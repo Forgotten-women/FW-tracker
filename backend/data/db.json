@@ -21,7 +21,7 @@
       "deviceIp": "192.168.18.59",
       "deviceMac": "66:7a:29:fb:69:ac",
       "isRegistered": true,
-      "lastSeen": "2026-08-27T12:15:11.414+05:00",
+      "lastSeen": "2026-08-27T12:34:38.017+05:00",
       "firstSeenToday": "2026-08-26T07:32:36.158Z",
       "status": "IN_OFFICE"
     }
@@ -45,7 +45,7 @@
       "ip": "192.168.18.18",
       "mac": "04:ed:33:ef:c6:d0",
       "firstSeen": "2026-08-27T11:47:58.418+05:00",
-      "lastSeen": "2026-08-27T11:48:28.369+05:00",
+      "lastSeen": "2026-08-27T12:34:38.016+05:00",
       "source": "PASSIVE_WIFI_SCANNER"
     },
     "192.168.18.21": {
@@ -94,7 +94,7 @@
       "ip": "192.168.18.83",
       "mac": "",
       "firstSeen": "2026-08-27T12:12:08.819+05:00",
-      "lastSeen": "2026-08-27T12:12:08.819+05:00",
+      "lastSeen": "2026-08-27T12:24:12.474+05:00",
       "source": "ESP8266_SWEEP"
     }
   },
@@ -353,8 +353,8 @@
         "role": "Engineering",
         "firstCheckIn": "2026-08-27T11:33:35.860+05:00",
         "firstCheckInDisplay": "11:33:35 AM",
-        "lastActive": "2026-08-27T12:15:11.414+05:00",
-        "lastActiveDisplay": "12:15:11 PM",
+        "lastActive": "2026-08-27T12:34:38.017+05:00",
+        "lastActiveDisplay": "12:34:38 PM",
         "sessions": [],
         "currentSessionStart": "2026-08-27T11:33:35.860+05:00",
         "status": "IN_OFFICE"

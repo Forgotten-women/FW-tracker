@@ -1,18 +1,23 @@
 {
   "name": "office-tracker-backend",
   "version": "1.0.0",
-  "description": "24/7 Office Presence & Movement Tracking Backend",
+  "description": "Office presence and attendance tracking backend (event-sourced, SQLite)",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js",
+    "migrate": "node src/db/migrate-from-json.js",
+    "backup": "node -e \"require('./src/db').backup().then(p=>console.log(p))\"",
+    "genkey": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    "bssids": "node scripts/discover-bssids.js"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "iconv-lite": "^0.7.3",
     "morgan": "^1.10.0"
   }
 }

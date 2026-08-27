@@ -66,5 +66,17 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Office Tracker checks which Wi-Fi network you are connected to, so your time at the office can be recorded for payroll.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Office Tracker needs background location to record when you arrive at and leave the office. It does not track where you are at other times.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Office Tracker needs background location to record when you arrive at and leave the office. It does not track where you are at other times.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>location</string>
+		<string>processing</string>
+	</array>
 </dict>
 </plist>

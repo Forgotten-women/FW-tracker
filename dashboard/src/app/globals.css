@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0B0F19;
+  --color-surface: #111827;
+  --color-raised: #1F2937;
+  --color-line: rgba(255, 255, 255, 0.08);
+
+  --color-brand: #10B981;
+  --color-brand-dim: rgba(16, 185, 129, 0.18);
+  --color-warn: #F59E0B;
+  --color-warn-dim: rgba(245, 158, 11, 0.16);
+  --color-danger: #F43F5E;
+  --color-danger-dim: rgba(244, 63, 94, 0.16);
+
+  --color-text: #F9FAFB;
+  --color-muted: #9CA3AF;
+  --color-dim: #6B7280;
+}
+
+html,
+body {
+  background: var(--color-ink);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Wide content scrolls inside its own container so the page body never scrolls
+   horizontally. */
+.scroll-x {
+  overflow-x: auto;
+}

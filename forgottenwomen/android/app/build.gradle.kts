@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.forgottenwomen"
+    namespace = "org.rethinkcharity.officetracker"
     compileSdk = flutter.compileSdkVersion
 
     compileOptions {
@@ -14,7 +14,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.forgottenwomen"
+        applicationId = "org.rethinkcharity.officetracker"
         minSdk = flutter.minSdkVersion
         targetSdk = 34
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION

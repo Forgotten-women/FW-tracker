@@ -1,188 +1,240 @@
+// Presence ingest and read APIs.
+//
+// Every route is authenticated. The employee identity on an app heartbeat comes
+// from the bearer token, never from the request body - the old /mobile-ping
+// took a client-supplied employeeId, which made marking someone else present a
+// one-line script.
+
 const express = require('express');
 const router = express.Router();
-const { db, saveDb, normalizeIp, getPktTime, getPktDateKey, getPktIsoString, logMovement, processDeviceSeen, broadcastEvent } = require('../store');
 
-// 1. ESP8266 Subnet Sweep Heartbeat Inbound
-router.post('/heartbeat', (req, res) => {
-  const { office_id, devices = [] } = req.body;
+const { db } = require('../db');
+const { config } = require('../config');
+const { requireDevice, requireSensor, requireAdmin } = require('../middleware/auth');
+const P = require('../domain/presence');
+const events = require('../events');
+const T = require('../util/time');
 
-  const results = [];
-  for (const device of devices) {
-    if (device.ip) {
-      const result = processDeviceSeen(device.ip, device.mac || '', 'ESP8266_SWEEP');
-      if (!result.isIgnored) {
-        results.push({ ip: normalizeIp(device.ip), employee: result.employee ? result.employee.name : null });
-      }
+const MAX_OBSERVATIONS = 500;   // one batch of replayed offline heartbeats
+const MAX_BACKDATE_MS = 7 * 24 * 60 * 60 * 1000;
+
+const insertMovement = db.prepare(
+  'INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)'
+);
+
+/**
+ * Emit a movement entry when the derived status crosses a boundary.
+ * Movements are now a consequence of derivation rather than something written
+ * by hand at each call site, so they cannot drift from the actual state.
+ */
+function emitTransition(employeeId, employeeName, before, after, nowMs) {
+  const from = before.status;
+  const to = after.status;
+  if (from === to) return null;
+
+  let type = null;
+  if (from === 'NOT_CHECKED_IN' && (to === 'IN_OFFICE' || to === 'GRACE_PERIOD')) type = 'ARRIVED';
+  else if (from === 'AWAY' && (to === 'IN_OFFICE' || to === 'GRACE_PERIOD')) type = 'RECONNECTED';
+  else if (to === 'AWAY') type = 'DEPARTED';
+  if (!type) return null;
+
+  const details = type === 'DEPARTED'
+    ? `No activity for ${after.inactivityMinutes} mins`
+    : 'Detected on office Wi-Fi';
+
+  insertMovement.run(nowMs, type, employeeId, employeeName, details);
+  events.broadcast('MOVEMENT', { type, employeeId, employeeName, details, time: T.displayTime(nowMs) });
+  return type;
+}
+
+// ---------------------------------------------------------------------------
+// 1. Phone app heartbeat  (device token)
+// ---------------------------------------------------------------------------
+//
+// Accepts either a single observation or a batch. The app buffers heartbeats
+// locally while the server is unreachable and replays them with their ORIGINAL
+// timestamps; recordEvent dedupes, so replay is idempotent.
+router.post('/ping', requireDevice, (req, res) => {
+  const { employeeId, deviceId, employeeName, employeeRole } = req.auth;
+  const nowMs = T.now();
+  const srcIp = T.normalizeIp(req.ip || req.socket.remoteAddress);
+
+  const body = req.body || {};
+  const observations = Array.isArray(body.observations) && body.observations.length
+    ? body.observations
+    : [{ observedAt: body.observedAt, ssid: body.ssid, bssid: body.bssid }];
+
+  if (observations.length > MAX_OBSERVATIONS) {
+    return res.status(413).json({
+      status: 'ERROR',
+      message: `At most ${MAX_OBSERVATIONS} observations per request.`,
+    });
+  }
+
+  const before = P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
+
+  let accepted = 0, duplicates = 0, rejected = 0;
+  const touchedDays = new Set();
+  // The location verdict for the NEWEST observation in this batch. This is
+  // what the app reports to the user, so it must describe this heartbeat, not
+  // whatever attendance already existed for the day.
+  let latestObservedAt = -1;
+  let latestLocation = 'UNKNOWN';
+
+  for (const o of observations) {
+    // A client-supplied timestamp is clamped: never in the future, never more
+    // than a week old. Otherwise a phone with a wrong clock (or a hostile one)
+    // could write attendance into arbitrary days.
+    let observedAt = Number(o?.observedAt);
+    if (!Number.isFinite(observedAt)) observedAt = nowMs;
+    if (observedAt > nowMs + 60000 || observedAt < nowMs - MAX_BACKDATE_MS) {
+      rejected++;
+      continue;
     }
-  }
 
-  res.status(200).json({
-    status: 'SUCCESS',
-    timestamp: getPktIsoString(),
-    displayTime: getPktTime(),
-    processedCount: results.length,
-    devices: results
-  });
-});
-
-// 2. Mobile App Direct Heartbeat / Check-in Ping
-router.post('/mobile-ping', (req, res) => {
-  const { employeeId, employeeName, employeeRole, deviceModel, localIp } = req.body;
-  const rawIp = localIp || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  const clientIp = normalizeIp(rawIp);
-  const now = new Date();
-  const pktIso = getPktIsoString(now);
-  const pktTimeStr = getPktTime(now);
-
-  if (!db.employees) db.employees = [];
-  let employee = db.employees.find(e => (employeeId && e.id === employeeId) || (clientIp && e.deviceIp === clientIp));
-
-  if (!employee && employeeName) {
-    employee = {
-      id: employeeId || 'emp_' + Date.now(),
-      name: employeeName,
-      role: employeeRole || 'Team Member',
-      deviceModel: deviceModel || 'Mobile Device',
-      deviceIp: clientIp,
-      deviceMac: '',
-      isRegistered: true,
-      lastSeen: pktIso,
-      firstSeenToday: pktIso,
-      status: 'IN_OFFICE'
-    };
-    db.employees.push(employee);
-    if (db.unassignedDevices && db.unassignedDevices[clientIp]) {
-      delete db.unassignedDevices[clientIp];
+    const r = P.recordEvent({
+      employeeId, deviceId, source: 'APP',
+      srcIp,
+      ssid: o?.ssid ?? body.ssid ?? null,
+      bssid: o?.bssid ?? body.bssid ?? null,
+      observedAt,
+    });
+    if (r.inserted) accepted++; else duplicates++;
+    if (observedAt > latestObservedAt) {
+      latestObservedAt = observedAt;
+      latestLocation = r.location;
     }
-    saveDb();
-    logMovement('EMPLOYEE_REGISTERED', employee, clientIp, '', 'Registered from Mobile App (' + pktTimeStr + ')');
+    touchedDays.add(T.dateKey(observedAt));
   }
 
-  if (employee) {
-    if (clientIp) employee.deviceIp = clientIp;
-    processDeviceSeen(employee.deviceIp, employee.deviceMac, 'MOBILE_APP_PING');
-  }
+  for (const day of touchedDays) P.recomputeDay(employeeId, day, nowMs);
 
-  const todayKey = getPktDateKey();
-  const todayRecord = employee ? (db.attendanceRecords && db.attendanceRecords[todayKey] ? db.attendanceRecords[todayKey][employee.id] : null) : null;
+  const after = P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
+  emitTransition(employeeId, employeeName, before, after, nowMs);
+  events.broadcast('PRESENCE_UPDATED', { employeeId, status: after.status });
 
-  res.status(200).json({
+  res.json({
     status: 'SUCCESS',
-    message: 'Presence confirmed',
-    employee,
-    todayAttendance: todayRecord,
-    serverTimePkt: pktTimeStr,
-    timestamp: pktIso
+    accepted, duplicates, rejected,
+    // Whether THIS heartbeat was accepted as office presence, so the app can
+    // show an honest state instead of claiming "IN OFFICE" regardless.
+    verified: latestLocation === 'OFFICE',
+    location: latestLocation,
+    serverTime: T.displayTime(nowMs),
+    serverTimeMs: nowMs,
+    attendance: P.presentDay(after, { name: employeeName, role: employeeRole }),
   });
 });
 
-// 3. Register or Assign Device to Employee (Admin or Mobile)
-router.post('/register-device', (req, res) => {
-  const { id, name, role, deviceModel, deviceIp, deviceMac } = req.body;
-  const rawIp = deviceIp || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  const cleanIp = normalizeIp(rawIp);
-  const now = new Date();
-  const pktIso = getPktIsoString(now);
-  const pktTimeStr = getPktTime(now);
-  const todayKey = getPktDateKey(now);
-
-  if (!name) {
-    return res.status(400).json({ status: 'ERROR', message: 'Employee name is required' });
-  }
-
-  if (!db.employees) db.employees = [];
-  let employee = db.employees.find(e => (id && e.id === id) || (cleanIp && e.deviceIp === cleanIp));
-
-  if (employee) {
-    employee.name = name;
-    if (role) employee.role = role;
-    if (deviceModel) employee.deviceModel = deviceModel;
-    if (cleanIp) employee.deviceIp = cleanIp;
-    if (deviceMac) employee.deviceMac = deviceMac;
-    employee.status = 'IN_OFFICE';
-    employee.lastSeen = pktIso;
-    if (!employee.firstSeenToday) employee.firstSeenToday = pktIso;
-  } else {
-    employee = {
-      id: id || 'emp_' + Date.now(),
-      name,
-      role: role || 'Team Member',
-      deviceModel: deviceModel || 'Device',
-      deviceIp: cleanIp || '',
-      deviceMac: deviceMac || '',
-      isRegistered: true,
-      lastSeen: pktIso,
-      firstSeenToday: pktIso,
-      status: 'IN_OFFICE'
-    };
-    db.employees.push(employee);
-  }
-
-  if (cleanIp && db.unassignedDevices && db.unassignedDevices[cleanIp]) {
-    delete db.unassignedDevices[cleanIp];
-  }
-
-  if (!db.attendanceRecords[todayKey]) db.attendanceRecords[todayKey] = {};
-  if (!db.attendanceRecords[todayKey][employee.id]) {
-    db.attendanceRecords[todayKey][employee.id] = {
-      employeeId: employee.id,
-      employeeName: employee.name,
-      role: employee.role,
-      checkIn: pktIso,
-      checkInDisplay: pktTimeStr,
-      checkOut: pktIso,
-      checkOutDisplay: pktTimeStr,
-      totalMinutes: 1,
-      status: 'PRESENT'
-    };
-  }
-
-  saveDb();
-  logMovement('DEVICE_REGISTERED', employee, employee.deviceIp, employee.deviceMac, 'Device paired at ' + pktTimeStr);
-  broadcastEvent('EMPLOYEE_REGISTERED', employee);
-
-  res.status(200).json({
+// GET /api/attendance/me - the app's own record for today.
+router.get('/me', requireDevice, (req, res) => {
+  const { employeeId, employeeName, employeeRole, deviceId } = req.auth;
+  const nowMs = T.now();
+  const d = P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
+  res.json({
     status: 'SUCCESS',
-    message: 'Employee registered successfully',
-    employee,
-    todayAttendance: db.attendanceRecords[todayKey][employee.id]
+    employee: { id: employeeId, name: employeeName, role: employeeRole, deviceId },
+    attendance: P.presentDay(d, { name: employeeName, role: employeeRole }),
+    serverTimeMs: nowMs,
   });
 });
 
-// 4. Complete Fresh Reset
-router.post('/reset-logs', (req, res) => {
-  db.employees = [];
-  db.movements = [];
-  db.attendanceRecords = {};
-  db.unassignedDevices = {};
-  saveDb();
-  res.status(200).json({ status: 'SUCCESS', message: 'All employees, logs, and attendance wiped clean.' });
+// GET /api/attendance/my-history?days=7
+router.get('/my-history', requireDevice, (req, res) => {
+  const { employeeId, employeeName, employeeRole } = req.auth;
+  const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 60);
+  const nowMs = T.now();
+  const out = [];
+  for (let i = 0; i < days; i++) {
+    const key = T.dateKey(nowMs - i * 24 * 60 * 60 * 1000);
+    const d = P.deriveDay(employeeId, key, nowMs);
+    out.push(P.presentDay(d, { name: employeeName, role: employeeRole }));
+  }
+  res.json({ status: 'SUCCESS', days: out });
 });
 
-// 5. Get Real-time Live Presence Board
-router.get('/live', (req, res) => {
-  const employees = db.employees || [];
-  const present = employees.filter(e => e.status === 'IN_OFFICE');
-  const away = employees.filter(e => e.status !== 'IN_OFFICE');
+// ---------------------------------------------------------------------------
+// 2. Hardware sensor heartbeat  (HMAC signed)
+// ---------------------------------------------------------------------------
+//
+// Corroboration only. A network sighting can confirm that *a* device is on the
+// office Wi-Fi, but it can never name a person: MAC randomisation and DHCP
+// lease reuse make that attribution unsound, and getting it wrong would put
+// the hours of one employee onto the payroll record of another.
+router.post('/heartbeat', requireSensor, (req, res) => {
+  const { sensorId } = req.auth;
+  const nowMs = T.now();
+  const devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
 
-  res.status(200).json({
+  if (devices.length > MAX_OBSERVATIONS) {
+    return res.status(413).json({ status: 'ERROR', message: 'Too many devices in one report.' });
+  }
+
+  let recorded = 0;
+  for (const d of devices) {
+    const mac = T.normalizeMac(d?.mac);
+    const ip = T.normalizeIp(d?.ip);
+    if (!mac && !ip) continue;
+    // Routers, the server itself and broadcast addresses are not people.
+    if (ip && config.infrastructureIps.has(ip)) continue;
+
+    const r = P.recordEvent({
+      employeeId: null,
+      source: 'ESP_SNIFFER',
+      mac: mac || null,
+      srcIp: ip || null,
+      rssi: d?.rssi ?? null,
+      observedAt: Number(d?.at) || nowMs,
+      note: `sensor:${sensorId}`,
+    });
+    if (r.inserted) recorded++;
+  }
+
+  res.json({
     status: 'SUCCESS',
-    presentCount: present.length,
-    awayCount: away.length,
-    present,
-    away,
-    unassignedDevices: Object.values(db.unassignedDevices || {})
+    sensorId,
+    recorded,
+    // Lets the firmware resync if its clock has drifted out of the signature
+    // freshness window.
+    serverTimeMs: nowMs,
+    serverTime: T.displayTime(nowMs),
   });
 });
 
-// 6. Get Recent Logs
-router.get('/logs', (req, res) => {
-  const limit = parseInt(req.query.limit) || 50;
-  const movements = db.movements || [];
-  res.status(200).json({
+// ---------------------------------------------------------------------------
+// 3. Dashboard reads  (admin key)
+// ---------------------------------------------------------------------------
+
+// Uses the SAME derivation as /api/dashboard/summary. Previously this route
+// filtered on a denormalised employee.status field while the dashboard
+// recomputed from the ledger, so the two could disagree about the same person.
+router.get('/live', requireAdmin, (req, res) => {
+  const nowMs = T.now();
+  const board = P.liveBoard(nowMs);
+  res.json({
     status: 'SUCCESS',
-    totalLogs: movements.length,
-    logs: movements.slice(0, limit)
+    inOffice: board.filter(e => e.status === 'IN_OFFICE'),
+    grace: board.filter(e => e.status === 'GRACE_PERIOD'),
+    away: board.filter(e => e.status === 'AWAY'),
+    notArrived: board.filter(e => e.status === 'NOT_CHECKED_IN'),
+    serverTime: T.displayTime(nowMs),
+  });
+});
+
+router.get('/logs', requireAdmin, (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 50, 500);
+  const rows = db.prepare('SELECT * FROM movements ORDER BY at DESC LIMIT ?').all(limit);
+  res.json({
+    status: 'SUCCESS',
+    total: db.prepare('SELECT COUNT(*) c FROM movements').get().c,
+    logs: rows.map(m => ({
+      id: m.id,
+      time: T.displayTime(m.at),
+      date: T.dateKey(m.at),
+      type: m.type,
+      employeeName: m.employee_name || 'Unknown',
+      details: m.details || '',
+    })),
   });
 });
 

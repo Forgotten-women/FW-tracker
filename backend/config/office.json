@@ -1,0 +1,65 @@
+{
+  "officeName": "Trans K Office (Pakistan)",
+  "timeZone": "Asia/Karachi",
+
+  "workStartTime": "09:00",
+  "workEndTime": "18:00",
+
+  "activeThresholdMinutes": 3,
+  "gracePeriodMinutes": 15,
+  "maxSessionMinutes": 720,
+
+  "_comment_enforceBssid": "Collecting BSSIDs and enforcing them are separate steps on purpose. While this is false the BSSIDs below are recorded but NOT checked, and verification falls back to source IP. Turn it on only once you have confirmed every access point radio your staff actually connect to is listed - otherwise anyone on a missing radio silently stops being counted. Discover them with: npm run bssids",
+  "enforceBssid": false,
+
+  "_comment_networks": "All BSSIDs below belong to ONE physical access point (ba:9f:cc:db:52:5x). Note that the SSID named 'Trans K 2.4G' broadcasts on BOTH bands - the 2.4GHz radio on channel 11 and a 5GHz radio on channel 40 - so the name does not tell you the band. Verified by netsh wlan show networks mode=bssid on 2026-08-27.",
+  "networks": [
+    {
+      "name": "Trans K 2.4G (2.4GHz radio)",
+      "ssid": "Trans K 2.4G",
+      "band": "2.4",
+      "channel": 11,
+      "bssids": ["ba:9f:cc:db:52:58"],
+      "subnets": ["192.168.18.0/24"]
+    },
+    {
+      "name": "Trans K 2.4G (5GHz radio)",
+      "ssid": "Trans K 2.4G",
+      "band": "5",
+      "channel": 40,
+      "bssids": ["ba:9f:cc:db:52:5e"],
+      "subnets": ["192.168.18.0/24"]
+    },
+    {
+      "name": "Trans K 5G",
+      "ssid": "Trans K 5G",
+      "band": "5",
+      "channel": 40,
+      "bssids": ["ba:9f:cc:db:52:5c"],
+      "subnets": ["192.168.18.0/24"]
+    },
+    {
+      "_comment": "The router's un-renamed factory SSID, on the same physical AP. Listed so that anyone who happens to join it is still counted. It had zero connected stations when surveyed - if nobody needs it, disable it on the router and delete this entry.",
+      "name": "Router default SSID (disable if unused)",
+      "ssid": "HUAWEI-2.4G-2Jwu",
+      "band": "5",
+      "channel": 40,
+      "bssids": ["ba:9f:cc:db:52:5d"],
+      "subnets": ["192.168.18.0/24"]
+    }
+  ],
+
+  "_comment_infrastructure": "Infrastructure IPs are never treated as employee devices.",
+  "infrastructureIps": [
+    "192.168.18.1",
+    "192.168.18.68",
+    "192.168.18.81",
+    "192.168.18.255"
+  ],
+
+  "_comment_retention": "Days to keep raw presence_events and unknown-device records. Derived attendance_days rows are kept indefinitely (they are the payroll record).",
+  "retention": {
+    "presenceEventDays": 90,
+    "unknownDeviceDays": 7
+  }
+}

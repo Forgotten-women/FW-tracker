@@ -1,69 +1,177 @@
-﻿const express = require('express');
+const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
-const path = require('path');
-const { registerSseClient, db } = require('./store');
-const { startPassiveScanner } = require('./scanner');
 
-const attendanceRoutes = require('./routes/attendance');
-const dashboardRoutes = require('./routes/dashboard');
+const { config, configWarnings } = require('./config');
+const { db, close: closeDb } = require('./db');
+const events = require('./events');
+const jobs = require('./jobs');
+const arpSensor = require('./sensors/arp');
+const { requireAdmin, consumeSseTicket } = require('./middleware/auth');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+// Location verification depends on the source address, so X-Forwarded-For must
+// NOT be trusted by default: with `trust proxy` on, any client can set that
+// header and claim an office IP, which would defeat the anti-spoofing check
+// entirely. This server normally sits directly on the LAN with no proxy, so the
+// real socket address is the honest one.
+// Set TRUST_PROXY only if you actually put a reverse proxy in front, and give
+// it that proxy's address rather than `true`.
+function trustProxySetting() {
+  const v = (process.env.TRUST_PROXY || '').trim();
+  if (!v || v === 'false' || v === '0') return false;
+  if (v === 'true' || v === '1') return true;
+  return v; // an address or comma-separated list of trusted proxies
+}
+app.set('trust proxy', trustProxySetting());
 
-// Raw and JSON body parser
-app.use((req, res, next) => {
-  if (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) {
-    let data = '';
-    req.on('data', chunk => { data += chunk; });
-    req.on('end', () => {
-      try {
-        req.body = data ? JSON.parse(data) : {};
-      } catch (err) {
-        req.body = {};
-      }
-      next();
-    });
-  } else {
-    req.body = {};
-    next();
+// CORS is restricted to the dashboard origin. It used to be bare cors(), i.e.
+// "*", which let any page open in any browser on the LAN call the API - at a
+// time when none of it required authentication.
+app.use(cors({
+  origin: config.corsOrigin,
+  credentials: true,
+}));
+
+// The raw body is captured for HMAC verification of hardware sensor requests,
+// which sign "<timestamp>.<raw body>".
+app.use(express.json({
+  limit: '256kb',
+  verify: (req, res, buf) => { req.rawBody = buf; },
+}));
+
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ status: 'ERROR', message: 'Malformed JSON body' });
   }
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ status: 'ERROR', message: 'Request body too large' });
+  }
+  return next(err);
 });
 
-app.use(morgan(':date[iso] :method :url :status :res[content-length] - :response-time ms'));
+morgan.token('actor', req => (req.auth ? req.auth.kind : '-'));
+app.use(morgan(':date[iso] :method :url :status :actor :response-time ms'));
 
-// Serve Web Dashboard Static Files
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// No static dashboard is served from here any more. The dashboard is a separate
+// Next.js app in /dashboard, which proxies /api/* to this server, so the browser
+// stays same-origin with it and this server's CORS stays locked down.
 
-// Real-time SSE Stream for Live Dashboard
+// --- health ----------------------------------------------------------------
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    time: new Date().toISOString(),
+    employees: db.prepare('SELECT COUNT(*) c FROM employees WHERE active = 1').get().c,
+    events: db.prepare('SELECT COUNT(*) c FROM presence_events').get().c,
+    sseClients: events.clientCount(),
+    bssidVerification: config.bssidEnforced ? 'enforced' : 'not-configured',
+  });
+});
+
+// --- live stream -----------------------------------------------------------
+
+// EventSource cannot set request headers, so the dashboard first exchanges its
+// admin key for a single-use, short-lived ticket (POST /api/admin/sse-ticket)
+// and passes that instead. That keeps the long-lived admin key out of URLs,
+// server logs and browser history.
 app.get('/api/events', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  registerSseClient(res);
-  res.write(`data: ${JSON.stringify({ type: 'CONNECTED', message: 'SSE Stream active', time: new Date().toISOString() })}\n\n`);
+  const ticket = String(req.query.ticket || '');
+  if (!consumeSseTicket(ticket)) {
+    return res.status(401).json({ status: 'ERROR', message: 'A valid SSE ticket is required.' });
+  }
+  events.register(res);
 });
 
-// API Routes
-app.use('/api/attendance', attendanceRoutes);
-app.use('/api/dashboard', dashboardRoutes);
+// --- routes ----------------------------------------------------------------
 
-// Fallback to Dashboard SPA
+app.use('/api/enroll', require('./routes/enroll'));            // code-authenticated
+app.use('/api/attendance', require('./routes/attendance'));    // per-route auth
+app.use('/api/dashboard', require('./routes/dashboard'));      // admin
+app.use('/api/admin', require('./routes/admin'));              // admin
+
+// Unknown API routes return JSON, never the SPA shell - otherwise the phone
+// app's jsonDecode throws a parse error instead of seeing a clean failure.
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    status: 'ERROR',
+    message: `Unknown API endpoint: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// Anything that is not an API route gets a pointer to the dashboard rather
+// than a 404 with no explanation.
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  res.status(404).json({
+    status: 'ERROR',
+    message: 'This is the Office Tracker API. The dashboard is the Next.js app in /dashboard (npm run dev, then http://localhost:3000).',
+  });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('\n======================================================');
-  console.log(`🚀 Office Presence Sentinel Backend & Dashboard`);
-  console.log(`🌐 Web Dashboard: http://localhost:${PORT}`);
-  console.log(`📡 Network URL:   http://192.168.18.68:${PORT}`);
-  console.log('======================================================\n');
-
-  // Start 24/7 Zero-Touch Wi-Fi Presence Scanner
-  startPassiveScanner();
+// Last-resort handler so an unexpected throw returns JSON and is logged,
+// rather than hanging the client.
+app.use((err, req, res, next) => {
+  console.error('[server] unhandled error:', err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ status: 'ERROR', message: 'Internal server error' });
 });
+
+// --- start -----------------------------------------------------------------
+
+let server = null;
+
+/**
+ * Start listening. Kept separate from module load so tests can mount the app
+ * on their own port without also starting the background jobs and ARP sensor.
+ */
+function start(port = config.port) {
+  server = app.listen(port, '0.0.0.0', () => {
+    const actual = server.address().port;
+    console.log('');
+    console.log('======================================================');
+    console.log('  Office Presence Tracker');
+    console.log(`  Dashboard : http://localhost:${actual}`);
+    console.log(`  Office    : ${config.office.officeName} (${config.timeZone})`);
+    console.log(`  Networks  : ${(config.office.networks || []).map(n => `${n.ssid} ${n.band}GHz`).join(', ')}`);
+    console.log('======================================================');
+
+    const warnings = configWarnings();
+    if (warnings.length) {
+      console.log('');
+      console.log('  CONFIGURATION WARNINGS');
+      for (const w of warnings) console.log(`   !  ${w}`);
+      console.log('');
+    }
+
+    jobs.start();
+    arpSensor.start();
+  });
+  return server;
+}
+
+function shutdown(signal) {
+  console.log('');
+  console.log(`[server] ${signal} received, shutting down`);
+  jobs.stop();
+  arpSensor.stop();
+  if (!server) { closeDb(); process.exit(0); return; }
+  server.close(() => {
+    // Checkpoints the WAL into the main database file so the on-disk state is
+    // complete and self-contained.
+    closeDb();
+    console.log('[server] closed cleanly');
+    process.exit(0);
+  });
+  // Do not hang forever on a stuck connection (SSE streams are long-lived).
+  setTimeout(() => { closeDb(); process.exit(0); }, 5000).unref();
+}
+
+if (require.main === module) {
+  start();
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+module.exports = { app, start, shutdown };
