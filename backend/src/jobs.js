@@ -9,6 +9,8 @@ const { config } = require('./config');
 const P = require('./domain/presence');
 const bindings = require('./domain/bindings');
 const A = require('./domain/attendance');
+const W = require('./domain/warnings');
+const L = require('./domain/leave');
 const events = require('./events');
 const T = require('./util/time');
 
@@ -106,6 +108,84 @@ function rollover(nowMs = T.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// Warning evaluation
+// ---------------------------------------------------------------------------
+
+let lastWarningSweepKey = null;
+
+/**
+ * Raises lateness referrals and ages out expired warnings.
+ *
+ * Runs once a day rather than every minute: a referral is about a monthly
+ * count, not a live signal, and re-evaluating constantly would only burn CPU.
+ * evaluateLateness is idempotent regardless.
+ */
+function evaluateWarnings(nowMs = T.now()) {
+  const todayKey = T.dateKey(nowMs);
+  if (lastWarningSweepKey === todayKey) return;
+  lastWarningSweepKey = todayKey;
+
+  try {
+    const expired = W.expireWarnings(nowMs);
+    if (expired) {
+      console.log(`[jobs] ${expired} warning(s) expired - still counted toward escalation history`);
+    }
+
+    const raised = W.evaluateAll(todayKey, nowMs);
+    for (const r of raised) {
+      const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(r.employeeId);
+      // A referral, not a warning. The wording matters because this text is
+      // what HR sees first.
+      insertMovement.run(nowMs, 'WARNING_TRIGGER', r.employeeId, emp?.name || null,
+        'Lateness threshold reached - referred to HR for review');
+      events.broadcast('WARNING_TRIGGER', {
+        employeeId: r.employeeId,
+        employeeName: emp?.name || null,
+        triggerId: r.triggerId,
+        time: T.displayTime(nowMs),
+      });
+    }
+    if (raised.length) console.log(`[jobs] ${raised.length} lateness referral(s) raised for HR review`);
+  } catch (err) {
+    console.error('[jobs] warning evaluation failed:', err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Leave accrual
+// ---------------------------------------------------------------------------
+
+let lastAccrualKey = null;
+
+/**
+ * Credits monthly leave accrual. Runs once a day; accrue() is idempotent, so
+ * the exact tick it lands on does not matter.
+ *
+ * Employees who cannot be assessed are LOGGED rather than skipped silently.
+ * Under an anniversary-based holiday year an employee with no start date has no
+ * computable balance, and quietly showing them zero days would be worse than
+ * saying so.
+ */
+function accrueLeave(nowMs = T.now()) {
+  const todayKey = T.dateKey(nowMs);
+  if (lastAccrualKey === todayKey) return;
+  lastAccrualKey = todayKey;
+
+  try {
+    const r = L.accrueAll(todayKey);
+    if (r.accrued) console.log(`[jobs] leave accrued for ${r.accrued} employee(s)`);
+    if (r.blocked.length) {
+      console.log(
+        `[jobs] leave accrual BLOCKED for ${r.blocked.length} employee(s) - ` +
+        'no employment start date, so their holiday year cannot be worked out',
+      );
+    }
+  } catch (err) {
+    console.error('[jobs] leave accrual failed:', err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Retention
 // ---------------------------------------------------------------------------
 
@@ -175,6 +255,8 @@ function start() {
       const expired = bindings.expireStale(nowMs);
       if (expired) console.log(`[jobs] ${expired} MAC binding(s) expired without reconfirmation`);
       detectTransitions(nowMs);
+      evaluateWarnings(nowMs);
+      accrueLeave(nowMs);
       retention(nowMs);
       void nightlyBackup(nowMs);
     } catch (err) {
@@ -198,4 +280,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { start, stop, rollover, retention, detectTransitions, nightlyBackup };
+module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, accrueLeave, nightlyBackup };

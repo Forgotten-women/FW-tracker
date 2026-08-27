@@ -91,6 +91,8 @@ app.use('/api/auth', require('./routes/auth'));                 // sign-in and s
 app.use('/api/enroll', require('./routes/enroll'));            // code-authenticated
 app.use('/api/attendance', require('./routes/attendance'));    // presence ingest
 app.use('/api/attendance', require('./routes/attendance-hr'));  // HR attendance engine
+app.use('/api/warnings', require('./routes/warnings'));         // warning engine
+app.use('/api/leave', require('./routes/leave'));              // leave engine
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin
 app.use('/api/admin', require('./routes/admin'));              // admin
 

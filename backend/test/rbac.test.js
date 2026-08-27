@@ -293,11 +293,25 @@ test('sign-in attempts are recorded with their outcome', () => {
 
 // Spec 9.6 and 35: the lateness reset period is explicitly undecided. Seeding a
 // default would silently invent policy that decides who gets a warning.
-test('undecided policy is stored as undecided, not guessed', () => {
+test('confirmed policy is recorded, unconfirmed policy stays undecided', () => {
   const rule = db.prepare("SELECT * FROM warning_rules WHERE id = 'wr_lateness'").get();
   assert.equal(rule.threshold, 3, 'spec 9.1: 3 permitted late occurrences');
-  assert.equal(rule.monitoring_period, null,
-    'spec 9.6 says do not hard-code the reset period until the organisation confirms it');
+
+  // Spec 9.6 said not to hard-code the reset period until the organisation
+  // confirmed it. Confirmed on 2026-08-27 as the calendar month.
+  assert.equal(rule.monitoring_period, 'CALENDAR_MONTH');
+
+  // What follows a final written warning is still NOT specified, so the
+  // escalation sequence must stop rather than invent an outcome.
+  const { config } = require('../src/config');
+  assert.deepEqual(config.warningEscalationSequence,
+    ['INFORMAL_NOTICE', 'FIRST_WRITTEN', 'FINAL_WRITTEN']);
+
+  // And an unauthorised absence still has no automatic consequence.
+  for (const k of ['deductAnnualLeave', 'treatAsUnpaid', 'createWarningTrigger']) {
+    assert.equal(config.unauthorisedAbsence[k], null,
+      `${k} must remain a per-case decision, not a default`);
+  }
 });
 
 // Spec 10.2 warns that the wording supplied would apply two consequences to one

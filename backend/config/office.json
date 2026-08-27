@@ -88,5 +88,44 @@
   "_comment_grace": "CONFIRMED by Forgotten Women on 2026-08-27: 10 minute grace period. With an 11:00 start that means 11:10 is still on time and 11:11 is late. The grace period only decides whether an arrival counts as a late OCCURRENCE - late MINUTES for the deficit ledger are still measured from 11:00, per spec 8.1.",
   "latenessOccurrencesAllowed": 3,
   "latenessMonitoringPeriod": "CALENDAR_MONTH",
-  "_comment_lateness": "CONFIRMED by Forgotten Women on 2026-08-27: 3 late occurrences are allowed per CALENDAR MONTH, and the 4th triggers HR warning review. The count resets on the 1st of each month."
+  "_comment_lateness": "CONFIRMED by Forgotten Women on 2026-08-27: 3 late occurrences are allowed per CALENDAR MONTH, and the 4th triggers HR warning review. The count resets on the 1st of each month.",
+  "_comment_warnings": "Warning policy CONFIRMED by Forgotten Women on 2026-08-27, resolving the items spec section 35 left open. Escalation is driven by WARNING HISTORY, not by which warnings are currently active: a warning goes inactive after warningExpiryMonths but still counts toward the next level, so escalation progresses instead of resetting every month.",
+  "warningEscalationSequence": [
+    "INFORMAL_NOTICE",
+    "FIRST_WRITTEN",
+    "FINAL_WRITTEN"
+  ],
+  "warningExpiryMonths": 1,
+  "_comment_escalationExhausted": "What follows a final written warning is NOT defined by the spec and has not been confirmed. The engine therefore stops at the last level in the sequence and marks the trigger as requiring an HR decision outside the system, rather than inventing a level such as dismissal.",
+  "escalateOnEveryOccurrence": true,
+  "_comment_escalateOnEvery": "Confirmed: the late count does not reset when a warning is issued, and every further late occurrence in the same month escalates. With a limit of 3, the 4th raises an informal notice, the 5th a first written and the 6th a final written. HR still confirms each one before it becomes formal.",
+  "_comment_absence": "Confirmed: NO automatic consequence for an unauthorised absence. The three switches spec 10.2 requires to be independent are all null, meaning undecided-by-design: the system records and flags the absence, and a person chooses the outcome case by case. This is what stops one day producing both a leave deduction and a pay deduction by default.",
+  "unauthorisedAbsence": {
+    "deductAnnualLeave": null,
+    "treatAsUnpaid": null,
+    "createWarningTrigger": null
+  },
+  "_comment_leave": "Leave policy CONFIRMED by Forgotten Women on 2026-08-27. The holiday year runs from each employee EMPLOYMENT ANNIVERSARY, not the calendar year, so accrual cannot be computed for anyone without a start date on their employment record. The engine reports that as blocked rather than assuming a date.",
+  "leave": {
+    "annualEntitlementDays": 20,
+    "holidayYearBasis": "EMPLOYMENT_ANNIVERSARY",
+    "accrualMethod": "MONTHLY_ON_COMPLETION",
+    "carryOverDays": 0,
+    "allowNegativeBalance": true,
+    "negativeBalanceRequiresApproval": true,
+    "approvalRoute": [
+      "HR"
+    ]
+  },
+  "_comment_accrual": "MONTHLY_ON_COMPLETION means the month accrues once it has been WORKED, which is what makes the spec section 14 table come out right: 12 accruals of 20/12 reach exactly 20.00 at month 12. Accruing at the start of each month would give 13 accruals in the first year and overshoot.",
+  "_comment_payroll": "Payroll policy CONFIRMED by Forgotten Women on 2026-08-27. The daily rate follows spec section 17: monthly x 12 gives the annual salary, then / 52 gives weekly and / 5 gives daily. For 2000 a month that is 24000 annual, 461.54 weekly and 92.31 daily, matching the worked example exactly.",
+  "payroll": {
+    "weeksPerYear": 52,
+    "workingDaysPerWeek": 5,
+    "monthsPerYear": 12,
+    "breakIsPaid": true,
+    "leaverSettlement": "HR_DECIDES",
+    "currency": "GBP"
+  },
+  "_comment_break": "CONFIRMED: the 30 minute break is PAID and part of the working day. That is why 11:00-19:00 counts as 480 minutes for a full day rather than 450 - the break is inside the paid day, not deducted from it."
 }

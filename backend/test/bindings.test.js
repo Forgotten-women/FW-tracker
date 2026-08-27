@@ -196,7 +196,7 @@ test('a sensor sighting of a bound address is recorded against that employee', (
 
   const r = espSighting(mac, now + MIN);
   assert.equal(r.employeeId, emp);
-  assert.equal(r.attributedVia, 'MAC_BINDING');
+  assert.equal(r.attributedVia, P.ATTRIBUTED_VIA_BINDING);
 
   // Recorded honestly: stronger than an anonymous sighting, weaker than a live
   // authenticated heartbeat.
@@ -204,7 +204,7 @@ test('a sensor sighting of a bound address is recorded against that employee', (
     'SELECT confidence, note FROM presence_events WHERE employee_id = ? ORDER BY id DESC LIMIT 1'
   ).get(emp);
   assert.ok(row.confidence >= 0.7 && row.confidence < 1.0);
-  assert.match(row.note, /MAC_BINDING/);
+  assert.match(row.note, new RegExp(P.ATTRIBUTED_VIA_BINDING));
 });
 
 // ---------------------------------------------------------------------------

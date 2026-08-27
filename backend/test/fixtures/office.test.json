@@ -43,5 +43,17 @@
   "retention": {
     "presenceEventDays": 90,
     "unknownDeviceDays": 7
+  },
+  "warningEscalationSequence": [
+    "INFORMAL_NOTICE",
+    "FIRST_WRITTEN",
+    "FINAL_WRITTEN"
+  ],
+  "warningExpiryMonths": 1,
+  "escalateOnEveryOccurrence": true,
+  "unauthorisedAbsence": {
+    "deductAnnualLeave": null,
+    "treatAsUnpaid": null,
+    "createWarningTrigger": null
   }
 }

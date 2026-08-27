@@ -123,6 +123,38 @@ const config = {
   latenessGraceMinutes: office.latenessGraceMinutes ?? 0,
   latenessOccurrencesAllowed: office.latenessOccurrencesAllowed ?? 3,
   latenessMonitoringPeriod: office.latenessMonitoringPeriod || 'UNSET',
+
+  // Warning policy. Confirmed 2026-08-27.
+  warningEscalationSequence: office.warningEscalationSequence
+    || ['INFORMAL_NOTICE', 'FIRST_WRITTEN', 'FINAL_WRITTEN'],
+  warningExpiryMonths: office.warningExpiryMonths ?? null,
+  escalateOnEveryOccurrence: office.escalateOnEveryOccurrence === true,
+  // Leave policy. Confirmed 2026-08-27.
+  leave: {
+    annualEntitlementDays: 20,
+    holidayYearBasis: 'EMPLOYMENT_ANNIVERSARY',
+    accrualMethod: 'MONTHLY_ON_COMPLETION',
+    carryOverDays: 0,
+    allowNegativeBalance: true,
+    negativeBalanceRequiresApproval: true,
+    approvalRoute: ['HR'],
+    ...(office.leave || {}),
+  },
+
+  // Payroll policy. Confirmed 2026-08-27.
+  payroll: {
+    weeksPerYear: 52,
+    workingDaysPerWeek: 5,
+    monthsPerYear: 12,
+    breakIsPaid: true,
+    leaverSettlement: 'HR_DECIDES',
+    currency: 'GBP',
+    ...(office.payroll || {}),
+  },
+
+  // All three null means "no automatic consequence, HR decides case by case".
+  unauthorisedAbsence: office.unauthorisedAbsence
+    || { deductAnnualLeave: null, treatAsUnpaid: null, createWarningTrigger: null },
   infrastructureIps: new Set(office.infrastructureIps || []),
 
   isOfficeIp,

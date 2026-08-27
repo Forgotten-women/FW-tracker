@@ -23,6 +23,11 @@ const MAX_SESSION_MS = config.maxSessionMinutes * 60 * 1000;
 // it is the only source that carries an authenticated statement of who the
 // device belongs to. Network sensors corroborate location, they never name a
 // person - MAC randomisation and DHCP lease reuse make that unsound.
+// How a sighting that carries a bound identity is labelled. Defined once,
+// because it is written in one place and read in another, and a rename that
+// touched only one of them silently removed the confidence boost.
+const ATTRIBUTED_VIA_BINDING = 'ESP_SENSOR';
+
 const SOURCE_CONFIDENCE = {
   APP: 1.0,
   ROUTER: 0.6,
@@ -165,7 +170,7 @@ function recordEvent({
     if (bound) {
       employeeId = bound.employeeId;
       deviceId = deviceId || bound.deviceId;
-      attributedVia = 'ESP_SENSOR';
+      attributedVia = ATTRIBUTED_VIA_BINDING;
     }
   }
 
@@ -187,7 +192,7 @@ function recordEvent({
     location,
     // A bound sighting is stronger than an anonymous one but weaker than a
     // live authenticated heartbeat, and a dispute should be able to see which.
-    confidence: attributedVia === 'MAC_BINDING'
+    confidence: attributedVia === ATTRIBUTED_VIA_BINDING
       ? Math.max(SOURCE_CONFIDENCE[source] ?? 0.5, 0.7)
       : (SOURCE_CONFIDENCE[source] ?? 0.5),
     ssid, bssid, src_ip: srcIp,
@@ -458,5 +463,6 @@ function liveBoard(nowMs = T.now()) {
 module.exports = {
   recordEvent, deriveDay, recomputeDay, recomputeAll,
   presentDay, liveBoard, classifyLocation, explainLocation,
+  ATTRIBUTED_VIA_BINDING,
   SOURCE_CONFIDENCE,
 };
