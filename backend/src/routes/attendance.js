@@ -1,4 +1,4 @@
-// Presence ingest and read APIs.
+﻿// Presence ingest and read APIs.
 //
 // Every route is authenticated. The employee identity on an app heartbeat comes
 // from the bearer token, never from the request body - the old /mobile-ping
@@ -206,10 +206,8 @@ router.post('/heartbeat', requireSensor, (req, res) => {
       observedAt: Number(d?.at) || nowMs,
       note: `sensor:${sensorId}`,
     });
-    if (r.inserted) {
-      recorded++;
-      if (r.employeeId) touched.add(r.employeeId);
-    }
+    if (r.inserted) recorded++;
+    if (r.employeeId) touched.add(r.employeeId);
   }
 
   // A bound sighting is now somebody's attendance, so refresh it immediately -

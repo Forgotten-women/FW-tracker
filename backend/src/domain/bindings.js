@@ -1,4 +1,4 @@
-// Device-to-employee MAC bindings.
+﻿// Device-to-employee MAC bindings.
 //
 // See migrations/005 for the reasoning. In short: the app proves who someone
 // is, the network sensors then keep tracking them without needing the app to
@@ -193,8 +193,28 @@ function statusForEmployee(employeeId, nowMs = T.now()) {
   };
 }
 
+function bindDirectMac({ employeeId, deviceId = null, mac, nowMs = T.now() }) {
+  const cleanMac = T.normalizeMac(mac);
+  if (!cleanMac) return { bound: false, reason: 'INVALID_MAC' };
+  const macHash = T.hashMac(cleanMac, MAC_SALT);
+  const existing = selectActiveByMac.get(macHash, nowMs);
+  if (existing && existing.employee_id === employeeId) {
+    db.prepare("UPDATE device_mac_bindings SET last_confirmed_at = ?, expires_at = ? WHERE id = ?")
+      .run(nowMs, nowMs + BINDING_TTL_MS, existing.id);
+    return { bound: true, bindingId: existing.id, macHash };
+  }
+  const bindingId = 'bind_' + crypto.randomBytes(8).toString('hex');
+  db.prepare(`
+    INSERT INTO device_mac_bindings
+      (id, employee_id, device_id, mac_hash, bound_at, last_confirmed_at,
+       expires_at, bound_via, bound_ip, confidence)
+    VALUES (?,?,?,?,?,?,?,'DIRECT',null,0.9)
+  `).run(bindingId, employeeId, deviceId, macHash, nowMs, nowMs, nowMs + BINDING_TTL_MS);
+  return { bound: true, bindingId, macHash };
+}
+
 module.exports = {
-  employeeForMac, bindFromAuthenticatedPing,
+  employeeForMac, bindFromAuthenticatedPing, bindDirectMac,
   revokeForEmployee, revokeForDevice, expireStale, statusForEmployee,
   BINDING_TTL_MS, CORRELATION_WINDOW_MS,
 };

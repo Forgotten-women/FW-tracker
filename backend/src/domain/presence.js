@@ -1,4 +1,4 @@
-// Presence derivation.
+﻿// Presence derivation.
 //
 // The ONE place attendance is computed. Previously status was calculated in two
 // places that disagreed: /api/attendance/live filtered on a denormalised
@@ -157,12 +157,15 @@ function recordEvent({
   // Note the direction: an identity already PROVED is being followed, never
   // guessed from a MAC. An unbound MAC stays anonymous.
   let attributedVia = null;
-  if (!employeeId && macHash) {
+  // ESP Hardware Sensor: Real-time over-the-air 802.11 monitor.
+  // When an employee phone is active on office Wi-Fi, the ESP captures live frames and attributes presence.
+  // When the phone disconnects or turns Wi-Fi off, ESP sightings stop immediately (no stale cache).
+  if (!employeeId && macHash && source === 'ESP_SNIFFER') {
     const bound = bindings.employeeForMac(macHash, observed);
     if (bound) {
       employeeId = bound.employeeId;
       deviceId = deviceId || bound.deviceId;
-      attributedVia = 'MAC_BINDING';
+      attributedVia = 'ESP_SENSOR';
     }
   }
 
