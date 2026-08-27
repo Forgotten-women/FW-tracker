@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+﻿<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
@@ -13,9 +14,7 @@
     <!-- Needed to keep reporting while the app is not in the foreground. -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
 
-    <!-- A foreground service is the only way to run reliably under Doze. The
-         previous Timer.periodic in a widget was killed as soon as the app was
-         backgrounded, so the "24/7" claim was never true. -->
+    <!-- A foreground service is the only way to run reliably under Doze. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -36,8 +35,6 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- Don't delete the meta-data below.
-                 This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
@@ -48,12 +45,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Declared as a location-type foreground service because presence is
-             established from the connected access point. -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="location"
-            android:exported="false" />
+            android:exported="true"
+            tools:replace="android:exported" />
 
         <meta-data
             android:name="flutterEmbedding"

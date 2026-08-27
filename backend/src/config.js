@@ -9,6 +9,15 @@ const path = require('path');
 const CONFIG_DIR = path.join(__dirname, '..', 'config');
 
 function loadOfficeConfig() {
+  // OFFICE_CONFIG_FILE lets tests pin a known configuration. Without it the
+  // suite depends on live production settings, so an operator legitimately
+  // turning on BSSID enforcement would break unrelated tests - which is a
+  // property of the tests, not a fault in their change.
+  if (process.env.OFFICE_CONFIG_FILE) {
+    const p = path.resolve(process.env.OFFICE_CONFIG_FILE);
+    return { ...JSON.parse(fs.readFileSync(p, 'utf-8')), _source: path.basename(p) };
+  }
+
   // office.local.json (gitignored) overrides office.json, so a machine can
   // differ without dirtying the repo.
   const localPath = path.join(CONFIG_DIR, 'office.local.json');
@@ -108,6 +117,12 @@ const config = {
   workStartTime: office.workStartTime || '09:00',
   workEndTime: office.workEndTime || '18:00',
   retention: office.retention || { presenceEventDays: 90, unknownDeviceDays: 7 },
+  unknownDeviceMinSightings: office.unknownDeviceMinSightings ?? 3,
+
+  // Lateness policy. Confirmed 2026-08-27.
+  latenessGraceMinutes: office.latenessGraceMinutes ?? 0,
+  latenessOccurrencesAllowed: office.latenessOccurrencesAllowed ?? 3,
+  latenessMonitoringPeriod: office.latenessMonitoringPeriod || 'UNSET',
   infrastructureIps: new Set(office.infrastructureIps || []),
 
   isOfficeIp,
@@ -133,6 +148,9 @@ function configWarnings() {
   }
   if (OFFICE_SUBNETS.length === 0) {
     w.push('No office subnets configured - presence cannot be location-verified at all.');
+  }
+  if (config.latenessMonitoringPeriod === 'UNSET') {
+    w.push('latenessMonitoringPeriod is UNSET - the warning engine will refuse to run rather than guess when the late count resets.');
   }
   return w;
 }

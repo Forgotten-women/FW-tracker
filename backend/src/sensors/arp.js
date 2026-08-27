@@ -77,20 +77,31 @@ function scanOnce() {
     if (err || !stdout) return;
 
     const nowMs = T.now();
+    const touched = new Set();
+
     for (const d of parseArpOutput(stdout)) {
-      P.recordEvent({
-        employeeId: null,          // deliberately unattributed - see header
+      const r = P.recordEvent({
+        employeeId: null,          // never guessed here - see header
         source: 'ARP',
         mac: d.mac,
         srcIp: d.ip,
         observedAt: nowMs,
       });
+      // recordEvent may still resolve an employee, if this MAC was bound by an
+      // authenticated app heartbeat. That is a lookup of a proved identity,
+      // not the MAC-guessing this sensor deliberately avoids.
+      if (r.employeeId) touched.add(r.employeeId);
     }
+
+    const dayKey = T.dateKey(nowMs);
+    for (const empId of touched) P.recomputeDay(empId, dayKey, nowMs);
   });
 }
 
 function start() {
-  const subnets = (config.office.networks || []).flatMap(n => n.subnets || []);
+  // Deduplicated: several SSIDs share one subnet, and repeating it once per
+  // network entry made the startup line look like four separate scans.
+  const subnets = [...new Set((config.office.networks || []).flatMap(n => n.subnets || []))];
   console.log(
     `[sensor:arp] corroborating sightings on ${subnets.join(', ') || '(no subnets configured)'} ` +
     `every ${SCAN_INTERVAL_MS / 1000}s`

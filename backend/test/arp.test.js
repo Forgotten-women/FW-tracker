@@ -12,6 +12,7 @@ const path = require('path');
 
 process.env.DB_FILE = path.join(os.tmpdir(), `office-arp-test-${process.pid}.db`);
 process.env.ADMIN_API_KEY = 'test';
+process.env.OFFICE_CONFIG_FILE = require('path').join(__dirname, 'fixtures', 'office.test.json');
 
 const { parseArpOutput } = require('../src/sensors/arp');
 

@@ -28,10 +28,12 @@ What it is genuinely good for:
 
 ### Hard limits, worth knowing before you rely on it
 
-1. **2.4GHz only.** The ESP8266 radio cannot see 5GHz at all. Any phone that
-   roams to your 5GHz band is invisible to this sensor. If the office moves
-   primarily to 5GHz, the access point's own association log is the only viable
-   network signal — implement `backend/src/sensors/router.js` for it.
+1. **2.4GHz only.** The ESP8266 radio cannot see 5GHz at all. In this office
+   that matters concretely: of roughly 29 connected stations surveyed, 13 were
+   on the 2.4GHz radio (`ba:9f:cc:db:52:58`, channel 11) and 16 were on 5GHz
+   radios this sensor is deaf to. If the office moves primarily to 5GHz, the
+   access point's own association log becomes the only viable network signal —
+   implement `backend/src/sensors/router.js` for it.
 2. **Sniffing and being connected are mutually exclusive.** Monitor mode hops
    channels, so the firmware alternates: listen for 25 s, then reconnect and
    upload.
@@ -104,6 +106,15 @@ Open Serial Monitor at **115200 baud**. A healthy cycle looks like:
 [loop] free heap: 31240 bytes, uptime: 142s
 ```
 
+At boot it locates the office 2.4GHz radio and locks onto that channel, which
+captures roughly three times more frames than sweeping 1/6/11 blindly. It
+re-checks every 15 minutes, because routers move their 2.4GHz channel on their
+own:
+
+```
+[scan] office 2.4GHz radio on channel 11 (rssi -62)
+```
+
 **Watch the free heap.** If it trends downward over hours there is a leak — the
 old String-concatenation payload fragmented it steadily, which is why the
 payload is now a fixed `char[4096]` buffer.
@@ -117,3 +128,4 @@ payload is now a fixed `char[4096]` buffer.
 | `UNKNOWN_SENSOR` | `SENSOR_ID` has no matching secret. `esp-main-01` maps to `SENSOR_SECRET_esp_main_01` (dashes and dots become underscores) |
 | Watchdog resets | Should not happen; the sniff loop yields. If it does, lower `CHANNEL_DWELL_MS` |
 | Sees nothing | Check the office is on 2.4GHz, and that `MIN_RSSI` (-85) is not too strict |
+| `[scan] no 2.4GHz radio found` | `WIFI_SSID` in `secrets.h` resolves only to a 5GHz radio. Point it at the SSID that has a 2.4GHz radio |

@@ -7,6 +7,8 @@
 const { db, tx, audit, backup } = require('./db');
 const { config } = require('./config');
 const P = require('./domain/presence');
+const bindings = require('./domain/bindings');
+const A = require('./domain/attendance');
 const events = require('./events');
 const T = require('./util/time');
 
@@ -45,6 +47,9 @@ function detectTransitions(nowMs = T.now()) {
       });
     }
     P.recomputeDay(emp.id, todayKey, nowMs);
+    // Keeps late minutes, break excess and the deficit in step with presence,
+    // so the HR dashboard is never a tick behind the live board.
+    A.recomputeDay(emp.id, todayKey, nowMs);
   }
 }
 
@@ -75,6 +80,10 @@ function rollover(nowMs = T.now()) {
   const run = tx(() => {
     for (const emp of employees) {
       const d = P.recomputeDay(emp.id, closedKey, nowMs);
+      // Settles the day's deficit into the ledger now that it can no longer
+      // change. Posting it while the day was still running would have written
+      // a figure that kept moving.
+      A.recomputeDay(emp.id, closedKey, nowMs);
       if (d.status === 'NOT_CHECKED_IN') continue;
       db.prepare('UPDATE attendance_days SET closed = 1 WHERE employee_id = ? AND date_key = ?')
         .run(emp.id, closedKey);
@@ -161,6 +170,10 @@ function start() {
     const nowMs = T.now();
     try {
       rollover(nowMs);
+      // Before transitions, so an employee whose binding has just lapsed is
+      // evaluated against the new reality rather than a stale one.
+      const expired = bindings.expireStale(nowMs);
+      if (expired) console.log(`[jobs] ${expired} MAC binding(s) expired without reconfirmation`);
       detectTransitions(nowMs);
       retention(nowMs);
       void nightlyBackup(nowMs);

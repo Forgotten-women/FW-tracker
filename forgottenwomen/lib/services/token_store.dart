@@ -1,23 +1,21 @@
-// Credential and preference storage.
-//
-// The device token authenticates this person to the attendance system, so it
-// lives in the platform keystore/keychain rather than SharedPreferences, where
-// the old app kept its whole profile in plaintext.
+﻿// Credential and preference storage.
 
+import 'dart:developer';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TokenStore {
   static const _secure = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: false,
+      resetOnError: true,
+    ),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
 
   static const _kToken = 'device_token';
   static const _kDeviceId = 'device_id';
 
-  // Non-secret, and needed by the background isolate without a keystore
-  // round-trip on every tick.
   static const _kServerUrl = 'server_url';
   static const _kEmployeeName = 'employee_name';
   static const _kEmployeeRole = 'employee_role';
@@ -25,8 +23,23 @@ class TokenStore {
 
   static const defaultServerUrl = 'http://192.168.18.68:5000';
 
-  Future<String?> readToken() => _secure.read(key: _kToken);
-  Future<String?> readDeviceId() => _secure.read(key: _kDeviceId);
+  Future<String?> readToken() async {
+    try {
+      return await _secure.read(key: _kToken);
+    } catch (e) {
+      log('TokenStore readToken error: $e');
+      return null;
+    }
+  }
+
+  Future<String?> readDeviceId() async {
+    try {
+      return await _secure.read(key: _kDeviceId);
+    } catch (e) {
+      log('TokenStore readDeviceId error: $e');
+      return null;
+    }
+  }
 
   Future<void> saveEnrollment({
     required String token,
@@ -35,46 +48,78 @@ class TokenStore {
     required String employeeName,
     required String employeeRole,
   }) async {
-    await _secure.write(key: _kToken, value: token);
-    await _secure.write(key: _kDeviceId, value: deviceId);
+    try {
+      await _secure.write(key: _kToken, value: token);
+      await _secure.write(key: _kDeviceId, value: deviceId);
+    } catch (e) {
+      log('TokenStore saveEnrollment secure error: $e');
+    }
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kEmployeeId, employeeId);
-    await prefs.setString(_kEmployeeName, employeeName);
-    await prefs.setString(_kEmployeeRole, employeeRole);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kEmployeeId, employeeId);
+      await prefs.setString(_kEmployeeName, employeeName);
+      await prefs.setString(_kEmployeeRole, employeeRole);
+    } catch (e) {
+      log('TokenStore saveEnrollment prefs error: $e');
+    }
   }
 
-  /// Wipes the credential. Used on sign-out and when the server reports the
-  /// token has been revoked or has expired.
   Future<void> clear() async {
-    await _secure.delete(key: _kToken);
-    await _secure.delete(key: _kDeviceId);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kEmployeeId);
-    await prefs.remove(_kEmployeeName);
-    await prefs.remove(_kEmployeeRole);
+    try {
+      await _secure.delete(key: _kToken);
+      await _secure.delete(key: _kDeviceId);
+    } catch (_) {}
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kEmployeeId);
+      await prefs.remove(_kEmployeeName);
+      await prefs.remove(_kEmployeeRole);
+    } catch (_) {}
   }
 
-  Future<bool> get isEnrolled async => (await readToken())?.isNotEmpty ?? false;
+  Future<bool> get isEnrolled async {
+    try {
+      final token = await readToken();
+      return token != null && token.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
 
   Future<String> readServerUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_kServerUrl) ?? defaultServerUrl;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_kServerUrl) ?? defaultServerUrl;
+    } catch (_) {
+      return defaultServerUrl;
+    }
   }
 
   Future<void> saveServerUrl(String url) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kServerUrl, _normalise(url));
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kServerUrl, _normalise(url));
+    } catch (_) {}
   }
 
   Future<String> readEmployeeName() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_kEmployeeName) ?? '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_kEmployeeName) ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<String> readEmployeeRole() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_kEmployeeRole) ?? '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_kEmployeeRole) ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 
   static String _normalise(String url) {

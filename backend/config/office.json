@@ -1,17 +1,13 @@
 {
   "officeName": "Trans K Office (Pakistan)",
   "timeZone": "Asia/Karachi",
-
-  "workStartTime": "09:00",
-  "workEndTime": "18:00",
-
+  "workStartTime": "11:00",
+  "workEndTime": "19:00",
   "activeThresholdMinutes": 3,
   "gracePeriodMinutes": 15,
   "maxSessionMinutes": 720,
-
   "_comment_enforceBssid": "Collecting BSSIDs and enforcing them are separate steps on purpose. While this is false the BSSIDs below are recorded but NOT checked, and verification falls back to source IP. Turn it on only once you have confirmed every access point radio your staff actually connect to is listed - otherwise anyone on a missing radio silently stops being counted. Discover them with: npm run bssids",
-  "enforceBssid": false,
-
+  "enforceBssid": true,
   "_comment_networks": "All BSSIDs below belong to ONE physical access point (ba:9f:cc:db:52:5x). Note that the SSID named 'Trans K 2.4G' broadcasts on BOTH bands - the 2.4GHz radio on channel 11 and a 5GHz radio on channel 40 - so the name does not tell you the band. Verified by netsh wlan show networks mode=bssid on 2026-08-27.",
   "networks": [
     {
@@ -19,24 +15,36 @@
       "ssid": "Trans K 2.4G",
       "band": "2.4",
       "channel": 11,
-      "bssids": ["ba:9f:cc:db:52:58"],
-      "subnets": ["192.168.18.0/24"]
+      "bssids": [
+        "ba:9f:cc:db:52:58"
+      ],
+      "subnets": [
+        "192.168.18.0/24"
+      ]
     },
     {
       "name": "Trans K 2.4G (5GHz radio)",
       "ssid": "Trans K 2.4G",
       "band": "5",
       "channel": 40,
-      "bssids": ["ba:9f:cc:db:52:5e"],
-      "subnets": ["192.168.18.0/24"]
+      "bssids": [
+        "ba:9f:cc:db:52:5e"
+      ],
+      "subnets": [
+        "192.168.18.0/24"
+      ]
     },
     {
       "name": "Trans K 5G",
       "ssid": "Trans K 5G",
       "band": "5",
       "channel": 40,
-      "bssids": ["ba:9f:cc:db:52:5c"],
-      "subnets": ["192.168.18.0/24"]
+      "bssids": [
+        "ba:9f:cc:db:52:5c"
+      ],
+      "subnets": [
+        "192.168.18.0/24"
+      ]
     },
     {
       "_comment": "The router's un-renamed factory SSID, on the same physical AP. Listed so that anyone who happens to join it is still counted. It had zero connected stations when surveyed - if nobody needs it, disable it on the router and delete this entry.",
@@ -44,11 +52,14 @@
       "ssid": "HUAWEI-2.4G-2Jwu",
       "band": "5",
       "channel": 40,
-      "bssids": ["ba:9f:cc:db:52:5d"],
-      "subnets": ["192.168.18.0/24"]
+      "bssids": [
+        "ba:9f:cc:db:52:5d"
+      ],
+      "subnets": [
+        "192.168.18.0/24"
+      ]
     }
   ],
-
   "_comment_infrastructure": "Infrastructure IPs are never treated as employee devices.",
   "infrastructureIps": [
     "192.168.18.1",
@@ -56,10 +67,26 @@
     "192.168.18.81",
     "192.168.18.255"
   ],
-
   "_comment_retention": "Days to keep raw presence_events and unknown-device records. Derived attendance_days rows are kept indefinitely (they are the payroll record).",
   "retention": {
     "presenceEventDays": 90,
     "unknownDeviceDays": 7
-  }
+  },
+  "_comment_unknownDevices": "A device must be seen at least this many times before it is reported as an unrecognised device on the office network. Defence in depth behind the firmware BSSID filter: a single stray sighting is noise, not a device that is actually here.",
+  "unknownDeviceMinSightings": 3,
+  "_comment_schedule": "Forgotten Women default schedule (spec section 6). These are the ORG-WIDE defaults only. Per-employee overrides live in the working_patterns table, because the spec requires different employees, departments and offices to be able to run different schedules.",
+  "workingDays": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri"
+  ],
+  "permittedBreakMinutes": 30,
+  "dayEquivalentMinutes": 480,
+  "latenessGraceMinutes": 10,
+  "_comment_grace": "CONFIRMED by Forgotten Women on 2026-08-27: 10 minute grace period. With an 11:00 start that means 11:10 is still on time and 11:11 is late. The grace period only decides whether an arrival counts as a late OCCURRENCE - late MINUTES for the deficit ledger are still measured from 11:00, per spec 8.1.",
+  "latenessOccurrencesAllowed": 3,
+  "latenessMonitoringPeriod": "CALENDAR_MONTH",
+  "_comment_lateness": "CONFIRMED by Forgotten Women on 2026-08-27: 3 late occurrences are allowed per CALENDAR MONTH, and the 4th triggers HR warning review. The count resets on the 1st of each month."
 }

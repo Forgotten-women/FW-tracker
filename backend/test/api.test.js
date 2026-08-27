@@ -13,6 +13,7 @@ const path = require('path');
 const TMP = path.join(os.tmpdir(), `office-api-test-${process.pid}.db`);
 process.env.DB_FILE = TMP;
 process.env.ADMIN_API_KEY = 'test-admin-key-0123456789';
+process.env.OFFICE_CONFIG_FILE = require('path').join(__dirname, 'fixtures', 'office.test.json');
 process.env.SENSOR_SECRET_esp_test_01 = 'sensor-shared-secret';
 // The tests need to simulate requests arriving from an office IP. In production
 // this stays off so X-Forwarded-For cannot be used to fake a location.

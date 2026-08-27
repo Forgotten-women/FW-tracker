@@ -189,6 +189,95 @@ function requireSensor(req, res, next) {
   next();
 }
 
+// --- user sessions and permissions -----------------------------------------
+
+const rbac = require('../domain/rbac');
+
+/**
+ * Authenticates a human user by session token.
+ *
+ * Kept separate from requireAdmin, which checks a single shared API key. That
+ * key stays for machine access and the initial bootstrap, but it cannot say
+ * WHO acted - unusable for a payroll audit trail, which is why real accounts
+ * exist.
+ */
+function requireUser(req, res, next) {
+  const token = bearer(req) || req.headers['x-session-token'];
+  const user = token ? rbac.resolveSession(token) : null;
+
+  if (!user) {
+    return res.status(401).json({
+      status: 'ERROR', code: 'NO_SESSION', message: 'Sign in to continue.',
+    });
+  }
+
+  req.auth = { kind: 'user', actor: `user:${user.id}`, ...user };
+  next();
+}
+
+/**
+ * Requires one or more permissions. Use AFTER requireUser.
+ *
+ *   router.get('/salary', requireUser, requirePermission('employee.salary.read'), handler)
+ */
+function requirePermission(...needed) {
+  return (req, res, next) => {
+    if (!req.auth || req.auth.kind !== 'user') {
+      return res.status(401).json({ status: 'ERROR', code: 'NO_SESSION', message: 'Sign in to continue.' });
+    }
+    const held = req.auth.permissions;
+    const missing = needed.filter(p => !held.has(p));
+    if (missing.length) {
+      return res.status(403).json({
+        status: 'ERROR', code: 'FORBIDDEN',
+        message: 'You do not have permission to do that.',
+        // Named so an administrator can grant exactly what is missing rather
+        // than guessing, or reaching for a broader role than necessary.
+        missing,
+      });
+    }
+    next();
+  };
+}
+
+/**
+ * Requires that the caller may see the employee named by a route parameter.
+ *
+ * Separate from requirePermission on purpose: holding attendance.read says a
+ * user may read attendance, not WHOSE. A manager has it for their assigned
+ * reports only, and an employee only for themselves.
+ */
+function requireEmployeeAccess(paramName = 'employeeId') {
+  return (req, res, next) => {
+    const employeeId = req.params[paramName] || req.body?.[paramName];
+    if (!employeeId) {
+      return res.status(400).json({ status: 'ERROR', message: `${paramName} is required.` });
+    }
+    if (!rbac.canAccessEmployee(req.auth, employeeId)) {
+      // 404 rather than 403: confirming that an employee exists is itself a
+      // disclosure to someone with no business knowing.
+      return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
+    }
+    req.targetEmployeeId = employeeId;
+    next();
+  };
+}
+
+/** Allows either a signed-in user with the permission, or the shared admin key. */
+function requireUserOrAdminKey(...needed) {
+  return (req, res, next) => {
+    const supplied = req.headers['x-admin-key'];
+    if (supplied && config.adminApiKey && safeEqual(supplied, config.adminApiKey)) {
+      req.auth = { kind: 'admin', actor: 'admin-key', roles: ['super_admin'], permissions: new Set(needed) };
+      return next();
+    }
+    requireUser(req, res, (err) => {
+      if (err) return next(err);
+      requirePermission(...needed)(req, res, next);
+    });
+  };
+}
+
 // --- SSE tickets -----------------------------------------------------------
 
 // EventSource cannot send an Authorization header, so the dashboard exchanges
@@ -218,6 +307,7 @@ function consumeSseTicket(ticket) {
 
 module.exports = {
   requireDevice, requireAdmin, requireSensor,
+  requireUser, requirePermission, requireEmployeeAccess, requireUserOrAdminKey,
   newToken, newEnrollmentCode, sha256, safeEqual,
   issueSseTicket, consumeSseTicket,
 };

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import 'screens/enroll_screen.dart';
 import 'screens/home_screen.dart';
@@ -8,9 +8,11 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Must happen before any UI, so the background isolate is registered even
-  // when the app is launched by the OS rather than by the user.
-  await PresenceService.configure();
+  try {
+    await PresenceService.configure();
+  } catch (e) {
+    debugPrint('PresenceService.configure non-fatal error: $e');
+  }
   runApp(const OfficeTrackerApp());
 }
 
@@ -32,11 +34,22 @@ class _OfficeTrackerAppState extends State<OfficeTrackerApp> {
   }
 
   Future<void> _check() async {
-    final enrolled = await _store.isEnrolled;
-    if (!mounted) return;
-    setState(() => _enrolled = enrolled);
-    // Resume reporting after a reboot or an app update.
-    if (enrolled) await PresenceService.start();
+    try {
+      final enrolled = await _store.isEnrolled;
+      if (!mounted) return;
+      setState(() => _enrolled = enrolled);
+      if (enrolled) {
+        try {
+          await PresenceService.start();
+        } catch (e) {
+          debugPrint('PresenceService.start error: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('Enrollment check failed: $e');
+      if (!mounted) return;
+      setState(() => _enrolled = false);
+    }
   }
 
   @override

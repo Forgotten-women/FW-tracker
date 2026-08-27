@@ -29,9 +29,24 @@ router.get('/summary', (req, res) => {
 
   // Unknown devices are stored as salted hashes on a short TTL, so this is a
   // count of distinct unrecognised devices - never a list of identifiers.
+  //
+  // Devices seen only once or twice are excluded. Before the firmware filtered
+  // by office BSSID this number reached 175 for a team of about 50, because the
+  // sniffer was reporting every device on all 13 neighbouring networks plus a
+  // fresh randomised MAC for every phone that probed while walking past.
+  // Two thirds of those rows had a single sighting.
+  const dayAgo = nowMs - 24 * 60 * 60 * 1000;
+  const minSightings = config.unknownDeviceMinSightings;
+
   const unknownCount = db.prepare(
-    'SELECT COUNT(*) c FROM unknown_devices WHERE last_seen_at > ?'
-  ).get(nowMs - 24 * 60 * 60 * 1000).c;
+    'SELECT COUNT(*) c FROM unknown_devices WHERE last_seen_at > ? AND sighting_count >= ?'
+  ).get(dayAgo, minSightings).c;
+
+  // Kept visible so a return of the flood is obvious rather than silently
+  // filtered away.
+  const unknownTransient = db.prepare(
+    'SELECT COUNT(*) c FROM unknown_devices WHERE last_seen_at > ? AND sighting_count < ?'
+  ).get(dayAgo, minSightings).c;
 
   const movements = db.prepare('SELECT * FROM movements ORDER BY at DESC LIMIT 20').all();
 
@@ -52,6 +67,8 @@ router.get('/summary', (req, res) => {
       currentlyAway: away.length,
       totalAttendeesToday: attended.length,
       unknownDevicesSeen24h: unknownCount,
+      unknownDevicesTransient24h: unknownTransient,
+      unknownDeviceMinSightings: minSightings,
       averageTimeWorkedToday: T.formatMinutes(avgMinutes),
       liveDashboardClients: events.clientCount(),
     },
@@ -61,9 +78,13 @@ router.get('/summary', (req, res) => {
       workHours: `${config.workStartTime} - ${config.workEndTime}`,
       activeThreshold: `${config.activeThresholdMinutes} mins`,
       gracePeriod: `${config.gracePeriodMinutes} mins`,
-      // Shown so the weaker anti-spoofing posture is visible in the UI rather
-      // than only in a startup log line nobody reads.
-      bssidVerification: config.bssidEnforced ? 'enforced' : 'NOT CONFIGURED',
+      // Three states, not two. "4 listed but not enforced" is a genuinely
+      // different situation from "none configured", and reporting the first as
+      // the second told the operator to redo work they had already done.
+      bssidVerification: config.bssidEnforced
+        ? 'enforced'
+        : (config.bssidListed > 0 ? 'listed-not-enforced' : 'not-configured'),
+      bssidListed: config.bssidListed,
     },
     inOffice, grace, away,
     notArrived: board.filter(e => e.status === 'NOT_CHECKED_IN'),

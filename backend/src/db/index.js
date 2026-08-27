@@ -32,6 +32,10 @@ db.pragma('busy_timeout = 5000');
 
 db.exec(fs.readFileSync(SCHEMA_FILE, 'utf-8'));
 
+// Incremental schema changes on top of the baseline. Runs on every start, and
+// is a no-op once everything has been applied.
+require('./migrate').migrate(db, { verbose: process.env.NODE_ENV !== 'test' });
+
 // --- meta ------------------------------------------------------------------
 
 const getMetaStmt = db.prepare('SELECT value FROM meta WHERE key = ?');

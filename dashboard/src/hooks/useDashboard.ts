@@ -56,10 +56,14 @@ export function useDashboard(
   useEffect(() => {
     if (!unlocked) return;
     aliveRef.current = true;
-    void refresh();
+    // Queued rather than called straight from the effect body, so the first
+    // load resolves in a callback instead of triggering a synchronous
+    // re-render while React is still committing this one.
+    const initial = setTimeout(() => void refresh(), 0);
     const id = setInterval(() => void refresh(), 15000);
     return () => {
       aliveRef.current = false;
+      clearTimeout(initial);
       clearInterval(id);
     };
   }, [unlocked, refresh]);

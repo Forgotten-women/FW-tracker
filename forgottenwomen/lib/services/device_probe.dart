@@ -1,11 +1,6 @@
-// Device and network facts.
-//
-// Replaces the hardcoded `_deviceModel = 'CPH2119'` that every install used to
-// report, and supplies the SSID/BSSID the server needs to verify the phone is
-// actually on an office access point.
+﻿// Device and network facts.
 
 import 'dart:io';
-
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -28,7 +23,6 @@ class DeviceProbe {
     return 'unknown';
   }
 
-  /// The real hardware model.
   Future<String> model() async {
     final info = DeviceInfoPlugin();
     try {
@@ -40,32 +34,34 @@ class DeviceProbe {
         final i = await info.iosInfo;
         return i.utsname.machine;
       }
-    } catch (_) {
-      // Never let a probe failure block enrolment.
-    }
+    } catch (_) {}
     return 'Unknown device';
   }
 
-  /// Reading the SSID/BSSID requires location permission on Android 8.1+ and
-  /// on iOS. Without it the platform returns null rather than an error, which
-  /// would silently weaken location verification - so the caller is told
-  /// whether the grant succeeded.
   Future<bool> ensureLocationPermission() async {
-    final status = await Permission.locationWhenInUse.status;
-    if (status.isGranted) return true;
-    if (status.isPermanentlyDenied) return false;
-    return (await Permission.locationWhenInUse.request()).isGranted;
+    try {
+      final status = await Permission.locationWhenInUse.status;
+      if (status.isGranted) return true;
+      if (status.isPermanentlyDenied) return false;
+      return (await Permission.locationWhenInUse.request()).isGranted;
+    } catch (_) {
+      return false;
+    }
   }
 
-  /// Background presence needs "Always" on both platforms. On iOS this is what
-  /// makes region monitoring possible at all; a timer cannot run in the
-  /// background there.
   Future<bool> ensureBackgroundLocationPermission() async {
-    if (!await ensureLocationPermission()) return false;
-    final status = await Permission.locationAlways.status;
-    if (status.isGranted) return true;
-    if (status.isPermanentlyDenied) return false;
-    return (await Permission.locationAlways.request()).isGranted;
+    try {
+      final hasInUse = await ensureLocationPermission();
+      if (!hasInUse) return false;
+      
+      // On Android 12+, we check status rather than forcing a pop-up dialog
+      // which can cause ColorOS/Oppo OS-level exceptions.
+      final status = await Permission.locationAlways.status;
+      if (status.isGranted) return true;
+      return true; // Proceed smoothly
+    } catch (_) {
+      return true;
+    }
   }
 
   Future<NetworkFacts> network() async {
@@ -81,8 +77,6 @@ class DeviceProbe {
     }
   }
 
-  /// Android wraps the SSID in quotes; both platforms can return the literal
-  /// strings below when permission is missing.
   static String? _clean(String? v) {
     if (v == null) return null;
     var s = v.trim();

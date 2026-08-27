@@ -13,6 +13,7 @@ const path = require('path');
 const TMP = path.join(os.tmpdir(), `office-test-${process.pid}.db`);
 process.env.DB_FILE = TMP;
 process.env.ADMIN_API_KEY = 'test-key';
+process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
 
 const { db } = require('../src/db');
 const P = require('../src/domain/presence');

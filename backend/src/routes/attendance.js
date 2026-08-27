@@ -12,6 +12,7 @@ const { db } = require('../db');
 const { config } = require('../config');
 const { requireDevice, requireSensor, requireAdmin } = require('../middleware/auth');
 const P = require('../domain/presence');
+const bindings = require('../domain/bindings');
 const events = require('../events');
 const T = require('../util/time');
 
@@ -80,6 +81,7 @@ router.post('/ping', requireDevice, (req, res) => {
   // whatever attendance already existed for the day.
   let latestObservedAt = -1;
   let latestLocation = 'UNKNOWN';
+  let latestReason = null;
 
   for (const o of observations) {
     // A client-supplied timestamp is clamped: never in the future, never more
@@ -103,9 +105,17 @@ router.post('/ping', requireDevice, (req, res) => {
     if (observedAt > latestObservedAt) {
       latestObservedAt = observedAt;
       latestLocation = r.location;
+      latestReason = r.reason;
     }
     touchedDays.add(T.dateKey(observedAt));
   }
+
+  // Establish or refresh the MAC binding while we have an authenticated
+  // request to correlate against. This is what lets presence survive the app
+  // being closed: the sensors keep recognising this phone afterwards.
+  const binding = bindings.bindFromAuthenticatedPing({
+    employeeId, deviceId, srcIp, nowMs,
+  });
 
   for (const day of touchedDays) P.recomputeDay(employeeId, day, nowMs);
 
@@ -120,9 +130,17 @@ router.post('/ping', requireDevice, (req, res) => {
     // show an honest state instead of claiming "IN OFFICE" regardless.
     verified: latestLocation === 'OFFICE',
     location: latestLocation,
+    // Says WHY it did not count. With BSSID enforcement on, a phone that has
+    // lost location permission reports no access point and stops being
+    // counted, which is indistinguishable from absence unless we say so.
+    notCountedReason: latestReason,
     serverTime: T.displayTime(nowMs),
     serverTimeMs: nowMs,
     attendance: P.presentDay(after, { name: employeeName, role: employeeRole }),
+    // Lets the app tell the employee whether closing it will interrupt their
+    // attendance, instead of leaving them to find out from a payslip.
+    presenceContinues: binding.bound,
+    bindingState: binding.reason,
   });
 });
 
@@ -171,6 +189,7 @@ router.post('/heartbeat', requireSensor, (req, res) => {
   }
 
   let recorded = 0;
+  const touched = new Set();
   for (const d of devices) {
     const mac = T.normalizeMac(d?.mac);
     const ip = T.normalizeIp(d?.ip);
@@ -187,12 +206,20 @@ router.post('/heartbeat', requireSensor, (req, res) => {
       observedAt: Number(d?.at) || nowMs,
       note: `sensor:${sensorId}`,
     });
-    if (r.inserted) recorded++;
+    if (r.inserted) {
+      recorded++;
+      if (r.employeeId) touched.add(r.employeeId);
+    }
   }
+
+  // A bound sighting is now somebody's attendance, so refresh it immediately -
+  // the live dashboard should not lag a sensor report by a maintenance tick.
+  for (const empId of touched) P.recomputeDay(empId, T.dateKey(nowMs), nowMs);
 
   res.json({
     status: 'SUCCESS',
     sensorId,
+    attributed: touched.size,
     recorded,
     // Lets the firmware resync if its clock has drifted out of the signature
     // freshness window.

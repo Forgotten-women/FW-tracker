@@ -1,8 +1,4 @@
-// Presence dashboard for the employee.
-//
-// The status shown here is whatever the SERVER derived. The app never computes
-// it, which is what stops the phone and the office dashboard disagreeing about
-// the same person.
+﻿// Presence dashboard for the employee.
 
 import 'dart:async';
 
@@ -49,9 +45,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _bootstrap();
-    // A faster refresh only while the screen is actually visible. The
-    // background service is what keeps reporting when it is not - this timer
-    // is for the UI, and is no longer mistaken for the reporting mechanism.
     _foregroundTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
   }
 
@@ -69,20 +62,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrap() async {
-    _employeeName = await _store.readEmployeeName();
+    try {
+      _employeeName = await _store.readEmployeeName();
+    } catch (_) {}
     await _refresh();
   }
 
   Future<void> _refresh() async {
     if (_sending) return;
-    setState(() => _sending = true);
+    if (mounted) setState(() => _sending = true);
 
     try {
       final facts = await _probe.network();
-      final result = await sendHeartbeat(client: _api, probe: _probe, queue: _queue);
-      final history = await _api.history(days: 7);
-      final pending = await _queue.length;
-      final running = await PresenceService.isRunning();
+      PingResult? result;
+      try {
+        result = await sendHeartbeat(client: _api, probe: _probe, queue: _queue);
+      } catch (e) {
+        debugPrint('sendHeartbeat error: $e');
+      }
+
+      List<Attendance> history = const [];
+      try {
+        history = await _api.history(days: 7);
+      } catch (e) {
+        debugPrint('history fetch error: $e');
+      }
+
+      int pending = 0;
+      try {
+        pending = await _queue.length;
+      } catch (_) {}
+
+      bool running = false;
+      try {
+        running = await PresenceService.isRunning();
+      } catch (_) {}
 
       if (!mounted) return;
       setState(() {
@@ -100,144 +114,178 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } on ApiException catch (e) {
       if (!mounted) return;
       if (e.needsReEnrollment) {
-        await _store.clear();
-        await PresenceService.stop();
+        try {
+          await _store.clear();
+          await PresenceService.stop();
+        } catch (_) {}
         if (mounted) widget.onSignedOut();
         return;
       }
       setState(() {
         _error = e.message;
         _loading = false;
-        _pendingCount = 0;
       });
-      final pending = await _queue.length;
-      if (mounted) setState(() => _pendingCount = pending);
+    } catch (e) {
+      debugPrint('HomeScreen _refresh general error: $e');
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not sync with server: $e';
+        _loading = false;
+      });
     } finally {
       if (mounted) setState(() => _sending = false);
     }
   }
 
+  Future<void> _toggleService(bool enable) async {
+    try {
+      if (enable) {
+        await PresenceService.start();
+      } else {
+        await PresenceService.stop();
+      }
+      final running = await PresenceService.isRunning();
+      if (mounted) setState(() => _serviceRunning = running);
+    } catch (e) {
+      debugPrint('Service toggle error: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: AppColors.teal)),
-      );
-    }
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Office Tracker'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_employeeName.isEmpty ? 'Office Tracker' : _employeeName,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              _network.ssid == null ? 'Not on Wi-Fi' : 'Wi-Fi: ${_network.ssid}',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => SettingsScreen(onSignedOut: widget.onSignedOut),
-              ),
-            ).then((_) => _refresh()),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => SettingsScreen(
+                    onSignedOut: widget.onSignedOut,
+                  ),
+                ),
+              );
+              _refresh();
+            },
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _StatusCard(
-              name: _employeeName,
-              attendance: _attendance,
-              verified: _verified,
-              network: _network,
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              _Banner(
-                icon: Icons.cloud_off,
-                color: Colors.orange,
-                title: 'Not reaching the server',
-                body: _pendingCount > 0
-                    ? '$_error\n$_pendingCount reading(s) buffered on this phone and '
-                        'will upload automatically. Nothing has been lost.'
-                    : _error!,
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: AppColors.teal))
+          : RefreshIndicator(
+              color: AppColors.teal,
+              onRefresh: _refresh,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (_error != null) ...[
+                    _Banner(
+                      icon: Icons.warning_amber_rounded,
+                      color: Colors.amber.shade800,
+                      title: 'Sync issue',
+                      body: _error!,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  _StatusCard(
+                    attendance: _attendance,
+                    verified: _verified,
+                    onRefresh: _sending ? null : _refresh,
+                  ),
+                  const SizedBox(height: 12),
+                  _ServiceCard(
+                    running: _serviceRunning,
+                    pending: _pendingCount,
+                    onToggle: _toggleService,
+                    onSendNow: _sending ? null : _refresh,
+                    sending: _sending,
+                  ),
+                  if (_attendance.sessions.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    const _SectionHeader("Today's Sessions"),
+                    const SizedBox(height: 8),
+                    ..._attendance.sessions.map((s) => _SessionRow(session: s)),
+                  ],
+                  if (_history.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    const _SectionHeader('Past 7 Days'),
+                    const SizedBox(height: 8),
+                    ..._history.map((d) => _DayRow(day: d)),
+                  ],
+                ],
               ),
-            ],
-            if (!_verified && _error == null) ...[
-              const SizedBox(height: 12),
-              _Banner(
-                icon: Icons.location_off_outlined,
-                color: AppColors.amber,
-                title: 'Not counted as office time',
-                body: 'You are signed in, but this connection was not recognised '
-                    'as an office network, so it is not being recorded as '
-                    'attendance. Connect to the office Wi-Fi.',
-              ),
-            ],
-            const SizedBox(height: 12),
-            _ServiceCard(
-              running: _serviceRunning,
-              pending: _pendingCount,
-              onToggle: (on) async {
-                if (on) {
-                  await _probe.ensureBackgroundLocationPermission();
-                  await PresenceService.start();
-                } else {
-                  await PresenceService.stop();
-                }
-                final running = await PresenceService.isRunning();
-                if (mounted) setState(() => _serviceRunning = running);
-              },
-              onSendNow: _sending ? null : _refresh,
-              sending: _sending,
             ),
-            const SizedBox(height: 20),
-            if (_attendance.sessions.isNotEmpty) ...[
-              const _SectionHeader('Today'),
-              const SizedBox(height: 8),
-              ..._attendance.sessions.map((s) => _SessionRow(session: s)),
-              const SizedBox(height: 20),
-            ],
-            const _SectionHeader('Last 7 days'),
-            const SizedBox(height: 8),
-            ..._history.map((d) => _DayRow(day: d)),
-          ],
-        ),
-      ),
     );
   }
 }
 
 class _StatusCard extends StatelessWidget {
-  final String name;
   final Attendance attendance;
   final bool verified;
-  final NetworkFacts network;
+  final VoidCallback? onRefresh;
 
   const _StatusCard({
-    required this.name,
     required this.attendance,
     required this.verified,
-    required this.network,
+    this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
-    final present = attendance.status.isPresent && verified;
+    final (color, icon, label) = switch (attendance.status) {
+      PresenceStatus.inOffice => (
+          AppColors.teal,
+          Icons.check_circle_outline,
+          verified ? 'IN OFFICE' : 'ON NETWORK'
+        ),
+      PresenceStatus.gracePeriod => (
+          Colors.amber.shade700,
+          Icons.access_time_outlined,
+          'GRACE PERIOD'
+        ),
+      PresenceStatus.away => (
+          Colors.grey.shade700,
+          Icons.logout_outlined,
+          'AWAY / BREAK'
+        ),
+      PresenceStatus.closed => (
+          Colors.blueGrey,
+          Icons.bedtime_outlined,
+          'DAY CLOSED'
+        ),
+      PresenceStatus.notCheckedIn => (
+          Colors.grey.shade500,
+          Icons.radio_button_unchecked,
+          'NOT CHECKED IN'
+        ),
+    };
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: present
-              ? const [AppColors.teal, AppColors.tealDark]
-              : const [AppColors.slate, AppColors.slateDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: color,
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.3),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -245,75 +293,74 @@ class _StatusCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Colors.black26,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text(
-                  // The server's own label, so the app cannot invent a status.
-                  attendance.statusLabel.toUpperCase(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 14, color: Colors.white),
+                    const SizedBox(width: 6),
+                    Text(label,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5)),
+                  ],
                 ),
               ),
-              Flexible(
-                child: Text(
-                  network.ssid ?? 'No Wi-Fi',
-                  textAlign: TextAlign.right,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.85),
-                    fontSize: 12,
-                  ),
+              if (onRefresh != null)
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: Colors.white70, size: 20),
+                  onPressed: onRefresh,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
-              ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           Text(
-            name.isEmpty ? 'Employee' : name,
+            attendance.timeWorkedFormatted,
             style: const TextStyle(
-                color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-          ),
-          if (attendance.role.isNotEmpty)
-            Text(
-              attendance.role,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13),
+              fontSize: 36,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              letterSpacing: -0.5,
             ),
-          const SizedBox(height: 20),
-          const Divider(color: Colors.white24),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _Metric(
-                icon: Icons.login_rounded,
-                label: 'First in',
-                value: attendance.firstCheckIn,
-              ),
-              _Metric(
-                icon: Icons.timer_outlined,
-                label: 'Logged today',
-                value: attendance.timeWorkedFormatted,
-              ),
-              _Metric(
-                icon: Icons.update,
-                label: 'Last seen',
-                value: attendance.lastActiveTime,
-              ),
-            ],
           ),
-          if (attendance.adjustmentMinutes != 0) ...[
-            const SizedBox(height: 12),
-            Text(
-              'Includes a ${attendance.adjustmentMinutes > 0 ? '+' : ''}'
-              '${attendance.adjustmentMinutes} min adjustment by an administrator',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 11),
+          Text(
+            attendance.statusLabel,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black12,
+              borderRadius: BorderRadius.circular(10),
             ),
-          ],
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _Metric(
+                  icon: Icons.login,
+                  label: 'First In',
+                  value: attendance.firstCheckIn,
+                ),
+                _Metric(
+                  icon: Icons.timer_outlined,
+                  label: 'Last Seen',
+                  value: attendance.lastActiveTime,
+                ),
+                _Metric(
+                  icon: Icons.timelapse,
+                  label: 'Sessions',
+                  value: '${attendance.sessions.length}',
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -331,14 +378,14 @@ class _Metric extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white70, size: 20),
-        const SizedBox(height: 6),
+        Icon(icon, color: Colors.white70, size: 18),
+        const SizedBox(height: 4),
         Text(value,
             style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
         Text(label,
             style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
+                color: Colors.white.withValues(alpha: 0.75), fontSize: 10)),
       ],
     );
   }
@@ -380,15 +427,12 @@ class _ServiceCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Background reporting',
+                      const Text('Background presence reporting',
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       Text(
-                        // Deliberately accurate. The old UI claimed a 15-second
-                        // background heartbeat that could not and did not run.
                         running
-                            ? 'Reports every ${heartbeatInterval.inMinutes} min while at the office. '
-                                'On iOS, updates are driven by entering and leaving the office.'
-                            : 'Off. Attendance is only recorded while this screen is open.',
+                            ? 'Reports automatically while connected to office Wi-Fi.'
+                            : 'Off. Attendance only records while app is open.',
                         style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
                       ),
                     ],

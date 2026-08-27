@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 
 import { Gate } from '@/components/Gate';
 import {
@@ -14,28 +14,28 @@ import {
   WarningBar,
 } from '@/components/panels';
 import { useDashboard } from '@/hooks/useDashboard';
-import { api, clearKey, getKey } from '@/lib/api';
+import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, EnrollmentCode } from '@/lib/types';
 
 export default function DashboardPage() {
-  // Undefined until the first client render, because sessionStorage does not
-  // exist during SSR.
-  const [unlocked, setUnlocked] = useState<boolean | undefined>(undefined);
   const [gateError, setGateError] = useState<string>('');
   const [pairing, setPairing] = useState<(EnrollmentCode & { name: string }) | null>(null);
 
-  useEffect(() => {
-    setUnlocked(Boolean(getKey()));
-  }, []);
+  // The admin key lives in sessionStorage, which is an external store rather
+  // than React state. Subscribing to it directly avoids the extra render pass
+  // that reading it in an effect and calling setState caused, and keeps the
+  // server snapshot honest: during SSR there is no sessionStorage, so nothing
+  // is unlocked.
+  const unlocked = useSyncExternalStore(subscribeToKey, () => Boolean(getKey()), () => false);
 
   const lock = useCallback((message: string) => {
     clearKey();
     setGateError(message);
-    setUnlocked(false);
+    notifyKeyChanged();
   }, []);
 
   const { summary, employees, connection, error, refresh } = useDashboard(
-    unlocked === true,
+    unlocked,
     lock,
   );
 
@@ -70,7 +70,9 @@ export default function DashboardPage() {
         initialError={gateError}
         onUnlocked={() => {
           setGateError('');
-          setUnlocked(true);
+          // Gate has already written the key via setKey(), which notifies the
+          // store subscribers - so unlocked flips on its own.
+          notifyKeyChanged();
         }}
       />
     );

@@ -1,8 +1,4 @@
-// Enrolment.
-//
-// The employee enters a single-use code issued by an administrator. The old
-// flow instead let the phone invent its own employee id and send whatever name
-// was typed, so anyone could register as anyone.
+﻿// Enrolment Screen
 
 import 'package:flutter/material.dart';
 
@@ -48,11 +44,14 @@ class _EnrollScreenState extends State<EnrollScreen> {
   }
 
   Future<void> _enroll() async {
-    final code = _codeController.text.trim().toUpperCase();
-    if (code.isEmpty) {
-      setState(() => _error = 'Enter the code your administrator gave you.');
+    final rawText = _codeController.text.trim();
+    final clean = rawText.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+    if (clean.isEmpty) {
+      setState(() => _error = 'Enter the code shown on the dashboard.');
       return;
     }
+
+    final code = clean.length == 8 ? '${clean.substring(0, 4)}-${clean.substring(4)}' : clean;
 
     setState(() {
       _busy = true;
@@ -60,15 +59,15 @@ class _EnrollScreenState extends State<EnrollScreen> {
     });
 
     try {
-      await _store.saveServerUrl(_serverController.text);
+      final serverUrl = _serverController.text.trim();
+      if (serverUrl.isNotEmpty) {
+        await _store.saveServerUrl(serverUrl);
+      }
 
-      // Requested before the first heartbeat, because without it the platform
-      // returns a null SSID/BSSID and location verification silently weakens.
-      final granted = await _probe.ensureLocationPermission();
-      if (!granted && mounted) {
+      final hasLocation = await _probe.ensureLocationPermission();
+      if (!hasLocation) {
         setState(() => _error =
-            'Location permission is required to confirm you are on the office network. '
-            'Enable it in Settings and try again.');
+            'Location permission is required to detect office Wi-Fi networks.');
         setState(() => _busy = false);
         return;
       }
@@ -88,12 +87,19 @@ class _EnrollScreenState extends State<EnrollScreen> {
         employeeRole: employee['role'] as String? ?? '',
       );
 
-      await _probe.ensureBackgroundLocationPermission();
-      await PresenceService.start();
+      try {
+        await _probe.ensureBackgroundLocationPermission();
+      } catch (_) {}
+
+      try {
+        await PresenceService.start();
+      } catch (_) {}
 
       if (mounted) widget.onEnrolled();
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not pair: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -126,8 +132,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
                           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 6),
                       Text(
-                        'Ask your administrator for a pairing code. '
-                        'It can only be used once.',
+                        'Enter the pairing code shown on your admin dashboard.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                       ),
@@ -138,13 +143,13 @@ class _EnrollScreenState extends State<EnrollScreen> {
                         autocorrect: false,
                         style: const TextStyle(
                           fontSize: 22,
-                          letterSpacing: 4,
+                          letterSpacing: 3,
                           fontWeight: FontWeight.bold,
                         ),
                         textAlign: TextAlign.center,
                         decoration: const InputDecoration(
                           labelText: 'Pairing code',
-                          hintText: 'XXXX-XXXX',
+                          hintText: 'e.g. WKYJ-UPNM',
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -212,11 +217,6 @@ class _EnrollScreenState extends State<EnrollScreen> {
   }
 }
 
-/// Explicit, informed consent before any tracking begins.
-///
-/// This data is used for payroll, and the organisation is UK-based, so people
-/// have to be told what is collected and for how long before it starts - not
-/// discover it later.
 class _ConsentNotice extends StatelessWidget {
   final bool value;
   final ValueChanged<bool?> onChanged;
@@ -245,16 +245,11 @@ class _ConsentNotice extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'While paired, this app reports the time you are connected to an '
-            'office Wi-Fi network, so your working hours can be recorded for '
-            'payroll.\n\n'
-            'It records: the name of the network you are on, the access point '
-            'identifier, and the time. It does NOT record your location when '
-            'you are away from the office, your browsing, or anything else on '
-            'your phone.\n\n'
-            'Detailed records are kept for 90 days. Your daily hours are kept '
-            'as long as your employer retains payroll records. You can ask to '
-            'see your data or have this device unpaired at any time.',
+            'While paired, this app reports the time you are connected to the '
+            'office Wi-Fi network, so your working hours can be recorded.\n\n'
+            'It records: connected Wi-Fi network name, access point identifier, '
+            'and timestamps. It does NOT record personal GPS location when away '
+            'from the office or internet browsing activity.',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.45),
           ),
           const SizedBox(height: 4),

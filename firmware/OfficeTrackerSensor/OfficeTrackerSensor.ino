@@ -52,8 +52,22 @@ extern "C" {
 
 static const uint32_t SNIFF_WINDOW_MS    = 25000;  // listen before uploading
 static const uint32_t CHANNEL_DWELL_MS   = 400;    // per channel while hopping
-static const uint8_t  CHANNELS[]         = { 1, 6, 11 };  // non-overlapping 2.4GHz
-static const uint8_t  NUM_CHANNELS       = sizeof(CHANNELS) / sizeof(CHANNELS[0]);
+
+// Fallback sweep, used only until the office access point is located.
+static const uint8_t  FALLBACK_CHANNELS[] = { 1, 6, 11 };  // non-overlapping 2.4GHz
+static const uint8_t  NUM_FALLBACK = sizeof(FALLBACK_CHANNELS) / sizeof(FALLBACK_CHANNELS[0]);
+
+// The channel the office 2.4GHz radio is actually on, discovered at boot.
+// Locking to it instead of sweeping 1/6/11 roughly triples the number of frames
+// captured, because no time is spent listening to channels the office does not
+// use. 0 means "not found yet, sweep instead".
+//
+// Discovered rather than hardcoded because most routers pick their 2.4GHz
+// channel automatically and will move after a reboot or interference change. A
+// hardcoded channel would go quietly blind when that happened.
+static uint8_t officeChannel = 0;
+static uint32_t lastChannelCheckMs = 0;
+static const uint32_t CHANNEL_RECHECK_MS = 15UL * 60UL * 1000UL;   // 15 minutes
 
 static const uint8_t  MAX_DEVICES        = 40;
 static const int8_t   MIN_RSSI           = -85;    // ignore distant neighbours
@@ -109,6 +123,46 @@ struct SnifferPacket {
   uint16_t len;
 };
 
+// --- office access point allowlist ----------------------------------------
+//
+// THE reason the unknown-device count exploded. In promiscuous mode the radio
+// hears EVERY 802.11 frame in range, not just traffic on the office network.
+// With 13 neighbouring networks visible from this office, every phone and
+// laptop belonging to every neighbour was being reported as an office device.
+//
+// A frame is only counted if it is associated with one of OUR access point
+// radios. That also removes probe-request noise for free: an unassociated
+// phone probing for networks sends a wildcard BSSID, and modern phones use a
+// RANDOMISED MAC for those probes, so each pass of a stranger in the corridor
+// used to manufacture a brand-new "device".
+
+// Which SSIDs belong to this office. Defaults to the one the sensor joins.
+// Override in secrets.h to cover several office SSIDs on the same hardware.
+#ifndef OFFICE_SSID_LIST
+#define OFFICE_SSID_LIST { WIFI_SSID }
+#endif
+
+static const char* OFFICE_SSIDS[] = OFFICE_SSID_LIST;
+static const uint8_t OFFICE_SSID_COUNT = sizeof(OFFICE_SSIDS) / sizeof(OFFICE_SSIDS[0]);
+
+static const uint8_t MAX_OFFICE_BSSIDS = 8;
+static uint8_t officeBssids[MAX_OFFICE_BSSIDS][6];
+static uint8_t officeBssidCount = 0;
+
+static bool isOfficeBssid(const uint8_t* mac) {
+  for (uint8_t i = 0; i < officeBssidCount; i++) {
+    if (memcmp(officeBssids[i], mac, 6) == 0) return true;
+  }
+  return false;
+}
+
+static bool isOfficeSsid(const String& ssid) {
+  for (uint8_t i = 0; i < OFFICE_SSID_COUNT; i++) {
+    if (ssid == OFFICE_SSIDS[i]) return true;
+  }
+  return false;
+}
+
 // --- sighting table --------------------------------------------------------
 
 static bool isMulticast(const uint8_t* mac) {
@@ -139,16 +193,118 @@ static void recordSighting(const uint8_t* mac, int8_t rssi) {
 
 // Promiscuous callback. Must stay short: it runs in the Wi-Fi driver context,
 // so no printing, no allocation and no blocking.
+//
+// 802.11 puts the BSSID in a different address slot depending on the frame
+// type and the ToDS/FromDS direction bits, so the header has to be decoded
+// rather than assuming addr2 is always the device. The previous version took
+// addr2 unconditionally, which is both the wrong field half the time and the
+// reason neighbouring networks were being counted.
 static void ICACHE_FLASH_ATTR snifferCallback(uint8_t* buf, uint16_t len) {
-  if (len < 36) return;   // too short to contain addr2
+  if (len < 36) return;   // rx_ctrl + a full 3-address header
 
   const SnifferPacket* pkt = (SnifferPacket*)buf;
-  // Address 2 is the transmitter, at offset 10 of the 802.11 MAC header.
-  const uint8_t* addr2 = pkt->buf + 10;
-  recordSighting(addr2, (int8_t)pkt->rx_ctrl.rssi);
+  const uint8_t* frame = pkt->buf;
+
+  const uint8_t frameType = (frame[0] >> 2) & 0x03;   // 0 mgmt, 1 ctrl, 2 data
+  const bool toDS   = (frame[1] & 0x01) != 0;
+  const bool fromDS = (frame[1] & 0x02) != 0;
+
+  // Control frames (ACK, RTS, CTS) carry no useful identity.
+  if (frameType == 1) return;
+
+  const uint8_t* addr1 = frame + 4;
+  const uint8_t* addr2 = frame + 10;
+  const uint8_t* addr3 = frame + 16;
+
+  const uint8_t* device = 0;
+  const uint8_t* bssid  = 0;
+
+  if (frameType == 2) {                 // data frame
+    if (toDS && !fromDS)       { bssid = addr1; device = addr2; }  // client -> AP
+    else if (!toDS && fromDS)  { bssid = addr2; device = addr1; }  // AP -> client
+    else if (!toDS && !fromDS) { bssid = addr3; device = addr2; }  // ad-hoc
+    else return;                                                   // 4-address WDS
+  } else {                              // management frame
+    bssid  = addr3;
+    device = addr2;
+  }
+
+  // Without a known office AP, record nothing. Reporting every frame in range
+  // is what produced the flood, so silence is the safer failure mode.
+  if (officeBssidCount == 0) return;
+  if (!isOfficeBssid(bssid)) return;
+  if (isMulticast(device)) return;
+  if (isOfficeBssid(device)) return;    // the AP itself is not an employee
+
+  recordSighting(device, (int8_t)pkt->rx_ctrl.rssi);
 }
 
 // --- sniffing --------------------------------------------------------------
+
+// Finds which 2.4GHz channel WIFI_SSID is on.
+//
+// Note that an SSID name does not tell you its band: this office has an SSID
+// literally called "Trans K 2.4G" whose 5GHz radio is on channel 40. Only
+// channels 1-14 exist on 2.4GHz, so anything above 14 is a 5GHz radio this
+// chip cannot hear at all and must be ignored.
+static void discoverOfficeChannel() {
+  Serial.println(F("[scan] locating the office access point"));
+
+  const int found = WiFi.scanNetworks(false, true);
+  uint8_t best = 0;
+  int32_t bestRssi = -127;
+  officeBssidCount = 0;
+
+  for (int i = 0; i < found; i++) {
+    if (!isOfficeSsid(WiFi.SSID(i))) continue;
+
+    const int32_t ch = WiFi.channel(i);
+    if (ch < 1 || ch > 14) continue;   // 5GHz radio, invisible to an ESP8266
+
+    // Every 2.4GHz radio belonging to an office SSID becomes part of the
+    // capture allowlist. Collected from the live scan rather than hardcoded,
+    // so it stays correct if the router is replaced or reconfigured.
+    if (officeBssidCount < MAX_OFFICE_BSSIDS) {
+      memcpy(officeBssids[officeBssidCount], WiFi.BSSID(i), 6);
+      officeBssidCount++;
+    }
+
+    if (WiFi.RSSI(i) > bestRssi) {
+      bestRssi = WiFi.RSSI(i);
+      best = (uint8_t)ch;
+    }
+  }
+
+  WiFi.scanDelete();
+
+  Serial.print(F("[scan] office access point radios in range: "));
+  Serial.println(officeBssidCount);
+  for (uint8_t i = 0; i < officeBssidCount; i++) {
+    Serial.printf("         %02x:%02x:%02x:%02x:%02x:%02x",
+                  officeBssids[i][0], officeBssids[i][1], officeBssids[i][2],
+                  officeBssids[i][3], officeBssids[i][4], officeBssids[i][5]);
+    Serial.println();
+  }
+  if (officeBssidCount == 0) {
+    Serial.println(F("[scan] WARNING no office radio found - capture disabled this cycle"));
+    Serial.println(F("[scan] the sensor records NOTHING rather than logging every"));
+    Serial.println(F("[scan] neighbouring network it can hear"));
+  }
+  lastChannelCheckMs = millis();
+
+  if (best) {
+    if (best != officeChannel) {
+      Serial.printf("[scan] office 2.4GHz radio on channel %u (rssi %d)\n", best, bestRssi);
+    }
+    officeChannel = best;
+  } else {
+    officeChannel = 0;
+    Serial.print(F("[scan] no 2.4GHz radio found for SSID "));
+    Serial.println(WIFI_SSID);
+    Serial.println(F("[scan] if that SSID is 5GHz-only this sensor cannot see it - "
+                     "sweeping 1/6/11 for other traffic instead"));
+  }
+}
 
 static void sniffWindow() {
   Serial.println(F("[sniff] entering monitor mode"));
@@ -163,8 +319,10 @@ static void sniffWindow() {
   uint8_t channelIndex = 0;
 
   while (millis() - start < SNIFF_WINDOW_MS) {
-    wifi_set_channel(CHANNELS[channelIndex]);
-    channelIndex = (channelIndex + 1) % NUM_CHANNELS;
+    // Locked to the office channel when known, so the whole window is spent
+    // listening where the office traffic actually is.
+    wifi_set_channel(officeChannel ? officeChannel : FALLBACK_CHANNELS[channelIndex]);
+    channelIndex = (channelIndex + 1) % NUM_FALLBACK;
 
     const uint32_t dwellStart = millis();
     while (millis() - dwellStart < CHANNEL_DWELL_MS) {
@@ -344,10 +502,17 @@ void setup() {
   WiFi.setAutoReconnect(true);
 
   if (connectWifi()) syncClock();
+  discoverOfficeChannel();
 }
 
 void loop() {
   deviceCount = 0;
+
+  // Routers move their 2.4GHz channel on their own, so re-check periodically
+  // rather than trusting the value found at boot forever.
+  if (millis() - lastChannelCheckMs > CHANNEL_RECHECK_MS) {
+    if (connectWifi()) discoverOfficeChannel();
+  }
 
   sniffWindow();
 

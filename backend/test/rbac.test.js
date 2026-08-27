@@ -1,0 +1,332 @@
+// Access-control tests.
+//
+// Spec section 34 requires: an employee cannot access another employee's
+// information, a manager cannot access restricted HR documents without
+// permission, and every HR edit is auditable. Those are the tests here.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const TMP = path.join(os.tmpdir(), `office-rbac-test-${process.pid}.db`);
+process.env.DB_FILE = TMP;
+process.env.ADMIN_API_KEY = 'test-admin-key';
+process.env.NODE_ENV = 'test';
+
+const { db } = require('../src/db');
+const rbac = require('../src/domain/rbac');
+const T = require('../src/util/time');
+
+const PASSWORD = 'a-long-enough-passphrase';
+
+function makeEmployee(id, name) {
+  db.prepare(
+    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+  ).run(id, name, 'Staff', T.now(), T.now());
+  return id;
+}
+
+function assign(managerEmployeeId, employeeId) {
+  db.prepare(
+    'INSERT OR REPLACE INTO manager_assignments (manager_employee_id, employee_id, assigned_at) VALUES (?,?,?)'
+  ).run(managerEmployeeId, employeeId, T.now());
+}
+
+// Three employees: a manager, one of their reports, and an unrelated person.
+const EMP_MANAGER = makeEmployee('emp_mgr', 'Manager Person');
+const EMP_REPORT = makeEmployee('emp_report', 'Reporting Person');
+const EMP_OTHER = makeEmployee('emp_other', 'Unrelated Person');
+assign(EMP_MANAGER, EMP_REPORT);
+
+const employeeUser = rbac.createUser({
+  email: 'employee@test.org', displayName: 'Employee', password: PASSWORD,
+  roles: ['employee'], employeeId: EMP_REPORT,
+});
+const managerUser = rbac.createUser({
+  email: 'manager@test.org', displayName: 'Manager', password: PASSWORD,
+  roles: ['manager'], employeeId: EMP_MANAGER,
+});
+const hrUser = rbac.createUser({
+  email: 'hr@test.org', displayName: 'HR', password: PASSWORD, roles: ['hr'],
+});
+const adminUser = rbac.createUser({
+  email: 'admin@test.org', displayName: 'Admin', password: PASSWORD, roles: ['super_admin'],
+});
+
+const asEmployee = () => rbac.describeUser(employeeUser.id);
+const asManager = () => rbac.describeUser(managerUser.id);
+const asHr = () => rbac.describeUser(hrUser.id);
+const asAdmin = () => rbac.describeUser(adminUser.id);
+
+test.after(() => {
+  try { db.close(); } catch {}
+  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
+});
+
+// ---------------------------------------------------------------------------
+// Employee isolation
+// ---------------------------------------------------------------------------
+
+test('an employee can see only their own record', () => {
+  const me = asEmployee();
+  assert.equal(rbac.canAccessEmployee(me, EMP_REPORT), true);
+  assert.equal(rbac.canAccessEmployee(me, EMP_OTHER), false);
+  assert.equal(rbac.canAccessEmployee(me, EMP_MANAGER), false);
+  assert.deepEqual(rbac.accessibleEmployeeIds(me), [EMP_REPORT]);
+});
+
+test('an employee holds no permission over anyone else', () => {
+  const p = asEmployee().permissions;
+  for (const forbidden of [
+    'employee.read', 'employee.write', 'attendance.write', 'leave.approve',
+    'warning.issue', 'payroll.read', 'settings.write', 'user.manage', 'audit.read',
+  ]) {
+    assert.equal(p.has(forbidden), false, `employee must not hold ${forbidden}`);
+  }
+  assert.equal(p.has('self.read'), true);
+  assert.equal(p.has('self.leave.request'), true);
+});
+
+// ---------------------------------------------------------------------------
+// Manager scoping
+// ---------------------------------------------------------------------------
+
+test('a manager sees assigned reports and nobody else', () => {
+  const me = asManager();
+  assert.equal(rbac.canAccessEmployee(me, EMP_REPORT), true, 'their own report');
+  assert.equal(rbac.canAccessEmployee(me, EMP_MANAGER), true, 'themselves');
+  assert.equal(rbac.canAccessEmployee(me, EMP_OTHER), false, 'an unrelated employee');
+
+  const visible = rbac.accessibleEmployeeIds(me).sort();
+  assert.deepEqual(visible, [EMP_MANAGER, EMP_REPORT].sort());
+});
+
+// Spec 3.2 lists exactly what a manager must NOT automatically receive.
+test('a manager gets no sensitive personal data by default', () => {
+  const p = asManager().permissions;
+  const mustNotHave = [
+    'employee.identity.read',   // passport / ID
+    'employee.personal.read',   // home address, date of birth
+    'employee.bank.read',       // bank details
+    'employee.nextofkin.read',  // next of kin
+    'employee.medical.read',    // medical information
+    'employee.salary.read',     // salary
+  ];
+  for (const perm of mustNotHave) {
+    assert.equal(p.has(perm), false, `spec 3.2: manager must not hold ${perm} by default`);
+  }
+  // But they can still do the operational job.
+  assert.equal(p.has('attendance.read'), true);
+  assert.equal(p.has('leave.approve'), true);
+});
+
+test('an explicit grant gives one manager one sensitive permission', () => {
+  assert.equal(asManager().permissions.has('employee.personal.read'), false);
+
+  db.prepare(`
+    INSERT INTO user_permission_grants (user_id, permission_id, granted_at, granted_by, reason)
+    VALUES (?,?,?,?,?)
+  `).run(managerUser.id, 'employee.personal.read', T.now(), 'hr', 'Emergency contact duty');
+
+  assert.equal(asManager().permissions.has('employee.personal.read'), true);
+  // A grant widens WHICH FIELDS, never WHICH PEOPLE.
+  assert.equal(rbac.canAccessEmployee(asManager(), EMP_OTHER), false);
+});
+
+test('an expired grant stops applying', () => {
+  db.prepare(`
+    INSERT OR REPLACE INTO user_permission_grants
+      (user_id, permission_id, granted_at, granted_by, expires_at, reason)
+    VALUES (?,?,?,?,?,?)
+  `).run(managerUser.id, 'employee.salary.read', T.now() - 1000, 'hr', T.now() - 1, 'Expired');
+
+  assert.equal(asManager().permissions.has('employee.salary.read'), false);
+});
+
+// ---------------------------------------------------------------------------
+// HR and Super Admin
+// ---------------------------------------------------------------------------
+
+test('HR reaches the whole workforce and sensitive data', () => {
+  const me = asHr();
+  for (const e of [EMP_MANAGER, EMP_REPORT, EMP_OTHER]) {
+    assert.equal(rbac.canAccessEmployee(me, e), true);
+  }
+  for (const perm of ['employee.personal.read', 'employee.salary.read', 'payroll.read', 'warning.issue']) {
+    assert.equal(me.permissions.has(perm), true, `HR should hold ${perm}`);
+  }
+});
+
+// Least privilege: HR administers people, Super Admin sets the rules that
+// decide who is late and whose pay is affected. Those are different jobs.
+test('HR cannot change policy or manage user accounts', () => {
+  const p = asHr().permissions;
+  assert.equal(p.has('settings.write'), false);
+  assert.equal(p.has('user.manage'), false);
+
+  const admin = asAdmin().permissions;
+  assert.equal(admin.has('settings.write'), true);
+  assert.equal(admin.has('user.manage'), true);
+});
+
+// ---------------------------------------------------------------------------
+// Passwords and sessions
+// ---------------------------------------------------------------------------
+
+test('passwords are salted, and never recoverable from storage', () => {
+  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(hrUser.id);
+  assert.ok(row.password_hash.startsWith('scrypt$'));
+  assert.ok(!row.password_hash.includes(PASSWORD), 'the password must not appear in storage');
+
+  // Same password, different users, different hashes - so the salt is real.
+  const other = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(adminUser.id);
+  assert.notEqual(row.password_hash, other.password_hash);
+});
+
+test('the password policy rejects weak choices', () => {
+  assert.ok(rbac.passwordProblems('short').length > 0);
+  assert.ok(rbac.passwordProblems('1234567890123').length > 0, 'digits only');
+  assert.ok(rbac.passwordProblems('myforgottenwomenpass').length > 0, 'contains the org name');
+  assert.equal(rbac.passwordProblems('a-perfectly-fine-passphrase').length, 0);
+});
+
+test('sign-in issues a working session, and the wrong password does not', () => {
+  const ok = rbac.login({ email: 'hr@test.org', password: PASSWORD, ip: '127.0.0.1' });
+  assert.ok(ok.token);
+  const resolved = rbac.resolveSession(ok.token);
+  assert.equal(resolved.id, hrUser.id);
+  assert.equal(resolved.roles.includes('hr'), true);
+
+  assert.throws(
+    () => rbac.login({ email: 'hr@test.org', password: 'wrong-password-entirely' }),
+    /incorrect/i,
+  );
+});
+
+test('a failed sign-in does not reveal whether the account exists', () => {
+  let noSuchUser, wrongPassword;
+  try { rbac.login({ email: 'nobody@test.org', password: 'x'.repeat(20) }); }
+  catch (e) { noSuchUser = e.message; }
+  try { rbac.login({ email: 'admin@test.org', password: 'x'.repeat(20) }); }
+  catch (e) { wrongPassword = e.message; }
+
+  assert.equal(noSuchUser, wrongPassword,
+    'a different message would let an attacker enumerate valid accounts');
+});
+
+test('repeated failures lock the account', () => {
+  const email = 'lockme@test.org';
+  rbac.createUser({ email, displayName: 'Lock Me', password: PASSWORD, roles: ['employee'] });
+
+  for (let i = 0; i < rbac.MAX_FAILED_ATTEMPTS; i++) {
+    try { rbac.login({ email, password: 'definitely-wrong-here' }); } catch {}
+  }
+  // Even the CORRECT password is refused once locked.
+  assert.throws(() => rbac.login({ email, password: PASSWORD }), /locked/i);
+});
+
+test('signing out invalidates the token immediately', () => {
+  const { token } = rbac.login({ email: 'admin@test.org', password: PASSWORD });
+  assert.ok(rbac.resolveSession(token));
+  rbac.revokeSession(token);
+  assert.equal(rbac.resolveSession(token), null);
+});
+
+test('changing a password revokes every existing session', () => {
+  const email = 'rotate@test.org';
+  const u = rbac.createUser({ email, displayName: 'Rotate', password: PASSWORD, roles: ['employee'] });
+  const a = rbac.login({ email, password: PASSWORD }).token;
+  const b = rbac.login({ email, password: PASSWORD }).token;
+  assert.ok(rbac.resolveSession(a) && rbac.resolveSession(b));
+
+  rbac.changePassword({
+    userId: u.id, currentPassword: PASSWORD,
+    newPassword: 'an-entirely-different-passphrase', actor: 'test',
+  });
+
+  // A stolen token must not outlive the password it was obtained under.
+  assert.equal(rbac.resolveSession(a), null);
+  assert.equal(rbac.resolveSession(b), null);
+});
+
+// Spec 27: immediate account revocation for leavers.
+test('deactivating a user kills their sessions at once', () => {
+  const email = 'leaver@test.org';
+  const u = rbac.createUser({ email, displayName: 'Leaver', password: PASSWORD, roles: ['employee'] });
+  const token = rbac.login({ email, password: PASSWORD }).token;
+  assert.ok(rbac.resolveSession(token));
+
+  db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(u.id);
+  assert.equal(rbac.resolveSession(token), null, 'a leaver must lose access immediately');
+});
+
+test('an expired session stops resolving', () => {
+  const { token } = rbac.login({ email: 'admin@test.org', password: PASSWORD });
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  db.prepare('UPDATE user_sessions SET expires_at = ? WHERE token_hash = ?').run(T.now() - 1, hash);
+  assert.equal(rbac.resolveSession(token), null);
+});
+
+// ---------------------------------------------------------------------------
+// Auditability
+// ---------------------------------------------------------------------------
+
+test('user creation and password changes are audited', () => {
+  const actions = db.prepare('SELECT DISTINCT action FROM audit_log').all().map(r => r.action);
+  assert.ok(actions.includes('USER_CREATED'));
+  assert.ok(actions.includes('PASSWORD_CHANGED'));
+});
+
+test('sign-in attempts are recorded with their outcome', () => {
+  const outcomes = db.prepare('SELECT DISTINCT outcome FROM login_events').all().map(r => r.outcome);
+  assert.ok(outcomes.includes('SUCCESS'));
+  assert.ok(outcomes.includes('BAD_PASSWORD'));
+  assert.ok(outcomes.includes('NO_USER'), 'attempts against unknown accounts must still be logged');
+});
+
+// ---------------------------------------------------------------------------
+// Policy decisions the spec leaves open
+// ---------------------------------------------------------------------------
+
+// Spec 9.6 and 35: the lateness reset period is explicitly undecided. Seeding a
+// default would silently invent policy that decides who gets a warning.
+test('undecided policy is stored as undecided, not guessed', () => {
+  const rule = db.prepare("SELECT * FROM warning_rules WHERE id = 'wr_lateness'").get();
+  assert.equal(rule.threshold, 3, 'spec 9.1: 3 permitted late occurrences');
+  assert.equal(rule.monitoring_period, null,
+    'spec 9.6 says do not hard-code the reset period until the organisation confirms it');
+});
+
+// Spec 10.2 warns that the wording supplied would apply two consequences to one
+// absence. They must stay independently switchable.
+test('unauthorised-absence consequences are three separate switches', () => {
+  const cols = db.prepare('PRAGMA table_info(absence_records)').all().map(c => c.name);
+  for (const c of ['deduct_annual_leave', 'treat_as_unpaid', 'create_warning_trigger']) {
+    assert.ok(cols.includes(c), `${c} must be independently controllable`);
+  }
+  // Null, not 0 or 1: nothing is assumed until a human decides.
+  const info = db.prepare('PRAGMA table_info(absence_records)').all();
+  for (const c of ['deduct_annual_leave', 'treat_as_unpaid', 'create_warning_trigger']) {
+    assert.equal(info.find(x => x.name === c).dflt_value, null,
+      `${c} must have no default - the consequence is a decision, not a fallback`);
+  }
+});
+
+// Spec 18/29: calculated is not the same as approved.
+test('payroll adjustments separate calculated from approved amounts', () => {
+  const cols = db.prepare('PRAGMA table_info(payroll_adjustments)').all().map(c => c.name);
+  for (const c of ['calculated_amount', 'approved_amount', 'approved_by', 'status']) {
+    assert.ok(cols.includes(c), `payroll_adjustments needs ${c}`);
+  }
+});
+
+// Spec 31: salary must not be a single overwriteable field.
+test('salary history is versioned with effective dates', () => {
+  const cols = db.prepare('PRAGMA table_info(salary_history)').all().map(c => c.name);
+  for (const c of ['effective_from', 'effective_to', 'amount', 'created_by']) {
+    assert.ok(cols.includes(c), `salary_history needs ${c}`);
+  }
+});

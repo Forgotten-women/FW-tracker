@@ -33,6 +33,15 @@ export interface EmployeeDay {
   adjustmentMinutes: number;
   /** A session hit the duration cap - usually a phone left in the office. */
   needsReview: boolean;
+  /** Human label for the signal currently carrying this presence. */
+  presenceSource: string | null;
+  presenceSourceKey: 'APP' | 'SENSOR' | 'NETWORK' | 'MANUAL' | 'UNKNOWN' | null;
+  /**
+   * True when presence no longer depends on the app being open, because the
+   * office sensor recognises this phone. False means closing the app will stop
+   * the clock.
+   */
+  sensorCarried: boolean;
   sessions: WorkSession[];
 }
 
@@ -56,7 +65,11 @@ export interface DashboardSummary {
     currentlyInGracePeriod: number;
     currentlyAway: number;
     totalAttendeesToday: number;
+    /** Unrecognised devices seen at least `unknownDeviceMinSightings` times. */
     unknownDevicesSeen24h: number;
+    /** Seen once or twice only - stray frames, not devices actually present. */
+    unknownDevicesTransient24h: number;
+    unknownDeviceMinSightings: number;
     averageTimeWorkedToday: string;
     liveDashboardClients: number;
   };
@@ -66,8 +79,13 @@ export interface DashboardSummary {
     workHours: string;
     activeThreshold: string;
     gracePeriod: string;
-    /** 'enforced' or 'NOT CONFIGURED' - surfaced in the UI, not just logged. */
-    bssidVerification: string;
+    /**
+     * 'enforced' | 'listed-not-enforced' | 'not-configured'.
+     * The middle state matters: BSSIDs collected but not yet switched on is a
+     * deliberate step, not an outstanding task.
+     */
+    bssidVerification: 'enforced' | 'listed-not-enforced' | 'not-configured';
+    bssidListed: number;
   };
   inOffice: EmployeeDay[];
   grace: EmployeeDay[];

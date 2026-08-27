@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 
@@ -87,15 +87,37 @@ export function Header({
  * log line nobody reads.
  */
 export function WarningBar({ summary }: { summary: DashboardSummary }) {
-  if (summary.officeConfig.bssidVerification === 'enforced') return null;
+  const { bssidVerification, bssidListed } = summary.officeConfig;
+  if (bssidVerification === 'enforced') return null;
+
+  const code = 'rounded bg-black/30 px-1.5 py-0.5';
+
+  // Collected-but-not-enforced is a deliberate step, not an outstanding task.
+  // Telling the operator to add BSSIDs they had already added sent them to redo
+  // finished work and hid the one thing actually left to do.
+  if (bssidVerification === 'listed-not-enforced') {
+    return (
+      <div className="mx-6 mb-4 rounded-lg border border-warn bg-warn-dim px-4 py-3 text-xs leading-relaxed">
+        <strong>{bssidListed} access point radio(s) listed, not yet enforced.</strong>{' '}
+        Presence is still verified by source IP only. Check every radio your staff
+        actually connect to is listed — run{' '}
+        <code className={code}>npm run bssids</code> a few times, since the scan is
+        cached — then set <code className={code}>&quot;enforceBssid&quot;: true</code> in{' '}
+        <code className={code}>backend/config/office.json</code>.
+        <div className="mt-1 text-muted">
+          Turning it on with a radio missing silently stops counting everyone
+          connected to that radio.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-6 mb-4 rounded-lg border border-warn bg-warn-dim px-4 py-3 text-xs leading-relaxed">
-      No office BSSIDs configured — presence is verified by source IP only. Add{' '}
-      <code className="rounded bg-black/30 px-1.5 py-0.5">bssids</code> to{' '}
-      <code className="rounded bg-black/30 px-1.5 py-0.5">
-        backend/config/office.json
-      </code>{' '}
-      to fully prevent off-site check-ins.
+      No office BSSIDs configured — presence is verified by source IP only. Run{' '}
+      <code className={code}>npm run bssids</code> and add them to{' '}
+      <code className={code}>backend/config/office.json</code> to fully prevent
+      off-site check-ins.
     </div>
   );
 }
@@ -110,7 +132,7 @@ export function Stats({ summary }: { summary: DashboardSummary }) {
     ['Away', s.currentlyAway, 'text-text'],
     ['Attended today', s.totalAttendeesToday, 'text-text'],
     ['Avg worked', s.averageTimeWorkedToday, 'text-text'],
-    ['Unknown devices (24h)', s.unknownDevicesSeen24h, 'text-text'],
+    ['Unrecognised devices', s.unknownDevicesSeen24h, 'text-text'],
   ];
 
   return (
@@ -119,6 +141,17 @@ export function Stats({ summary }: { summary: DashboardSummary }) {
         <div key={label} className="rounded-xl border border-line bg-surface/70 p-4">
           <div className={`text-2xl font-bold ${tone}`}>{value}</div>
           <div className="mt-1 text-[11px] text-muted">{label}</div>
+          {label === 'Unrecognised devices' && (
+            <div className="mt-1 text-[10px] leading-snug text-muted">
+              seen {s.unknownDeviceMinSightings}+ times in 24h
+              {s.unknownDevicesTransient24h > 0 && (
+                <>
+                  {' '}&middot; {s.unknownDevicesTransient24h} one-off sighting
+                  {s.unknownDevicesTransient24h === 1 ? '' : 's'} excluded
+                </>
+              )}
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -165,6 +198,28 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
                   <span title="Last sighting">seen {e.lastActiveTime}</span>
                   <strong className="text-text">{e.timeWorkedFormatted}</strong>
                 </div>
+                {e.presenceSource && (
+                  <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted">
+                    <span
+                      aria-hidden
+                      className={`inline-block h-1.5 w-1.5 rounded-full ${
+                        e.sensorCarried ? 'bg-brand' : 'bg-warn'
+                      }`}
+                    />
+                    <span>via {e.presenceSource}</span>
+                    {!e.sensorCarried && (
+                      // The app closing would stop this person's clock, which is
+                      // the failure mode HR would otherwise only discover from a
+                      // wrong timesheet at the end of the month.
+                      <span
+                        className="text-warn"
+                        title="The office sensor has not recognised this phone yet, so closing the app will stop the clock."
+                      >
+                        — app must stay open
+                      </span>
+                    )}
+                  </div>
+                )}
                 {e.needsReview && (
                   <div className="mt-2 text-[10px] text-warn">
                     Unusually long session — review
@@ -424,7 +479,7 @@ export function CodeModal({
         </div>
 
         <p className="mb-5 text-[11px] leading-relaxed text-dim">
-          Single use, expires {expires}. Give it to the employee to enter in the app. It
+          Single use · Valid until {expires}. Give it to the employee to enter in the app. It
           will not be shown again.
         </p>
 
@@ -435,3 +490,4 @@ export function CodeModal({
     </div>
   );
 }
+

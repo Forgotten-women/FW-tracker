@@ -11,7 +11,9 @@
     "migrate": "node src/db/migrate-from-json.js",
     "backup": "node -e \"require('./src/db').backup().then(p=>console.log(p))\"",
     "genkey": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
-    "bssids": "node scripts/discover-bssids.js"
+    "bssids": "node scripts/discover-bssids.js",
+    "migrate:status": "node -e \"const{db}=require('./src/db');console.table(require('./src/db/migrate').status(db))\"",
+    "user:create": "node scripts/create-user.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

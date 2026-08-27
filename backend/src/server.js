@@ -87,8 +87,10 @@ app.get('/api/events', (req, res) => {
 
 // --- routes ----------------------------------------------------------------
 
+app.use('/api/auth', require('./routes/auth'));                 // sign-in and sessions
 app.use('/api/enroll', require('./routes/enroll'));            // code-authenticated
-app.use('/api/attendance', require('./routes/attendance'));    // per-route auth
+app.use('/api/attendance', require('./routes/attendance'));    // presence ingest
+app.use('/api/attendance', require('./routes/attendance-hr'));  // HR attendance engine
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin
 app.use('/api/admin', require('./routes/admin'));              // admin
 

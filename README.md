@@ -111,14 +111,40 @@ For production:
 cd dashboard && npm run build && npm start
 ```
 
-### 2. Office networks
+### 2. Office networks and BSSIDs
 
-Edit `backend/config/office.json`. Add one entry per SSID and band. Find your
-BSSIDs on Windows with:
+An SSID is just a name - anyone can create a network called `Trans K 2.4G`. A
+**BSSID is the MAC address of a specific access point radio**, which is what
+makes it usable as proof of location. Each radio has its own, so a dual-band
+router has at least two.
+
+Discover them:
 
 ```bash
-netsh wlan show interfaces
+cd backend && npm run bssids
 ```
+
+Then list every radio in `backend/config/office.json`.
+
+**`netsh` serves a cached scan**, so a radio that exists may not appear in any
+single run - run it a few times and cross-check the router admin page before
+deciding the list is complete.
+
+Enabling enforcement is a deliberate second step:
+
+```json
+"enforceBssid": true
+```
+
+While it is `false` the BSSIDs are recorded but not checked, and verification
+falls back to source IP. Turn it on only once you have confirmed every radio
+staff actually connect to is listed - **a missing radio silently stops counting
+everyone on it.** The server prints how many are listed and whether they are
+being enforced at startup, and the dashboard shows a banner.
+
+> Watch out for SSID names that lie about their band. In this office the SSID
+> named `Trans K 2.4G` runs on *both* the 2.4GHz radio (channel 11) and a 5GHz
+> radio (channel 40). Drive the config from the scan, never from the name.
 
 ### 3. Employee app
 
@@ -205,3 +231,69 @@ data under UK GDPR.
   header.
 - The office Wi-Fi password was previously hardcoded in the firmware and is
   in this repository's git history. **It must be rotated.**
+
+## Users, roles and permissions
+
+The HR platform (spec sections 3-5) uses real user accounts, not a shared key.
+The `ADMIN_API_KEY` still exists for machine access and bootstrap, but it cannot
+say *who* acted - which is unusable for a payroll audit trail.
+
+Create the first account:
+
+```bash
+cd backend && npm run user:create -- --email you@example.org --name "Your Name" --role super_admin
+```
+
+The password is read from `OFFICE_TRACKER_PASSWORD` or generated and printed
+once. It is never passed as a command-line argument, because argv is visible to
+other processes and lands in shell history.
+
+### The four roles
+
+| Role | Sees | Notably cannot |
+|---|---|---|
+| `employee` | Own record only | Anything about anyone else |
+| `manager` | Assigned reports only | Passports, addresses, bank details, next-of-kin, medical records, salary |
+| `hr` | Whole workforce, including sensitive data and payroll preparation | Change policy, manage user accounts |
+| `super_admin` | Everything | — |
+
+Two checks run on every request, and they answer different questions:
+
+- **Permission** — *may this user do this kind of thing?* (`attendance.read`)
+- **Employee access** — *may this user do it to this person?*
+
+Holding `attendance.read` does not imply reading everyone's attendance. A
+manager has it for their assigned reports and nobody else. Conflating the two is
+how a workforce-wide leak happens, so they are enforced separately
+(`requirePermission` and `requireEmployeeAccess`).
+
+Managers deliberately receive **no** sensitive permissions by default, per spec
+3.2. To grant one without inventing a new role, insert a row into
+`user_permission_grants` — optionally with an expiry. A grant widens *which
+fields*, never *which people*.
+
+### Schema changes
+
+Migrations in `backend/src/db/migrations/` run automatically at startup and are
+recorded in `schema_migrations`, so they apply exactly once.
+
+```bash
+cd backend && npm run migrate:status
+```
+
+Once a migration has run it is immutable — editing it makes deployments disagree
+about the shape of a database holding payroll data. Add a new migration instead.
+The runner warns if a checksum changes.
+
+### Policy left undecided on purpose
+
+Spec section 35 lists decisions the organisation has not made. Where a default
+would silently invent policy, the value is stored as **undecided** and the
+engine refuses to act rather than guessing:
+
+| Setting | State | Why it matters |
+|---|---|---|
+| `latenessMonitoringPeriod` | `UNSET` | Decides whether 3 late arrivals reset monthly, quarterly or never — i.e. who gets a warning |
+| `latenessGraceMinutes` | `0` | Whether 11:01 is automatically late |
+| Unauthorised absence | 3 separate switches, no defaults | The wording supplied would deduct a day's leave *and* a day's pay for the same absence |
+

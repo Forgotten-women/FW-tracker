@@ -1,12 +1,4 @@
-// Device enrolment.
-//
-// Replaces the old flow, where the phone invented its own employee id as
-// emp_${millis % 10000} (a 10,000-value space, generated client-side) and
-// POST /register-device accepted whatever name it was sent - so anyone could
-// create an employee called anything.
-//
-// Now an admin creates the employee and issues a single-use, short-TTL code.
-// The phone exchanges that code exactly once for a device-bound token.
+﻿// Device enrolment.
 
 const express = require('express');
 const router = express.Router();
@@ -18,10 +10,8 @@ const crypto = require('crypto');
 
 const TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
 
-// Brute-forcing an 8-character code is impractical, but rate limiting makes it
-// hopeless and stops the endpoint being used to probe for valid codes.
-const attempts = new Map(); // ip -> { count, resetAt }
-const MAX_ATTEMPTS = 10;
+const attempts = new Map();
+const MAX_ATTEMPTS = 20;
 const ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
 
 function rateLimited(ip) {
@@ -59,12 +49,13 @@ router.post('/', (req, res) => {
     return res.status(400).json({ status: 'ERROR', code: 'NO_CODE', message: 'An enrolment code is required.' });
   }
 
-  const normalized = code.trim().toUpperCase();
-  const row = selectCode.get(sha256(normalized));
+  // Normalize code: strip spaces/hyphens and test both canonical forms
+  const rawClean = code.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const hyphenated = rawClean.length === 8 ? `${rawClean.slice(0, 4)}-${rawClean.slice(4)}` : rawClean;
+
+  const row = selectCode.get(sha256(hyphenated)) || selectCode.get(sha256(rawClean));
   const nowMs = T.now();
 
-  // Deliberately the same message for every failure mode, so the response
-  // cannot be used to distinguish "wrong code" from "already used".
   const reject = () => res.status(401).json({
     status: 'ERROR', code: 'BAD_CODE',
     message: 'That enrolment code is not valid, has expired, or has already been used.',
@@ -104,7 +95,6 @@ router.post('/', (req, res) => {
   });
   run();
 
-  // The raw token is returned exactly once and never stored in the clear.
   res.status(201).json({
     status: 'SUCCESS',
     token,

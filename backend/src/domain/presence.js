@@ -12,6 +12,7 @@
 const crypto = require('crypto');
 const { db, tx, MAC_SALT } = require('../db');
 const { config } = require('../config');
+const bindings = require('./bindings');
 const T = require('../util/time');
 
 const ACTIVE_MS = config.activeThresholdMinutes * 60 * 1000;
@@ -93,6 +94,47 @@ function classifyLocation({ bssid, srcIp, source }) {
 }
 
 /**
+ * Why a sighting did not count, in words the employee can act on.
+ *
+ * With BSSID enforcement on, a phone that cannot read the access point - which
+ * is what happens when location permission is denied - reports a null BSSID and
+ * silently stops being counted. That looks identical to being absent, so the
+ * reason has to be surfaced rather than left for someone to discover from a
+ * short timesheet at the end of the month.
+ */
+function explainLocation({ bssid, srcIp, source, location }) {
+  if (location === 'OFFICE') return null;
+  if (source !== 'APP') return null;
+
+  const ipOk = config.isOfficeIp(srcIp);
+
+  if (config.bssidEnforced && ipOk && !bssid) {
+    return {
+      code: 'NO_BSSID',
+      message: 'Location permission is needed to confirm which office Wi-Fi you are on. '
+             + 'Without it your time is not being recorded.',
+      actionable: true,
+    };
+  }
+  if (config.bssidEnforced && ipOk && bssid) {
+    return {
+      code: 'UNKNOWN_ACCESS_POINT',
+      message: 'This Wi-Fi access point is not recognised as an office one. '
+             + 'If it is a new office access point, ask an administrator to add it.',
+      actionable: true,
+    };
+  }
+  if (!ipOk) {
+    return {
+      code: 'OFF_NETWORK',
+      message: 'You are not connected to the office network, so this time is not counted as attendance.',
+      actionable: false,
+    };
+  }
+  return { code: 'UNVERIFIED', message: 'Presence could not be verified.', actionable: false };
+}
+
+/**
  * Record one sighting. Idempotent: replaying the offline queue in the app
  * resends buffered heartbeats with their ORIGINAL timestamps, and the
  * dedupe_key ensures each inserts exactly once.
@@ -106,23 +148,52 @@ function recordEvent({
   const macHash = mac ? T.hashMac(mac, MAC_SALT) : null;
   const location = classifyLocation({ bssid, srcIp, source });
 
+  // A network sighting carries no identity of its own. But if this MAC was
+  // bound to an employee by an authenticated app heartbeat, presence keeps
+  // being attributed to them even with the app closed - which is the whole
+  // point of the binding, and what stops "last seen" freezing at the moment
+  // someone swiped the app away.
+  //
+  // Note the direction: an identity already PROVED is being followed, never
+  // guessed from a MAC. An unbound MAC stays anonymous.
+  let attributedVia = null;
+  if (!employeeId && macHash) {
+    const bound = bindings.employeeForMac(macHash, observed);
+    if (bound) {
+      employeeId = bound.employeeId;
+      deviceId = deviceId || bound.deviceId;
+      attributedVia = 'MAC_BINDING';
+    }
+  }
+
   // Bucket to the second so a burst of retries for the same instant collapses.
-  const identity = deviceId || macHash || srcIp || 'anon';
-  const dedupeKey = `${source}|${identity}|${Math.floor(observed / 1000)}`;
+  //
+  // The employee is part of the key. Without it the key falls back to the
+  // source IP when no device or MAC is known, and two people behind one address
+  // collide - the second person's sighting is silently discarded as a duplicate
+  // and their attendance simply never appears. Dedupe must mean "this employee,
+  // seen by this source, on this device, in this second".
+  const deviceIdentity = deviceId || macHash || srcIp || 'anon';
+  const dedupeKey =
+    `${source}|${employeeId || 'anon'}|${deviceIdentity}|${Math.floor(observed / 1000)}`;
 
   const info = insertEvent.run({
     employee_id: employeeId,
     device_id: deviceId,
     source,
     location,
-    confidence: SOURCE_CONFIDENCE[source] ?? 0.5,
+    // A bound sighting is stronger than an anonymous one but weaker than a
+    // live authenticated heartbeat, and a dispute should be able to see which.
+    confidence: attributedVia === 'MAC_BINDING'
+      ? Math.max(SOURCE_CONFIDENCE[source] ?? 0.5, 0.7)
+      : (SOURCE_CONFIDENCE[source] ?? 0.5),
     ssid, bssid, src_ip: srcIp,
     mac_hash: macHash,
     rssi: rssi === null ? null : Number(rssi),
     observed_at: observed,
     received_at: receivedAt,
     dedupe_key: dedupeKey,
-    note,
+    note: attributedVia ? `${note || ''} [attributed via ${attributedVia}]`.trim() : note,
   });
 
   if (deviceId) touchDevice.run(observed, deviceId);
@@ -134,7 +205,10 @@ function recordEvent({
     upsertUnknown.run({ mac_hash: macHash, at: observed, source });
   }
 
-  return { inserted: info.changes > 0, location, observedAt: observed };
+  return {
+    inserted: info.changes > 0, location, observedAt: observed, employeeId, attributedVia,
+    reason: explainLocation({ bssid, srcIp, source, location }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +222,21 @@ const selectDayEvents = db.prepare(`
     AND observed_at >= ? AND observed_at < ?
   ORDER BY observed_at ASC
 `);
+
+// Which signal is currently keeping someone present. Worth showing, because
+// "the app is reporting" and "the sensor is reporting because the app proved
+// who they are earlier" are different situations, and only the second survives
+// the employee closing the app.
+function describeSource(source) {
+  switch (source) {
+    case 'APP':         return { key: 'APP', label: 'App' };
+    case 'ESP_SNIFFER': return { key: 'SENSOR', label: 'Office sensor' };
+    case 'ARP':         return { key: 'NETWORK', label: 'Office network' };
+    case 'ROUTER':      return { key: 'NETWORK', label: 'Access point' };
+    case 'ADMIN':       return { key: 'MANUAL', label: 'Entered by HR' };
+    default:            return { key: 'UNKNOWN', label: source || 'Unknown' };
+  }
+}
 
 /**
  * Replay one employee-day into sessions.
@@ -222,12 +311,14 @@ function deriveDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
       status: 'NOT_CHECKED_IN', statusLabel: 'Not Arrived Yet',
       inactivityMinutes: 0, graceMinutesLeft: 0,
       eventCount: 0, exceededCap: false,
+      lastSource: null, sensorCarried: false,
     };
   }
 
   const sessions = replaySessions(events, { dayStart, dayEnd, nowMs });
   const firstInAt = events[0].observed_at;
-  const lastActiveAt = events[events.length - 1].observed_at;
+  const lastEvent = events[events.length - 1];
+  const lastActiveAt = lastEvent.observed_at;
   const sessionMinutes = sessions.reduce((a, s) => a + s.minutes, 0);
   const totalMinutes = Math.max(0, sessionMinutes + adjustment);
 
@@ -260,6 +351,9 @@ function deriveDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
     graceMinutesLeft,
     eventCount: events.length,
     exceededCap: sessions.some(s => s.exceededCap),
+    lastSource: describeSource(lastEvent.source),
+    // True when presence no longer depends on the app being open.
+    sensorCarried: lastEvent.source !== 'APP',
   };
 }
 
@@ -333,6 +427,9 @@ function presentDay(d, employee) {
     graceMinutesLeft: d.graceMinutesLeft,
     adjustmentMinutes: d.adjustmentMinutes,
     needsReview: d.exceededCap,
+    presenceSource: d.lastSource ? d.lastSource.label : null,
+    presenceSourceKey: d.lastSource ? d.lastSource.key : null,
+    sensorCarried: !!d.sensorCarried,
     sessions: d.sessions.map(s => ({
       from: T.displayTime(s.start),
       to: s.open ? 'now' : T.displayTime(s.end),
@@ -357,6 +454,6 @@ function liveBoard(nowMs = T.now()) {
 
 module.exports = {
   recordEvent, deriveDay, recomputeDay, recomputeAll,
-  presentDay, liveBoard, classifyLocation,
+  presentDay, liveBoard, classifyLocation, explainLocation,
   SOURCE_CONFIDENCE,
 };

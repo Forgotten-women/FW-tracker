@@ -1,4 +1,4 @@
-// Admin API. Every route requires the admin key and every mutation is audited.
+﻿// Admin API. Every route requires the admin key and every mutation is audited.
 //
 // This is where employee management moved to. It used to be unauthenticated on
 // /api/attendance, alongside a /reset-logs endpoint that destroyed the whole
@@ -11,12 +11,13 @@ const crypto = require('crypto');
 const { db, tx, audit, backup } = require('../db');
 const { requireAdmin, newEnrollmentCode, issueSseTicket } = require('../middleware/auth');
 const P = require('../domain/presence');
+const bindings = require('../domain/bindings');
 const T = require('../util/time');
 const { config } = require('../config');
 
 router.use(requireAdmin);
 
-const CODE_TTL_MS = 24 * 60 * 60 * 1000;
+const CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // --- employees -------------------------------------------------------------
 
@@ -103,7 +104,7 @@ router.post('/employees/:id/enrollment-code', (req, res) => {
     code,
     employee: { id: employee.id, name: employee.name },
     expiresAt,
-    expiresAtDisplay: T.displayTime(expiresAt),
+    expiresAtDisplay: `${T.displayDate(expiresAt)} at ${T.displayTime(expiresAt)}`,
     message: 'Single-use code. Give it to the employee to enter in the app.',
   });
 });
@@ -135,6 +136,9 @@ router.delete('/devices/:id', (req, res) => {
   const run = tx(() => {
     db.prepare('UPDATE devices SET revoked_at = ? WHERE id = ?').run(nowMs, req.params.id);
     db.prepare('UPDATE device_tokens SET revoked_at = ? WHERE device_id = ?').run(nowMs, req.params.id);
+    // Otherwise the sensors would keep recognising this handset and recording
+    // attendance for someone who has handed their phone back.
+    bindings.revokeForDevice(req.params.id, 'Device revoked by administrator');
     audit({
       actor: 'admin', action: 'DEVICE_REVOKED', targetType: 'device', targetId: req.params.id,
       before: { employeeId: device.employee_id, model: device.model },
@@ -312,3 +316,5 @@ router.post('/sse-ticket', (req, res) => {
 });
 
 module.exports = router;
+
+

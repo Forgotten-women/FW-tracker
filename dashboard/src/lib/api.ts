@@ -24,10 +24,29 @@ export function getKey(): string {
 
 export function setKey(key: string) {
   sessionStorage.setItem(KEY_STORAGE, key);
+  notifyKeyChanged();
 }
 
 export function clearKey() {
   sessionStorage.removeItem(KEY_STORAGE);
+  notifyKeyChanged();
+}
+
+// sessionStorage is an external store, so components read it through
+// useSyncExternalStore rather than mirroring it into React state. That needs a
+// way to tell subscribers it changed, because storage events only fire in OTHER
+// tabs, never the one that made the write.
+const keyListeners = new Set<() => void>();
+
+export function subscribeToKey(listener: () => void): () => void {
+  keyListeners.add(listener);
+  return () => {
+    keyListeners.delete(listener);
+  };
+}
+
+export function notifyKeyChanged() {
+  for (const listener of keyListeners) listener();
 }
 
 async function request<T>(
