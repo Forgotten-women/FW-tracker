@@ -93,6 +93,7 @@ app.use('/api/attendance', require('./routes/attendance'));    // presence inges
 app.use('/api/attendance', require('./routes/attendance-hr'));  // HR attendance engine
 app.use('/api/warnings', require('./routes/warnings'));         // warning engine
 app.use('/api/leave', require('./routes/leave'));              // leave engine
+app.use('/api/payroll', require('./routes/payroll'));          // payroll preparation
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin
 app.use('/api/admin', require('./routes/admin'));              // admin
 

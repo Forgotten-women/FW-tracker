@@ -55,5 +55,24 @@
     "deductAnnualLeave": null,
     "treatAsUnpaid": null,
     "createWarningTrigger": null
+  },
+  "payroll": {
+    "weeksPerYear": 52,
+    "workingDaysPerWeek": 5,
+    "monthsPerYear": 12,
+    "breakIsPaid": true,
+    "leaverSettlement": "HR_DECIDES",
+    "currency": "GBP"
+  },
+  "leave": {
+    "annualEntitlementDays": 20,
+    "holidayYearBasis": "EMPLOYMENT_ANNIVERSARY",
+    "accrualMethod": "MONTHLY_ON_COMPLETION",
+    "carryOverDays": 0,
+    "allowNegativeBalance": true,
+    "negativeBalanceRequiresApproval": true,
+    "approvalRoute": [
+      "HR"
+    ]
   }
 }
