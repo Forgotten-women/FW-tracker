@@ -1,0 +1,364 @@
+{
+  "officeConfig": {
+    "officeName": "Main Office",
+    "ssid": "Trans K 2.4G",
+    "gracePeriodMinutes": 15,
+    "workStartTime": "09:00",
+    "workEndTime": "18:00"
+  },
+  "ignoredIps": [
+    "192.168.18.1",
+    "192.168.18.68",
+    "192.168.18.81",
+    "192.168.18.255"
+  ],
+  "employees": [
+    {
+      "id": "emp_8619",
+      "name": "Abdullah shahid",
+      "role": "Engineering",
+      "deviceModel": "CPH2119",
+      "deviceIp": "192.168.18.59",
+      "deviceMac": "66:7a:29:fb:69:ac",
+      "isRegistered": true,
+      "lastSeen": "2026-08-27T12:11:56.194+05:00",
+      "firstSeenToday": "2026-08-26T07:32:36.158Z",
+      "status": "IN_OFFICE"
+    }
+  ],
+  "unassignedDevices": {
+    "192.168.18.14": {
+      "ip": "192.168.18.14",
+      "mac": "14:85:7f:6b:9c:16",
+      "firstSeen": "2026-08-27T11:47:58.382+05:00",
+      "lastSeen": "2026-08-27T11:48:28.368+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.17": {
+      "ip": "192.168.18.17",
+      "mac": "14:18:c3:46:98:7b",
+      "firstSeen": "2026-08-27T11:47:58.415+05:00",
+      "lastSeen": "2026-08-27T11:48:28.368+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.18": {
+      "ip": "192.168.18.18",
+      "mac": "04:ed:33:ef:c6:d0",
+      "firstSeen": "2026-08-27T11:47:58.418+05:00",
+      "lastSeen": "2026-08-27T11:48:28.369+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.21": {
+      "ip": "192.168.18.21",
+      "mac": "14:85:7f:6b:aa:03",
+      "firstSeen": "2026-08-27T11:47:58.421+05:00",
+      "lastSeen": "2026-08-27T11:48:28.371+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.22": {
+      "ip": "192.168.18.22",
+      "mac": "74:d8:3e:da:c9:f1",
+      "firstSeen": "2026-08-27T11:47:58.422+05:00",
+      "lastSeen": "2026-08-27T11:48:28.372+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.51": {
+      "ip": "192.168.18.51",
+      "mac": "84:fd:d1:8a:7f:eb",
+      "firstSeen": "2026-08-27T11:47:58.424+05:00",
+      "lastSeen": "2026-08-27T11:48:28.372+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.52": {
+      "ip": "192.168.18.52",
+      "mac": "f0:77:c3:95:aa:74",
+      "firstSeen": "2026-08-27T11:47:58.425+05:00",
+      "lastSeen": "2026-08-27T11:48:28.373+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.65": {
+      "ip": "192.168.18.65",
+      "mac": "44:af:28:87:20:b2",
+      "firstSeen": "2026-08-27T11:47:58.430+05:00",
+      "lastSeen": "2026-08-27T11:48:28.373+05:00",
+      "source": "PASSIVE_WIFI_SCANNER"
+    },
+    "192.168.18.41": {
+      "ip": "192.168.18.41",
+      "mac": "",
+      "firstSeen": "2026-08-27T11:50:38.062+05:00",
+      "lastSeen": "2026-08-27T12:04:51.967+05:00",
+      "source": "ESP8266_SWEEP"
+    },
+    "192.168.18.83": {
+      "ip": "192.168.18.83",
+      "mac": "",
+      "firstSeen": "2026-08-27T12:12:08.819+05:00",
+      "lastSeen": "2026-08-27T12:12:08.819+05:00",
+      "source": "ESP8266_SWEEP"
+    }
+  },
+  "movements": [
+    {
+      "id": "mov_1787814728821_dzpc",
+      "timestamp": "2026-08-27T12:12:08.821+05:00",
+      "displayTime": "12:12:08 PM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.83)",
+      "deviceModel": "",
+      "ip": "192.168.18.83",
+      "mac": "",
+      "details": "Other device on office Wi-Fi (ESP8266_SWEEP)"
+    },
+    {
+      "id": "mov_1787813800754_gf0q",
+      "timestamp": "2026-08-27T11:56:40.754+05:00",
+      "displayTime": "11:56:40 AM",
+      "type": "DEVICE_REGISTERED",
+      "employeeId": "emp_8619",
+      "employeeName": "Abdullah shahid",
+      "deviceModel": "CPH2119",
+      "ip": "192.168.18.59",
+      "mac": "66:7a:29:fb:69:ac",
+      "details": "Device paired at 11:56:40 AM"
+    },
+    {
+      "id": "mov_1787813438064_7cox",
+      "timestamp": "2026-08-27T11:50:38.064+05:00",
+      "displayTime": "11:50:38 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.41)",
+      "deviceModel": "",
+      "ip": "192.168.18.41",
+      "mac": "",
+      "details": "Other device on office Wi-Fi (ESP8266_SWEEP)"
+    },
+    {
+      "id": "mov_1787813278432_qa1e",
+      "timestamp": "2026-08-27T11:47:58.432+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.65)",
+      "deviceModel": "",
+      "ip": "192.168.18.65",
+      "mac": "44:af:28:87:20:b2",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278429_xsbs",
+      "timestamp": "2026-08-27T11:47:58.429+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.59)",
+      "deviceModel": "",
+      "ip": "192.168.18.59",
+      "mac": "66:7a:29:fb:69:ac",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278426_cv4p",
+      "timestamp": "2026-08-27T11:47:58.427+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.52)",
+      "deviceModel": "",
+      "ip": "192.168.18.52",
+      "mac": "f0:77:c3:95:aa:74",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278425_oxb7",
+      "timestamp": "2026-08-27T11:47:58.425+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.51)",
+      "deviceModel": "",
+      "ip": "192.168.18.51",
+      "mac": "84:fd:d1:8a:7f:eb",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278423_8a85",
+      "timestamp": "2026-08-27T11:47:58.423+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.22)",
+      "deviceModel": "",
+      "ip": "192.168.18.22",
+      "mac": "74:d8:3e:da:c9:f1",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278422_z8uv",
+      "timestamp": "2026-08-27T11:47:58.422+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.21)",
+      "deviceModel": "",
+      "ip": "192.168.18.21",
+      "mac": "14:85:7f:6b:aa:03",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278420_1rkw",
+      "timestamp": "2026-08-27T11:47:58.420+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.18)",
+      "deviceModel": "",
+      "ip": "192.168.18.18",
+      "mac": "04:ed:33:ef:c6:d0",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278417_sncg",
+      "timestamp": "2026-08-27T11:47:58.417+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.17)",
+      "deviceModel": "",
+      "ip": "192.168.18.17",
+      "mac": "14:18:c3:46:98:7b",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787813278414_k5s4",
+      "timestamp": "2026-08-27T11:47:58.414+05:00",
+      "displayTime": "11:47:58 AM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.14)",
+      "deviceModel": "",
+      "ip": "192.168.18.14",
+      "mac": "14:85:7f:6b:9c:16",
+      "details": "Other device on office Wi-Fi (PASSIVE_WIFI_SCANNER)"
+    },
+    {
+      "id": "mov_1787812415860_qhn2",
+      "timestamp": "2026-08-27T11:33:35.861+05:00",
+      "displayTime": "11:33:35 AM",
+      "type": "ARRIVED",
+      "employeeId": "emp_8619",
+      "employeeName": "Abdullah shahid",
+      "deviceModel": "CPH2119",
+      "ip": "192.168.18.59",
+      "mac": "",
+      "details": "Checked in for the day via MOBILE_APP_PING"
+    },
+    {
+      "id": "mov_1787810620211_hec4",
+      "timestamp": "2026-08-27T11:03:40.211+05:00",
+      "displayTime": "11:03:40 AM",
+      "type": "DEPARTED",
+      "employeeId": "emp_8619",
+      "employeeName": "Abdullah shahid",
+      "deviceModel": "CPH2119",
+      "ip": "192.168.18.41",
+      "mac": "",
+      "details": "No network activity for 15 mins"
+    },
+    {
+      "id": "mov_1787734387044_0lsv",
+      "timestamp": "2026-08-26T13:53:07.044+05:00",
+      "displayTime": "1:53:07 PM",
+      "type": "RECONNECTED",
+      "employeeId": "emp_8619",
+      "employeeName": "Abdullah shahid",
+      "deviceModel": "CPH2119",
+      "ip": "192.168.18.59",
+      "mac": "",
+      "details": "Detected via ESP8266_SWEEP"
+    },
+    {
+      "id": "mov_1787731945258_7577",
+      "timestamp": "2026-08-26T13:12:25.258+05:00",
+      "displayTime": "1:12:25 PM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.41)",
+      "deviceModel": "",
+      "ip": "192.168.18.41",
+      "mac": "",
+      "details": "New device found on office network (ESP8266_SWEEP)"
+    },
+    {
+      "id": "mov_1787731836587_hp5g",
+      "timestamp": "2026-08-26T13:10:36.587+05:00",
+      "displayTime": "1:10:36 PM",
+      "type": "DEPARTED",
+      "employeeId": "emp_8619",
+      "employeeName": "Abdullah shahid",
+      "deviceModel": "CPH2119",
+      "ip": "192.168.18.59",
+      "mac": "",
+      "details": "No network activity for 15 mins"
+    },
+    {
+      "id": "mov_1787729556158_iyw3",
+      "timestamp": "2026-08-26T07:32:36.159Z",
+      "displayTime": "12:32:36 PM",
+      "type": "DEVICE_REGISTERED",
+      "employeeId": "emp_8619",
+      "employeeName": "Abdullah shahid",
+      "deviceModel": "CPH2119",
+      "ip": "192.168.18.59",
+      "mac": "",
+      "details": "Device paired to employee profile"
+    },
+    {
+      "id": "mov_1787729470970_bn3r",
+      "timestamp": "2026-08-26T07:31:10.972Z",
+      "displayTime": "12:31:10 PM",
+      "type": "DEVICE_DISCOVERED",
+      "employeeId": null,
+      "employeeName": "Device (192.168.18.79)",
+      "deviceModel": "",
+      "ip": "192.168.18.79",
+      "mac": "",
+      "details": "New device found on office network (ESP8266_SWEEP)"
+    }
+  ],
+  "attendanceRecords": {
+    "2026-08-26": {
+      "emp_8619": {
+        "employeeId": "emp_8619",
+        "employeeName": "Abdullah shahid",
+        "role": "Engineering",
+        "checkIn": "2026-08-26T07:32:36.158Z",
+        "checkInDisplay": "12:32:36 PM",
+        "checkOut": "2026-08-26T13:53:07.042+05:00",
+        "checkOutDisplay": "1:53:07 PM",
+        "totalMinutes": 1,
+        "status": "IN_OFFICE",
+        "lastSeen": "2026-08-26T13:53:07.042+05:00",
+        "lastSeenDisplay": "1:53:07 PM",
+        "lastActive": "2026-08-26T14:43:21.944+05:00",
+        "lastActiveDisplay": "2:43:21 PM"
+      }
+    },
+    "2026-08-27": {
+      "emp_8619": {
+        "employeeId": "emp_8619",
+        "employeeName": "Abdullah shahid",
+        "role": "Engineering",
+        "firstCheckIn": "2026-08-27T11:33:35.860+05:00",
+        "firstCheckInDisplay": "11:33:35 AM",
+        "lastActive": "2026-08-27T12:11:56.194+05:00",
+        "lastActiveDisplay": "12:11:56 PM",
+        "sessions": [],
+        "currentSessionStart": "2026-08-27T11:33:35.860+05:00",
+        "status": "IN_OFFICE"
+      }
+    }
+  }
+}
