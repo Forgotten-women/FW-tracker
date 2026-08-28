@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/attendance.dart';
+import '../models/hr.dart';
 import 'token_store.dart';
 
 /// A failure the caller can act on, rather than a swallowed exception.
@@ -137,6 +138,38 @@ class ApiClient {
         return Attendance.fromJson(body['attendance'] as Map<String, dynamic>);
       });
 
+  /// Fetches comprehensive attendance, break, and deficit details for today (Spec 8, 12, 19).
+  Future<TodayAttendanceDetails> fetchTodayDetails() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/attendance/today'), headers: await _authHeaders())
+            .timeout(timeout);
+        return TodayAttendanceDetails.fromJson(_decode(res));
+      });
+
+  /// Starts a break for the employee (Spec 12).
+  Future<BreakStartResult> startBreak() => _guard(() async {
+        final res = await _http
+            .post(await _uri('/api/attendance/break/start'), headers: await _authHeaders())
+            .timeout(timeout);
+        return BreakStartResult.fromJson(_decode(res));
+      });
+
+  /// Ends the currently active break for the employee (Spec 12).
+  Future<BreakEndResult> endBreak() => _guard(() async {
+        final res = await _http
+            .post(await _uri('/api/attendance/break/end'), headers: await _authHeaders())
+            .timeout(timeout);
+        return BreakEndResult.fromJson(_decode(res));
+      });
+
+  /// Manually clocks out the employee for the day (Spec 2.2, 7, 23.6).
+  Future<void> clockOut() => _guard(() async {
+        final res = await _http
+            .post(await _uri('/api/attendance/clock-out'), headers: await _authHeaders())
+            .timeout(timeout);
+        _decode(res);
+      });
+
   Future<List<Attendance>> history({int days = 7}) => _guard(() async {
         final res = await _http
             .get(
@@ -148,6 +181,143 @@ class ApiClient {
         return (body['days'] as List<dynamic>)
             .map((d) => Attendance.fromJson(d as Map<String, dynamic>))
             .toList();
+      });
+  /// Submits an attendance correction / dispute request to HR (Spec 11).
+  Future<String> submitCorrection({
+    required String dateKey,
+    required String reason,
+    Map<String, dynamic>? requestedChange,
+  }) =>
+      _guard(() async {
+        final res = await _http
+            .post(
+              await _uri('/api/attendance/corrections'),
+              headers: await _authHeaders(),
+              body: jsonEncode({
+                'dateKey': dateKey,
+                'reason': reason,
+                if (requestedChange != null) 'requestedChange': requestedChange,
+              }),
+            )
+            .timeout(timeout);
+        final body = _decode(res);
+        return body['message'] as String? ?? 'Correction request submitted to HR.';
+      });
+
+  /// Fetches the employee's submitted attendance corrections and their review statuses (Spec 11).
+  Future<List<CorrectionRequest>> fetchMyCorrections() => _guard(() async {
+        final res = await _http
+            .get(
+              await _uri('/api/attendance/corrections/mine'),
+              headers: await _authHeaders(),
+            )
+            .timeout(timeout);
+        final body = _decode(res);
+        return (body['corrections'] as List<dynamic>? ?? [])
+            .map((c) => CorrectionRequest.fromJson(c as Map<String, dynamic>))
+            .toList();
+      });
+
+  // --- leave (spec 13-15) --------------------------------------------------
+
+  Future<Map<String, dynamic>> myLeave() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/leave/mine'), headers: await _authHeaders())
+            .timeout(timeout);
+        final body = _decode(res);
+        return {
+          'balance': LeaveBalance.fromJson(body['balance'] as Map<String, dynamic>),
+          'requests': (body['requests'] as List<dynamic>? ?? [])
+              .map((r) => LeaveRequest.fromJson(r as Map<String, dynamic>))
+              .toList(),
+        };
+      });
+
+  Future<List<LeaveType>> leaveTypes() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/leave/types'), headers: await _authHeaders())
+            .timeout(timeout);
+        final body = _decode(res);
+        return (body['types'] as List<dynamic>? ?? [])
+            .map((t) => LeaveType.fromJson(t as Map<String, dynamic>))
+            .toList();
+      });
+
+  Future<LeavePreview> previewLeave({
+    required String leaveTypeId,
+    required String startDate,
+    required String endDate,
+    String dayPortion = 'FULL_DAY',
+  }) =>
+      _guard(() async {
+        final res = await _http
+            .post(
+              await _uri('/api/leave/preview'),
+              headers: await _authHeaders(),
+              body: jsonEncode({
+                'leaveTypeId': leaveTypeId,
+                'startDate': startDate,
+                'endDate': endDate,
+                'dayPortion': dayPortion,
+              }),
+            )
+            .timeout(timeout);
+        return LeavePreview.fromJson(_decode(res));
+      });
+
+  Future<void> requestLeave({
+    required String leaveTypeId,
+    required String startDate,
+    required String endDate,
+    String dayPortion = 'FULL_DAY',
+    String? reason,
+  }) =>
+      _guard(() async {
+        final res = await _http
+            .post(
+              await _uri('/api/leave/request'),
+              headers: await _authHeaders(),
+              body: jsonEncode({
+                'leaveTypeId': leaveTypeId,
+                'startDate': startDate,
+                'endDate': endDate,
+                'dayPortion': dayPortion,
+                'reason': ?reason,
+              }),
+            )
+            .timeout(timeout);
+        _decode(res);
+      });
+
+  Future<void> cancelLeave(String requestId) => _guard(() async {
+        final res = await _http
+            .post(
+              await _uri('/api/leave/request/$requestId/cancel'),
+              headers: await _authHeaders(),
+            )
+            .timeout(timeout);
+        _decode(res);
+      });
+
+  // --- warnings (spec 9, 19.5) --------------------------------------------
+
+  Future<WarningView> myWarnings() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/warnings/mine'), headers: await _authHeaders())
+            .timeout(timeout);
+        return WarningView.fromJson(_decode(res));
+      });
+
+  Future<void> acknowledgeWarning(String warningId, {String? comments}) =>
+      _guard(() async {
+        final res = await _http
+            .post(
+              await _uri('/api/warnings/$warningId/acknowledge'),
+              headers: await _authHeaders(),
+              body: jsonEncode(comments == null ? {} : {'comments': comments}),
+            )
+            .timeout(timeout);
+        _decode(res);
       });
 
   /// Unauthenticated reachability check, used by the settings screen so the

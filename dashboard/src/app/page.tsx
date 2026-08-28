@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { Gate } from '@/components/Gate';
 import {
   ActivityFeed,
+  AttendanceCorrectionsPanel,
   AttendanceTable,
   CodeModal,
   Header,
@@ -13,13 +14,17 @@ import {
   TeamPanel,
   WarningBar,
 } from '@/components/panels';
+import { HrAlertsPanel } from '@/components/HrAlerts';
+import { LeaveManagementPanel } from '@/components/LeaveManagementPanel';
+import { WarningBoard } from '@/components/WarningBoard';
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
-import type { AdminEmployee, EnrollmentCode } from '@/lib/types';
+import type { AdminEmployee, AttendanceCorrection, EnrollmentCode } from '@/lib/types';
 
 export default function DashboardPage() {
   const [gateError, setGateError] = useState<string>('');
   const [pairing, setPairing] = useState<(EnrollmentCode & { name: string }) | null>(null);
+  const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
 
   // The admin key lives in sessionStorage, which is an external store rather
   // than React state. Subscribing to it directly avoids the extra render pass
@@ -38,6 +43,31 @@ export default function DashboardPage() {
     unlocked,
     lock,
   );
+
+  const loadCorrections = useCallback(async () => {
+    try {
+      const res = await api.attendanceCorrections('ALL');
+      setCorrections(res.corrections || []);
+    } catch {
+      // Handled silently
+    }
+  }, []);
+
+  useEffect(() => {
+    if (unlocked) {
+      loadCorrections();
+    }
+  }, [unlocked, loadCorrections]);
+
+  const decideCorrection = async (
+    id: string,
+    decision: 'APPROVED' | 'REJECTED' | 'AMENDED',
+    notes: string,
+    adjustmentMinutes?: number,
+  ) => {
+    await api.decideCorrection(id, decision, notes, adjustmentMinutes);
+    await Promise.all([refresh(), loadCorrections()]);
+  };
 
   const addEmployee = async (name: string, role: string) => {
     await api.createEmployee(name, role);
@@ -105,6 +135,13 @@ export default function DashboardPage() {
                   dateKey={summary.currentDateKey}
                   onExport={exportCsv}
                 />
+                <AttendanceCorrectionsPanel
+                  corrections={corrections}
+                  onDecide={decideCorrection}
+                  onRefresh={loadCorrections}
+                />
+                <WarningBoard />
+                <LeaveManagementPanel />
               </div>
 
               <div className="flex min-w-0 flex-col gap-5">
@@ -113,6 +150,7 @@ export default function DashboardPage() {
                   onAdd={addEmployee}
                   onPair={pairDevice}
                 />
+                <HrAlertsPanel />
                 <ActivityFeed movements={summary.recentMovements} />
               </div>
             </div>

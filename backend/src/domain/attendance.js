@@ -369,9 +369,20 @@ const insertLedger = db.prepare(`
  * carried forward, not 1.1 days. They are derived from the balance rather than
  * stored separately, so they cannot drift apart.
  */
-function balanceFor(employeeId) {
+function balanceFor(employeeId, nowMs = T.now(), includeToday = true) {
   const latest = selectLatestLedger.get(employeeId);
-  const balance = latest ? latest.balance_after : 0;
+  let balance = latest ? Math.max(0, latest.balance_after) : 0;
+
+  if (includeToday) {
+    const todayDateKey = T.dateKey(nowMs);
+    const todaySettled = selectLedgerForDay.get(employeeId, todayDateKey);
+    // If today's deficit has not yet been settled into the ledger at end of day
+    if (!todaySettled) {
+      const todaySummary = deriveDay(employeeId, todayDateKey, nowMs);
+      balance += (todaySummary.dailyDeficitMinutes || 0);
+    }
+  }
+
   const dayEquivalent = schedule.resolve(employeeId).dayEquivalentMinutes;
   return {
     balanceMinutes: balance,
@@ -562,6 +573,7 @@ function latenessStatus(employeeId, dateKey = T.dateKey()) {
 // ---------------------------------------------------------------------------
 
 function present(d) {
+  const activeBreak = d.breaks.find(b => b.open);
   return {
     employeeId: d.employeeId,
     date: d.dateKey,
@@ -584,18 +596,24 @@ function present(d) {
       excessBreakMinutes: d.excessBreakMinutes,
       earlyDepartureMinutes: d.earlyDepartureMinutes,
       unauthorisedMissingMinutes: d.unauthorisedMissingMinutes,
-      approvedAdjustmentMinutes: d.approvedAdjustmentMinutes,
+      approvedAdjustmentMinutes: Math.abs(d.approvedAdjustmentMinutes || 0),
       totalMinutes: d.dailyDeficitMinutes,
       formatted: T.formatMinutes(d.dailyDeficitMinutes),
     },
 
     isLateOccurrence: d.isLateOccurrence,
-    onBreak: !!d.onBreak,
+    onBreak: Boolean(d.onBreak),
     breakDueBack: d.breakDueBackAt ? T.displayTime(d.breakDueBackAt) : null,
+    breakDueBackAtMs: d.breakDueBackAt || null,
+    activeBreakStartedAtMs: activeBreak ? activeBreak.startedAt : null,
+    permittedBreakMinutes: activeBreak ? activeBreak.permittedMinutes : (d.schedule ? d.schedule.permittedBreakMinutes : 30),
+    breakMinutesTaken: d.breaks.reduce((a, b) => a + (b.actualMinutes || 0), 0),
     breaks: d.breaks.map(b => ({
       from: T.displayTime(b.startedAt),
       to: b.endedAt ? T.displayTime(b.endedAt) : null,
       taken: b.actualMinutes === null ? null : `${b.actualMinutes} / ${b.permittedMinutes} mins`,
+      actualMinutes: b.actualMinutes,
+      permittedMinutes: b.permittedMinutes,
       excessMinutes: b.excessMinutes,
       open: b.open,
     })),

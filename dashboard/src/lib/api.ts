@@ -6,8 +6,17 @@
 
 import type {
   AdminEmployee,
+  AttendanceCorrection,
   DashboardSummary,
+  EmployeeLeaveOverview,
   EnrollmentCode,
+  FormalWarningItem,
+  HrAlerts,
+  LeaveRequestItem,
+  LeaveTypeItem,
+  TeamCalendarLeave,
+  WarningBoardSummary,
+  WarningTrigger,
 } from './types';
 
 // sessionStorage, not localStorage: the key is gone when the tab closes rather
@@ -111,6 +120,14 @@ export const api = {
     await request<DashboardSummary>('/api/dashboard/summary', {}, key);
   },
 
+  hrAlerts: () => request<HrAlerts>('/api/hr/alerts'),
+
+  dismissAlert: (key: string, value: string, note?: string) =>
+    request<{ status: string }>('/api/hr/alerts/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ key, value, note }),
+    }),
+
   exportCsv: async (from: string, to: string) => {
     const res = await fetch(
       `/api/admin/export?from=${from}&to=${to}`,
@@ -119,4 +136,132 @@ export const api = {
     if (!res.ok) throw new Error('Export failed');
     return res.blob();
   },
+
+  attendanceCorrections: (status = 'PENDING') =>
+    request<{ status: string; corrections: AttendanceCorrection[] }>(
+      `/api/attendance/corrections?status=${encodeURIComponent(status)}`,
+    ),
+
+  decideCorrection: (
+    id: string,
+    decision: 'APPROVED' | 'REJECTED' | 'AMENDED' | 'INFO_REQUESTED',
+    notes: string,
+    adjustmentMinutes?: number,
+  ) =>
+    request<{ status: string; decision: string }>(
+      `/api/attendance/corrections/${encodeURIComponent(id)}/decide`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          decision,
+          notes,
+          adjustmentMinutes,
+        }),
+      },
+    ),
+
+  warningBoard: (date?: string) =>
+    request<WarningBoardSummary>(
+      `/api/warnings/board${date ? `?date=${encodeURIComponent(date)}` : ''}`,
+    ),
+
+  warningTriggers: (status = 'PENDING_REVIEW') =>
+    request<{ status: string; triggers: WarningTrigger[] }>(
+      `/api/warnings/triggers?status=${encodeURIComponent(status)}`,
+    ),
+
+  reviewWarningTrigger: (
+    id: string,
+    decision: 'CONFIRMED' | 'WAIVED' | 'CORRECTED',
+    notes: string,
+    explanation?: string,
+  ) =>
+    request<{ status: string; decision: string; warning?: FormalWarningItem }>(
+      `/api/warnings/triggers/${encodeURIComponent(id)}/review`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ decision, notes, explanation }),
+      },
+    ),
+
+  formalWarnings: () =>
+    request<{ status: string; warnings: FormalWarningItem[] }>(
+      '/api/warnings/formal',
+    ),
+
+  issueFormalWarning: (
+    employeeId: string,
+    level: string,
+    explanation: string,
+    warningType = 'OTHER',
+  ) =>
+    request<{ status: string; warning: FormalWarningItem }>(
+      `/api/warnings/employee/${encodeURIComponent(employeeId)}/issue`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ level, explanation, warningType }),
+      },
+    ),
+
+  withdrawFormalWarning: (id: string, reason: string) =>
+    request<{ status: string; message: string }>(
+      `/api/warnings/${encodeURIComponent(id)}/withdraw`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      },
+    ),
+
+  pendingLeaveRequests: () =>
+    request<{ status: string; requests: LeaveRequestItem[] }>(
+      '/api/leave/pending',
+    ),
+
+  leaveRequests: (status = 'ALL') =>
+    request<{ status: string; requests: LeaveRequestItem[] }>(
+      `/api/leave/requests${status !== 'ALL' ? `?status=${encodeURIComponent(status)}` : ''}`,
+    ),
+
+  decideLeaveRequest: (
+    id: string,
+    decision: 'APPROVED' | 'REJECTED',
+    notes: string,
+    overdraftReason?: string,
+  ) =>
+    request<{ status: string; decision: string }>(
+      `/api/leave/request/${encodeURIComponent(id)}/decide`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ decision, notes, overdraftReason }),
+      },
+    ),
+
+  leaveBalances: () =>
+    request<{ status: string; employees: EmployeeLeaveOverview[] }>(
+      '/api/leave/balances',
+    ),
+
+  teamLeaveCalendar: (from?: string, to?: string) =>
+    request<{ status: string; from: string; to: string; leaves: TeamCalendarLeave[] }>(
+      `/api/leave/calendar${from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : ''}`,
+    ),
+
+  adjustLeaveBalance: (
+    employeeId: string,
+    days: number,
+    reason: string,
+    onDate?: string,
+  ) =>
+    request<{ status: string; balance: unknown }>(
+      `/api/leave/employee/${encodeURIComponent(employeeId)}/adjust`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ days, reason, onDate }),
+      },
+    ),
+
+  leaveTypes: () =>
+    request<{ status: string; types: LeaveTypeItem[] }>(
+      '/api/leave/types',
+    ),
 };

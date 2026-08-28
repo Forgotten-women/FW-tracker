@@ -1,4 +1,4 @@
-﻿// Presence derivation.
+// Presence derivation.
 //
 // The ONE place attendance is computed. Previously status was calculated in two
 // places that disagreed: /api/attendance/live filtered on a denormalised
@@ -418,8 +418,21 @@ function recomputeAll() {
 // Presentation
 // ---------------------------------------------------------------------------
 
+const selectOpenBreakPresence = db.prepare(
+  'SELECT started_at, permitted_minutes FROM break_records WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1'
+);
+
+const selectSummaryPresence = db.prepare(
+  'SELECT break_minutes, excess_break_minutes, daily_deficit_minutes, late_minutes FROM attendance_daily_summary WHERE employee_id = ? AND date_key = ?'
+);
+
 /** Shape one derived day for an API response (formatting happens only here). */
 function presentDay(d, employee) {
+  const openBreak = selectOpenBreakPresence.get(d.employeeId);
+  const summary = selectSummaryPresence.get(d.employeeId, d.dateKey);
+  const onBreak = Boolean(openBreak);
+  const activeBreakMinutes = openBreak ? Math.max(0, Math.round((T.now() - openBreak.started_at) / 60000)) : 0;
+
   return {
     employeeId: d.employeeId,
     employeeName: employee ? employee.name : 'Unknown',
@@ -427,6 +440,12 @@ function presentDay(d, employee) {
     date: d.dateKey,
     status: d.status,
     statusLabel: d.statusLabel,
+    onBreak,
+    activeBreakMinutes,
+    breakMinutes: summary ? summary.break_minutes : 0,
+    excessBreakMinutes: summary ? summary.excess_break_minutes : 0,
+    dailyDeficitMinutes: summary ? summary.daily_deficit_minutes : 0,
+    lateMinutes: summary ? summary.late_minutes : 0,
     firstCheckIn: d.firstInAt ? T.displayTime(d.firstInAt) : '--',
     lastActiveTime: d.lastActiveAt ? T.displayTime(d.lastActiveAt) : '--',
     totalMinutes: d.totalMinutes,

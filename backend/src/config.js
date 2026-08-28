@@ -141,6 +141,15 @@ const config = {
     ...(office.leave || {}),
   },
 
+  // Advanced HR alert lead times, in days before the date. Confirmed 2026-08-27.
+  alerts: {
+    contractExpiryDays: 30,
+    probationReviewDays: 7,
+    documentExpiryDays: 30,
+    performanceReviewDays: 14,
+    ...(office.alerts || {}),
+  },
+
   // Payroll policy. Confirmed 2026-08-27.
   payroll: {
     weeksPerYear: 52,

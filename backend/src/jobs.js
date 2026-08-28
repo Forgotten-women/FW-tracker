@@ -11,6 +11,7 @@ const bindings = require('./domain/bindings');
 const A = require('./domain/attendance');
 const W = require('./domain/warnings');
 const L = require('./domain/leave');
+const AL = require('./domain/alerts');
 const events = require('./events');
 const T = require('./util/time');
 
@@ -186,6 +187,27 @@ function accrueLeave(nowMs = T.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// Advanced HR alerts (spec 22)
+// ---------------------------------------------------------------------------
+
+let lastAlertKey = null;
+
+// Notifies HR of contract, probation, document and review dates coming due.
+// Once a day; notifyHr is keyed on (alert, value) so it never re-notifies the
+// same date.
+function notifyHrAlerts(nowMs = T.now()) {
+  const todayKey = T.dateKey(nowMs);
+  if (lastAlertKey === todayKey) return;
+  lastAlertKey = todayKey;
+  try {
+    const r = AL.notifyHr(todayKey, nowMs);
+    if (r.notified) console.log(`[jobs] ${r.notified} HR alert(s) notified`);
+  } catch (err) {
+    console.error('[jobs] HR alert notification failed:', err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Retention
 // ---------------------------------------------------------------------------
 
@@ -257,6 +279,7 @@ function start() {
       detectTransitions(nowMs);
       evaluateWarnings(nowMs);
       accrueLeave(nowMs);
+      notifyHrAlerts(nowMs);
       retention(nowMs);
       void nightlyBackup(nowMs);
     } catch (err) {
@@ -280,4 +303,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, accrueLeave, nightlyBackup };
+module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, accrueLeave, notifyHrAlerts, nightlyBackup };

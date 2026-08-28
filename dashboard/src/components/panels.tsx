@@ -1,9 +1,10 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useState } from 'react';
 
 import type {
   AdminEmployee,
+  AttendanceCorrection,
   DashboardSummary,
   EmployeeDay,
   Movement,
@@ -190,7 +191,14 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold">{e.employeeName}</span>
-                  <Badge tone={meta.tone}>{meta.label}</Badge>
+                  <div className="flex items-center gap-1.5">
+                    {e.onBreak && (
+                      <span className="rounded border border-warn bg-warn-dim px-1.5 py-0.5 text-[10px] font-semibold text-warn">
+                        ☕ On Break · {e.activeBreakMinutes ?? 0}m
+                      </span>
+                    )}
+                    <Badge tone={meta.tone}>{meta.label}</Badge>
+                  </div>
                 </div>
                 <div className="mt-0.5 text-[11px] text-muted">{e.role}</div>
                 <div className="mt-2.5 flex justify-between gap-2 text-[11px] text-muted">
@@ -270,10 +278,10 @@ export function AttendanceTable({
       }
     >
       <div className="scroll-x">
-        <table className="w-full min-w-[640px] border-collapse text-sm">
+        <table className="w-full min-w-[720px] border-collapse text-sm">
           <thead>
             <tr>
-              {['Employee', 'First in', 'Last seen', 'Sessions', 'Worked', 'Status'].map(
+              {['Employee', 'First in', 'Last seen', 'Sessions', 'Worked', 'Break (30m)', 'Deficit', 'Status'].map(
                 (h) => (
                   <th
                     key={h}
@@ -288,13 +296,16 @@ export function AttendanceTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={8}>
                   <Empty>Nobody has checked in today.</Empty>
                 </td>
               </tr>
             ) : (
               rows.map((a) => {
                 const meta = STATUS_META[a.status] ?? STATUS_META.NOT_CHECKED_IN;
+                const hasExcessBreak = (a.excessBreakMinutes ?? 0) > 0;
+                const hasDeficit = (a.dailyDeficitMinutes ?? 0) > 0;
+
                 return (
                   <tr key={a.employeeId}>
                     <td className="border-b border-line px-2.5 py-2.5 align-top">
@@ -321,6 +332,38 @@ export function AttendanceTable({
                       {a.adjustmentMinutes !== 0 && (
                         <div className="text-[11px] text-muted">
                           incl. {a.adjustmentMinutes}m adj.
+                        </div>
+                      )}
+                    </td>
+                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      <div>
+                        {a.onBreak ? (
+                          <span className="font-semibold text-warn">
+                            On break ({a.activeBreakMinutes ?? 0}m)
+                          </span>
+                        ) : a.breakMinutes ? (
+                          <span>{a.breakMinutes}m</span>
+                        ) : (
+                          <span className="text-dim">0m</span>
+                        )}
+                      </div>
+                      {hasExcessBreak && (
+                        <div className="text-[10px] font-semibold text-danger">
+                          +{a.excessBreakMinutes}m excess
+                        </div>
+                      )}
+                    </td>
+                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      {hasDeficit ? (
+                        <span className="font-semibold text-danger">
+                          {a.dailyDeficitMinutes}m
+                        </span>
+                      ) : (
+                        <span className="text-dim">0m</span>
+                      )}
+                      {(a.lateMinutes ?? 0) > 0 && (
+                        <div className="text-[10px] text-muted">
+                          late: {a.lateMinutes}m
                         </div>
                       )}
                     </td>
@@ -488,6 +531,263 @@ export function CodeModal({
         </Button>
       </div>
     </div>
+  );
+}
+
+// --- attendance corrections (spec 11) --------------------------------------
+
+export function AttendanceCorrectionsPanel({
+  corrections,
+  onDecide,
+  onRefresh,
+}: {
+  corrections: AttendanceCorrection[];
+  onDecide: (
+    id: string,
+    decision: 'APPROVED' | 'REJECTED' | 'AMENDED',
+    notes: string,
+    adjustmentMinutes?: number,
+  ) => Promise<void>;
+  onRefresh: () => void;
+}) {
+  const [activeCorrection, setActiveCorrection] = useState<AttendanceCorrection | null>(null);
+  const [decisionAction, setDecisionAction] = useState<'APPROVED' | 'AMENDED' | 'REJECTED'>('APPROVED');
+  const [adjustmentMinutes, setAdjustmentMinutes] = useState<number>(30);
+  const [notes, setNotes] = useState<string>('');
+  const [submitting, setSubmitting] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'PENDING' | 'ALL'>('PENDING');
+
+  const filtered = corrections.filter((c) =>
+    statusFilter === 'ALL' ? true : c.status === 'PENDING',
+  );
+  const pendingCount = corrections.filter((c) => c.status === 'PENDING').length;
+
+  const openDecision = (
+    c: AttendanceCorrection,
+    action: 'APPROVED' | 'AMENDED' | 'REJECTED',
+  ) => {
+    setActiveCorrection(c);
+    setDecisionAction(action);
+    const initialMinutes =
+      (c.requestedChange?.adjustmentMinutes as number | undefined) ?? 30;
+    setAdjustmentMinutes(initialMinutes);
+    setNotes(
+      action === 'APPROVED'
+        ? 'Approved as requested.'
+        : action === 'AMENDED'
+          ? 'Approved with modified adjustment.'
+          : '',
+    );
+  };
+
+  const handleConfirm = async () => {
+    if (!activeCorrection) return;
+    if (!notes.trim()) {
+      alert('Please provide a decision note explaining the outcome.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onDecide(
+        activeCorrection.id,
+        decisionAction,
+        notes.trim(),
+        decisionAction === 'REJECTED' ? undefined : adjustmentMinutes,
+      );
+      setActiveCorrection(null);
+      onRefresh();
+    } catch (e: unknown) {
+      const err = e as Error;
+      alert(err.message || 'Failed to submit decision.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Panel
+      title="Attendance Disputes & Corrections"
+      note={pendingCount > 0 ? `${pendingCount} pending review` : undefined}
+      actions={
+        <div className="flex items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'PENDING' | 'ALL')}
+            className="rounded border border-line bg-raised px-2 py-1 text-xs text-text"
+          >
+            <option value="PENDING">Pending ({pendingCount})</option>
+            <option value="ALL">All Disputes</option>
+          </select>
+          <Button onClick={onRefresh} className="py-1 text-xs">
+            Refresh
+          </Button>
+        </div>
+      }
+    >
+      {filtered.length === 0 ? (
+        <Empty>No attendance disputes {statusFilter === 'PENDING' ? 'awaiting review' : 'recorded'}.</Empty>
+      ) : (
+        <div className="scroll-x">
+          <table className="w-full min-w-[680px] border-collapse text-sm">
+            <thead>
+              <tr>
+                {['Employee', 'Date', 'Reason & Details', 'Proposed Adjustment', 'Status', 'Actions'].map(
+                  (h) => (
+                    <th
+                      key={h}
+                      className="border-b border-line px-2.5 py-2 text-left text-[11px] font-semibold tracking-wide text-dim uppercase"
+                    >
+                      {h}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((c) => {
+                const isPending = c.status === 'PENDING';
+                const requestedMins = c.requestedChange?.adjustmentMinutes as number | undefined;
+                const statusTone =
+                  c.status === 'APPROVED'
+                    ? 'brand'
+                    : c.status === 'REJECTED'
+                      ? 'danger'
+                      : 'warn';
+
+                return (
+                  <tr key={c.id} className="hover:bg-white/[0.02]">
+                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      <div className="font-semibold">{c.employeeName}</div>
+                      <div className="text-[11px] text-muted">{c.role}</div>
+                    </td>
+                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      <span className="font-mono text-xs">{c.date}</span>
+                      <div className="text-[10px] text-dim">{c.requestedAt}</div>
+                    </td>
+                    <td className="border-b border-line px-2.5 py-2.5 align-top max-w-[240px]">
+                      <div className="text-xs leading-snug">{c.reason}</div>
+                      {c.reviewNotes && (
+                        <div className="mt-1 text-[11px] italic text-muted">
+                          HR: {c.reviewNotes}
+                        </div>
+                      )}
+                    </td>
+                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      {requestedMins !== undefined ? (
+                        <span className="font-semibold text-brand">+{requestedMins}m</span>
+                      ) : (
+                        <span className="text-dim">—</span>
+                      )}
+                      {c.appliedChange?.adjustmentMinutes !== undefined && (
+                        <div className="text-[10px] text-dim">
+                          applied: +{String(c.appliedChange.adjustmentMinutes)}m
+                        </div>
+                      )}
+                    </td>
+                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      <Badge tone={statusTone}>{c.status}</Badge>
+                    </td>
+                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      {isPending ? (
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant="primary"
+                            onClick={() => openDecision(c, 'APPROVED')}
+                            className="py-1 px-2 text-[11px]"
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            onClick={() => openDecision(c, 'AMENDED')}
+                            className="py-1 px-2 text-[11px]"
+                          >
+                            Amend
+                          </Button>
+                          <Button
+                            onClick={() => openDecision(c, 'REJECTED')}
+                            className="py-1 px-2 text-[11px] text-danger hover:bg-danger-dim"
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-dim">Decided {c.reviewedAt ?? ''}</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activeCorrection && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6">
+            <h2 className="text-base font-bold text-text">
+              {decisionAction === 'APPROVED'
+                ? 'Approve Attendance Dispute'
+                : decisionAction === 'AMENDED'
+                  ? 'Amend & Approve Attendance Dispute'
+                  : 'Reject Attendance Dispute'}
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              {activeCorrection.employeeName} · {activeCorrection.date}
+            </p>
+
+            <div className="my-4 rounded-lg bg-raised p-3 text-xs">
+              <div className="text-dim">Reason:</div>
+              <div className="mt-0.5 text-text font-medium">{activeCorrection.reason}</div>
+            </div>
+
+            {decisionAction !== 'REJECTED' && (
+              <div className="mb-4">
+                <label className="block text-xs font-semibold text-text mb-1">
+                  Adjustment Minutes to Credit (Spec 11)
+                </label>
+                <Input
+                  type="number"
+                  value={adjustmentMinutes}
+                  onChange={(e) => setAdjustmentMinutes(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full"
+                />
+                <span className="text-[11px] text-muted mt-1 block">
+                  This will reduce the employee&apos;s daily deficit balance and recompute attendance.
+                </span>
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label className="block text-xs font-semibold text-text mb-1">
+                Decision Note {decisionAction === 'REJECTED' ? '(Required - explain rejection)' : '(Required)'}
+              </label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Explain the decision rationale for the audit log and employee..."
+                rows={3}
+                className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setActiveCorrection(null)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button
+                variant={decisionAction === 'REJECTED' ? 'ghost' : 'primary'}
+                onClick={handleConfirm}
+                disabled={submitting}
+                className={decisionAction === 'REJECTED' ? 'bg-danger text-white hover:bg-danger/90' : ''}
+              >
+                {submitting ? 'Submitting…' : `Confirm ${decisionAction}`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }
 

@@ -5,7 +5,7 @@ const router = express.Router();
 
 const { db } = require('../db');
 const {
-  requireDevice, requireUser, requirePermission, requireEmployeeAccess,
+  requireDevice, requireUser, requirePermission, requireEmployeeAccess, requireUserOrAdminKey,
 } = require('../middleware/auth');
 const W = require('../domain/warnings');
 const rbac = require('../domain/rbac');
@@ -43,7 +43,7 @@ router.post('/:id/acknowledge', requireDevice, (req, res) => {
 // HR: the warning board (spec 21)
 // ---------------------------------------------------------------------------
 
-router.get('/board', requireUser, requirePermission('warning.read'), (req, res) => {
+router.get('/board', requireUserOrAdminKey('warning.read'), (req, res) => {
   const dateKey = String(req.query.date || T.dateKey());
   const visible = rbac.accessibleEmployeeIds(req.auth);
   const employees = db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all()
@@ -84,7 +84,7 @@ router.get('/board', requireUser, requirePermission('warning.read'), (req, res) 
 });
 
 // GET /api/warnings/triggers?status=PENDING_REVIEW
-router.get('/triggers', requireUser, requirePermission('warning.read'), (req, res) => {
+router.get('/triggers', requireUserOrAdminKey('warning.read'), (req, res) => {
   const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
   const rows = db.prepare(`
     SELECT t.*, e.name FROM warning_triggers t
@@ -118,9 +118,44 @@ router.get('/triggers', requireUser, requirePermission('warning.read'), (req, re
   });
 });
 
+// GET /api/warnings/formal
+router.get('/formal', requireUserOrAdminKey('warning.read'), (req, res) => {
+  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+  const rows = db.prepare(`
+    SELECT w.*, e.name AS employee_name, e.role AS employee_role,
+           a.acknowledged_at, a.comments AS ack_comments
+    FROM formal_warnings w
+    JOIN employees e ON e.id = w.employee_id
+    LEFT JOIN warning_acknowledgements a ON a.warning_id = w.id
+    ORDER BY w.issued_at DESC
+  `).all().filter(r => visible.has(r.employee_id));
+
+  res.json({
+    status: 'SUCCESS',
+    warnings: rows.map(r => ({
+      id: r.id,
+      employeeId: r.employee_id,
+      employeeName: r.employee_name,
+      employeeRole: r.employee_role,
+      level: r.warning_level,
+      levelLabel: W.levelLabel(r.warning_level),
+      warningType: r.warning_type,
+      explanation: r.explanation,
+      issuedAt: T.displayTime(r.issued_at),
+      issuedAtMs: r.issued_at,
+      issuedDate: T.dateKey(r.issued_at),
+      expiryDate: r.expiry_date,
+      status: r.status,
+      acknowledgedAt: r.acknowledged_at ? T.displayTime(r.acknowledged_at) : null,
+      ackComments: r.ack_comments,
+      outcome: r.outcome,
+    })),
+  });
+});
+
 // POST /api/warnings/triggers/:id/review
 router.post('/triggers/:id/review',
-  requireUser, requirePermission('warning.issue'),
+  requireUserOrAdminKey('warning.issue'),
   (req, res) => {
     const trigger = db.prepare('SELECT * FROM warning_triggers WHERE id = ?').get(req.params.id);
     if (!trigger) return res.status(404).json({ status: 'ERROR', message: 'No such trigger.' });
@@ -134,7 +169,7 @@ router.post('/triggers/:id/review',
         decision: req.body?.decision,
         notes: req.body?.notes,
         explanation: req.body?.explanation,
-        actor: `user:${req.auth.id}`,
+        actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
       });
       res.json({
         status: 'SUCCESS',
@@ -151,7 +186,7 @@ router.post('/triggers/:id/review',
 // ---------------------------------------------------------------------------
 
 router.get('/employee/:employeeId',
-  requireUser, requirePermission('warning.read'), requireEmployeeAccess(),
+  requireUserOrAdminKey('warning.read'), requireEmployeeAccess(),
   (req, res) => {
     res.json({ status: 'SUCCESS', ...W.employeeWarningView(req.params.employeeId) });
   });
@@ -159,7 +194,7 @@ router.get('/employee/:employeeId',
 // Issue a warning directly, without a trigger. Spec 3.3 allows HR to issue
 // formal warnings; not every disciplinary matter starts with a lateness count.
 router.post('/employee/:employeeId/issue',
-  requireUser, requirePermission('warning.issue'), requireEmployeeAccess(),
+  requireUserOrAdminKey('warning.issue'), requireEmployeeAccess(),
   (req, res) => {
     const { level, warningType, explanation } = req.body || {};
     if (!explanation || !String(explanation).trim()) {
@@ -178,7 +213,7 @@ router.post('/employee/:employeeId/issue',
       level,
       warningType: String(warningType || 'OTHER'),
       explanation: String(explanation).trim(),
-      actor: `user:${req.auth.id}`,
+      actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
     });
     W.refreshStanding(req.params.employeeId);
 
@@ -188,7 +223,7 @@ router.post('/employee/:employeeId/issue',
     });
   });
 
-router.post('/:id/withdraw', requireUser, requirePermission('warning.issue'), (req, res) => {
+router.post('/:id/withdraw', requireUserOrAdminKey('warning.issue'), (req, res) => {
   const w = db.prepare('SELECT * FROM formal_warnings WHERE id = ?').get(req.params.id);
   if (!w) return res.status(404).json({ status: 'ERROR', message: 'No such warning.' });
   if (!rbac.canAccessEmployee(req.auth, w.employee_id)) {
@@ -199,7 +234,7 @@ router.post('/:id/withdraw', requireUser, requirePermission('warning.issue'), (r
     W.withdrawWarning({
       warningId: req.params.id,
       reason: req.body?.reason,
-      actor: `user:${req.auth.id}`,
+      actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
     });
     res.json({ status: 'SUCCESS', message: 'Warning withdrawn. It no longer counts toward escalation.' });
   } catch (err) {
@@ -211,7 +246,7 @@ router.post('/:id/withdraw', requireUser, requirePermission('warning.issue'), (r
 // HR: absences (spec 10)
 // ---------------------------------------------------------------------------
 
-router.get('/absences', requireUser, requirePermission('attendance.read'), (req, res) => {
+router.get('/absences', requireUserOrAdminKey('attendance.read'), (req, res) => {
   const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
   const rows = db.prepare(`
     SELECT a.*, e.name FROM absence_records a
@@ -242,7 +277,7 @@ router.get('/absences', requireUser, requirePermission('attendance.read'), (req,
 });
 
 router.post('/absences/:id/review',
-  requireUser, requirePermission('attendance.write'),
+  requireUserOrAdminKey('attendance.write'),
   (req, res) => {
     const record = db.prepare('SELECT * FROM absence_records WHERE id = ?').get(req.params.id);
     if (!record) return res.status(404).json({ status: 'ERROR', message: 'No such absence record.' });
@@ -258,7 +293,7 @@ router.post('/absences/:id/review',
         treatAsUnpaid: req.body?.treatAsUnpaid ?? null,
         createWarningTrigger: req.body?.createWarningTrigger ?? null,
         notes: req.body?.notes,
-        actor: `user:${req.auth.id}`,
+        actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
       });
       res.json({
         status: 'SUCCESS', ...r,

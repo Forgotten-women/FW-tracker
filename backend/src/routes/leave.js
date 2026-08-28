@@ -5,16 +5,16 @@ const router = express.Router();
 
 const { db } = require('../db');
 const {
-  requireDevice, requireUser, requirePermission, requireEmployeeAccess,
+  requireDevice, requireUser, requirePermission, requireEmployeeAccess, requireUserOrAdminKey,
 } = require('../middleware/auth');
 const L = require('../domain/leave');
 const rbac = require('../domain/rbac');
 const T = require('../util/time');
 
 function presentBalance(b) {
-  if (b.blocked) {
+  if (!b || b.blocked) {
     return {
-      blocked: true, reason: b.reason, message: b.message,
+      blocked: true, reason: b?.reason || 'NOT_AVAILABLE', message: b?.message || 'Leave balance not computable.',
     };
   }
   return {
@@ -131,13 +131,13 @@ router.post('/request/:id/cancel', requireDevice, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// HR
+// HR / Admin Leave Management
 // ---------------------------------------------------------------------------
 
-router.get('/pending', requireUser, requirePermission('leave.read'), (req, res) => {
+router.get('/pending', requireUserOrAdminKey('leave.read'), (req, res) => {
   const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
   const rows = db.prepare(`
-    SELECT r.*, e.name AS employee_name, t.name AS type_name, t.reduces_entitlement
+    SELECT r.*, e.name AS employee_name, e.role AS employee_role, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
@@ -148,9 +148,6 @@ router.get('/pending', requireUser, requirePermission('leave.read'), (req, res) 
   res.json({
     status: 'SUCCESS',
     requests: rows.map(r => {
-      // The balance is re-checked at review time, excluding this request, so
-      // whoever decides sees the true position rather than the figure that was
-      // true when it was submitted.
       const preview = L.previewRequest({
         employeeId: r.employee_id, leaveTypeId: r.leave_type_id,
         startDate: r.start_date, endDate: r.end_date, dayPortion: r.day_portion,
@@ -160,21 +157,123 @@ router.get('/pending', requireUser, requirePermission('leave.read'), (req, res) 
         id: r.id,
         employeeId: r.employee_id,
         employeeName: r.employee_name,
+        employeeRole: r.employee_role,
         type: r.type_name,
+        leaveTypeId: r.leave_type_id,
         from: r.start_date, to: r.end_date, days: r.total_days,
         reason: r.reason,
         submittedAt: T.displayTime(r.submitted_at),
+        submittedAtMs: r.submitted_at,
         balance: preview.ok ? presentBalance(preview.balance) : null,
         exceedsBalance: preview.ok ? preview.exceedsBalance : null,
         shortfallDays: preview.ok ? preview.shortfallDays : null,
         blocked: preview.ok ? null : preview.error,
+        reducesEntitlement: !!r.reduces_entitlement,
+        requiresEvidence: !!r.requires_evidence,
       };
     }),
   });
 });
 
+router.get('/requests', requireUserOrAdminKey('leave.read'), (req, res) => {
+  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+  const statusFilter = req.query.status;
+
+  let query = `
+    SELECT r.*, e.name AS employee_name, e.role AS employee_role, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
+    FROM leave_requests r
+    JOIN employees e ON e.id = r.employee_id
+    JOIN leave_types t ON t.id = r.leave_type_id
+  `;
+  const params = [];
+  if (statusFilter && statusFilter !== 'ALL') {
+    query += ' WHERE r.status = ? ';
+    params.push(statusFilter);
+  }
+  query += ' ORDER BY r.start_date DESC LIMIT 200';
+
+  const rows = db.prepare(query).all(...params).filter(r => visible.has(r.employee_id));
+
+  res.json({
+    status: 'SUCCESS',
+    requests: rows.map(r => ({
+      id: r.id,
+      employeeId: r.employee_id,
+      employeeName: r.employee_name,
+      employeeRole: r.employee_role,
+      type: r.type_name,
+      leaveTypeId: r.leave_type_id,
+      from: r.start_date,
+      to: r.end_date,
+      days: r.total_days,
+      status: r.status,
+      reason: r.reason,
+      notes: r.decision_notes,
+      shortfallDays: r.shortfall_days || 0,
+      reducesEntitlement: !!r.reduces_entitlement,
+      requiresEvidence: !!r.requires_evidence,
+      submittedAt: T.displayTime(r.submitted_at),
+      submittedAtMs: r.submitted_at,
+      decidedAt: r.decided_at ? T.displayTime(r.decided_at) : null,
+      decidedBy: r.decided_by,
+    })),
+  });
+});
+
+router.get('/balances', requireUserOrAdminKey('leave.read'), (req, res) => {
+  const visible = rbac.accessibleEmployeeIds(req.auth);
+  const employees = db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all()
+    .filter(e => visible.includes(e.id));
+
+  const rows = employees.map(e => {
+    const b = L.balanceFor(e.id);
+    return {
+      employeeId: e.id,
+      employeeName: e.name,
+      role: e.role,
+      balance: presentBalance(b),
+    };
+  });
+
+  res.json({
+    status: 'SUCCESS',
+    employees: rows,
+  });
+});
+
+router.get('/calendar', requireUserOrAdminKey('leave.read'), (req, res) => {
+  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+  const from = String(req.query.from || T.dateKey(T.now() - 30 * 24 * 60 * 60 * 1000));
+  const to = String(req.query.to || T.dateKey(T.now() + 60 * 24 * 60 * 60 * 1000));
+
+  const rows = db.prepare(`
+    SELECT r.*, e.name AS employee_name, t.name AS type_name
+    FROM leave_requests r
+    JOIN employees e ON e.id = r.employee_id
+    JOIN leave_types t ON t.id = r.leave_type_id
+    WHERE r.status = 'APPROVED' AND r.cancelled_at IS NULL
+      AND r.start_date <= ? AND r.end_date >= ?
+    ORDER BY r.start_date ASC
+  `).all(to, from).filter(r => visible.has(r.employee_id));
+
+  res.json({
+    status: 'SUCCESS',
+    from,
+    to,
+    leaves: rows.map(r => ({
+      id: r.id,
+      employeeId: r.employee_id,
+      employeeName: r.employee_name,
+      type: r.type_name,
+      from: r.start_date,
+      to: r.end_date,
+      days: r.total_days,
+    })),
+  });
+});
+
 router.post('/request/:id/decide',
-  requireUser, requirePermission('leave.approve'),
+  requireUserOrAdminKey('leave.approve'),
   (req, res) => {
     const r = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
@@ -183,12 +282,13 @@ router.post('/request/:id/decide',
     }
 
     try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
       const out = L.decideRequest({
         requestId: req.params.id,
         decision: req.body?.decision,
         notes: req.body?.notes,
         overdraftReason: req.body?.overdraftReason || null,
-        actor: `user:${req.auth.id}`,
+        actor,
       });
       res.json({ status: 'SUCCESS', ...out, balance: presentBalance(L.balanceFor(r.employee_id)) });
     } catch (err) {
@@ -197,7 +297,7 @@ router.post('/request/:id/decide',
   });
 
 router.get('/employee/:employeeId',
-  requireUser, requirePermission('leave.read'), requireEmployeeAccess(),
+  requireUserOrAdminKey('leave.read'), requireEmployeeAccess(),
   (req, res) => {
     const balance = L.balanceFor(req.params.employeeId);
     const ledger = db.prepare(`
@@ -220,14 +320,15 @@ router.get('/employee/:employeeId',
   });
 
 router.post('/employee/:employeeId/adjust',
-  requireUser, requirePermission('leave.write'), requireEmployeeAccess(),
+  requireUserOrAdminKey('leave.write'), requireEmployeeAccess(),
   (req, res) => {
     try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
       const balance = L.adjustBalance({
         employeeId: req.params.employeeId,
         days: Number(req.body?.days),
         reason: req.body?.reason,
-        actor: `user:${req.auth.id}`,
+        actor,
         onDate: req.body?.onDate || T.dateKey(),
       });
       res.json({ status: 'SUCCESS', balance: presentBalance(balance) });
@@ -239,7 +340,7 @@ router.post('/employee/:employeeId/adjust',
 // Who cannot be assessed at all, and why. Under an anniversary-based year an
 // employee with no start date has no computable balance, and that needs to be
 // visible rather than showing as zero.
-router.get('/blocked', requireUser, requirePermission('leave.read'), (req, res) => {
+router.get('/blocked', requireUserOrAdminKey('leave.read'), (req, res) => {
   const visible = rbac.accessibleEmployeeIds(req.auth);
   const rows = db.prepare('SELECT id, name FROM employees WHERE active = 1').all()
     .filter(e => visible.includes(e.id))

@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { db, tx, audit } = require('../db');
 const {
   requireDevice, requireUser, requirePermission, requireEmployeeAccess,
+  requireUserOrAdminKey,
 } = require('../middleware/auth');
 const A = require('../domain/attendance');
 const schedule = require('../domain/schedule');
@@ -285,15 +286,22 @@ router.get('/lateness', requireUser, requirePermission('attendance.read'), (req,
 // ---------------------------------------------------------------------------
 
 router.get('/corrections',
-  requireUser, requirePermission('attendance.correction.review'),
+  requireUserOrAdminKey('attendance.correction.review'),
   (req, res) => {
     const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
-    const rows = db.prepare(`
-      SELECT c.*, e.name FROM attendance_corrections c
-      JOIN employees e ON e.id = c.employee_id
-      WHERE c.status = ? ORDER BY c.requested_at ASC
-    `).all(String(req.query.status || 'PENDING'))
-      .filter(r => visible.has(r.employee_id));
+    const statusQuery = String(req.query.status || 'PENDING');
+    const rows = (statusQuery === 'ALL'
+      ? db.prepare(`
+          SELECT c.*, e.name, e.role FROM attendance_corrections c
+          JOIN employees e ON e.id = c.employee_id
+          ORDER BY c.requested_at DESC
+        `).all()
+      : db.prepare(`
+          SELECT c.*, e.name, e.role FROM attendance_corrections c
+          JOIN employees e ON e.id = c.employee_id
+          WHERE c.status = ? ORDER BY c.requested_at ASC
+        `).all(statusQuery)
+    ).filter(r => visible.has(r.employee_id));
 
     res.json({
       status: 'SUCCESS',
@@ -301,70 +309,79 @@ router.get('/corrections',
         id: r.id,
         employeeId: r.employee_id,
         employeeName: r.name,
+        role: r.role,
         date: r.date_key,
         reason: r.reason,
         requestedChange: JSON.parse(r.requested_change || '{}'),
+        appliedChange: JSON.parse(r.applied_change || '{}'),
         requestedAt: T.displayTime(r.requested_at),
+        reviewedAt: r.reviewed_at ? T.displayTime(r.reviewed_at) : null,
+        reviewNotes: r.review_notes,
         status: r.status,
       })),
     });
   });
 
-// POST /api/attendance/corrections/:id/review
-router.post('/corrections/:id/review',
-  requireUser, requirePermission('attendance.correction.review'),
-  (req, res) => {
-    const { decision, notes, adjustmentMinutes } = req.body || {};
-    const valid = ['APPROVED', 'REJECTED', 'AMENDED', 'INFO_REQUESTED'];
-    if (!valid.includes(decision)) {
-      return res.status(400).json({ status: 'ERROR', message: `decision must be one of ${valid.join(', ')}.` });
-    }
-    if (!notes || !String(notes).trim()) {
-      return res.status(400).json({ status: 'ERROR', message: 'A note explaining the decision is required.' });
-    }
+const handleCorrectionDecision = (req, res) => {
+  const { decision, notes, adjustmentMinutes } = req.body || {};
+  const valid = ['APPROVED', 'REJECTED', 'AMENDED', 'INFO_REQUESTED'];
+  if (!valid.includes(decision)) {
+    return res.status(400).json({ status: 'ERROR', message: `decision must be one of ${valid.join(', ')}.` });
+  }
+  if (!notes || !String(notes).trim()) {
+    return res.status(400).json({ status: 'ERROR', message: 'A note explaining the decision is required.' });
+  }
 
-    const corr = db.prepare('SELECT * FROM attendance_corrections WHERE id = ?').get(req.params.id);
-    if (!corr) return res.status(404).json({ status: 'ERROR', message: 'No such correction.' });
-    if (!rbac.canAccessEmployee(req.auth, corr.employee_id)) {
-      return res.status(404).json({ status: 'ERROR', message: 'No such correction.' });
-    }
+  const corr = db.prepare('SELECT * FROM attendance_corrections WHERE id = ?').get(req.params.id);
+  if (!corr) return res.status(404).json({ status: 'ERROR', message: 'No such correction.' });
+  if (!rbac.canAccessEmployee(req.auth, corr.employee_id)) {
+    return res.status(404).json({ status: 'ERROR', message: 'No such correction.' });
+  }
 
-    const nowMs = T.now();
-    const actor = `user:${req.auth.id}`;
+  const nowMs = T.now();
+  const actor = req.auth.kind === 'user' ? `user:${req.auth.id}` : (req.auth.actor || 'admin');
 
-    tx(() => {
-      db.prepare(`
-        UPDATE attendance_corrections
-        SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?, applied_change = ?
-        WHERE id = ?
-      `).run(decision, actor, nowMs, String(notes).trim(),
-             JSON.stringify({ adjustmentMinutes: adjustmentMinutes ?? null }), corr.id);
+  tx(() => {
+    db.prepare(`
+      UPDATE attendance_corrections
+      SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?, applied_change = ?
+      WHERE id = ?
+    `).run(decision, actor, nowMs, String(notes).trim(),
+           JSON.stringify({ adjustmentMinutes: adjustmentMinutes ?? null }), corr.id);
 
-      // An approved correction posts an adjustment. The original record is
-      // never edited - spec 11 requires it to remain in the audit history.
-      if (decision === 'APPROVED' && Number.isFinite(Number(adjustmentMinutes))) {
-        A.adjustBalance({
-          employeeId: corr.employee_id,
-          dateKey: corr.date_key,
-          minutes: -Math.abs(Number(adjustmentMinutes)),
-          reason: `Correction ${corr.id} approved: ${String(notes).trim()}`,
-          actor,
-        });
-      }
-
-      audit({
-        actor, action: 'ATTENDANCE_CORRECTION_REVIEWED',
-        targetType: 'correction', targetId: corr.id,
-        before: { status: corr.status },
-        after: { status: decision, adjustmentMinutes: adjustmentMinutes ?? null },
-        note: String(notes).trim(),
+    // An approved or amended correction posts an adjustment. The original record is
+    // never edited - spec 11 requires it to remain in the audit history.
+    if ((decision === 'APPROVED' || decision === 'AMENDED') && Number.isFinite(Number(adjustmentMinutes))) {
+      A.adjustBalance({
+        employeeId: corr.employee_id,
+        dateKey: corr.date_key,
+        minutes: -Math.abs(Number(adjustmentMinutes)),
+        reason: `Correction ${corr.id} ${decision.toLowerCase()}: ${String(notes).trim()}`,
+        actor,
       });
-    })();
+    }
 
-    // Recompute so the day reflects the decision immediately.
-    const day = A.recomputeDay(corr.employee_id, corr.date_key, nowMs);
-    res.json({ status: 'SUCCESS', decision, day: A.present(day) });
-  });
+    audit({
+      actor, action: 'ATTENDANCE_CORRECTION_REVIEWED',
+      targetType: 'correction', targetId: corr.id,
+      before: { status: corr.status },
+      after: { status: decision, adjustmentMinutes: adjustmentMinutes ?? null },
+      note: String(notes).trim(),
+    });
+  })();
+
+  // Recompute so the day reflects the decision immediately.
+  const day = A.recomputeDay(corr.employee_id, corr.date_key, nowMs);
+  res.json({ status: 'SUCCESS', decision, day: A.present(day) });
+};
+
+router.post('/corrections/:id/review',
+  requireUserOrAdminKey('attendance.correction.review'),
+  handleCorrectionDecision);
+
+router.post('/corrections/:id/decide',
+  requireUserOrAdminKey('attendance.correction.review'),
+  handleCorrectionDecision);
 
 // POST /api/attendance/employee/:employeeId/adjust - direct HR adjustment.
 router.post('/employee/:employeeId/adjust',

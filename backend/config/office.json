@@ -127,5 +127,12 @@
     "leaverSettlement": "HR_DECIDES",
     "currency": "GBP"
   },
-  "_comment_break": "CONFIRMED: the 30 minute break is PAID and part of the working day. That is why 11:00-19:00 counts as 480 minutes for a full day rather than 450 - the break is inside the paid day, not deducted from it."
+  "_comment_break": "CONFIRMED: the 30 minute break is PAID and part of the working day. That is why 11:00-19:00 counts as 480 minutes for a full day rather than 450 - the break is inside the paid day, not deducted from it.",
+  "_comment_alerts": "Advanced HR alert lead times, CONFIRMED 2026-08-27 from spec section 20.2. Alerts fire this many days BEFORE the date, and are visible to HR and Super Admin only. Spec section 30 requires these to be configurable.",
+  "alerts": {
+    "contractExpiryDays": 30,
+    "probationReviewDays": 7,
+    "documentExpiryDays": 30,
+    "performanceReviewDays": 14
+  }
 }

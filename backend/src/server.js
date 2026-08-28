@@ -94,6 +94,9 @@ app.use('/api/attendance', require('./routes/attendance-hr'));  // HR attendance
 app.use('/api/warnings', require('./routes/warnings'));         // warning engine
 app.use('/api/leave', require('./routes/leave'));              // leave engine
 app.use('/api/payroll', require('./routes/payroll'));          // payroll preparation
+app.use('/api/hr', require('./routes/hr'));                    // advanced HR alerts & reviews
+app.use('/api/people', require('./routes/people'));            // master record & org structure
+app.use('/api/documents', require('./routes/documents'));       // document vault
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin
 app.use('/api/admin', require('./routes/admin'));              // admin
 

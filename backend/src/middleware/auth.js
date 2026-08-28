@@ -264,11 +264,30 @@ function requireEmployeeAccess(paramName = 'employeeId') {
 }
 
 /** Allows either a signed-in user with the permission, or the shared admin key. */
+// The shared admin key IS super_admin, so it must carry super_admin's full
+// permission set - not just the permissions a given route names. Otherwise a
+// handler that gates extra field groups on other permissions (an employee
+// profile hiding bank details, say) would wrongly hide them from the admin-key
+// dashboard. Loaded once and reused.
+let adminPermissionSet = null;
+function superAdminPermissions() {
+  if (!adminPermissionSet) {
+    adminPermissionSet = new Set(
+      db.prepare("SELECT permission_id AS p FROM role_permissions WHERE role_id = 'super_admin'")
+        .all().map(r => r.p),
+    );
+  }
+  return adminPermissionSet;
+}
+
 function requireUserOrAdminKey(...needed) {
   return (req, res, next) => {
     const supplied = req.headers['x-admin-key'];
     if (supplied && config.adminApiKey && safeEqual(supplied, config.adminApiKey)) {
-      req.auth = { kind: 'admin', actor: 'admin-key', roles: ['super_admin'], permissions: new Set(needed) };
+      req.auth = {
+        kind: 'admin', actor: 'admin-key', roles: ['super_admin'],
+        permissions: superAdminPermissions(),
+      };
       return next();
     }
     requireUser(req, res, (err) => {

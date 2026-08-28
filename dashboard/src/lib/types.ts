@@ -24,6 +24,12 @@ export interface EmployeeDay {
   date: string;
   status: PresenceStatus;
   statusLabel: string;
+  onBreak?: boolean;
+  activeBreakMinutes?: number;
+  breakMinutes?: number;
+  excessBreakMinutes?: number;
+  dailyDeficitMinutes?: number;
+  lateMinutes?: number;
   firstCheckIn: string;
   lastActiveTime: string;
   totalMinutes: number;
@@ -109,4 +115,188 @@ export interface EnrollmentCode {
   code: string;
   employee: { id: string; name: string };
   expiresAtDisplay: string;
+}
+
+export type AlertType =
+  | 'CONTRACT_EXPIRY'
+  | 'PROBATION_REVIEW'
+  | 'DOCUMENT_EXPIRY'
+  | 'PERFORMANCE_REVIEW';
+
+export type AlertSeverity = 'overdue' | 'urgent' | 'warning';
+
+export interface HrAlert {
+  type: AlertType;
+  key: string;
+  /** The date the alert is about; a dismissal only holds while this is unchanged. */
+  value: string;
+  employeeId: string;
+  employeeName: string;
+  date: string;
+  daysUntil: number;
+  severity: AlertSeverity;
+  title: string;
+  detail: string;
+  overdue: boolean;
+}
+
+export interface HrAlerts {
+  summary: {
+    total: number;
+    overdue: number;
+    contractExpiry: number;
+    probationReview: number;
+    documentExpiry: number;
+    performanceReview: number;
+  };
+  alerts: HrAlert[];
+}
+
+export interface AttendanceCorrection {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  date: string;
+  reason: string;
+  requestedChange: {
+    adjustmentMinutes?: number;
+    [key: string]: unknown;
+  };
+  appliedChange: {
+    adjustmentMinutes?: number;
+    [key: string]: unknown;
+  };
+  requestedAt: string;
+  reviewedAt?: string | null;
+  reviewNotes?: string | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'AMENDED' | 'INFO_REQUESTED';
+}
+
+export interface WarningTrigger {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  reason: string;
+  occurrences: number;
+  period: string;
+  raisedAt: string;
+  raisedOn: string;
+  status: 'PENDING_REVIEW' | 'CONFIRMED' | 'WAIVED' | 'CORRECTED' | 'SUPERSEDED';
+  proposedLevel: string | null;
+  proposedLevelLabel: string | null;
+  sequenceExhausted: boolean;
+  priorWarnings: number;
+}
+
+export interface FormalWarningItem {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeRole?: string;
+  level: string;
+  levelLabel: string;
+  warningType: string;
+  explanation: string;
+  issuedAt: string;
+  issuedAtMs: number;
+  issuedDate: string;
+  expiryDate: string | null;
+  status: 'ACTIVE' | 'EXPIRED' | 'WITHDRAWN';
+  acknowledgedAt: string | null;
+  ackComments: string | null;
+  outcome: string | null;
+}
+
+export interface WarningBoardEmployee {
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  band: 'GREEN' | 'AMBER' | 'RED' | 'UNKNOWN';
+  bandLabel: string;
+  lateOccurrences: number | null;
+  allowed: number | null;
+  pendingReview: boolean;
+  activeWarnings: number;
+  highestLevel: string | null;
+  nextLevelIfConfirmed: string | null;
+  sequenceExhausted: boolean;
+}
+
+export interface WarningBoardSummary {
+  counts: {
+    red: number;
+    amber: number;
+    green: number;
+    unknown: number;
+  };
+  employees: WarningBoardEmployee[];
+}
+
+export interface LeaveBalanceDetails {
+  blocked: boolean;
+  reason?: string;
+  message?: string;
+  holidayYear?: {
+    from: string;
+    to: string;
+    monthsCompleted: number;
+  };
+  nextAccrualDate?: string;
+  annualEntitlement: number;
+  accrued: number;
+  taken: number;
+  booked: number;
+  available: number;
+  isNegative: boolean;
+}
+
+export interface LeaveRequestItem {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeRole?: string;
+  type: string;
+  leaveTypeId: string;
+  from: string;
+  to: string;
+  days: number;
+  status: 'PENDING_HR' | 'PENDING_MANAGER' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  reason?: string;
+  notes?: string | null;
+  shortfallDays?: number;
+  exceedsBalance?: boolean;
+  reducesEntitlement?: boolean;
+  requiresEvidence?: boolean;
+  submittedAt: string;
+  submittedAtMs?: number;
+  decidedAt?: string | null;
+  decidedBy?: string | null;
+  balance?: LeaveBalanceDetails | null;
+  blocked?: string | null;
+}
+
+export interface EmployeeLeaveOverview {
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  balance: LeaveBalanceDetails;
+}
+
+export interface TeamCalendarLeave {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  type: string;
+  from: string;
+  to: string;
+  days: number;
+}
+
+export interface LeaveTypeItem {
+  id: string;
+  name: string;
+  reducesEntitlement: boolean;
+  requiresEvidence: boolean;
+  isPaid: boolean;
 }

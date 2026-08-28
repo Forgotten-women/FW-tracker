@@ -1,7 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 
 import 'screens/enroll_screen.dart';
-import 'screens/home_screen.dart';
+import 'screens/main_shell.dart';
 import 'services/presence_service.dart';
 import 'services/token_store.dart';
 import 'theme.dart';
@@ -63,7 +63,7 @@ class _OfficeTrackerAppState extends State<OfficeTrackerApp> {
             body: Center(child: CircularProgressIndicator(color: AppColors.teal)),
           ),
         false => EnrollScreen(onEnrolled: () => setState(() => _enrolled = true)),
-        true => HomeScreen(onSignedOut: () => setState(() => _enrolled = false)),
+        true => MainShell(onSignedOut: () => setState(() => _enrolled = false)),
       },
     );
   }

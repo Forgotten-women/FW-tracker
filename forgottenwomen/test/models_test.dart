@@ -3,6 +3,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:office_tracker/models/attendance.dart';
+import 'package:office_tracker/models/hr.dart';
 import 'package:office_tracker/services/offline_queue.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -128,6 +129,230 @@ void main() {
       final remaining = await q.readAll();
       expect(remaining.length, 1);
       expect(remaining.single.observedAt, 3);
+    });
+  });
+
+  group('Break and Deficit Models (Spec 8, 12, 19)', () {
+    test('BreakStartResult parses start response', () {
+      final res = BreakStartResult.fromJson({
+        'breakId': 'brk_123',
+        'startedAt': '2:14 PM',
+        'permittedMinutes': 30,
+        'dueBackAt': '2:44 PM',
+        'dueBackAtMs': 1756000000000,
+      });
+
+      expect(res.breakId, 'brk_123');
+      expect(res.startedAt, '2:14 PM');
+      expect(res.permittedMinutes, 30);
+      expect(res.dueBackAt, '2:44 PM');
+      expect(res.dueBackAtMs, 1756000000000);
+    });
+
+    test('BreakEndResult parses end response with excess deficit', () {
+      final res = BreakEndResult.fromJson({
+        'actualMinutes': 37,
+        'permittedMinutes': 30,
+        'excessMinutes': 7,
+        'message':
+            'Break was 37 minutes. 7 minutes over the permitted 30 have been added to your attendance deficit.',
+      });
+
+      expect(res.actualMinutes, 37);
+      expect(res.permittedMinutes, 30);
+      expect(res.excessMinutes, 7);
+      expect(res.message, contains('7 minutes over'));
+    });
+
+    test('DeficitBalance parses 480-minute whole-day rule correctly', () {
+      final balance = DeficitBalance.fromJson({
+        'minutes': 527,
+        'formatted': '8h 47m',
+        'wholeDayEquivalents': 1,
+        'carryForwardMinutes': 47,
+        'dayEquivalentMinutes': 480,
+      }, todayBreakdown: const DeficitBreakdown(
+        lateMinutes: 21,
+        excessBreakMinutes: 9,
+        earlyDepartureMinutes: 0,
+        unauthorisedMissingMinutes: 0,
+        approvedAdjustmentMinutes: 0,
+        totalMinutes: 30,
+        formatted: '30 mins',
+      ));
+
+      expect(balance.minutes, 527);
+      expect(balance.wholeDayEquivalents, 1);
+      expect(balance.carryForwardMinutes, 47);
+      expect(balance.todayBreakdown.lateMinutes, 21);
+      expect(balance.todayBreakdown.excessBreakMinutes, 9);
+      expect(balance.todayBreakdown.totalMinutes, 30);
+    });
+
+    test('TodayAttendanceDetails parses full today payload with active break', () {
+      final today = TodayAttendanceDetails.fromJson({
+        'status': 'SUCCESS',
+        'employee': {'id': 'emp_123', 'name': 'Amina Ali'},
+        'today': {
+          'status': 'IN_OFFICE',
+          'statusLabel': 'Active in Office',
+          'firstIn': '9:00 AM',
+          'lastSeen': '2:30 PM',
+          'worked': '5h 30m',
+          'workedMinutes': 330,
+          'onBreak': true,
+          'breakDueBack': '2:44 PM',
+          'breakDueBackAtMs': 1756001800000,
+          'activeBreakStartedAtMs': 1756000000000,
+          'permittedBreakMinutes': 30,
+          'breakMinutesTaken': 14,
+          'deficit': {
+            'lateMinutes': 10,
+            'excessBreakMinutes': 0,
+            'earlyDepartureMinutes': 0,
+            'unauthorisedMissingMinutes': 0,
+            'approvedAdjustmentMinutes': 0,
+            'totalMinutes': 10,
+            'formatted': '10 mins',
+          },
+          'breaks': [],
+          'sessions': [],
+        },
+        'lateness': {'message': 'On time'},
+        'deficitBalance': {
+          'minutes': 10,
+          'formatted': '10 mins',
+          'wholeDayEquivalents': 0,
+          'carryForwardMinutes': 10,
+          'dayEquivalentMinutes': 480,
+        },
+      });
+
+      expect(today.employeeName, 'Amina Ali');
+      expect(today.breakInfo.onBreak, isTrue);
+      expect(today.breakInfo.breakMinutesTaken, 14);
+      expect(today.breakInfo.dueBackDisplay, '2:44 PM');
+      expect(today.deficitBalance.minutes, 10);
+      expect(today.deficitBalance.todayBreakdown.lateMinutes, 10);
+    });
+
+    test('CorrectionRequest parses pending and approved dispute payloads (Spec 11)', () {
+      final req = CorrectionRequest.fromJson({
+        'id': 'corr_abc123',
+        'dateKey': '2026-08-27',
+        'reason': '[Wi-Fi failure] Phone was in office but Wi-Fi disconnected',
+        'status': 'PENDING',
+        'requestedChange': {'adjustmentMinutes': 30},
+        'requestedAt': '3:15 PM',
+      });
+
+      expect(req.id, 'corr_abc123');
+      expect(req.date, '2026-08-27');
+      expect(req.reason, contains('Wi-Fi failure'));
+      expect(req.isPending, isTrue);
+      expect(req.isApproved, isFalse);
+      expect(req.requestedChange['adjustmentMinutes'], 30);
+
+      final approved = CorrectionRequest.fromJson({
+        'id': 'corr_xyz789',
+        'date': '2026-08-26',
+        'reason': '[Manager authorised] External client visit',
+        'status': 'APPROVED',
+        'appliedChange': {'adjustmentMinutes': 45},
+        'requestedAt': '10:00 AM',
+        'reviewedAt': '11:30 AM',
+        'reviewNotes': 'Approved as authorised by manager',
+      });
+
+      expect(approved.isApproved, isTrue);
+      expect(approved.appliedChange['adjustmentMinutes'], 45);
+      expect(approved.reviewNotes, 'Approved as authorised by manager');
+    });
+
+    test('WarningView and FormalWarning parse full disciplinary payload (Spec 9, 21)', () {
+      final view = WarningView.fromJson({
+        'band': 'AMBER',
+        'bandLabel': 'Warning band (2-3 lates)',
+        'pendingReview': false,
+        'lateness': {
+          'resolved': true,
+          'count': 2,
+          'allowed': 3,
+          'remaining': 1,
+          'message': '2 of 3 late arrivals this month',
+          'thresholdReached': false,
+        },
+        'standing': {
+          'warningsIssued': 1,
+          'highestLevel': 'INFORMAL',
+          'highestLevelLabel': 'Informal notice',
+          'nextLevel': 'FIRST_WRITTEN',
+          'nextLevelIfConfirmed': 'First written warning',
+          'sequenceExhausted': false,
+          'activeWarnings': 1,
+        },
+        'warnings': [
+          {
+            'id': 'fw_123',
+            'level': 'INFORMAL',
+            'levelLabel': 'Informal notice',
+            'explanation': 'Arrived past grace period on 4 occasions',
+            'issuedOn': '2026-08-15',
+            'expiryDate': '2026-09-15',
+            'status': 'ACTIVE',
+            'acknowledgementRequired': true,
+            'acknowledgedAt': null,
+          }
+        ],
+      });
+
+      expect(view.band, 'AMBER');
+      expect(view.bandLabel, contains('Warning band'));
+      expect(view.lateness.count, 2);
+      expect(view.lateness.allowed, 3);
+      expect(view.activeWarnings, 1);
+      expect(view.nextLevelIfConfirmed, 'First written warning');
+      expect(view.warnings.length, 1);
+      expect(view.warnings.first.acknowledgementRequired, isTrue);
+      expect(view.warnings.first.status, 'ACTIVE');
+    });
+
+    test('LeaveBalance and LeaveRequest parse full leave payload (Spec 13, 14, 15)', () {
+      final bal = LeaveBalance.fromJson({
+        'blocked': false,
+        'holidayYear': {'from': '2026-03-01', 'to': '2027-02-28', 'monthsCompleted': 5},
+        'nextAccrualDate': '2026-09-01',
+        'annualEntitlement': 20.0,
+        'accrued': 8.33,
+        'taken': 2.0,
+        'booked': 1.0,
+        'available': 5.33,
+        'isNegative': false,
+      });
+
+      expect(bal.blocked, isFalse);
+      expect(bal.annualEntitlement, 20.0);
+      expect(bal.accrued, 8.33);
+      expect(bal.taken, 2.0);
+      expect(bal.booked, 1.0);
+      expect(bal.available, 5.33);
+      expect(bal.yearFrom, '2026-03-01');
+
+      final req = LeaveRequest.fromJson({
+        'id': 'lr_123',
+        'type': 'Annual Leave',
+        'from': '2026-09-10',
+        'to': '2026-09-12',
+        'days': 3.0,
+        'status': 'PENDING_HR',
+        'submittedAt': '10:15 AM',
+      });
+
+      expect(req.id, 'lr_123');
+      expect(req.type, 'Annual Leave');
+      expect(req.days, 3.0);
+      expect(req.isPending, isTrue);
+      expect(req.isApproved, isFalse);
     });
   });
 }
