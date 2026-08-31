@@ -469,6 +469,83 @@ void main() {
       expect(confirmed.createWarningTrigger, isFalse);
       expect(confirmed.reviewNotes, contains('Unexcused no-show'));
     });
+
+    test('EmployeeProfile and SalaryInfo parse profile and conditional salary payload', () {
+      final prof = EmployeeProfile.fromJson({
+        'id': 'emp_123',
+        'name': 'Abdullah Shahid',
+        'role': 'Senior Software Engineer',
+        'employeeNumber': 'FW-042',
+        'workEmail': 'abdullah@forgottenwomen.org',
+        'departmentName': 'Engineering',
+        'officeName': 'Trans K Office (Pakistan)',
+        'active': true,
+        'employment': {
+          'jobTitle': 'Senior Software Engineer',
+          'employmentType': 'Full-time',
+          'startDate': '2025-01-15',
+          'holidayEntitlementDays': 20,
+        },
+        'schedule': {
+          'startTime': '11:00',
+          'endTime': '19:00',
+          'graceMinutes': 10,
+          'breakMinutes': 30,
+          'workDays': 'MON,TUE,WED,THU,FRI',
+        },
+        'personal': {
+          'nationalId': '42101-1234567-1',
+          'mobilePhone': '+92 300 1234567',
+          'personalEmail': 'personal@example.com',
+          'addressLine1': 'Gulshan-e-Iqbal',
+          'city': 'Karachi',
+        },
+        'emergencyContacts': [
+          {
+            'name': 'Sarah Shahid',
+            'relationship': 'Spouse / Next of Kin',
+            'phone': '+92 300 9876543',
+            'isPrimary': true,
+          }
+        ],
+        'salary': {
+          'enabled': true,
+          'blocked': false,
+          'monthly': 100000.0,
+          'daily': 4615.38,
+          'annual': 1200000.0,
+          'currency': 'PKR',
+          'effectiveFrom': '2026-08-01',
+        },
+        'kyc': {
+          'verifiedCount': 3,
+          'totalCount': 3,
+        },
+      });
+
+      expect(prof.name, 'Abdullah Shahid');
+      expect(prof.role, 'Senior Software Engineer');
+      expect(prof.officeName, 'Trans K Office (Pakistan)');
+      expect(prof.emergencyContacts.length, 1);
+      expect(prof.emergencyContacts.first.isPrimary, isTrue);
+      expect(prof.emergencyContacts.first.relationship, 'Spouse / Next of Kin');
+      
+      // Salary check
+      expect(prof.salary.enabled, isTrue);
+      expect(prof.salary.blocked, isFalse);
+      expect(prof.salary.monthly, 100000.0);
+      expect(prof.salary.daily, 4615.38);
+      expect(prof.salary.currency, 'PKR');
+      expect(prof.salary.effectiveFrom, '2026-08-01');
+
+      // Hidden salary check
+      final hiddenSalary = SalaryInfo.fromJson({
+        'enabled': false,
+        'message': 'Salary visibility is disabled by HR policy.',
+      });
+      expect(hiddenSalary.enabled, isFalse);
+      expect(hiddenSalary.message, contains('disabled by HR policy'));
+    });
   });
 }
 

@@ -11,11 +11,33 @@ const router = express.Router();
 
 const { db } = require('../db');
 const {
-  requireUserOrAdminKey, requireEmployeeAccess,
+  requireDevice, requireUserOrAdminKey, requireEmployeeAccess,
 } = require('../middleware/auth');
 const people = require('../domain/people');
 const payroll = require('../domain/payroll');
 const T = require('../util/time');
+
+// ---------------------------------------------------------------------------
+// Employee Mobile Self-Profile
+// ---------------------------------------------------------------------------
+
+router.get('/mine/profile', (req, res, next) => {
+  if (req.headers['x-admin-key']) {
+    return requireUserOrAdminKey()(req, res, () => {
+      const empId = req.query.employeeId || req.auth.employeeId || req.auth.userId;
+      if (!empId) return res.status(400).json({ status: 'ERROR', message: 'employeeId required for admin caller.' });
+      const prof = people.myEmployeeProfile(empId);
+      if (!prof) return res.status(404).json({ status: 'ERROR', message: 'Profile not found.' });
+      return res.json({ status: 'SUCCESS', profile: prof });
+    });
+  }
+  requireDevice(req, res, () => {
+    const employeeId = req.auth.employeeId;
+    const prof = people.myEmployeeProfile(employeeId);
+    if (!prof) return res.status(404).json({ status: 'ERROR', message: 'Profile not found.' });
+    res.json({ status: 'SUCCESS', profile: prof });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Consolidated profile (spec 37)

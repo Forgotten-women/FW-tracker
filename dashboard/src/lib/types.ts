@@ -422,4 +422,121 @@ export interface NotificationsResponse {
   notifications: NotificationItem[];
 }
 
+// ---------------------------------------------------------------------------
+// Payroll (2.13)
+// ---------------------------------------------------------------------------
 
+export interface SalaryRecord {
+  blocked: false;
+  salaryId: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  currency: string;
+  payFrequency: string;
+  monthly: number;
+  annual: number;
+  weekly: number;
+  daily: number;
+  dailyPrecise: number;
+  formula: string;
+  workingDaysPerYear: number;
+}
+
+export interface SalaryBlocked {
+  blocked: true;
+  reason: string;
+  message: string;
+}
+
+export interface PayrollPeriod {
+  id: string;
+  name: string;
+  from: string;
+  to: string;
+  exchangeRate?: number;
+  status: 'OPEN' | 'DRAFT' | 'CLOSED';
+  approvedBy: string | null;
+  approvedAt: string | null;
+}
+
+export interface PayrollEmployee {
+  employeeId: string;
+  employeeName: string;
+  role?: string;
+  salary: SalaryRecord | SalaryBlocked;
+  workingDays: number;
+  grossPay: number | null;
+  adjustmentsTotal: number;
+  netPay: number | null;
+  blocked: boolean;
+  blockedReason?: string;
+}
+
+export interface PayrollBlocked {
+  employeeId: string;
+  employeeName: string;
+  role?: string;
+  blockedReason: string;
+}
+
+export interface PayrollPrepareSheet {
+  periodId: string;
+  periodName: string;
+  from: string;
+  to: string;
+  status: string;
+  employees: PayrollEmployee[];
+  blocked: PayrollBlocked[];
+  totals: {
+    employeeCount: number;
+    blockedCount: number;
+    grossTotal: number;
+    adjustmentsTotal: number;
+    netTotal: number;
+  };
+}
+
+export interface PayrollAdjustment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  type: string;
+  calculated: { days: number | null; amount: number | null };
+  approved: { days: number | null; amount: number | null } | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  explanation: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+}
+
+export interface StarterCalculation {
+  applicable: boolean;
+  blocked?: boolean;
+  reason?: string;
+  startDate?: string;
+  eligibleWorkingDays?: number;
+  fullPeriodWorkingDays?: number;
+  dailyRate?: number;
+  calculatedGross?: number;
+  calculatedGrossRoundedDaily?: number;
+  fullMonthlySalary?: number;
+  formula?: string;
+}
+
+export interface LeaverCalculation {
+  blocked?: boolean;
+  reason?: string;
+  message?: string;
+  lastWorkingDate?: string;
+  workedDays?: number;
+  grossPay?: number;
+  formula?: string;
+  leave?: {
+    blocked: boolean;
+    untakenDays: number | null;
+    excessTakenDays: number | null;
+    untakenValue: number | null;
+    excessDeduction: number | null;
+  };
+  estimatedFinalPay?: number | null;
+}

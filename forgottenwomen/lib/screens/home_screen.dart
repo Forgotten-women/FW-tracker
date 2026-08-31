@@ -13,6 +13,7 @@ import '../services/offline_queue.dart';
 import '../services/presence_service.dart';
 import '../services/token_store.dart';
 import '../theme.dart';
+import 'profile_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -710,33 +711,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         backgroundColor: AppColors.surfaceDark,
         elevation: 0,
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: AppColors.primary.withOpacity(0.2),
-              child: Text(
-                _employeeName.isNotEmpty ? _employeeName.substring(0, 1).toUpperCase() : 'U',
-                style: const TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold, fontSize: 14),
+        title: GestureDetector(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const ProfileScreen(),
               ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _employeeName.isEmpty ? 'Employee Portal' : _employeeName,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+            );
+          },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: AppColors.primary.withOpacity(0.2),
+                child: Text(
+                  _employeeName.isNotEmpty ? _employeeName.substring(0, 1).toUpperCase() : 'U',
+                  style: const TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold, fontSize: 14),
                 ),
-                Text(
-                  _employeeRole.isNotEmpty ? _employeeRole : 'Staff Attendance',
-                  style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _employeeName.isEmpty ? 'Employee Portal' : _employeeName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    Text(
+                      _employeeRole.isNotEmpty ? _employeeRole : 'Staff Attendance',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline_rounded, color: Colors.white70),
+            tooltip: 'My Profile & Salary',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const ProfileScreen(),
+                ),
+              );
+            },
+          ),
           Stack(
             children: [
               IconButton(

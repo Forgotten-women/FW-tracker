@@ -1,4 +1,4 @@
-﻿// Admin API. Every route requires the admin key and every mutation is audited.
+// Admin API. Every route requires the admin key and every mutation is audited.
 //
 // This is where employee management moved to. It used to be unauthenticated on
 // /api/attendance, alongside a /reset-logs endpoint that destroyed the whole
@@ -307,6 +307,44 @@ router.get('/config', (req, res) => {
       retention: config.retention,
     },
   });
+});
+
+// --- org settings ----------------------------------------------------------
+
+router.get('/settings', (req, res) => {
+  const rows = db.prepare('SELECT * FROM org_settings').all();
+  const settings = {};
+  for (const r of rows) settings[r.key] = r.value;
+  res.json({ status: 'SUCCESS', settings });
+});
+
+router.post('/settings', (req, res) => {
+  const { key, value } = req.body || {};
+  if (!key || value === undefined) {
+    return res.status(400).json({ status: 'ERROR', message: 'Key and value are required.' });
+  }
+
+  const before = db.prepare('SELECT * FROM org_settings WHERE key = ?').get(key);
+  const nowMs = T.now();
+  db.prepare(`
+    INSERT INTO org_settings (key, value, updated_at, updated_by)
+    VALUES (?, ?, ?, 'admin')
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+  `).run(String(key).trim(), String(value), nowMs);
+
+  audit({
+    actor: 'admin',
+    action: 'ORG_SETTING_UPDATED',
+    targetType: 'setting',
+    targetId: key,
+    before: before ? { value: before.value } : null,
+    after: { value: String(value) },
+  });
+
+  const events = require('../events');
+  events.broadcast('SETTINGS_UPDATED', { key, value: String(value) });
+
+  res.json({ status: 'SUCCESS', key, value: String(value) });
 });
 
 // Exchanges the admin key for a short-lived ticket the dashboard can pass to

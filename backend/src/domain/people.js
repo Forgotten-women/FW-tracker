@@ -390,10 +390,122 @@ function profile(employeeId, { permissions = new Set(), includeSensitive = true 
   return out;
 }
 
+/**
+ * Assembles the employee's own self-service profile for the mobile app.
+ * Returns personal details, employment terms, working schedule, emergency contacts,
+ * KYC document checklist stats, and salary (ONLY if enabled by HR policy in org_settings).
+ */
+function myEmployeeProfile(employeeId) {
+  const emp = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+  if (!emp) return null;
+
+  const er = currentEmployment(employeeId);
+  const dept = emp.department_id ? db.prepare('SELECT name FROM departments WHERE id = ?').get(emp.department_id) : null;
+  const office = (er && er.office_id) ? db.prepare('SELECT name, time_zone FROM office_locations WHERE id = ?').get(er.office_id) : null;
+
+  const wpId = (er && er.working_pattern_id) || null;
+  const wp = wpId
+    ? db.prepare('SELECT * FROM working_patterns WHERE id = ?').get(wpId)
+    : (db.prepare('SELECT * FROM working_patterns WHERE is_default = 1').get() ||
+       db.prepare('SELECT * FROM working_patterns ORDER BY created_at ASC LIMIT 1').get());
+  const p = db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
+
+  const contacts = db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ? ORDER BY is_primary DESC, created_at ASC').all(employeeId)
+    .map(c => ({ name: c.name, relationship: c.relationship, phone: c.phone, email: c.email, isPrimary: !!c.is_primary }));
+
+  // Check HR salary visibility setting
+  let showSalary = false;
+  try {
+    const row = db.prepare("SELECT value FROM org_settings WHERE key = 'show_salary_to_employees'").get();
+    if (row && (row.value === '1' || row.value === 'true')) {
+      showSalary = true;
+    }
+  } catch {
+    showSalary = false;
+  }
+
+  let salary = null;
+  if (showSalary) {
+    const PR = require('./payroll');
+    const s = PR.salaryAt(employeeId, T.dateKey());
+    if (s && !s.blocked) {
+      salary = {
+        enabled: true,
+        monthly: s.monthly,
+        daily: s.daily,
+        annual: s.annual,
+        currency: s.currency || 'GBP',
+        effectiveFrom: s.effectiveFrom,
+      };
+    } else {
+      salary = {
+        enabled: true,
+        blocked: true,
+        reason: s ? s.reason : 'NO_SALARY_ON_RECORD',
+        message: s ? s.message : 'No salary record on file.',
+      };
+    }
+  } else {
+    salary = {
+      enabled: false,
+      message: 'Salary visibility is disabled by HR policy.',
+    };
+  }
+
+  const kycDocs = db.prepare('SELECT verification_status, document_type_id FROM employee_documents WHERE employee_id = ? AND archived_at IS NULL').all(employeeId);
+  const kycVerified = kycDocs.filter(d => d.verification_status === 'VERIFIED').length;
+
+  return {
+    id: emp.id,
+    name: emp.name,
+    preferredName: emp.preferred_name,
+    role: emp.role,
+    employeeNumber: emp.employee_number,
+    workEmail: emp.work_email,
+    departmentName: dept?.name || null,
+    officeName: office?.name || null,
+    timeZone: office?.time_zone || 'Asia/Karachi',
+    active: !!emp.active,
+    employment: er ? {
+      jobTitle: er.job_title,
+      employmentType: er.employment_type,
+      startDate: er.start_date,
+      contractStartDate: er.contract_start_date,
+      contractEndDate: er.contract_end_date,
+      noticePeriodDays: er.notice_period_days,
+      holidayEntitlementDays: er.holiday_entitlement_days,
+    } : null,
+    schedule: {
+      startTime: wp?.start_time || '11:00',
+      endTime: wp?.end_time || '19:00',
+      graceMinutes: wp?.grace_minutes ?? 10,
+      breakMinutes: wp?.break_minutes ?? 30,
+      workDays: wp?.work_days || 'MON,TUE,WED,THU,FRI',
+    },
+    personal: p ? {
+      dateOfBirth: p.date_of_birth,
+      personalEmail: p.personal_email,
+      mobilePhone: p.mobile_phone,
+      addressLine1: p.address_line1,
+      addressLine2: p.address_line2,
+      city: p.city,
+      postcode: p.postcode,
+      country: p.country,
+      nationalId: p.national_id,
+    } : null,
+    emergencyContacts: contacts,
+    salary,
+    kyc: {
+      verifiedCount: kycVerified,
+      totalCount: kycDocs.length,
+    },
+  };
+}
+
 module.exports = {
   createOffice, listOffices, createDepartment, listDepartments,
   assignManager, endManagerAssignment,
   setEmployment, currentEmployment, employmentHistory,
   setStatus, setPersonal, setBank, addEmergencyContact,
-  profile, VALID_TYPES, VALID_STATUS,
+  profile, myEmployeeProfile, VALID_TYPES, VALID_STATUS,
 };

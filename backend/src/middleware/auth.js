@@ -222,7 +222,7 @@ function requireUser(req, res, next) {
  */
 function requirePermission(...needed) {
   return (req, res, next) => {
-    if (!req.auth || req.auth.kind !== 'user') {
+    if (!req.auth || (req.auth.kind !== 'user' && req.auth.kind !== 'admin')) {
       return res.status(401).json({ status: 'ERROR', code: 'NO_SESSION', message: 'Sign in to continue.' });
     }
     const held = req.auth.permissions;

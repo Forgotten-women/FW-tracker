@@ -411,6 +411,15 @@ class ApiClient {
             .toList();
       });
 
+  /// Fetches this employee's self-service profile and conditional salary info.
+  Future<EmployeeProfile> getProfile() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/people/mine/profile'), headers: await _authHeaders())
+            .timeout(timeout);
+        final body = _decode(res);
+        return EmployeeProfile.fromJson(body['profile'] as Map<String, dynamic>);
+      });
+
   /// Unauthenticated reachability check, used by the settings screen so the
   /// user can tell a wrong address apart from a rejected credential.
   Future<bool> health() async {

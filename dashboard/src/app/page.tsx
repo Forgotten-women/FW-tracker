@@ -19,12 +19,13 @@ import { LeaveManagementPanel } from '@/components/LeaveManagementPanel';
 import DocumentVaultPanel from '@/components/DocumentVaultPanel';
 import { WarningBoard } from '@/components/WarningBoard';
 import { NotificationDrawer } from '@/components/NotificationDrawer';
+import { PayrollPanel } from '@/components/PayrollPanel';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, AttendanceCorrection, EnrollmentCode, NotificationItem } from '@/lib/types';
 
-type DashboardTab = 'overview' | 'attendance' | 'leave' | 'disciplinary' | 'documents' | 'workforce';
+type DashboardTab = 'overview' | 'attendance' | 'leave' | 'disciplinary' | 'documents' | 'workforce' | 'payroll';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -274,6 +275,21 @@ export default function DashboardPage() {
               </svg>
               <span>Workforce Directory</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('payroll')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'payroll'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span>Payroll</span>
+            </button>
           </div>
 
           <div className="hidden items-center gap-3 md:flex">
@@ -390,6 +406,13 @@ export default function DashboardPage() {
                   </div>
                   <ActivityFeed movements={summary.recentMovements} />
                 </div>
+              </div>
+            )}
+
+            {/* 7. PAYROLL PREPARATION TAB */}
+            {activeTab === 'payroll' && (
+              <div className="flex flex-col gap-6">
+                <PayrollPanel />
               </div>
             )}
           </>

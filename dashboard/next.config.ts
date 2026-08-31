@@ -2,7 +2,7 @@ import type { NextConfig } from 'next';
 
 // The backend origin. Only ever read on the Next server, never shipped to the
 // browser, because every API call is proxied through the rewrite below.
-const API_ORIGIN = process.env.API_ORIGIN ?? 'http://localhost:5000';
+const API_ORIGIN = process.env.API_ORIGIN ?? 'http://127.0.0.1:5000';
 
 const nextConfig: NextConfig = {
   // Proxying keeps the browser same-origin with the dashboard, so there is no

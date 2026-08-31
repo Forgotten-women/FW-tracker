@@ -456,3 +456,201 @@ class EmployeeAbsenceRecord {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Employee Profile & Salary
+// ---------------------------------------------------------------------------
+
+class SalaryInfo {
+  final bool enabled;
+  final bool blocked;
+  final String? message;
+  final String? reason;
+  final double monthly;
+  final double daily;
+  final double annual;
+  final String currency;
+  final String? effectiveFrom;
+
+  const SalaryInfo({
+    required this.enabled,
+    this.blocked = false,
+    this.message,
+    this.reason,
+    this.monthly = 0,
+    this.daily = 0,
+    this.annual = 0,
+    this.currency = 'GBP',
+    this.effectiveFrom,
+  });
+
+  factory SalaryInfo.fromJson(Map<String, dynamic>? json) {
+    if (json == null) {
+      return const SalaryInfo(enabled: false, message: 'Salary visibility is disabled.');
+    }
+    final enabled = json['enabled'] == true;
+    final blocked = json['blocked'] == true;
+    return SalaryInfo(
+      enabled: enabled,
+      blocked: blocked,
+      message: json['message'] as String?,
+      reason: json['reason'] as String?,
+      monthly: (json['monthly'] as num?)?.toDouble() ?? 0,
+      daily: (json['daily'] as num?)?.toDouble() ?? 0,
+      annual: (json['annual'] as num?)?.toDouble() ?? 0,
+      currency: (json['currency'] as String?)?.toUpperCase() ?? 'GBP',
+      effectiveFrom: json['effectiveFrom'] as String?,
+    );
+  }
+}
+
+class EmergencyContact {
+  final String name;
+  final String relationship;
+  final String phone;
+  final String? email;
+  final bool isPrimary;
+
+  const EmergencyContact({
+    required this.name,
+    required this.relationship,
+    required this.phone,
+    this.email,
+    this.isPrimary = false,
+  });
+
+  factory EmergencyContact.fromJson(Map<String, dynamic> json) => EmergencyContact(
+    name: json['name'] as String? ?? '—',
+    relationship: json['relationship'] as String? ?? '—',
+    phone: json['phone'] as String? ?? '—',
+    email: json['email'] as String?,
+    isPrimary: json['isPrimary'] == true,
+  );
+}
+
+class EmployeeProfile {
+  final String id;
+  final String name;
+  final String? preferredName;
+  final String role;
+  final String? employeeNumber;
+  final String? workEmail;
+  final String? departmentName;
+  final String? officeName;
+  final String timeZone;
+  final bool active;
+
+  // Employment terms
+  final String? jobTitle;
+  final String? employmentType;
+  final String? startDate;
+  final String? contractEndDate;
+  final int? noticePeriodDays;
+  final double? holidayEntitlementDays;
+
+  // Schedule
+  final String startTime;
+  final String endTime;
+  final int graceMinutes;
+  final int breakMinutes;
+  final String workDays;
+
+  // Personal
+  final String? dateOfBirth;
+  final String? personalEmail;
+  final String? mobilePhone;
+  final String? addressLine1;
+  final String? addressLine2;
+  final String? city;
+  final String? postcode;
+  final String? nationalId;
+
+  // Emergency contacts & KYC
+  final List<EmergencyContact> emergencyContacts;
+  final SalaryInfo salary;
+  final int kycVerifiedCount;
+  final int kycTotalCount;
+
+  const EmployeeProfile({
+    required this.id,
+    required this.name,
+    this.preferredName,
+    required this.role,
+    this.employeeNumber,
+    this.workEmail,
+    this.departmentName,
+    this.officeName,
+    this.timeZone = 'Asia/Karachi',
+    this.active = true,
+    this.jobTitle,
+    this.employmentType,
+    this.startDate,
+    this.contractEndDate,
+    this.noticePeriodDays,
+    this.holidayEntitlementDays,
+    this.startTime = '11:00',
+    this.endTime = '19:00',
+    this.graceMinutes = 10,
+    this.breakMinutes = 30,
+    this.workDays = 'MON,TUE,WED,THU,FRI',
+    this.dateOfBirth,
+    this.personalEmail,
+    this.mobilePhone,
+    this.addressLine1,
+    this.addressLine2,
+    this.city,
+    this.postcode,
+    this.nationalId,
+    this.emergencyContacts = const [],
+    required this.salary,
+    this.kycVerifiedCount = 0,
+    this.kycTotalCount = 0,
+  });
+
+  factory EmployeeProfile.fromJson(Map<String, dynamic> json) {
+    final emp = json['employment'] as Map<String, dynamic>?;
+    final sched = json['schedule'] as Map<String, dynamic>?;
+    final pers = json['personal'] as Map<String, dynamic>?;
+    final kyc = json['kyc'] as Map<String, dynamic>?;
+    final contactsList = (json['emergencyContacts'] as List<dynamic>? ?? [])
+        .map((c) => EmergencyContact.fromJson(c as Map<String, dynamic>))
+        .toList();
+
+    return EmployeeProfile(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      preferredName: json['preferredName'] as String?,
+      role: json['role'] as String? ?? 'Employee',
+      employeeNumber: json['employeeNumber'] as String?,
+      workEmail: json['workEmail'] as String?,
+      departmentName: json['departmentName'] as String?,
+      officeName: json['officeName'] as String?,
+      timeZone: json['timeZone'] as String? ?? 'Asia/Karachi',
+      active: json['active'] as bool? ?? true,
+      jobTitle: emp?['jobTitle'] as String?,
+      employmentType: emp?['employmentType'] as String?,
+      startDate: emp?['startDate'] as String?,
+      contractEndDate: emp?['contractEndDate'] as String?,
+      noticePeriodDays: (emp?['noticePeriodDays'] as num?)?.toInt(),
+      holidayEntitlementDays: (emp?['holidayEntitlementDays'] as num?)?.toDouble(),
+      startTime: sched?['startTime'] as String? ?? '11:00',
+      endTime: sched?['endTime'] as String? ?? '19:00',
+      graceMinutes: (sched?['graceMinutes'] as num?)?.toInt() ?? 10,
+      breakMinutes: (sched?['breakMinutes'] as num?)?.toInt() ?? 30,
+      workDays: sched?['workDays'] as String? ?? 'MON,TUE,WED,THU,FRI',
+      dateOfBirth: pers?['dateOfBirth'] as String?,
+      personalEmail: pers?['personalEmail'] as String?,
+      mobilePhone: pers?['mobilePhone'] as String?,
+      addressLine1: pers?['addressLine1'] as String?,
+      addressLine2: pers?['addressLine2'] as String?,
+      city: pers?['city'] as String?,
+      postcode: pers?['postcode'] as String?,
+      nationalId: pers?['nationalId'] as String?,
+      emergencyContacts: contactsList,
+      salary: SalaryInfo.fromJson(json['salary'] as Map<String, dynamic>?),
+      kycVerifiedCount: (kyc?['verifiedCount'] as num?)?.toInt() ?? 0,
+      kycTotalCount: (kyc?['totalCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+

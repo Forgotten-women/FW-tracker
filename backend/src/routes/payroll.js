@@ -7,14 +7,18 @@ const express = require('express');
 const router = express.Router();
 
 const { db } = require('../db');
-const { requireUser, requirePermission, requireEmployeeAccess } = require('../middleware/auth');
+const { requirePermission, requireEmployeeAccess, requireUserOrAdminKey } = require('../middleware/auth');
 const PR = require('../domain/payroll');
 const rbac = require('../domain/rbac');
 const T = require('../util/time');
 
 // Reading pay is a sensitive permission; spec 3.2 keeps it away from managers
 // unless it has been explicitly granted.
-router.use(requireUser);
+router.use(requireUserOrAdminKey());
+
+function getActor(req) {
+  return req.auth?.actor || (req.auth?.id ? `user:${req.auth.id}` : 'admin');
+}
 
 // ---------------------------------------------------------------------------
 // Salary
@@ -44,7 +48,7 @@ router.post('/employee/:employeeId/salary',
         reason: req.body?.reason,
         currency: req.body?.currency,
         payFrequency: req.body?.payFrequency,
-        actor: `user:${req.auth.id}`,
+        actor: getActor(req),
       });
       res.status(201).json({
         status: 'SUCCESS',
@@ -103,6 +107,7 @@ router.get('/periods', requirePermission('payroll.read'), (req, res) => {
     status: 'SUCCESS',
     periods: rows.map(p => ({
       id: p.id, name: p.name, from: p.start_date, to: p.end_date, status: p.status,
+      exchangeRate: p.exchange_rate || 350.0,
       approvedBy: p.approved_by,
       approvedAt: p.approved_at ? T.displayTime(p.approved_at) : null,
     })),
@@ -115,9 +120,23 @@ router.post('/periods', requirePermission('payroll.approve'), (req, res) => {
       name: req.body?.name,
       startDate: req.body?.startDate,
       endDate: req.body?.endDate,
-      actor: `user:${req.auth.id}`,
+      exchangeRate: req.body?.exchangeRate,
+      actor: getActor(req),
     });
     res.status(201).json({ status: 'SUCCESS', period: p });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/periods/:id/exchange-rate', requirePermission('payroll.approve'), (req, res) => {
+  try {
+    const r = PR.updatePeriodExchangeRate({
+      periodId: req.params.id,
+      exchangeRate: req.body?.exchangeRate,
+      actor: getActor(req),
+    });
+    res.json({ status: 'SUCCESS', ...r });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
   }
@@ -141,7 +160,7 @@ router.get('/periods/:id/prepare', requirePermission('payroll.read'), (req, res)
 
 router.post('/periods/:id/close', requirePermission('payroll.approve'), (req, res) => {
   try {
-    res.json({ status: 'SUCCESS', ...PR.closePeriod({ periodId: req.params.id, actor: `user:${req.auth.id}` }) });
+    res.json({ status: 'SUCCESS', ...PR.closePeriod({ periodId: req.params.id, actor: getActor(req) }) });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
   }
@@ -190,7 +209,7 @@ router.post('/periods/:id/adjustments', requirePermission('payroll.read'), (req,
       calculatedAmount: req.body?.calculatedAmount,
       explanation: req.body?.explanation,
       sourceReference: req.body?.sourceReference,
-      actor: `user:${req.auth.id}`,
+      actor: getActor(req),
     });
     res.status(201).json({
       status: 'SUCCESS', adjustment: a,
@@ -211,7 +230,7 @@ router.post('/adjustments/:id/decide', requirePermission('payroll.approve'), (re
       approvedDays: req.body?.approvedDays ?? null,
       approvedAmount: req.body?.approvedAmount ?? null,
       notes: req.body?.notes,
-      actor: `user:${req.auth.id}`,
+      actor: getActor(req),
     });
     res.json({ status: 'SUCCESS', ...r });
   } catch (err) {
@@ -220,3 +239,4 @@ router.post('/adjustments/:id/decide', requirePermission('payroll.approve'), (re
 });
 
 module.exports = router;
+

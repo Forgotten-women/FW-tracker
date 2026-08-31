@@ -16,12 +16,19 @@ import type {
   FormalWarningItem,
   HrAlerts,
   KycChecklistResponse,
+  LeaverCalculation,
   LeaveRequestItem,
   LeaveTypeItem,
   NotificationItem,
   NotificationsResponse,
+  PayrollAdjustment,
+  PayrollPeriod,
+  PayrollPrepareSheet,
   PendingVerificationDoc,
   PresenceStatus,
+  SalaryRecord,
+  SalaryBlocked,
+  StarterCalculation,
   TeamCalendarLeave,
   WarningBoardSummary,
   WarningTrigger,
@@ -438,5 +445,120 @@ export const api = {
         method: 'POST',
       },
     ),
+
+  // -------------------------------------------------------------------------
+  // Payroll (2.13)
+  // -------------------------------------------------------------------------
+
+  payrollPeriods: () =>
+    request<{ status: string; periods: PayrollPeriod[] }>('/api/payroll/periods'),
+
+  createPayrollPeriod: (name: string, startDate: string, endDate: string, exchangeRate?: number) =>
+    request<{ status: string; period: PayrollPeriod }>('/api/payroll/periods', {
+      method: 'POST',
+      body: JSON.stringify({ name, startDate, endDate, exchangeRate }),
+    }),
+
+  updatePeriodExchangeRate: (periodId: string, exchangeRate: number) =>
+    request<{ status: string; exchangeRate: number }>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/exchange-rate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ exchangeRate }),
+      },
+    ),
+
+  payrollPrepare: (periodId: string) =>
+    request<{ status: string } & PayrollPrepareSheet>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/prepare`,
+    ),
+
+  closePayrollPeriod: (periodId: string) =>
+    request<{ status: string; period: PayrollPeriod }>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/close`,
+      { method: 'POST' },
+    ),
+
+  payrollAdjustments: (periodId: string) =>
+    request<{ status: string; adjustments: PayrollAdjustment[] }>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/adjustments`,
+    ),
+
+  proposePayrollAdjustment: (
+    periodId: string,
+    employeeId: string,
+    adjustmentType: string,
+    calculatedDays: number | null,
+    calculatedAmount: number,
+    explanation: string,
+  ) =>
+    request<{ status: string; adjustment: PayrollAdjustment }>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/adjustments`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ employeeId, adjustmentType, calculatedDays, calculatedAmount, explanation }),
+      },
+    ),
+
+  decidePayrollAdjustment: (
+    adjId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    notes: string,
+    approvedDays?: number | null,
+    approvedAmount?: number | null,
+  ) =>
+    request<{ status: string }>(
+      `/api/payroll/adjustments/${encodeURIComponent(adjId)}/decide`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ decision, notes, approvedDays: approvedDays ?? null, approvedAmount: approvedAmount ?? null }),
+      },
+    ),
+
+  starterPreview: (employeeId: string, from: string, to: string) =>
+    request<{ status: string; calculation: StarterCalculation }>(
+      `/api/payroll/employee/${encodeURIComponent(employeeId)}/starter?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+
+  leaverPreview: (employeeId: string, lastWorkingDate: string) =>
+    request<{ status: string; calculation: LeaverCalculation }>(
+      `/api/payroll/employee/${encodeURIComponent(employeeId)}/leaver?lastWorkingDate=${encodeURIComponent(lastWorkingDate)}`,
+    ),
+
+  employeeSalary: (employeeId: string) =>
+    request<{ status: string; onDate: string; current: SalaryRecord | SalaryBlocked; history: (SalaryRecord & { from: string; to: string | null; reason: string; setBy: string; setAt: string })[] }>(
+      `/api/payroll/employee/${encodeURIComponent(employeeId)}/salary`,
+    ),
+
+  setEmployeeSalary: (
+    employeeId: string,
+    data: {
+      amount: number;
+      effectiveFrom: string;
+      reason: string;
+      currency?: string;
+      payFrequency?: string;
+    },
+  ) =>
+    request<{ status: string; salary: SalaryRecord; message: string }>(
+      `/api/payroll/employee/${encodeURIComponent(employeeId)}/salary`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  // -------------------------------------------------------------------------
+  // Settings & Configuration
+  // -------------------------------------------------------------------------
+
+  getSettings: () =>
+    request<{ status: string; settings: Record<string, string> }>('/api/admin/settings'),
+
+  updateSetting: (key: string, value: string) =>
+    request<{ status: string; key: string; value: string }>('/api/admin/settings', {
+      method: 'POST',
+      body: JSON.stringify({ key, value }),
+    }),
 };
 

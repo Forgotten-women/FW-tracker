@@ -301,21 +301,41 @@ function leaverCalculation({ employeeId, lastWorkingDate, periodStart = null }) 
 // Periods and adjustments
 // ---------------------------------------------------------------------------
 
-function createPeriod({ name, startDate, endDate, actor }) {
+function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, actor }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     throw new Error('startDate and endDate must be YYYY-MM-DD.');
   }
   if (endDate < startDate) throw new Error('endDate must be on or after startDate.');
 
+  const rate = Number(exchangeRate) > 0 ? Number(exchangeRate) : 350.0;
   const id = 'pp_' + crypto.randomBytes(6).toString('hex');
   db.prepare(`
-    INSERT INTO payroll_periods (id, name, start_date, end_date, status, created_at)
-    VALUES (?,?,?,?, 'OPEN', ?)
-  `).run(id, name || `${startDate} to ${endDate}`, startDate, endDate, T.now());
+    INSERT INTO payroll_periods (id, name, start_date, end_date, exchange_rate, status, created_at)
+    VALUES (?,?,?,?,?, 'OPEN', ?)
+  `).run(id, name || `${startDate} to ${endDate}`, startDate, endDate, rate, T.now());
 
   audit({ actor, action: 'PAYROLL_PERIOD_CREATED', targetType: 'payroll_period', targetId: id,
-          after: { startDate, endDate } });
-  return { id, startDate, endDate, status: 'OPEN' };
+          after: { startDate, endDate, exchangeRate: rate } });
+  return { id, name: name || `${startDate} to ${endDate}`, startDate, endDate, exchangeRate: rate, status: 'OPEN' };
+}
+
+function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
+  const period = db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
+  if (!period) throw new Error('No such payroll period.');
+  if (period.status === 'CLOSED') throw new Error('Cannot change exchange rate of a closed payroll period.');
+
+  const rate = Number(exchangeRate);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new Error('A positive numeric exchange rate is required.');
+  }
+
+  db.prepare('UPDATE payroll_periods SET exchange_rate = ? WHERE id = ?').run(rate, periodId);
+  audit({
+    actor, action: 'PAYROLL_PERIOD_EXCHANGE_RATE_UPDATED', targetType: 'payroll_period', targetId: periodId,
+    before: { exchangeRate: period.exchange_rate }, after: { exchangeRate: rate },
+  });
+
+  return { periodId, exchangeRate: rate, message: 'Exchange rate updated for this period.' };
 }
 
 /**
@@ -352,7 +372,7 @@ function preparePeriod(periodId) {
     rows.push({
       employeeId: e.id,
       employeeName: e.name,
-      salary: { monthly: salary.monthly, daily: salary.daily, annual: salary.annual },
+      salary: { monthly: salary.monthly, daily: salary.daily, annual: salary.annual, currency: salary.currency || 'GBP' },
       isStarter: starter.applicable && !starter.blocked,
       starter: starter.applicable && !starter.blocked ? {
         startDate: starter.startDate,
@@ -382,6 +402,7 @@ function preparePeriod(periodId) {
     period: {
       id: period.id, name: period.name,
       from: period.start_date, to: period.end_date,
+      exchangeRate: period.exchange_rate || 350.0,
       status: period.status,
     },
     employees: rows,
@@ -488,5 +509,5 @@ function closePeriod({ periodId, actor }) {
 module.exports = {
   rates, money, salaryAt, setSalary, salaryHistoryFor,
   eligibleWorkingDays, starterCalculation, leaverCalculation,
-  createPeriod, preparePeriod, proposeAdjustment, decideAdjustment, closePeriod,
+  createPeriod, updatePeriodExchangeRate, preparePeriod, proposeAdjustment, decideAdjustment, closePeriod,
 };
