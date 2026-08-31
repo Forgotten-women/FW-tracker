@@ -1,5 +1,3 @@
-// Document vault API. Spec sections 5 and 27.
-
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
@@ -10,18 +8,74 @@ const {
   requireUserOrAdminKey, requireEmployeeAccess, requireDevice,
 } = require('../middleware/auth');
 const docs = require('../domain/documents');
+const storage = require('../domain/storage');
 const rbac = require('../domain/rbac');
 
-// In memory, size-capped: the buffer is written to the private store and then
-// dropped. 15 MB covers a scanned multi-page contract without inviting abuse.
+// In memory, size-capped to 15 MB
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 1 },
 });
 
 // ---------------------------------------------------------------------------
-// HR / manager
+// Document Types
 // ---------------------------------------------------------------------------
+
+router.get('/types', (req, res) => {
+  res.json({
+    status: 'SUCCESS',
+    types: docs.listDocumentTypes(),
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HR / Admin Management & Verification Queue
+// ---------------------------------------------------------------------------
+
+router.get('/pending-verification', requireUserOrAdminKey('document.read'), (req, res) => {
+  res.json({
+    status: 'SUCCESS',
+    pendingDocuments: docs.listPendingVerification(),
+  });
+});
+
+router.post('/:documentId/verify', requireUserOrAdminKey('document.write'), (req, res) => {
+  try {
+    const result = docs.verifyDocument({
+      documentId: req.params.documentId,
+      verifiedBy: req.auth.actor,
+      actor: req.auth.actor,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/:documentId/reject', requireUserOrAdminKey('document.write'), (req, res) => {
+  try {
+    const result = docs.rejectDocument({
+      documentId: req.params.documentId,
+      rejectionReason: req.body?.reason || req.body?.rejectionReason,
+      rejectedBy: req.auth.actor,
+      actor: req.auth.actor,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.get('/employee/:employeeId/kyc-checklist',
+  requireUserOrAdminKey('document.read'), requireEmployeeAccess(),
+  (req, res) => {
+    try {
+      const checklist = docs.kycChecklistFor(req.params.employeeId);
+      res.json({ status: 'SUCCESS', ...checklist });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
 
 router.get('/employee/:employeeId',
   requireUserOrAdminKey('document.read'), requireEmployeeAccess(),
@@ -35,10 +89,10 @@ router.get('/employee/:employeeId',
 router.post('/employee/:employeeId',
   requireUserOrAdminKey('document.write'), requireEmployeeAccess(),
   upload.single('file'),
-  (req, res) => {
+  async (req, res) => {
     if (!req.file) return res.status(400).json({ status: 'ERROR', message: 'A file is required (field name "file").' });
     try {
-      const r = docs.upload({
+      const r = await docs.upload({
         employeeId: req.params.employeeId,
         documentTypeId: req.body?.documentTypeId,
         title: req.body?.title,
@@ -53,8 +107,7 @@ router.post('/employee/:employeeId',
     }
   });
 
-// Exchanges the caller's permission for a one-minute download token, so the
-// link that reaches the browser is short-lived and single-use.
+// Exchanges the caller's permission for a one-minute download token
 router.post('/:documentId/download-token', requireUserOrAdminKey('document.read'), (req, res) => {
   const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc) return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
@@ -81,21 +134,59 @@ router.post('/:documentId/download-token', requireUserOrAdminKey('document.read'
   }
 });
 
-// The actual download. The token IS the authorisation, so this route takes no
-// admin key - but the token is single-use, one-minute, and was only issued to
-// someone who held the permission.
-router.get('/download/:token', (req, res) => {
+// The actual download via token
+router.get('/download/:token', async (req, res) => {
   const file = docs.redeemDownloadToken(req.params.token, { ip: req.ip });
   if (!file) {
     return res.status(404).json({ status: 'ERROR', message: 'This download link has expired or was already used.' });
   }
-  res.setHeader('Content-Type', file.mimeType);
-  res.setHeader('Content-Disposition', `attachment; filename="${file.filename.replace(/"/g, '')}"`);
-  fs.createReadStream(file.path).pipe(res);
+
+  res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${(file.filename || 'document').replace(/"/g, '')}"`);
+
+  if (file.path && fs.existsSync(file.path)) {
+    return fs.createReadStream(file.path).pipe(res);
+  }
+
+  try {
+    const buf = await storage.getFileBuffer(file.path);
+    res.setHeader('Content-Length', buf.length);
+    res.send(buf);
+  } catch (err) {
+    res.status(404).json({ status: 'ERROR', message: 'File not found in storage.' });
+  }
 });
 
 router.get('/:documentId/access-log', requireUserOrAdminKey('audit.read'), (req, res) => {
   res.json({ status: 'SUCCESS', log: docs.accessLog(req.params.documentId) });
+});
+
+router.delete('/:documentId', requireUserOrAdminKey('document.write'), async (req, res) => {
+  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  if (!doc) return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
+  if (!rbac.canAccessEmployee(req.auth, doc.employee_id)) {
+    return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
+  }
+  try {
+    const result = await docs.deleteDocument({ documentId: req.params.documentId, actor: req.auth.actor });
+    res.json({ status: 'SUCCESS', ...result });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/:documentId/delete', requireUserOrAdminKey('document.write'), async (req, res) => {
+  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  if (!doc) return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
+  if (!rbac.canAccessEmployee(req.auth, doc.employee_id)) {
+    return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
+  }
+  try {
+    const result = await docs.deleteDocument({ documentId: req.params.documentId, actor: req.auth.actor });
+    res.json({ status: 'SUCCESS', ...result });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 router.post('/:documentId/archive', requireUserOrAdminKey('document.write'), (req, res) => {
@@ -113,11 +204,40 @@ router.post('/:documentId/archive', requireUserOrAdminKey('document.write'), (re
 });
 
 // ---------------------------------------------------------------------------
-// Employee (device token) - own documents only
+// Employee Mobile App (Device Token)
 // ---------------------------------------------------------------------------
 
+router.get('/mine/kyc-checklist', requireDevice, (req, res) => {
+  try {
+    const checklist = docs.kycChecklistFor(req.auth.employeeId);
+    res.json({ status: 'SUCCESS', ...checklist });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/mine/upload', requireDevice, upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ status: 'ERROR', message: 'A file is required (field name "file").' });
+  }
+  try {
+    const r = await docs.upload({
+      employeeId: req.auth.employeeId,
+      documentTypeId: req.body?.documentTypeId,
+      title: req.body?.title,
+      effectiveDate: req.body?.effectiveDate || null,
+      expiryDate: req.body?.expiryDate || null,
+      file: req.file,
+      actor: `employee:${req.auth.employeeId}`,
+      status: 'PENDING_VERIFICATION',
+    });
+    res.status(201).json({ status: 'SUCCESS', ...r });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 router.get('/mine', requireDevice, (req, res) => {
-  // An employee may see their own permitted documents. Spec 3.1.
   const permitted = new Set(['document.read', 'self.document.read']);
   res.json({ status: 'SUCCESS', documents: docs.listFor(req.auth.employeeId, permitted) });
 });
@@ -127,9 +247,6 @@ router.post('/mine/:documentId/download-token', requireDevice, (req, res) => {
   if (!doc || doc.employee_id !== req.auth.employeeId) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }
-  // An employee may open their own normal and sensitive documents, but not
-  // their highly-confidential or medical records through the app - the same
-  // filter the /mine list uses, so the two never disagree.
   const employeePermitted = new Set(['document.read', 'self.document.read']);
   const required = docs.requiredReadPermission(req.params.documentId);
   if (!employeePermitted.has(required)) {
@@ -149,6 +266,32 @@ router.post('/mine/:documentId/acknowledge', requireDevice, (req, res) => {
   try {
     const r = docs.acknowledge({ documentId: req.params.documentId, employeeId: req.auth.employeeId });
     res.json({ status: 'SUCCESS', ...r });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.delete('/mine/:documentId', requireDevice, async (req, res) => {
+  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  if (!doc || doc.employee_id !== req.auth.employeeId) {
+    return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
+  }
+  try {
+    const result = await docs.deleteDocument({ documentId: req.params.documentId, actor: `employee:${req.auth.employeeId}` });
+    res.json({ status: 'SUCCESS', ...result });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/mine/:documentId/delete', requireDevice, async (req, res) => {
+  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  if (!doc || doc.employee_id !== req.auth.employeeId) {
+    return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
+  }
+  try {
+    const result = await docs.deleteDocument({ documentId: req.params.documentId, actor: `employee:${req.auth.employeeId}` });
+    res.json({ status: 'SUCCESS', ...result });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
   }

@@ -1,12 +1,8 @@
-// Bottom-navigation shell for the enrolled employee. Spec section 32 lists the
-// mobile navigation as Home, Attendance, Leave, Warnings, Documents, Profile,
-// Notifications. The three built so far - Home (attendance), Leave and Warnings
-// - are the ones with backend behind them; the rest are placeholders for later
-// phases rather than dead tabs.
-
 import 'package:flutter/material.dart';
 
+import '../services/api_client.dart';
 import '../theme.dart';
+import 'documents_screen.dart';
 import 'home_screen.dart';
 import 'leave_screen.dart';
 import 'warnings_screen.dart';
@@ -21,16 +17,22 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  final _api = ApiClient();
+
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    // IndexedStack keeps each tab's state alive when switching, so the Home
-    // tab's presence polling is not torn down every time the employee checks
-    // their leave.
+    // IndexedStack keeps each tab's state alive when switching
     final tabs = [
       HomeScreen(onSignedOut: widget.onSignedOut),
       const LeaveScreen(),
       const WarningsScreen(),
+      DocumentsScreen(api: _api),
     ];
 
     return Scaffold(
@@ -55,8 +57,14 @@ class _MainShellState extends State<MainShell> {
             selectedIcon: Icon(Icons.gavel, color: AppColors.teal),
             label: 'Warnings',
           ),
+          NavigationDestination(
+            icon: Icon(Icons.folder_outlined),
+            selectedIcon: Icon(Icons.folder, color: AppColors.teal),
+            label: 'Documents',
+          ),
         ],
       ),
     );
   }
 }
+

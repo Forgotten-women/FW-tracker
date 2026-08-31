@@ -16,6 +16,7 @@
     "user:create": "node scripts/create-user.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

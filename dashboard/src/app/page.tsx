@@ -16,21 +16,22 @@ import {
 } from '@/components/panels';
 import { HrAlertsPanel } from '@/components/HrAlerts';
 import { LeaveManagementPanel } from '@/components/LeaveManagementPanel';
+import DocumentVaultPanel from '@/components/DocumentVaultPanel';
 import { WarningBoard } from '@/components/WarningBoard';
+
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, AttendanceCorrection, EnrollmentCode } from '@/lib/types';
 
+type DashboardTab = 'overview' | 'attendance' | 'leave' | 'disciplinary' | 'documents' | 'workforce';
+
 export default function DashboardPage() {
+  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [gateError, setGateError] = useState<string>('');
   const [pairing, setPairing] = useState<(EnrollmentCode & { name: string }) | null>(null);
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
 
-  // The admin key lives in sessionStorage, which is an external store rather
-  // than React state. Subscribing to it directly avoids the extra render pass
-  // that reading it in an effect and calling setState caused, and keeps the
-  // server snapshot honest: during SSR there is no sessionStorage, so nothing
-  // is unlocked.
+  // The admin key lives in sessionStorage
   const unlocked = useSyncExternalStore(subscribeToKey, () => Boolean(getKey()), () => false);
 
   const lock = useCallback((message: string) => {
@@ -91,7 +92,14 @@ export default function DashboardPage() {
   };
 
   if (unlocked === undefined) {
-    return <div className="grid min-h-screen place-items-center text-sm text-dim">Loading…</div>;
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#0F172A] text-sm text-slate-400">
+        <div className="flex items-center gap-3">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+          <span>Authenticating HR Dashboard…</span>
+        </div>
+      </div>
+    );
   }
 
   if (!unlocked) {
@@ -100,36 +108,172 @@ export default function DashboardPage() {
         initialError={gateError}
         onUnlocked={() => {
           setGateError('');
-          // Gate has already written the key via setKey(), which notifies the
-          // store subscribers - so unlocked flips on its own.
           notifyKeyChanged();
         }}
       />
     );
   }
 
+  const pendingCorrectionsCount = corrections.filter(
+    (c) => c.status === 'PENDING',
+  ).length;
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-[#090D16] text-slate-100 selection:bg-indigo-500 selection:text-white">
+      {/* Global Header */}
       <Header summary={summary} connection={connection} onLock={() => lock('')} />
+
+      {/* Primary Navigation Tabs */}
+      <nav className="sticky top-0 z-30 border-b border-slate-800/80 bg-[#0F172A]/90 px-6 backdrop-blur-md">
+        <div className="flex items-center justify-between overflow-x-auto">
+          <div className="flex items-center gap-1 py-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('overview')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'overview'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              </svg>
+              <span>Overview</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('attendance')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'attendance'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>Time & Attendance</span>
+              {pendingCorrectionsCount > 0 && (
+                <span className="ml-1 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                  {pendingCorrectionsCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('leave')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'leave'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span>Leave & Holidays</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('disciplinary')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'disciplinary'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>Disciplinary & Lateness</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('documents')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'documents'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span>Document Vault & KYC</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('workforce')}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
+                activeTab === 'workforce'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span>Workforce Directory</span>
+            </button>
+          </div>
+
+          <div className="hidden items-center gap-3 md:flex">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 border border-emerald-500/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Office Beacon Active
+            </span>
+          </div>
+        </div>
+      </nav>
 
       {summary && <WarningBar summary={summary} />}
 
       {error && (
-        <div className="mx-6 mb-4 rounded-lg border border-danger bg-danger-dim px-4 py-3 text-xs">
-          {error} — showing the last successful load.
+        <div className="mx-6 mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
+          ⚠️ {error} — displaying cached state.
         </div>
       )}
 
-      <main className="px-6 pb-10">
+      <main className="px-6 py-6">
         {!summary ? (
-          <p className="py-10 text-center text-sm text-dim">Loading dashboard…</p>
+          <div className="flex h-64 flex-col items-center justify-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+            <p className="text-sm text-slate-400">Loading workforce data…</p>
+          </div>
         ) : (
           <>
-            <Stats summary={summary} />
+            {/* 1. OVERVIEW TAB */}
+            {activeTab === 'overview' && (
+              <div className="flex flex-col gap-6">
+                <Stats summary={summary} />
 
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[2fr_1fr]">
-              <div className="flex min-w-0 flex-col gap-5">
-                <PresenceGrid summary={summary} />
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
+                  <div className="flex min-w-0 flex-col gap-6">
+                    <PresenceGrid summary={summary} />
+                    <AttendanceTable
+                      rows={summary.todayAttendance}
+                      dateKey={summary.currentDateKey}
+                      onExport={exportCsv}
+                    />
+                  </div>
+
+                  <div className="flex min-w-0 flex-col gap-6">
+                    <HrAlertsPanel />
+                    <ActivityFeed movements={summary.recentMovements} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 2. TIME & ATTENDANCE TAB */}
+            {activeTab === 'attendance' && (
+              <div className="flex flex-col gap-6">
                 <AttendanceTable
                   rows={summary.todayAttendance}
                   dateKey={summary.currentDateKey}
@@ -140,20 +284,61 @@ export default function DashboardPage() {
                   onDecide={decideCorrection}
                   onRefresh={loadCorrections}
                 />
-                <WarningBoard />
+              </div>
+            )}
+
+            {/* 3. LEAVE & HOLIDAYS TAB */}
+            {activeTab === 'leave' && (
+              <div className="flex flex-col gap-6">
                 <LeaveManagementPanel />
               </div>
+            )}
 
-              <div className="flex min-w-0 flex-col gap-5">
+            {/* 4. DISCIPLINARY & LATENESS TAB */}
+            {activeTab === 'disciplinary' && (
+              <div className="flex flex-col gap-6">
+                <WarningBoard />
+              </div>
+            )}
+
+            {/* 5. DOCUMENT VAULT & KYC TAB */}
+            {activeTab === 'documents' && (
+              <div className="flex flex-col gap-6">
+                <DocumentVaultPanel />
+              </div>
+            )}
+
+            {/* 6. WORKFORCE DIRECTORY TAB */}
+            {activeTab === 'workforce' && (
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
                 <TeamPanel
                   employees={employees}
                   onAdd={addEmployee}
                   onPair={pairDevice}
                 />
-                <HrAlertsPanel />
-                <ActivityFeed movements={summary.recentMovements} />
+                <div className="flex flex-col gap-6">
+                  <div className="rounded-2xl border border-slate-800 bg-[#141E33] p-6 shadow-xl">
+                    <h3 className="text-base font-bold text-white">Staff Management Guide</h3>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                      Generate 6-digit pairing codes to onboard staff devices onto the Office Tracker system.
+                      Once enrolled, their mobile presence will automatically synchronize via office beacons and Wi-Fi sniffer sensors.
+                    </p>
+                    <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/10 p-4">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300">
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Automatic Audit Compliance
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        All device revocations, role adjustments, and KYC verifications are immutably logged with actor timestamps.
+                      </p>
+                    </div>
+                  </div>
+                  <ActivityFeed movements={summary.recentMovements} />
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </main>

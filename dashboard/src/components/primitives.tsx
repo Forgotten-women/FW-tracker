@@ -44,7 +44,7 @@ export function Panel({
   actions,
   children,
 }: {
-  title: string;
+  title: React.ReactNode;
   note?: string;
   actions?: React.ReactNode;
   children: React.ReactNode;

@@ -354,5 +354,78 @@ void main() {
       expect(req.isPending, isTrue);
       expect(req.isApproved, isFalse);
     });
+
+    test('EmployeeDocument and KycChecklist parse full KYC and cloud storage payload (Spec 5, 27)', () {
+      final doc = EmployeeDocument.fromJson({
+        'id': 'doc_abc123',
+        'type': 'National Identity Card (CNIC)',
+        'typeId': 'nic_card',
+        'title': 'CNIC Scan 2026.pdf',
+        'version': 2,
+        'filename': 'cnic_front_back.pdf',
+        'sizeBytes': 2048500,
+        'mimeType': 'application/pdf',
+        'storageProvider': 'supabase',
+        'confidentiality': 'highly_confidential',
+        'verificationStatus': 'VERIFIED',
+        'verifiedBy': 'admin_usr',
+        'verifiedAt': '2:30 PM',
+        'effectiveDate': '2026-01-01',
+        'expiryDate': '2030-01-01',
+        'uploadedAt': '10:00 AM',
+      });
+
+      expect(doc.id, 'doc_abc123');
+      expect(doc.typeId, 'nic_card');
+      expect(doc.version, 2);
+      expect(doc.storageProvider, 'supabase');
+      expect(doc.isVerified, isTrue);
+      expect(doc.isPending, isFalse);
+      expect(doc.expiryDate, '2030-01-01');
+
+      final kyc = KycChecklist.fromJson({
+        'employeeId': 'emp_8619',
+        'employeeName': 'Abdullah Shahid',
+        'employeeRole': 'Engineering',
+        'overallKycStatus': 'PENDING_REVIEW',
+        'completionPercentage': 80,
+        'summary': {
+          'totalMandatory': 5,
+          'verifiedCount': 4,
+          'pendingCount': 1,
+          'rejectedCount': 0,
+          'missingCount': 0,
+        },
+        'mandatoryChecklist': [
+          {
+            'typeId': 'cv_resume',
+            'name': 'CV / Resume',
+            'description': 'Up to date CV',
+            'isMandatory': true,
+            'status': 'VERIFIED',
+            'filename': 'cv.pdf',
+          },
+          {
+            'typeId': 'utility_bill',
+            'name': 'Home Utility Bill',
+            'description': 'Recent electricity bill',
+            'isMandatory': true,
+            'status': 'PENDING_VERIFICATION',
+            'filename': 'bill.jpg',
+          }
+        ],
+        'optionalChecklist': [],
+      });
+
+      expect(kyc.employeeId, 'emp_8619');
+      expect(kyc.completionPercentage, 80);
+      expect(kyc.totalMandatory, 5);
+      expect(kyc.verifiedCount, 4);
+      expect(kyc.pendingCount, 1);
+      expect(kyc.mandatoryChecklist.length, 2);
+      expect(kyc.mandatoryChecklist.first.isVerified, isTrue);
+      expect(kyc.mandatoryChecklist.last.isPending, isTrue);
+    });
   });
 }
+

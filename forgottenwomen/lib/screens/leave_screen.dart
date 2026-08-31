@@ -1,9 +1,4 @@
 // Employee leave screen. Spec sections 14, 15 and 19.4.
-//
-// Shows the five balance figures spec 19.4 asks for, the list of requests, and
-// a booking flow that previews the cost and shortfall BEFORE submitting - spec
-// 15 is explicit that those figures appear up front, so nobody discovers a
-// shortfall after the fact.
 
 import 'package:flutter/material.dart';
 
@@ -61,7 +56,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
     final booked = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surfaceDark,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -74,14 +69,21 @@ class _LeaveScreenState extends State<LeaveScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancel this request?'),
-        content: Text('${r.type}: ${r.from} to ${r.to}'),
+        backgroundColor: AppColors.surfaceDark,
+        title: const Text('Cancel Request?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Are you sure you want to cancel this leave application (${r.type}: ${r.from} to ${r.to})?',
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep', style: TextStyle(color: AppColors.textMuted)),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
-            child: const Text('Cancel request'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Cancel Request'),
           ),
         ],
       ),
@@ -91,42 +93,63 @@ class _LeaveScreenState extends State<LeaveScreen> {
       await _api.cancelLeave(r.id);
       _load();
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: AppColors.danger));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Leave')),
+      backgroundColor: AppColors.bgDark,
+      appBar: AppBar(
+        backgroundColor: AppColors.surfaceDark,
+        elevation: 0,
+        title: const Text('Leave & Time Off', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.white)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white70),
+            onPressed: _loading ? null : _load,
+          ),
+        ],
+      ),
       floatingActionButton: (_balance != null && !_balance!.blocked)
           ? FloatingActionButton.extended(
               onPressed: _openBooking,
-              backgroundColor: AppColors.teal,
-              icon: const Icon(Icons.add),
-              label: const Text('Book leave'),
+              backgroundColor: AppColors.primary,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text('Apply for Leave', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             )
           : null,
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.teal))
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : RefreshIndicator(
-              color: AppColors.teal,
+              color: AppColors.primary,
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
                 children: [
                   if (_error != null) _errorBanner(_error!),
                   if (_balance != null) _balanceCard(_balance!),
-                  const SizedBox(height: 20),
-                  const Text('Your requests',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'LEAVE APPLICATIONS & HISTORY',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+                  ),
+                  const SizedBox(height: 10),
                   if (_requests.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(
-                        child: Text('No leave requests yet.',
-                            style: TextStyle(color: Colors.grey)),
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceDark,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'No leave requests on record.\nTap "Apply for Leave" to submit a holiday or leave request.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+                        ),
                       ),
                     )
                   else
@@ -141,32 +164,30 @@ class _LeaveScreenState extends State<LeaveScreen> {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.red.shade50,
+          color: AppColors.danger.withOpacity(0.15),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.red.shade200),
+          border: Border.all(color: AppColors.danger.withOpacity(0.4)),
         ),
-        child: Text(msg, style: TextStyle(color: Colors.red.shade800, fontSize: 12)),
+        child: Text(msg, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
       );
 
   Widget _balanceCard(LeaveBalance b) {
-    // Under an anniversary-based year, an employee with no start date has no
-    // computable balance. Say so plainly rather than showing zeroes.
     if (b.blocked) {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.amber.shade50,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.amber.shade200),
+          color: AppColors.amber.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.amber.withOpacity(0.4)),
         ),
         child: Row(
           children: [
-            Icon(Icons.info_outline, color: Colors.amber.shade800),
-            const SizedBox(width: 10),
+            const Icon(Icons.info_outline, color: AppColors.amber),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 b.blockedMessage ?? 'Your leave balance is not available yet.',
-                style: TextStyle(fontSize: 12, color: Colors.amber.shade900),
+                style: const TextStyle(fontSize: 12, color: AppColors.amber, height: 1.4),
               ),
             ),
           ],
@@ -178,42 +199,88 @@ class _LeaveScreenState extends State<LeaveScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AppColors.teal, AppColors.tealDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${d(b.available)} days available',
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text(
+                  'AVAILABLE LEAVE BALANCE',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (b.yearFrom != null)
+                Text(
+                  '${b.yearFrom} → ${b.yearTo}',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                d(b.available),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'days available',
+                style: TextStyle(color: AppColors.teal, fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+            ],
+          ),
           if (b.isNegative)
             const Padding(
               padding: EdgeInsets.only(top: 4),
-              child: Text('This is a negative balance, approved in advance.',
-                  style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
+              child: Text(
+                '⚠️ Negative balance: Leave taken in advance of monthly accruals.',
+                style: TextStyle(color: AppColors.amber, fontSize: 11),
+              ),
             ),
           const SizedBox(height: 16),
-          const Divider(color: Colors.white24),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _metric('Entitlement', d(b.annualEntitlement)),
-              _metric('Accrued', d(b.accrued)),
-              _metric('Taken', d(b.taken)),
-              _metric('Booked', d(b.booked)),
-            ],
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.bgDark,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _metric('Entitlement', '${d(b.annualEntitlement)}d'),
+                Container(width: 1, height: 26, color: AppColors.border),
+                _metric('Accrued', '${d(b.accrued)}d'),
+                Container(width: 1, height: 26, color: AppColors.border),
+                _metric('Taken', '${d(b.taken)}d'),
+                Container(width: 1, height: 26, color: AppColors.border),
+                _metric('Booked', '${d(b.booked)}d'),
+              ],
+            ),
           ),
-          if (b.yearFrom != null) ...[
-            const SizedBox(height: 12),
-            Text('Holiday year ${b.yearFrom} to ${b.yearTo}',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
-          ],
         ],
       ),
     );
@@ -221,55 +288,65 @@ class _LeaveScreenState extends State<LeaveScreen> {
 
   Widget _metric(String label, String value) => Column(
         children: [
-          Text(value,
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-          Text(label,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
+          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
         ],
       );
 
   Widget _requestRow(LeaveRequest r) {
-    final (color, label) = switch (r.status) {
-      'APPROVED' => (Colors.green, 'Approved'),
-      'REJECTED' => (Colors.red, 'Rejected'),
-      'CANCELLED' => (Colors.grey, 'Cancelled'),
-      _ => (Colors.orange, 'Pending'),
+    final (Color color, String label) = switch (r.status) {
+      'APPROVED' => (AppColors.teal, 'Approved'),
+      'REJECTED' => (AppColors.danger, 'Rejected'),
+      'CANCELLED' => (AppColors.textMuted, 'Cancelled'),
+      _ => (AppColors.amber, 'Pending Review'),
     };
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
         children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.event_note, color: color, size: 18),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${r.type} · ${r.days.toStringAsFixed(r.days == r.days.roundToDouble() ? 0 : 2)} day(s)',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                Text('${r.from} to ${r.to}',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+                Text(
+                  '${r.type} · ${r.days.toStringAsFixed(r.days == r.days.roundToDouble() ? 0 : 1)} day(s)',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                ),
+                const SizedBox(height: 2),
+                Text('${r.from} → ${r.to}', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
               ],
             ),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
+              color: color.withOpacity(0.15),
               borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: color.withOpacity(0.5)),
             ),
-            child: Text(label,
-                style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+            child: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
           ),
           if (r.isPending || r.isApproved)
             IconButton(
-              icon: const Icon(Icons.close, size: 18),
-              color: Colors.grey,
+              icon: const Icon(Icons.close, size: 16),
+              color: AppColors.textMuted,
               onPressed: () => _cancel(r),
               tooltip: 'Cancel',
             ),
@@ -347,8 +424,6 @@ class _BookingSheetState extends State<_BookingSheet> {
     _refreshPreview();
   }
 
-  // Previews the cost as soon as there is enough to compute it - spec 15 wants
-  // the figures visible before the request is sent.
   Future<void> _refreshPreview() async {
     if (_type == null || _from == null || _to == null) return;
     try {
@@ -389,60 +464,74 @@ class _BookingSheetState extends State<_BookingSheet> {
       child: _loadingTypes
           ? const Padding(
               padding: EdgeInsets.all(40),
-              child: Center(child: CircularProgressIndicator(color: AppColors.teal)),
+              child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
             )
           : Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Book leave',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Apply for Leave', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppColors.textMuted),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 16),
+                const Text('Leave Category', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
                 DropdownButtonFormField<LeaveType>(
-                  initialValue: _type,
-                  decoration: const InputDecoration(labelText: 'Type', border: OutlineInputBorder()),
+                  value: _type,
+                  dropdownColor: AppColors.surfaceDark,
+                  decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
                   items: _types
-                      .map((t) => DropdownMenuItem(value: t, child: Text(t.name)))
+                      .map((t) => DropdownMenuItem(value: t, child: Text(t.name, style: const TextStyle(color: Colors.white, fontSize: 13))))
                       .toList(),
                   onChanged: (t) {
                     setState(() => _type = t);
                     _refreshPreview();
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 Row(
                   children: [
-                    Expanded(child: _dateField('From', _from, () => _pick(isStart: true))),
+                    Expanded(child: _dateField('From Date', _from, () => _pick(isStart: true))),
                     const SizedBox(width: 12),
-                    Expanded(child: _dateField('To', _to, () => _pick(isStart: false))),
+                    Expanded(child: _dateField('To Date', _to, () => _pick(isStart: false))),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
+                const Text('Reason / Explanation', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
                 TextField(
                   controller: _reason,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    labelText: _type?.requiresEvidence == true
-                        ? 'Reason (required for this type)'
-                        : 'Reason (optional)',
-                    border: const OutlineInputBorder(),
+                    hintText: _type?.requiresEvidence == true ? 'Reason (required)' : 'Reason (optional)',
+                    hintStyle: const TextStyle(color: Colors.white30),
                   ),
                   maxLines: 2,
                 ),
                 if (_preview != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   _previewCard(_preview!),
                 ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Text(_error!, style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
+                  Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
                 ],
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
                 SizedBox(
-                  height: 48,
+                  height: 46,
                   child: FilledButton(
                     onPressed: (_submitting || _preview == null) ? null : _submit,
-                    style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
-                    child: Text(_submitting ? 'Submitting…' : 'Submit request'),
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+                    child: _submitting
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Submit Application to HR', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -450,35 +539,56 @@ class _BookingSheetState extends State<_BookingSheet> {
     );
   }
 
-  Widget _dateField(String label, DateTime? value, VoidCallback onTap) => InkWell(
-        onTap: onTap,
-        child: InputDecorator(
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-          child: Text(value == null ? 'Select' : _fmt(value),
-              style: TextStyle(color: value == null ? Colors.grey : Colors.black87)),
-        ),
+  Widget _dateField(String label, DateTime? value, VoidCallback onTap) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.bgDark,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(value == null ? 'Select Date' : _fmt(value), style: TextStyle(color: value == null ? AppColors.textMuted : Colors.white, fontSize: 13)),
+                  const Icon(Icons.calendar_today, size: 14, color: AppColors.primaryLight),
+                ],
+              ),
+            ),
+          ),
+        ],
       );
 
   Widget _previewCard(LeavePreview p) {
     final over = p.exceedsBalance;
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: over ? Colors.amber.shade50 : Colors.teal.shade50,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: over ? Colors.amber.shade300 : Colors.teal.shade100),
+        color: over ? AppColors.amber.withOpacity(0.15) : AppColors.teal.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: over ? AppColors.amber.withOpacity(0.4) : AppColors.teal.withOpacity(0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${p.requestedDays.toStringAsFixed(p.requestedDays == p.requestedDays.roundToDouble() ? 0 : 2)} working day(s)',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-          Text('Balance after approval: ${p.projectedAvailable.toStringAsFixed(2)} days',
-              style: const TextStyle(fontSize: 12)),
+          Text(
+            '${p.requestedDays.toStringAsFixed(p.requestedDays == p.requestedDays.roundToDouble() ? 0 : 1)} working day(s) requested',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Projected Available Balance: ${p.projectedAvailable.toStringAsFixed(2)} days',
+            style: TextStyle(fontSize: 12, color: over ? AppColors.amber : AppColors.teal),
+          ),
           if (p.warning != null) ...[
             const SizedBox(height: 6),
-            Text(p.warning!,
-                style: TextStyle(fontSize: 11, color: Colors.amber.shade900)),
+            Text(p.warning!, style: const TextStyle(fontSize: 11, color: AppColors.amber)),
           ],
         ],
       ),

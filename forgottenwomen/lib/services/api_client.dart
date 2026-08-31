@@ -320,6 +320,63 @@ class ApiClient {
         _decode(res);
       });
 
+  // --- documents & KYC (spec 5, 27) ---------------------------------------
+
+  Future<KycChecklist> myKycChecklist() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/documents/mine/kyc-checklist'), headers: await _authHeaders())
+            .timeout(timeout);
+        return KycChecklist.fromJson(_decode(res));
+      });
+
+  Future<List<EmployeeDocument>> myDocuments() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/documents/mine'), headers: await _authHeaders())
+            .timeout(timeout);
+        final body = _decode(res);
+        return (body['documents'] as List<dynamic>? ?? [])
+            .map((d) => EmployeeDocument.fromJson(d as Map<String, dynamic>))
+            .toList();
+      });
+
+  Future<Map<String, dynamic>> uploadDocument({
+    required String documentTypeId,
+    required String title,
+    required List<int> fileBytes,
+    required String filename,
+    String? expiryDate,
+  }) =>
+      _guard(() async {
+        final uri = await _uri('/api/documents/mine/upload');
+        final request = http.MultipartRequest('POST', uri);
+        final token = await _store.readToken();
+        if (token != null) {
+          request.headers['Authorization'] = 'Bearer $token';
+        }
+        request.fields['documentTypeId'] = documentTypeId;
+        request.fields['title'] = title;
+        if (expiryDate != null && expiryDate.isNotEmpty) {
+          request.fields['expiryDate'] = expiryDate;
+        }
+        request.files.add(http.MultipartFile.fromBytes(
+          'file',
+          fileBytes,
+          filename: filename,
+        ));
+
+        final streamed = await request.send().timeout(timeout);
+        final res = await http.Response.fromStream(streamed);
+        return _decode(res);
+      });
+
+  /// Deletes an uploaded document owned by this employee.
+  Future<void> deleteMyDocument(String documentId) => _guard(() async {
+        final res = await _http
+            .delete(await _uri('/api/documents/mine/$documentId'), headers: await _authHeaders())
+            .timeout(timeout);
+        _decode(res);
+      });
+
   /// Unauthenticated reachability check, used by the settings screen so the
   /// user can tell a wrong address apart from a rejected credential.
   Future<bool> health() async {
@@ -335,3 +392,4 @@ class ApiClient {
 
   void dispose() => _http.close();
 }
+

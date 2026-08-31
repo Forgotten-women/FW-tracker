@@ -234,3 +234,174 @@ class WarningView {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Document Vault & KYC
+// ---------------------------------------------------------------------------
+
+class EmployeeDocument {
+  final String id;
+  final String type;
+  final String typeId;
+  final String title;
+  final int version;
+  final String? filename;
+  final int sizeBytes;
+  final String? mimeType;
+  final String storageProvider;
+  final String confidentiality;
+  final String verificationStatus; // VERIFIED | PENDING_VERIFICATION | REJECTED
+  final String? verifiedBy;
+  final String? verifiedAt;
+  final String? rejectionReason;
+  final String? effectiveDate;
+  final String? expiryDate;
+  final String uploadedAt;
+  final bool acknowledgementRequired;
+  final String? acknowledgedAt;
+
+  const EmployeeDocument({
+    required this.id,
+    required this.type,
+    required this.typeId,
+    required this.title,
+    required this.version,
+    this.filename,
+    this.sizeBytes = 0,
+    this.mimeType,
+    this.storageProvider = 'local',
+    this.confidentiality = 'normal',
+    this.verificationStatus = 'VERIFIED',
+    this.verifiedBy,
+    this.verifiedAt,
+    this.rejectionReason,
+    this.effectiveDate,
+    this.expiryDate,
+    required this.uploadedAt,
+    this.acknowledgementRequired = false,
+    this.acknowledgedAt,
+  });
+
+  factory EmployeeDocument.fromJson(Map<String, dynamic> json) => EmployeeDocument(
+        id: json['id'] as String? ?? '',
+        type: json['type'] as String? ?? '',
+        typeId: json['typeId'] as String? ?? '',
+        title: json['title'] as String? ?? '',
+        version: (json['version'] as num?)?.toInt() ?? 1,
+        filename: json['filename'] as String?,
+        sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
+        mimeType: json['mimeType'] as String?,
+        storageProvider: json['storageProvider'] as String? ?? 'local',
+        confidentiality: json['confidentiality'] as String? ?? 'normal',
+        verificationStatus: json['verificationStatus'] as String? ?? 'VERIFIED',
+        verifiedBy: json['verifiedBy'] as String?,
+        verifiedAt: json['verifiedAt'] as String?,
+        rejectionReason: json['rejectionReason'] as String?,
+        effectiveDate: json['effectiveDate'] as String?,
+        expiryDate: json['expiryDate'] as String?,
+        uploadedAt: json['uploadedAt'] as String? ?? '',
+        acknowledgementRequired: json['acknowledgementRequired'] as bool? ?? false,
+        acknowledgedAt: json['acknowledgedAt'] as String?,
+      );
+
+  bool get isVerified => verificationStatus == 'VERIFIED';
+  bool get isPending => verificationStatus == 'PENDING_VERIFICATION';
+  bool get isRejected => verificationStatus == 'REJECTED';
+}
+
+class KycItem {
+  final String typeId;
+  final String name;
+  final String description;
+  final bool isMandatory;
+  final String status; // VERIFIED | PENDING_VERIFICATION | REJECTED | MISSING
+  final String? documentId;
+  final String? filename;
+  final String? rejectionReason;
+  final String? expiryDate;
+  final String? uploadedAt;
+
+  const KycItem({
+    required this.typeId,
+    required this.name,
+    required this.description,
+    required this.isMandatory,
+    required this.status,
+    this.documentId,
+    this.filename,
+    this.rejectionReason,
+    this.expiryDate,
+    this.uploadedAt,
+  });
+
+  factory KycItem.fromJson(Map<String, dynamic> json) => KycItem(
+        typeId: json['typeId'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        description: json['description'] as String? ?? '',
+        isMandatory: json['isMandatory'] as bool? ?? true,
+        status: json['status'] as String? ?? 'MISSING',
+        documentId: json['documentId'] as String?,
+        filename: json['filename'] as String?,
+        rejectionReason: json['rejectionReason'] as String?,
+        expiryDate: json['expiryDate'] as String?,
+        uploadedAt: json['uploadedAt'] as String?,
+      );
+
+  bool get isVerified => status == 'VERIFIED';
+  bool get isPending => status == 'PENDING_VERIFICATION';
+  bool get isRejected => status == 'REJECTED';
+  bool get isMissing => status == 'MISSING';
+}
+
+class KycChecklist {
+  final String employeeId;
+  final String employeeName;
+  final String employeeRole;
+  final String overallKycStatus; // COMPLETE | PENDING_REVIEW | INCOMPLETE
+  final int completionPercentage;
+  final int totalMandatory;
+  final int verifiedCount;
+  final int pendingCount;
+  final int rejectedCount;
+  final int missingCount;
+  final List<KycItem> mandatoryChecklist;
+  final List<KycItem> optionalChecklist;
+
+  const KycChecklist({
+    required this.employeeId,
+    required this.employeeName,
+    required this.employeeRole,
+    required this.overallKycStatus,
+    required this.completionPercentage,
+    required this.totalMandatory,
+    required this.verifiedCount,
+    required this.pendingCount,
+    required this.rejectedCount,
+    required this.missingCount,
+    required this.mandatoryChecklist,
+    required this.optionalChecklist,
+  });
+
+  factory KycChecklist.fromJson(Map<String, dynamic> json) {
+    final summary = json['summary'] as Map<String, dynamic>? ?? {};
+    return KycChecklist(
+      employeeId: json['employeeId'] as String? ?? '',
+      employeeName: json['employeeName'] as String? ?? '',
+      employeeRole: json['employeeRole'] as String? ?? '',
+      overallKycStatus: json['overallKycStatus'] as String? ?? 'INCOMPLETE',
+      completionPercentage: (json['completionPercentage'] as num?)?.toInt() ?? 0,
+      totalMandatory: (summary['totalMandatory'] as num?)?.toInt() ?? 0,
+      verifiedCount: (summary['verifiedCount'] as num?)?.toInt() ?? 0,
+      pendingCount: (summary['pendingCount'] as num?)?.toInt() ?? 0,
+      rejectedCount: (summary['rejectedCount'] as num?)?.toInt() ?? 0,
+      missingCount: (summary['missingCount'] as num?)?.toInt() ?? 0,
+      mandatoryChecklist: (json['mandatoryChecklist'] as List<dynamic>? ?? [])
+          .map((m) => KycItem.fromJson(m as Map<String, dynamic>))
+          .toList(),
+      optionalChecklist: (json['optionalChecklist'] as List<dynamic>? ?? [])
+          .map((m) => KycItem.fromJson(m as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+

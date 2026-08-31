@@ -300,3 +300,82 @@ export interface LeaveTypeItem {
   requiresEvidence: boolean;
   isPaid: boolean;
 }
+
+export interface DocumentTypeOption {
+  id: string;
+  name: string;
+  confidentiality: 'normal' | 'sensitive' | 'highly_confidential';
+  requires_expiry: number;
+  requires_acknowledgement: number;
+}
+
+export interface EmployeeDocumentItem {
+  id: string;
+  type: string;
+  typeId: string;
+  title: string;
+  version: number;
+  filename: string | null;
+  sizeBytes: number;
+  mimeType: string | null;
+  storageProvider: string;
+  confidentiality: 'normal' | 'sensitive' | 'highly_confidential';
+  verificationStatus: 'PENDING_VERIFICATION' | 'VERIFIED' | 'REJECTED';
+  verifiedBy?: string | null;
+  verifiedAt?: string | null;
+  rejectionReason?: string | null;
+  effectiveDate?: string | null;
+  expiryDate?: string | null;
+  uploadedAt: string;
+  acknowledgementRequired?: boolean;
+  acknowledgedAt?: string | null;
+}
+
+export interface PendingVerificationDoc {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeRole?: string;
+  documentTypeId: string;
+  documentTypeName: string;
+  title: string;
+  version: number;
+  filename: string;
+  sizeBytes: number;
+  mimeType: string;
+  storageProvider: string;
+  effectiveDate?: string | null;
+  expiryDate?: string | null;
+  uploadedAt: string;
+}
+
+export interface KycRequirementItem {
+  typeId: string;
+  name: string;
+  description: string;
+  isMandatory: boolean;
+  status: 'VERIFIED' | 'PENDING_VERIFICATION' | 'REJECTED' | 'MISSING';
+  documentId?: string | null;
+  filename?: string | null;
+  rejectionReason?: string | null;
+  expiryDate?: string | null;
+  uploadedAt?: string | null;
+}
+
+export interface KycChecklistResponse {
+  employeeId: string;
+  employeeName: string;
+  employeeRole: string;
+  overallKycStatus: 'COMPLETE' | 'PENDING_REVIEW' | 'INCOMPLETE';
+  completionPercentage: number;
+  summary: {
+    totalMandatory: number;
+    verifiedCount: number;
+    pendingCount: number;
+    rejectedCount: number;
+    missingCount: number;
+  };
+  mandatoryChecklist: KycRequirementItem[];
+  optionalChecklist: KycRequirementItem[];
+}
+

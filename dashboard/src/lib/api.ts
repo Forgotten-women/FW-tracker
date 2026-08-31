@@ -8,16 +8,22 @@ import type {
   AdminEmployee,
   AttendanceCorrection,
   DashboardSummary,
+  DocumentTypeOption,
+  EmployeeDocumentItem,
   EmployeeLeaveOverview,
   EnrollmentCode,
   FormalWarningItem,
   HrAlerts,
+  KycChecklistResponse,
   LeaveRequestItem,
   LeaveTypeItem,
+  PendingVerificationDoc,
+  PresenceStatus,
   TeamCalendarLeave,
   WarningBoardSummary,
   WarningTrigger,
 } from './types';
+
 
 // sessionStorage, not localStorage: the key is gone when the tab closes rather
 // than sitting on a shared machine indefinitely.
@@ -136,6 +142,31 @@ export const api = {
     if (!res.ok) throw new Error('Export failed');
     return res.blob();
   },
+
+  history: (from: string, to: string) =>
+    request<{
+      status: string;
+      from: string;
+      to: string;
+      days: Array<{
+        date: string;
+        employeeId: string;
+        employeeName: string;
+        role: string;
+        firstCheckIn: string;
+        lastActive: string;
+        timeWorked: string;
+        totalMinutes: number;
+        adjustmentMinutes: number;
+        adjustmentNote: string | null;
+        status: PresenceStatus;
+        sessions: Array<{
+          from: string;
+          to: string;
+          duration: string;
+        }>;
+      }>;
+    }>(`/api/dashboard/history?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
 
   attendanceCorrections: (status = 'PENDING') =>
     request<{ status: string; corrections: AttendanceCorrection[] }>(
@@ -264,4 +295,82 @@ export const api = {
     request<{ status: string; types: LeaveTypeItem[] }>(
       '/api/leave/types',
     ),
+
+  documentTypes: () =>
+    request<{ status: string; types: DocumentTypeOption[] }>(
+      '/api/documents/types',
+    ),
+
+  pendingDocuments: () =>
+    request<{ status: string; pendingDocuments: PendingVerificationDoc[] }>(
+      '/api/documents/pending-verification',
+    ),
+
+  verifyDocument: (documentId: string) =>
+    request<{ status: string; documentId: string; verificationStatus: string }>(
+      `/api/documents/${encodeURIComponent(documentId)}/verify`,
+      {
+        method: 'POST',
+      },
+    ),
+
+  rejectDocument: (documentId: string, reason: string) =>
+    request<{ status: string; documentId: string; verificationStatus: string }>(
+      `/api/documents/${encodeURIComponent(documentId)}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      },
+    ),
+
+  employeeKycChecklist: (employeeId: string) =>
+    request<KycChecklistResponse & { status: string }>(
+      `/api/documents/employee/${encodeURIComponent(employeeId)}/kyc-checklist`,
+    ),
+
+  employeeDocuments: (employeeId: string) =>
+    request<{ status: string; documents: EmployeeDocumentItem[] }>(
+      `/api/documents/employee/${encodeURIComponent(employeeId)}`,
+    ),
+
+  uploadDocument: (employeeId: string, formData: FormData) => {
+    const key = getKey();
+    return fetch(`/api/documents/employee/${encodeURIComponent(employeeId)}`, {
+      method: 'POST',
+      headers: {
+        ...(key ? { 'X-Admin-Key': key } : {}),
+      },
+      body: formData,
+    }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Upload failed');
+      return data;
+    });
+  },
+
+  documentDownloadToken: (documentId: string) =>
+    request<{ status: string; token: string; expiresInMs: number }>(
+      `/api/documents/${encodeURIComponent(documentId)}/download-token`,
+      {
+        method: 'POST',
+      },
+    ),
+
+  archiveDocument: (documentId: string, reason?: string) =>
+    request<{ status: string }>(
+      `/api/documents/${encodeURIComponent(documentId)}/archive`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      },
+    ),
+
+  deleteDocument: (documentId: string) =>
+    request<{ status: string; deleted: boolean }>(
+      `/api/documents/${encodeURIComponent(documentId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
 };
+

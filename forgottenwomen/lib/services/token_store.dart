@@ -1,4 +1,4 @@
-﻿// Credential and preference storage.
+// Credential and preference storage.
 
 import 'dart:developer';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -120,6 +120,17 @@ class TokenStore {
     } catch (_) {
       return '';
     }
+  }
+
+  Future<void> clearToken() async {
+    try {
+      await _secure.delete(key: _kToken);
+      await _secure.delete(key: _kDeviceId);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kEmployeeId);
+      await prefs.remove(_kEmployeeName);
+      await prefs.remove(_kEmployeeRole);
+    } catch (_) {}
   }
 
   static String _normalise(String url) {

@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react';
 
+import { api } from '@/lib/api';
 import type {
   AdminEmployee,
   AttendanceCorrection,
   DashboardSummary,
   EmployeeDay,
   Movement,
+  PresenceStatus,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel, STATUS_META } from './primitives';
 
@@ -253,35 +255,115 @@ export function AttendanceTable({
   dateKey: string;
   onExport: (from: string, to: string) => void;
 }) {
+  const [selectedDate, setSelectedDate] = useState(dateKey);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [from, setFrom] = useState(dateKey);
   const [to, setTo] = useState(dateKey);
 
+  const isToday = selectedDate === dateKey;
+
+  useEffect(() => {
+    if (isToday) return;
+    let active = true;
+    setLoadingHistory(true);
+    api
+      .history(selectedDate, selectedDate)
+      .then((res) => {
+        if (active) {
+          setHistoryRows(res.days || []);
+          setLoadingHistory(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setHistoryRows([]);
+          setLoadingHistory(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedDate, isToday]);
+
+  const shiftDate = (days: number) => {
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + days);
+    const newKey = d.toISOString().split('T')[0];
+    setSelectedDate(newKey);
+  };
+
   return (
     <Panel
-      title="Attendance today"
+      title={
+        <div className="flex items-center gap-3">
+          <span>Timesheets & Attendance</span>
+          <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-indigo-400 font-semibold border border-indigo-900/50">
+            {isToday ? '🟢 Live (Today)' : `📅 ${selectedDate}`}
+          </span>
+        </div>
+      }
       actions={
-        <>
-          <Input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="py-1 text-xs"
-          />
-          <Input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="py-1 text-xs"
-          />
-          <Button onClick={() => onExport(from, to)}>Export CSV</Button>
-        </>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Historical Date Picker Navigation */}
+          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-0.5">
+            <button
+              onClick={() => shiftDate(-1)}
+              className="px-2.5 py-1 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded transition font-medium"
+              title="Previous Day"
+            >
+              ◀ Prev
+            </button>
+            <Input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="py-1 px-2 text-xs border-0 bg-transparent text-white font-mono focus:ring-0 cursor-pointer"
+            />
+            <button
+              onClick={() => shiftDate(1)}
+              className="px-2.5 py-1 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded transition font-medium"
+              title="Next Day"
+            >
+              Next ▶
+            </button>
+            {!isToday && (
+              <button
+                onClick={() => setSelectedDate(dateKey)}
+                className="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded ml-1 transition shadow-sm"
+              >
+                Today
+              </button>
+            )}
+          </div>
+
+          {/* CSV Export Range */}
+          <div className="flex items-center gap-1.5 pl-3 border-l border-slate-700">
+            <Input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="py-1 text-xs w-32"
+              title="Export Range Start"
+            />
+            <span className="text-xs text-slate-500">to</span>
+            <Input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="py-1 text-xs w-32"
+              title="Export Range End"
+            />
+            <Button onClick={() => onExport(from, to)}>Export CSV</Button>
+          </div>
+        </div>
       }
     >
       <div className="scroll-x">
         <table className="w-full min-w-[720px] border-collapse text-sm">
           <thead>
             <tr>
-              {['Employee', 'First in', 'Last seen', 'Sessions', 'Worked', 'Break (30m)', 'Deficit', 'Status'].map(
+              {['Employee', 'First in', 'Last seen', 'Sessions Breakdown', 'Worked', 'Break / Notes', 'Deficit', 'Status'].map(
                 (h) => (
                   <th
                     key={h}
@@ -294,77 +376,145 @@ export function AttendanceTable({
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {isToday ? (
+              rows.length === 0 ? (
+                <tr>
+                  <td colSpan={8}>
+                    <Empty>Nobody has checked in today.</Empty>
+                  </td>
+                </tr>
+              ) : (
+                rows.map((a) => {
+                  const meta = STATUS_META[a.status] ?? STATUS_META.NOT_CHECKED_IN;
+                  const hasExcessBreak = (a.excessBreakMinutes ?? 0) > 0;
+                  const hasDeficit = (a.dailyDeficitMinutes ?? 0) > 0;
+
+                  return (
+                    <tr key={a.employeeId}>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                        <span className="font-semibold text-white">{a.employeeName}</span>
+                        <div className="text-[11px] text-muted">{a.role}</div>
+                      </td>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                        {a.firstCheckIn}
+                      </td>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                        {a.lastActiveTime}
+                      </td>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top text-[11px] leading-relaxed text-muted">
+                        {a.sessions.length
+                          ? a.sessions.map((s, i) => (
+                              <div key={i} className="font-mono text-slate-300">
+                                {s.from} – {s.to}
+                              </div>
+                            ))
+                          : '—'}
+                      </td>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                        <strong>{a.timeWorkedFormatted}</strong>
+                        {a.adjustmentMinutes !== 0 && (
+                          <div className="text-[11px] text-muted">
+                            incl. {a.adjustmentMinutes}m adj.
+                          </div>
+                        )}
+                      </td>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                        <div>
+                          {a.onBreak ? (
+                            <span className="font-semibold text-warn">
+                              On break ({a.activeBreakMinutes ?? 0}m)
+                            </span>
+                          ) : a.breakMinutes ? (
+                            <span>{a.breakMinutes}m</span>
+                          ) : (
+                            <span className="text-dim">0m</span>
+                          )}
+                        </div>
+                        {hasExcessBreak && (
+                          <div className="text-[10px] font-semibold text-danger">
+                            +{a.excessBreakMinutes}m excess
+                          </div>
+                        )}
+                      </td>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                        {hasDeficit ? (
+                          <span className="font-semibold text-danger">
+                            {a.dailyDeficitMinutes}m
+                          </span>
+                        ) : (
+                          <span className="text-dim">0m</span>
+                        )}
+                        {(a.lateMinutes ?? 0) > 0 && (
+                          <div className="text-[10px] text-muted">
+                            late: {a.lateMinutes}m
+                          </div>
+                        )}
+                      </td>
+                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                        <Badge tone={meta.tone}>{meta.label}</Badge>
+                      </td>
+                    </tr>
+                  );
+                })
+              )
+            ) : loadingHistory ? (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="animate-spin rounded-full h-4 w-4 border-2 border-indigo-500 border-t-transparent"></span>
+                    <span>Loading timesheet records for {selectedDate}...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : historyRows.length === 0 ? (
               <tr>
                 <td colSpan={8}>
-                  <Empty>Nobody has checked in today.</Empty>
+                  <Empty>No attendance records found for {selectedDate}.</Empty>
                 </td>
               </tr>
             ) : (
-              rows.map((a) => {
-                const meta = STATUS_META[a.status] ?? STATUS_META.NOT_CHECKED_IN;
-                const hasExcessBreak = (a.excessBreakMinutes ?? 0) > 0;
-                const hasDeficit = (a.dailyDeficitMinutes ?? 0) > 0;
-
+              historyRows.map((h) => {
+                const meta = STATUS_META[h.status as PresenceStatus] ?? STATUS_META.NOT_CHECKED_IN;
                 return (
-                  <tr key={a.employeeId}>
+                  <tr key={h.employeeId}>
                     <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      {a.employeeName}
-                      <div className="text-[11px] text-muted">{a.role}</div>
+                      <span className="font-semibold text-white">{h.employeeName}</span>
+                      <div className="text-[11px] text-muted">{h.role}</div>
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      {a.firstCheckIn}
+                    <td className="border-b border-line px-2.5 py-2.5 align-top font-mono text-slate-300">
+                      {h.firstCheckIn}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      {a.lastActiveTime}
+                    <td className="border-b border-line px-2.5 py-2.5 align-top font-mono text-slate-300">
+                      {h.lastActive}
                     </td>
                     <td className="border-b border-line px-2.5 py-2.5 align-top text-[11px] leading-relaxed text-muted">
-                      {a.sessions.length
-                        ? a.sessions.map((s, i) => (
-                            <div key={i}>
-                              {s.from}–{s.to}
+                      {h.sessions && h.sessions.length
+                        ? h.sessions.map((s: any, i: number) => (
+                            <div key={i} className="font-mono text-slate-300">
+                              {s.from} – {s.to} ({s.duration})
                             </div>
                           ))
                         : '—'}
                     </td>
                     <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <strong>{a.timeWorkedFormatted}</strong>
-                      {a.adjustmentMinutes !== 0 && (
-                        <div className="text-[11px] text-muted">
-                          incl. {a.adjustmentMinutes}m adj.
+                      <strong className="text-white">{h.timeWorked}</strong>
+                      {h.adjustmentMinutes !== 0 && h.adjustmentMinutes != null && (
+                        <div className="text-[11px] text-amber-400 font-medium">
+                          {h.adjustmentMinutes > 0 ? `+${h.adjustmentMinutes}m` : `${h.adjustmentMinutes}m`} adj.
+                          {h.adjustmentNote ? ` (${h.adjustmentNote})` : ''}
                         </div>
                       )}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <div>
-                        {a.onBreak ? (
-                          <span className="font-semibold text-warn">
-                            On break ({a.activeBreakMinutes ?? 0}m)
-                          </span>
-                        ) : a.breakMinutes ? (
-                          <span>{a.breakMinutes}m</span>
-                        ) : (
-                          <span className="text-dim">0m</span>
-                        )}
-                      </div>
-                      {hasExcessBreak && (
-                        <div className="text-[10px] font-semibold text-danger">
-                          +{a.excessBreakMinutes}m excess
-                        </div>
-                      )}
+                    <td className="border-b border-line px-2.5 py-2.5 align-top text-xs text-slate-400">
+                      {h.adjustmentNote ? h.adjustmentNote : '—'}
                     </td>
                     <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      {hasDeficit ? (
-                        <span className="font-semibold text-danger">
-                          {a.dailyDeficitMinutes}m
-                        </span>
+                      {h.totalMinutes >= 480 ? (
+                        <span className="text-xs text-emerald-400 font-semibold">Completed</span>
                       ) : (
-                        <span className="text-dim">0m</span>
-                      )}
-                      {(a.lateMinutes ?? 0) > 0 && (
-                        <div className="text-[10px] text-muted">
-                          late: {a.lateMinutes}m
-                        </div>
+                        <span className="text-xs text-amber-400 font-semibold">
+                          {480 - h.totalMinutes}m deficit
+                        </span>
                       )}
                     </td>
                     <td className="border-b border-line px-2.5 py-2.5 align-top">
