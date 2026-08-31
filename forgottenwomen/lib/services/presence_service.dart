@@ -1,4 +1,4 @@
-﻿// Presence reporting.
+// Presence reporting.
 
 import 'dart:async';
 import 'dart:ui';
@@ -8,10 +8,11 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import '../models/attendance.dart';
 import 'api_client.dart';
 import 'device_probe.dart';
+import 'notification_service.dart';
 import 'offline_queue.dart';
 import 'token_store.dart';
 
-const heartbeatInterval = Duration(minutes: 2);
+const heartbeatInterval = Duration(seconds: 30);
 
 Future<PingResult?> sendHeartbeat({
   ApiClient? client,
@@ -56,9 +57,16 @@ Future<PingResult?> sendHeartbeat({
   }
 }
 
+bool _wasVerified = false;
+
 @pragma('vm:entry-point')
 Future<void> onBackgroundStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
+
+  // Initialize notifications plugin in the background service isolate
+  try {
+    await NotificationService().initialize();
+  } catch (_) {}
 
   final store = TokenStore();
   final api = ApiClient();
@@ -72,14 +80,25 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
       if (!await store.isEnrolled) return;
       final result = await sendHeartbeat(client: api, probe: probe, queue: queue);
 
-      if (service is AndroidServiceInstance && result != null) {
-        await service.setForegroundNotificationInfo(
-          title: result.verified ? 'Present in office' : 'Not verified at office',
-          content: result.verified
-              ? 'Logged ${result.attendance.timeWorkedFormatted} today'
-              : 'Connected, but not on an office network',
-        );
+      if (result != null) {
+        // Only trigger a dismissable system notification when presence status transitions to verified
+        if (result.verified && !_wasVerified) {
+          _wasVerified = true;
+          await NotificationService().showSystemNotification(
+            id: 8801,
+            title: 'Office Presence Verified',
+            body: 'Connected to office network. Logged ${result.attendance.timeWorkedFormatted} today.',
+            category: 'ATTENDANCE',
+          );
+        } else if (!result.verified) {
+          _wasVerified = false;
+        }
       }
+
+      // Check for incoming HR notifications in background
+      try {
+        await NotificationService().checkAndDispatchUnseenNotifications(store: store);
+      } catch (_) {}
     } catch (_) {}
   });
 }
@@ -88,7 +107,10 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
 Future<bool> onIosBackground(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
   try {
+    await NotificationService().initialize();
     await sendHeartbeat();
+    final store = TokenStore();
+    await NotificationService().checkAndDispatchUnseenNotifications(store: store);
   } catch (_) {}
   return true;
 }

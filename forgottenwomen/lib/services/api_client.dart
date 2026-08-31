@@ -377,6 +377,40 @@ class ApiClient {
         _decode(res);
       });
 
+  /// Self-reports sickness or emergency absence (Spec 2.2 & 10).
+  Future<Map<String, dynamic>> selfReportAbsence({
+    required String dateKey,
+    String absenceType = 'SICK',
+    String reason = '',
+    String? evidenceDocumentId,
+  }) =>
+      _guard(() async {
+        final res = await _http
+            .post(
+              await _uri('/api/warnings/absences/self-report'),
+              headers: await _authHeaders(),
+              body: jsonEncode({
+                'dateKey': dateKey,
+                'absenceType': absenceType,
+                'reason': reason,
+                'evidenceDocumentId': evidenceDocumentId,
+              }),
+            )
+            .timeout(timeout);
+        return _decode(res);
+      });
+
+  /// Fetches this employee's reported absences & no-shows.
+  Future<List<EmployeeAbsenceRecord>> myAbsences() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/warnings/absences/mine'), headers: await _authHeaders())
+            .timeout(timeout);
+        final body = _decode(res);
+        return (body['absences'] as List<dynamic>? ?? [])
+            .map((a) => EmployeeAbsenceRecord.fromJson(a as Map<String, dynamic>))
+            .toList();
+      });
+
   /// Unauthenticated reachability check, used by the settings screen so the
   /// user can tell a wrong address apart from a rejected credential.
   Future<bool> health() async {

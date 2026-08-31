@@ -41,9 +41,9 @@ export default function DocumentVaultPanel() {
   // KYC Detail Modal
   const [kycDetailModal, setKycDetailModal] = useState<KycChecklistResponse | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
 
       const [typesRes, pendingRes, employeesRes] = await Promise.all([
@@ -61,14 +61,33 @@ export default function DocumentVaultPanel() {
         setSelectedEmployeeId(empList[0].id);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load document vault data.');
+      if (!silent) setError(err instanceof Error ? err.message : 'Failed to load document vault data.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [selectedEmployeeId]);
 
   useEffect(() => {
     loadData();
+
+    const handleSse = () => {
+      loadData(true);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('office-tracker-sse', handleSse);
+    }
+
+    const interval = setInterval(() => {
+      loadData(true);
+    }, 4000);
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('office-tracker-sse', handleSse);
+      }
+      clearInterval(interval);
+    };
   }, [loadData]);
 
   // Load employee specific documents when selectedEmployeeId changes
@@ -235,7 +254,7 @@ export default function DocumentVaultPanel() {
             <span>+ Upload Document</span>
           </button>
           <button
-            onClick={loadData}
+            onClick={() => loadData()}
             disabled={loading}
             className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition"
           >

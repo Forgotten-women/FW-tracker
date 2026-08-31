@@ -1,9 +1,11 @@
 // Employee leave screen. Spec sections 14, 15 and 19.4.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/hr.dart';
 import '../services/api_client.dart';
+import '../services/notification_service.dart';
 import '../theme.dart';
 
 class LeaveScreen extends StatefulWidget {
@@ -15,14 +17,17 @@ class LeaveScreen extends StatefulWidget {
 
 class _LeaveScreenState extends State<LeaveScreen> {
   final _api = ApiClient();
+  Timer? _pollTimer;
 
   LeaveBalance? _balance;
   List<LeaveRequest> _requests = const [];
+  List<EmployeeAbsenceRecord> _absences = const [];
   bool _loading = true;
   String? _error;
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _api.dispose();
     super.dispose();
   }
@@ -31,15 +36,46 @@ class _LeaveScreenState extends State<LeaveScreen> {
   void initState() {
     super.initState();
     _load();
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _loadSilently());
+  }
+
+  Future<void> _loadSilently() async {
+    try {
+      final results = await Future.wait([
+        _api.myLeave(),
+        _api.myAbsences(),
+      ]);
+      if (!mounted) return;
+      final leaveData = results[0] as Map<String, dynamic>;
+      final absList = results[1] as List<EmployeeAbsenceRecord>;
+
+      setState(() {
+        _balance = leaveData['balance'] as LeaveBalance;
+        _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
+        _absences = absList;
+        _error = null;
+      });
+
+      try {
+        await NotificationService().checkAndDispatchUnseenNotifications();
+      } catch (_) {}
+    } catch (_) {}
   }
 
   Future<void> _load() async {
     try {
-      final data = await _api.myLeave();
+      final results = await Future.wait([
+        _api.myLeave(),
+        _api.myAbsences(),
+      ]);
       if (!mounted) return;
+      final leaveData = results[0] as Map<String, dynamic>;
+      final absList = results[1] as List<EmployeeAbsenceRecord>;
+
       setState(() {
-        _balance = data['balance'] as LeaveBalance;
-        _requests = (data['requests'] as List).cast<LeaveRequest>();
+        _balance = leaveData['balance'] as LeaveBalance;
+        _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
+        _absences = absList;
         _error = null;
         _loading = false;
       });
@@ -63,6 +99,19 @@ class _LeaveScreenState extends State<LeaveScreen> {
       builder: (_) => _BookingSheet(api: _api),
     );
     if (booked == true) _load();
+  }
+
+  Future<void> _openReportAbsence() async {
+    final reported = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surfaceDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _ReportAbsenceSheet(api: _api),
+    );
+    if (reported == true) _load();
   }
 
   Future<void> _cancel(LeaveRequest r) async {
@@ -125,40 +174,93 @@ class _LeaveScreenState extends State<LeaveScreen> {
           : RefreshIndicator(
               color: AppColors.primary,
               onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                children: [
-                  if (_error != null) _errorBanner(_error!),
-                  if (_balance != null) _balanceCard(_balance!),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'LEAVE APPLICATIONS & HISTORY',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                    children: [
+                      if (_error != null) _errorBanner(_error!),
+                      if (_balance != null) _balanceCard(_balance!),
+                      const SizedBox(height: 16),
+                      _actionButtons(),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'LEAVE APPLICATIONS & HISTORY',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 10),
+                      if (_requests.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceDark,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'No leave requests on record.\nTap "Apply for Leave" to submit a holiday or leave request.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+                            ),
+                          ),
+                        )
+                      else
+                        ..._requests.map(_requestRow),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'SELF-REPORTED SICKNESS & ABSENCES',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 10),
+                      if (_absences.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceDark,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'No sickness reports or absences on record.\nUse "Report Sickness / Absence" above if unwell or experiencing an emergency.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+                            ),
+                          ),
+                        )
+                      else
+                        ..._absences.map(_absenceRow),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  if (_requests.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceDark,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'No leave requests on record.\nTap "Apply for Leave" to submit a holiday or leave request.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
-                        ),
-                      ),
-                    )
-                  else
-                    ..._requests.map(_requestRow),
-                ],
+                ),
               ),
             ),
     );
   }
+
+  Widget _actionButtons() => Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _openReportAbsence,
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: AppColors.amber.withOpacity(0.8)),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                backgroundColor: AppColors.amber.withOpacity(0.05),
+              ),
+              icon: const Icon(Icons.sick_outlined, size: 16, color: AppColors.amber),
+              label: const Text(
+                'Report Sickness / Absence',
+                style: TextStyle(color: AppColors.amber, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
+          ),
+        ],
+      );
 
   Widget _errorBanner(String msg) => Container(
         margin: const EdgeInsets.only(bottom: 12),
@@ -350,6 +452,101 @@ class _LeaveScreenState extends State<LeaveScreen> {
               onPressed: () => _cancel(r),
               tooltip: 'Cancel',
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _absenceRow(EmployeeAbsenceRecord a) {
+    final bool isPending = a.status == 'PENDING_REVIEW';
+    final bool isConfirmed = a.status == 'CONFIRMED';
+    final Color color = isPending
+        ? AppColors.amber
+        : isConfirmed
+            ? AppColors.danger
+            : AppColors.teal;
+    final String statusLabel = isPending
+        ? 'Pending HR Review'
+        : isConfirmed
+            ? 'Confirmed Absence'
+            : 'Excused / Dismissed';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  a.absenceType == 'SICK' ? Icons.sick_outlined : Icons.event_busy,
+                  color: color,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${a.absenceType} · ${a.date}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      a.reason?.isNotEmpty == true ? a.reason! : 'No explanation provided',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: color.withOpacity(0.5)),
+                ),
+                child: Text(statusLabel, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          if (a.documentTitle != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.attach_file, size: 14, color: AppColors.primaryLight),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Attached Evidence: ${a.documentTitle}',
+                    style: const TextStyle(color: AppColors.primaryLight, fontSize: 11),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (a.reviewNotes != null && a.reviewNotes!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'HR Note: "${a.reviewNotes}"',
+              style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic),
+            ),
+          ],
         ],
       ),
     );
@@ -590,6 +787,202 @@ class _BookingSheetState extends State<_BookingSheet> {
             const SizedBox(height: 6),
             Text(p.warning!, style: const TextStyle(fontSize: 11, color: AppColors.amber)),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sickness & Emergency Absence Self-Reporting Sheet (Spec 2.2 & 10)
+// ---------------------------------------------------------------------------
+
+class _ReportAbsenceSheet extends StatefulWidget {
+  final ApiClient api;
+  const _ReportAbsenceSheet({required this.api});
+
+  @override
+  State<_ReportAbsenceSheet> createState() => _ReportAbsenceSheetState();
+}
+
+class _ReportAbsenceSheetState extends State<_ReportAbsenceSheet> {
+  final _reason = TextEditingController();
+  DateTime _date = DateTime.now();
+  String _absenceType = 'SICK';
+  bool _submitting = false;
+  String? _error;
+  List<EmployeeDocument> _documents = const [];
+  String? _selectedDocumentId;
+  bool _loadingDocs = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDocs();
+  }
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDocs() async {
+    try {
+      final docs = await widget.api.myDocuments();
+      if (mounted) setState(() { _documents = docs; _loadingDocs = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loadingDocs = false);
+    }
+  }
+
+  String _fmt(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(now.year - 1),
+      lastDate: now.add(const Duration(days: 7)),
+    );
+    if (picked != null && mounted) {
+      setState(() => _date = picked);
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_reason.text.trim().isEmpty) {
+      setState(() => _error = 'Please provide a brief reason or symptoms description.');
+      return;
+    }
+
+    setState(() { _submitting = true; _error = null; });
+    try {
+      await widget.api.selfReportAbsence(
+        dateKey: _fmt(_date),
+        absenceType: _absenceType,
+        reason: _reason.text.trim(),
+        evidenceDocumentId: _selectedDocumentId,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (mounted) setState(() { _error = e.message; _submitting = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20, right: 20, top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Report Sickness / Absence',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: AppColors.textMuted),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Submitting a self-report notifies HR immediately so your absence is recorded and not treated as an unexcused no-show.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          const Text('Absence Category', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          DropdownButtonFormField<String>(
+            value: _absenceType,
+            dropdownColor: AppColors.surfaceDark,
+            decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+            items: const [
+              DropdownMenuItem(value: 'SICK', child: Text('🤒 Sickness / Flu', style: TextStyle(color: Colors.white, fontSize: 13))),
+              DropdownMenuItem(value: 'MEDICAL', child: Text('🏥 Medical Appointment', style: TextStyle(color: Colors.white, fontSize: 13))),
+              DropdownMenuItem(value: 'EMERGENCY', child: Text('🚨 Urgent Emergency', style: TextStyle(color: Colors.white, fontSize: 13))),
+              DropdownMenuItem(value: 'OTHER', child: Text('📋 Other Unplanned Absence', style: TextStyle(color: Colors.white, fontSize: 13))),
+            ],
+            onChanged: (val) {
+              if (val != null) setState(() => _absenceType = val);
+            },
+          ),
+          const SizedBox(height: 14),
+          const Text('Absence Date', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: _pickDate,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.bgDark,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(_fmt(_date), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                  const Icon(Icons.calendar_today, size: 14, color: AppColors.primaryLight),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text('Reason & Symptoms (Required)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _reason,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: const InputDecoration(
+              hintText: 'e.g. High fever and nausea, unable to come to the office today...',
+              hintStyle: TextStyle(color: Colors.white30),
+            ),
+            maxLines: 2,
+          ),
+          if (!_loadingDocs && _documents.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Text('Attach Evidence / Certificate (Optional)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            DropdownButtonFormField<String?>(
+              value: _selectedDocumentId,
+              dropdownColor: AppColors.surfaceDark,
+              decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('None / Will provide later', style: TextStyle(color: AppColors.textMuted, fontSize: 13))),
+                ..._documents.map(
+                  (d) => DropdownMenuItem(value: d.id, child: Text(d.title, style: const TextStyle(color: Colors.white, fontSize: 13))),
+                ),
+              ],
+              onChanged: (id) => setState(() => _selectedDocumentId = id),
+            ),
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+          ],
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 46,
+            child: FilledButton(
+              onPressed: _submitting ? null : _submit,
+              style: FilledButton.styleFrom(backgroundColor: AppColors.amber),
+              child: _submitting
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                  : const Text('Submit Absence Report to HR', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+            ),
+          ),
         ],
       ),
     );

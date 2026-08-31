@@ -14,6 +14,7 @@ const A = require('../domain/attendance');
 const schedule = require('../domain/schedule');
 const importer = require('../domain/import');
 const rbac = require('../domain/rbac');
+const N = require('../domain/notifications');
 const T = require('../util/time');
 
 // ---------------------------------------------------------------------------
@@ -139,6 +140,18 @@ router.post('/corrections', requireDevice, (req, res) => {
     VALUES (?,?,?,?,?,?,?, 'PENDING')
   `).run(id, employeeId, dateKey, `employee:${employeeId}`, T.now(),
          JSON.stringify(requestedChange || {}), String(reason).trim());
+
+  try {
+    const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+    const empName = emp?.name || employeeId;
+    N.notify({
+      category: 'CORRECTION',
+      title: `Attendance Dispute: ${empName}`,
+      body: `Correction submitted for ${dateKey}: ${String(reason).trim()}`,
+      severity: 'warning',
+      link: `/attendance?correction=${id}`,
+    });
+  } catch (_) {}
 
   res.status(201).json({
     status: 'SUCCESS', correctionId: id,
@@ -372,6 +385,20 @@ const handleCorrectionDecision = (req, res) => {
 
   // Recompute so the day reflects the decision immediately.
   const day = A.recomputeDay(corr.employee_id, corr.date_key, nowMs);
+
+  try {
+    const decisionLabel = decision === 'APPROVED' ? 'Approved' : (decision === 'AMENDED' ? 'Amended' : 'Rejected');
+    N.notify({
+      employeeId: corr.employee_id,
+      category: 'CORRECTION',
+      title: `Attendance Dispute ${decisionLabel}`,
+      body: `Your dispute for ${corr.date_key} has been ${decision.toLowerCase()} by HR. Note: ${notes}`,
+      severity: decision === 'APPROVED' || decision === 'AMENDED' ? 'info' : 'warning',
+      link: '/attendance',
+      nowMs,
+    });
+  } catch (_) {}
+
   res.json({ status: 'SUCCESS', decision, day: A.present(day) });
 };
 

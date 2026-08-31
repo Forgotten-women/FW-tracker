@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type {
+  AbsenceRecord,
   FormalWarningItem,
   WarningBoardEmployee,
   WarningBoardSummary,
@@ -14,22 +15,34 @@ export function WarningBoard() {
   const [board, setBoard] = useState<WarningBoardSummary | null>(null);
   const [triggers, setTriggers] = useState<WarningTrigger[]>([]);
   const [warnings, setWarnings] = useState<FormalWarningItem[]>([]);
+  const [absences, setAbsences] = useState<AbsenceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Tabs: 'triage' (workforce triage & triggers) vs 'formal' (issued formal warnings)
-  const [activeTab, setActiveTab] = useState<'triage' | 'formal'>('triage');
+  // Tabs: 'triage' (workforce triage & triggers), 'formal' (issued formal warnings), 'absences' (no-shows & sickness)
+  const [activeTab, setActiveTab] = useState<'triage' | 'formal' | 'absences'>('triage');
 
   // Filters
   const [bandFilter, setBandFilter] = useState<'ALL' | 'RED' | 'AMBER' | 'GREEN'>('ALL');
+  const [absenceStatusFilter, setAbsenceStatusFilter] = useState<'ALL' | 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED'>('PENDING_REVIEW');
   const [search, setSearch] = useState('');
 
-  // Modals & Action states
+  // Modals & Action states (Triggers)
   const [selectedTrigger, setSelectedTrigger] = useState<WarningTrigger | null>(null);
   const [triggerAction, setTriggerAction] = useState<'CONFIRM' | 'WAIVE' | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewExplanation, setReviewExplanation] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Modals & Action states (Absences)
+  const [selectedAbsence, setSelectedAbsence] = useState<AbsenceRecord | null>(null);
+  const [absenceAction, setAbsenceAction] = useState<'CONFIRM' | 'DISMISS' | null>(null);
+  const [deductAnnualLeave, setDeductAnnualLeave] = useState(true);
+  const [treatAsUnpaid, setTreatAsUnpaid] = useState(true);
+  const [createWarningTrigger, setCreateWarningTrigger] = useState(false);
+  const [absenceNotes, setAbsenceNotes] = useState('');
+  const [scanDate, setScanDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [scanning, setScanning] = useState(false);
 
   // Direct Issue Warning Modal
   const [showIssueModal, setShowIssueModal] = useState(false);
@@ -42,28 +55,89 @@ export function WarningBoard() {
   const [selectedWithdrawWarning, setSelectedWithdrawWarning] = useState<FormalWarningItem | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
-      const [bData, tData, wData] = await Promise.all([
+      const [bData, tData, wData, aData] = await Promise.all([
         api.warningBoard(),
         api.warningTriggers('PENDING_REVIEW'),
         api.formalWarnings(),
+        api.absences('ALL'),
       ]);
       setBoard(bData);
       setTriggers(tData.triggers || []);
       setWarnings(wData.warnings || []);
+      setAbsences(aData.absences || []);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load warning board data.');
+      if (!silent) setError(err instanceof Error ? err.message : 'Failed to load warning board data.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     refresh();
+
+    const handleSse = () => {
+      refresh(true);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('office-tracker-sse', handleSse);
+    }
+
+    const interval = setInterval(() => {
+      refresh(true);
+    }, 4000);
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('office-tracker-sse', handleSse);
+      }
+      clearInterval(interval);
+    };
   }, []);
+
+  const handleReviewAbsence = async () => {
+    if (!selectedAbsence || !absenceAction) return;
+    if (!absenceNotes.trim()) {
+      alert('A review note explaining the decision is required.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api.reviewAbsence(selectedAbsence.id, {
+        status: absenceAction === 'CONFIRM' ? 'CONFIRMED' : 'DISMISSED',
+        deductAnnualLeave: absenceAction === 'CONFIRM' ? deductAnnualLeave : false,
+        treatAsUnpaid: absenceAction === 'CONFIRM' ? treatAsUnpaid : false,
+        createWarningTrigger: absenceAction === 'CONFIRM' ? createWarningTrigger : false,
+        notes: absenceNotes.trim(),
+      });
+      setSelectedAbsence(null);
+      setAbsenceAction(null);
+      setAbsenceNotes('');
+      await refresh();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to decide absence record.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleScanAbsences = async () => {
+    setScanning(true);
+    try {
+      const res = await api.scanAbsences(scanDate);
+      alert(`Absence Scan Complete for ${res.dateKey}:\n• Scanned: ${res.scannedCount} employees\n• Flagged: ${res.detectedCount} suspected absence(s)`);
+      await refresh();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to scan absences.');
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const handleReviewTrigger = async () => {
     if (!selectedTrigger || !triggerAction) return;
@@ -159,11 +233,25 @@ export function WarningBoard() {
   const greenCount = board?.counts.green || 0;
   const pendingCount = triggers.length;
   const activeWarningsCount = warnings.filter((w) => w.status === 'ACTIVE').length;
+  const pendingAbsencesCount = absences.filter((a) => a.status === 'PENDING_REVIEW').length;
+
+  const filteredAbsences = absences.filter((a) => {
+    if (absenceStatusFilter !== 'ALL' && a.status !== absenceStatusFilter) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (
+        a.employeeName.toLowerCase().includes(q) ||
+        (a.role || '').toLowerCase().includes(q) ||
+        a.absenceType.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   return (
     <Panel
-      title="Warning & Disciplinary Board (Spec 9 & 21)"
-      note="Lateness monitoring, 4th-late referral triage, and formal escalation lifecycle"
+      title="Warning & Disciplinary Board (Spec 9, 10 & 21)"
+      note="Lateness monitoring, unauthorised absence review, and formal escalation lifecycle"
       actions={
         <div className="flex items-center gap-2">
           <Button
@@ -172,6 +260,13 @@ export function WarningBoard() {
             className="py-1 px-3 text-xs"
           >
             Workforce Triage
+          </Button>
+          <Button
+            variant={activeTab === 'absences' ? 'primary' : 'ghost'}
+            onClick={() => setActiveTab('absences')}
+            className="py-1 px-3 text-xs"
+          >
+            No-Shows & Absences ({pendingAbsencesCount})
           </Button>
           <Button
             variant={activeTab === 'formal' ? 'primary' : 'ghost'}
@@ -187,7 +282,7 @@ export function WarningBoard() {
           >
             + Issue Warning
           </Button>
-          <Button onClick={refresh} disabled={loading} className="py-1 px-3 text-xs">
+          <Button onClick={() => refresh()} disabled={loading} className="py-1 px-3 text-xs">
             {loading ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>
@@ -552,6 +647,278 @@ export function WarningBoard() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* 3. Unauthorised Absences & Sickness Reporting Tab (Spec 10 & 2.2) */}
+      {activeTab === 'absences' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-raised/50 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-text mr-1">Filter Status:</span>
+              {(['PENDING_REVIEW', 'CONFIRMED', 'DISMISSED', 'ALL'] as const).map((st) => (
+                <Button
+                  key={st}
+                  variant={absenceStatusFilter === st ? 'primary' : 'ghost'}
+                  onClick={() => setAbsenceStatusFilter(st)}
+                  className="py-1 px-2.5 text-xs"
+                >
+                  {st === 'PENDING_REVIEW'
+                    ? `Pending Review (${pendingAbsencesCount})`
+                    : st === 'CONFIRMED'
+                    ? 'Confirmed'
+                    : st === 'DISMISSED'
+                    ? 'Dismissed / Excused'
+                    : 'All'}
+                </Button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-dim">Scan Date:</span>
+              <Input
+                type="date"
+                value={scanDate}
+                onChange={(e) => setScanDate(e.target.value)}
+                className="py-1 text-xs w-36"
+              />
+              <Button
+                variant="primary"
+                onClick={handleScanAbsences}
+                disabled={scanning}
+                className="py-1 px-3 text-xs"
+              >
+                {scanning ? 'Scanning…' : '🔍 Scan for No-Shows'}
+              </Button>
+            </div>
+          </div>
+
+          {filteredAbsences.length === 0 ? (
+            <Empty>No absence or no-show records matching this filter.</Empty>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-line bg-raised text-[11px] text-dim uppercase">
+                  <tr>
+                    <th className="px-3 py-2.5 font-semibold">Employee</th>
+                    <th className="px-3 py-2.5 font-semibold">Date</th>
+                    <th className="px-3 py-2.5 font-semibold">Absence Type</th>
+                    <th className="px-3 py-2.5 font-semibold">Reason / Details</th>
+                    <th className="px-3 py-2.5 font-semibold">Consequence Decisions</th>
+                    <th className="px-3 py-2.5 font-semibold">Status</th>
+                    <th className="px-3 py-2.5 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {filteredAbsences.map((abs) => {
+                    const isNoShow = abs.absenceType === 'SUSPECTED_NO_SHOW';
+                    const isSick = abs.absenceType === 'SICK' || abs.absenceType === 'MEDICAL';
+
+                    return (
+                      <tr key={abs.id} className="hover:bg-white/[0.02]">
+                        <td className="px-3 py-3 align-middle">
+                          <div className="font-semibold text-text">{abs.employeeName}</div>
+                          <div className="text-[11px] text-muted">{abs.role || ''}</div>
+                        </td>
+                        <td className="px-3 py-3 align-middle font-mono font-medium text-slate-200">
+                          {abs.date}
+                          <div className="text-[10px] text-dim">Detected: {abs.detectedAt}</div>
+                        </td>
+                        <td className="px-3 py-3 align-middle">
+                          <Badge tone={isNoShow ? 'danger' : isSick ? 'warn' : 'muted'}>
+                            {isNoShow ? '🚨 SUSPECTED NO-SHOW' : `🤒 ${abs.absenceType}`}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-3 align-middle max-w-[260px]">
+                          <div className="text-xs text-text">{abs.reason || 'Auto-flagged scheduled no-show'}</div>
+                          {abs.documentTitle && (
+                            <div className="mt-1 text-[11px] text-brand font-medium">
+                              📎 Attached Doc: {abs.documentTitle}
+                            </div>
+                          )}
+                          {abs.reviewNotes && (
+                            <div className="mt-1 text-[11px] italic text-muted">
+                              Review Note: {abs.reviewNotes}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-middle text-[11px]">
+                          {abs.status === 'CONFIRMED' ? (
+                            <div className="space-y-0.5">
+                              <div className={abs.deductAnnualLeave ? 'text-amber-400 font-medium' : 'text-dim'}>
+                                • Deduct Annual Leave: {abs.deductAnnualLeave ? 'YES' : 'NO'}
+                              </div>
+                              <div className={abs.treatAsUnpaid ? 'text-danger font-medium' : 'text-dim'}>
+                                • Treat as Unpaid: {abs.treatAsUnpaid ? 'YES' : 'NO'}
+                              </div>
+                              <div className={abs.createWarningTrigger ? 'text-danger font-medium' : 'text-dim'}>
+                                • Disciplinary Trigger: {abs.createWarningTrigger ? 'YES' : 'NO'}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-dim">Decision Pending</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-middle">
+                          <Badge
+                            tone={
+                              abs.status === 'CONFIRMED'
+                                ? 'danger'
+                                : abs.status === 'DISMISSED'
+                                ? 'ok'
+                                : 'warn'
+                            }
+                          >
+                            {abs.status === 'PENDING_REVIEW'
+                              ? 'Pending Review'
+                              : abs.status === 'CONFIRMED'
+                              ? 'Confirmed'
+                              : 'Dismissed'}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-3 align-middle text-right">
+                          {abs.status === 'PENDING_REVIEW' && (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                variant="primary"
+                                onClick={() => {
+                                  setSelectedAbsence(abs);
+                                  setAbsenceAction('CONFIRM');
+                                  setDeductAnnualLeave(true);
+                                  setTreatAsUnpaid(true);
+                                  setCreateWarningTrigger(false);
+                                  setAbsenceNotes('');
+                                }}
+                                className="py-1 px-2.5 text-[11px]"
+                              >
+                                Review & Decide
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setSelectedAbsence(abs);
+                                  setAbsenceAction('DISMISS');
+                                  setAbsenceNotes('Excused with management approval.');
+                                }}
+                                className="py-1 px-2.5 text-[11px] text-muted hover:text-text"
+                              >
+                                Dismiss
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Review Absence Modal (Spec 10.2 Independent Policy Switches) */}
+      {selectedAbsence && absenceAction && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
+          <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-6">
+            <h2 className="text-base font-bold text-text">
+              {absenceAction === 'CONFIRM'
+                ? `Decide Absence Consequences: ${selectedAbsence.employeeName}`
+                : `Dismiss / Excuse Absence: ${selectedAbsence.employeeName}`}
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              Date: {selectedAbsence.date} · Type: {selectedAbsence.absenceType}
+            </p>
+
+            {selectedAbsence.reason && (
+              <div className="my-3 rounded-lg bg-raised p-3 text-xs text-text">
+                <div className="font-semibold text-dim mb-0.5">Reported Reason:</div>
+                {selectedAbsence.reason}
+              </div>
+            )}
+
+            {absenceAction === 'CONFIRM' && (
+              <div className="my-4 space-y-3 rounded-xl border border-line bg-raised/60 p-4 text-xs">
+                <div className="font-semibold text-text text-sm">
+                  Independent Policy Consequences (Spec 10.2):
+                </div>
+                <p className="text-dim text-[11px] leading-relaxed">
+                  Per the Forgotten Women HR policy, consequences must be decided separately case-by-case and not bundled automatically.
+                </p>
+
+                <label className="flex items-start gap-3 p-2.5 rounded-lg bg-surface border border-line cursor-pointer hover:border-brand transition">
+                  <input
+                    type="checkbox"
+                    checked={deductAnnualLeave}
+                    onChange={(e) => setDeductAnnualLeave(e.target.checked)}
+                    className="mt-0.5 rounded border-line text-brand focus:ring-brand h-4 w-4"
+                  />
+                  <div>
+                    <div className="font-semibold text-text">1. Deduct from Annual Leave Balance</div>
+                    <div className="text-[11px] text-muted">Deducts 1 full day from the employee's available paid leave balance.</div>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 p-2.5 rounded-lg bg-surface border border-line cursor-pointer hover:border-brand transition">
+                  <input
+                    type="checkbox"
+                    checked={treatAsUnpaid}
+                    onChange={(e) => setTreatAsUnpaid(e.target.checked)}
+                    className="mt-0.5 rounded border-line text-brand focus:ring-brand h-4 w-4"
+                  />
+                  <div>
+                    <div className="font-semibold text-text">2. Treat Day as Unpaid (Salary Deduction)</div>
+                    <div className="text-[11px] text-muted">Marks day as unpaid for payroll calculation (1/260th annual rate deduction).</div>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 p-2.5 rounded-lg bg-surface border border-line cursor-pointer hover:border-brand transition">
+                  <input
+                    type="checkbox"
+                    checked={createWarningTrigger}
+                    onChange={(e) => setCreateWarningTrigger(e.target.checked)}
+                    className="mt-0.5 rounded border-line text-brand focus:ring-brand h-4 w-4"
+                  />
+                  <div>
+                    <div className="font-semibold text-text">3. Create Disciplinary Warning Trigger</div>
+                    <div className="text-[11px] text-muted">Escalates this unauthorised absence into the formal warning referral queue.</div>
+                  </div>
+                </label>
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label className="block text-xs font-semibold text-text mb-1">
+                Decision Notes (Required for Audit Trail)
+              </label>
+              <textarea
+                value={absenceNotes}
+                onChange={(e) => setAbsenceNotes(e.target.value)}
+                placeholder="Explain the rationale for this decision (e.g. employee failed to contact manager, emergency confirmed)..."
+                rows={3}
+                className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setSelectedAbsence(null);
+                  setAbsenceAction(null);
+                }}
+                disabled={submitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleReviewAbsence}
+                disabled={submitting}
+                className={absenceAction === 'DISMISS' ? 'bg-slate-700 text-white' : 'bg-brand text-white'}
+              >
+                {submitting ? 'Submitting…' : absenceAction === 'CONFIRM' ? 'Confirm Consequences' : 'Confirm Dismissal'}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

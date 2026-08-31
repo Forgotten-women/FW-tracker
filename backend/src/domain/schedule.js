@@ -108,8 +108,8 @@ function resolve(employeeId, dateKey = T.dateKey()) {
     // Absolute instants, so callers never re-derive them and risk disagreeing.
     scheduledStartAt: T.wallClockToEpoch(dateKey, startTime),
     scheduledEndAt: T.wallClockToEpoch(dateKey, endTime),
-    // The latest arrival that is still not a late OCCURRENCE.
-    latestOnTimeAt: T.wallClockToEpoch(dateKey, startTime) + graceMinutes * 60000,
+    // The latest arrival that is still not late (10 mins grace on 11:00 means up to 11:10:59 is on time; 11:11 is late).
+    latestOnTimeAt: T.wallClockToEpoch(dateKey, startTime) + graceMinutes * 60000 + 59999,
   };
 }
 

@@ -233,6 +233,27 @@ export interface WarningBoardSummary {
   employees: WarningBoardEmployee[];
 }
 
+export interface AbsenceRecord {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  role?: string;
+  date: string;
+  absenceType: string;
+  reason: string | null;
+  evidenceDocumentId: string | null;
+  documentTitle: string | null;
+  detectedAt: string;
+  status: 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED';
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  reviewNotes: string | null;
+  deductAnnualLeave: boolean;
+  treatAsUnpaid: boolean;
+  createWarningTrigger: boolean;
+  consequencesAppliedAt: string | null;
+}
+
 export interface LeaveBalanceDetails {
   blocked: boolean;
   reason?: string;
@@ -378,4 +399,27 @@ export interface KycChecklistResponse {
   mandatoryChecklist: KycRequirementItem[];
   optionalChecklist: KycRequirementItem[];
 }
+
+export interface NotificationItem {
+  id: string;
+  employeeId?: string | null;
+  userId?: string | null;
+  category: 'LEAVE' | 'CORRECTION' | 'ABSENCE' | 'DOCUMENT' | 'WARNING' | 'HR_ALERT' | 'ATTENDANCE' | string;
+  title: string;
+  body: string;
+  severity: 'info' | 'warning' | 'urgent';
+  link?: string | null;
+  at: string;
+  date: string;
+  createdAt: number;
+  read: boolean;
+  dismissed: boolean;
+}
+
+export interface NotificationsResponse {
+  status: string;
+  unreadCount: number;
+  notifications: NotificationItem[];
+}
+
 

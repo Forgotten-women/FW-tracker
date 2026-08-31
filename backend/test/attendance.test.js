@@ -67,8 +67,8 @@ test('the confirmed schedule is 11:00-19:00 with 10 minutes grace', () => {
   assert.equal(s.permittedBreakMinutes, 30);
   assert.equal(s.dayEquivalentMinutes, 480);
   assert.equal(s.graceMinutes, 10);
-  // 11:10 is the last on-time minute, so 11:11 is late.
-  assert.equal(s.latestOnTimeAt, at('11:10'));
+  // 11:10:59 is the last on-time instant, so 11:11 is late.
+  assert.equal(s.latestOnTimeAt, at('11:10') + 59999);
 });
 
 test('a weekend is not a working day', () => {
@@ -92,15 +92,14 @@ test('arriving before the start time is not late', () => {
   assert.equal(d.attendanceStatus, 'PRESENT');
 });
 
-// The distinction that matters most in this engine.
-test('inside the grace period is deficit minutes but NOT a late occurrence', () => {
+test('inside the 10-minute grace period has 0 late minutes and is NOT a late occurrence', () => {
   const emp = makeEmployee('emp_grace');
   present(emp, '11:08', '19:00');
   const d = A.deriveDay(emp, DAY, at('19:30'));
 
   assert.equal(d.isLateOccurrence, false, '11:08 is within the 10 minute grace');
-  assert.equal(d.lateMinutes, 8, 'but late minutes still run from 11:00');
-  assert.equal(d.dailyDeficitMinutes, 8);
+  assert.equal(d.lateMinutes, 0, '11:08 is within 10m grace so 0 late minutes');
+  assert.equal(d.dailyDeficitMinutes, 0, '0 deficit inside grace period');
 });
 
 test('11:10 is on time and 11:11 is late', () => {

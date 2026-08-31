@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const { db, tx, audit } = require('../db');
 const { config } = require('../config');
 const schedule = require('./schedule');
+const N = require('./notifications');
 const T = require('../util/time');
 
 const ENTITLEMENT = config.leave.annualEntitlementDays;
@@ -482,6 +483,19 @@ function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion
     });
   })();
 
+  try {
+    const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+    const empName = emp?.name || employeeId;
+    N.notify({
+      category: 'LEAVE',
+      title: `Leave Request: ${empName}`,
+      body: `${preview.requestedDays} day(s) requested for ${startDate} to ${endDate} (${preview.leaveType.name}).`,
+      severity: preview.exceedsBalance ? 'warning' : 'info',
+      link: `/leave?request=${id}`,
+      nowMs,
+    });
+  } catch (_) {}
+
   return { id, ...preview, status: 'PENDING_HR' };
 }
 
@@ -573,6 +587,32 @@ function decideRequest({ requestId, decision, notes, actor, overdraftReason = nu
     });
   })();
 
+  try {
+    const type = selectLeaveType.get(req.leave_type_id);
+    const typeName = type?.name || 'Leave';
+    if (decision === 'APPROVED') {
+      N.notify({
+        employeeId: req.employee_id,
+        category: 'LEAVE',
+        title: 'Leave Request Approved',
+        body: `Your ${req.total_days} day(s) ${typeName} request from ${req.start_date} to ${req.end_date} has been approved.`,
+        severity: 'info',
+        link: '/leave',
+        nowMs,
+      });
+    } else if (decision === 'REJECTED') {
+      N.notify({
+        employeeId: req.employee_id,
+        category: 'LEAVE',
+        title: 'Leave Request Rejected',
+        body: `Your ${typeName} request from ${req.start_date} to ${req.end_date} was rejected. Note: ${notes}`,
+        severity: 'warning',
+        link: '/leave',
+        nowMs,
+      });
+    }
+  } catch (_) {}
+
   return { decision, requestId };
 }
 
@@ -614,6 +654,19 @@ function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() }) {
       before: { status: req.status }, note: reason,
     });
   })();
+
+  try {
+    const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(req.employee_id);
+    const empName = emp?.name || req.employee_id;
+    N.notify({
+      category: 'LEAVE',
+      title: `Leave Request Cancelled: ${empName}`,
+      body: `${empName} cancelled leave request for ${req.start_date} to ${req.end_date}.`,
+      severity: 'info',
+      link: '/leave',
+      nowMs,
+    });
+  } catch (_) {}
 
   return { cancelled: true };
 }

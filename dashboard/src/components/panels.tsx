@@ -19,10 +19,14 @@ export function Header({
   summary,
   connection,
   onLock,
+  unreadNotificationsCount = 0,
+  onOpenNotifications,
 }: {
   summary: DashboardSummary | null;
   connection: string;
   onLock: () => void;
+  unreadNotificationsCount?: number;
+  onOpenNotifications?: () => void;
 }) {
   const [clock, setClock] = useState('');
   const [date, setDate] = useState('');
@@ -76,6 +80,24 @@ export function Header({
           <div className="font-mono text-sm">{clock || '--:--:--'}</div>
           <div className="text-[11px] text-dim">{date}</div>
         </div>
+
+        {/* Notifications Bell */}
+        {onOpenNotifications && (
+          <button
+            type="button"
+            onClick={onOpenNotifications}
+            title="Notifications & Requests"
+            className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:border-slate-700 hover:bg-slate-800 transition shadow-inner"
+          >
+            <span className="text-base">🔔</span>
+            {unreadNotificationsCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white shadow-md ring-2 ring-[#090D16] animate-pulse">
+                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+              </span>
+            )}
+          </button>
+        )}
+
         <Badge tone={connection === 'live' ? 'ok' : 'muted'}>{connection}</Badge>
         <Button onClick={onLock} title="Forget the admin key on this browser">
           Lock

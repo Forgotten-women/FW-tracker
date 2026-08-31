@@ -426,6 +426,49 @@ void main() {
       expect(kyc.mandatoryChecklist.first.isVerified, isTrue);
       expect(kyc.mandatoryChecklist.last.isPending, isTrue);
     });
+
+    test('EmployeeAbsenceRecord parses sickness self-report and no-show payload (Spec 10 & 2.2)', () {
+      final abs = EmployeeAbsenceRecord.fromJson({
+        'id': 'abs_101',
+        'date': '2026-09-02',
+        'absenceType': 'SICK',
+        'reason': 'Severe migraine and fever',
+        'evidenceDocumentId': 'doc_med_99',
+        'documentTitle': 'Doctor Fit Note.pdf',
+        'detectedAt': '08:30 AM',
+        'status': 'PENDING_REVIEW',
+        'deductAnnualLeave': false,
+        'treatAsUnpaid': false,
+        'createWarningTrigger': false,
+      });
+
+      expect(abs.id, 'abs_101');
+      expect(abs.date, '2026-09-02');
+      expect(abs.absenceType, 'SICK');
+      expect(abs.reason, contains('Severe migraine'));
+      expect(abs.documentTitle, 'Doctor Fit Note.pdf');
+      expect(abs.status, 'PENDING_REVIEW');
+      expect(abs.deductAnnualLeave, isFalse);
+
+      final confirmed = EmployeeAbsenceRecord.fromJson({
+        'id': 'abs_102',
+        'date': '2026-09-01',
+        'absenceType': 'SUSPECTED_NO_SHOW',
+        'reason': null,
+        'detectedAt': '07:30 PM',
+        'status': 'CONFIRMED',
+        'reviewNotes': 'Unexcused no-show confirmed by manager',
+        'deductAnnualLeave': true,
+        'treatAsUnpaid': true,
+        'createWarningTrigger': false,
+      });
+
+      expect(confirmed.status, 'CONFIRMED');
+      expect(confirmed.deductAnnualLeave, isTrue);
+      expect(confirmed.treatAsUnpaid, isTrue);
+      expect(confirmed.createWarningTrigger, isFalse);
+      expect(confirmed.reviewNotes, contains('Unexcused no-show'));
+    });
   });
 }
 

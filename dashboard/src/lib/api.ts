@@ -5,6 +5,7 @@
 // and the backend's CORS stays locked down.
 
 import type {
+  AbsenceRecord,
   AdminEmployee,
   AttendanceCorrection,
   DashboardSummary,
@@ -17,6 +18,8 @@ import type {
   KycChecklistResponse,
   LeaveRequestItem,
   LeaveTypeItem,
+  NotificationItem,
+  NotificationsResponse,
   PendingVerificationDoc,
   PresenceStatus,
   TeamCalendarLeave,
@@ -243,6 +246,50 @@ export const api = {
       },
     ),
 
+  absences: (status = 'ALL', from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (status && status !== 'ALL') params.append('status', status);
+    if (from) params.append('from', from);
+    if (to) params.append('to', to);
+    const qs = params.toString();
+    return request<{
+      status: string;
+      absences: AbsenceRecord[];
+      counts: { pending: number; confirmed: number; dismissed: number };
+    }>(`/api/warnings/absences${qs ? `?${qs}` : ''}`);
+  },
+
+  reviewAbsence: (
+    id: string,
+    payload: {
+      status: 'CONFIRMED' | 'DISMISSED';
+      deductAnnualLeave?: boolean;
+      treatAsUnpaid?: boolean;
+      createWarningTrigger?: boolean;
+      notes: string;
+    },
+  ) =>
+    request<{ status: string; message: string }>(
+      `/api/warnings/absences/${encodeURIComponent(id)}/review`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  scanAbsences: (dateKey?: string) =>
+    request<{
+      status: string;
+      dateKey: string;
+      scannedCount: number;
+      detectedCount: number;
+      detected: Array<{ employeeId: string; employeeName: string; dateKey: string; absenceId: string }>;
+      message: string;
+    }>('/api/warnings/absences/scan', {
+      method: 'POST',
+      body: JSON.stringify({ dateKey }),
+    }),
+
   pendingLeaveRequests: () =>
     request<{ status: string; requests: LeaveRequestItem[] }>(
       '/api/leave/pending',
@@ -370,6 +417,25 @@ export const api = {
       `/api/documents/${encodeURIComponent(documentId)}`,
       {
         method: 'DELETE',
+      },
+    ),
+
+  notifications: (all = false) =>
+    request<NotificationsResponse>(
+      `/api/notifications${all ? '?all=true' : ''}`,
+    ),
+
+  markNotificationRead: (id?: string) =>
+    request<{ status: string }>('/api/notifications/read', {
+      method: 'POST',
+      body: JSON.stringify({ id: id || null }),
+    }),
+
+  dismissNotification: (id: string) =>
+    request<{ status: string }>(
+      `/api/notifications/${encodeURIComponent(id)}/dismiss`,
+      {
+        method: 'POST',
       },
     ),
 };

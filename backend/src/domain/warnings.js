@@ -20,6 +20,8 @@ const crypto = require('crypto');
 const { db, tx, audit } = require('../db');
 const { config } = require('../config');
 const A = require('./attendance');
+const schedule = require('./schedule');
+const N = require('./notifications');
 const T = require('../util/time');
 
 // ---------------------------------------------------------------------------
@@ -467,6 +469,19 @@ function reviewAbsence({
     });
   })();
 
+  try {
+    const statusLabel = status === 'CONFIRMED' ? 'Confirmed' : 'Dismissed';
+    N.notify({
+      employeeId: record.employee_id,
+      category: 'ABSENCE',
+      title: `Absence Review: ${statusLabel}`,
+      body: `Your absence for ${record.date_key} has been ${status.toLowerCase()} by HR. Note: ${notes}`,
+      severity: status === 'CONFIRMED' ? 'warning' : 'info',
+      link: '/leave',
+      nowMs,
+    });
+  } catch (_) {}
+
   // Chosen consequences are PROPOSED, never applied here. Spec 29: the system
   // calculates, a person approves, and the leave and payroll engines act only
   // on an approved decision.
@@ -477,17 +492,214 @@ function reviewAbsence({
   };
 }
 
+/**
+ * Scans all active employees for a given date.
+ * Flags scheduled staff who did not attend and have no approved leave.
+ */
+function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan = false) {
+  const employees = db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
+  const detected = [];
+  const isToday = dateKey === T.dateKey(nowMs);
+
+  for (const emp of employees) {
+    const sched = schedule.resolve(emp.id, dateKey);
+    // If not a scheduled working day for this employee, skip
+    if (!sched.isWorkingDay) continue;
+
+    // If scanning for today and not a manual override, do not auto-flag until after scheduled workday has ended
+    if (isToday && !isManualScan && nowMs < sched.scheduledEndAt) {
+      continue;
+    }
+
+    // Check if employee has attendance / presence recorded for this date
+    const attSummary = db.prepare(`
+      SELECT first_clock_in, worked_minutes FROM attendance_daily_summary
+      WHERE employee_id = ? AND date_key = ?
+    `).get(emp.id, dateKey);
+
+    if (attSummary && (attSummary.first_clock_in != null || attSummary.worked_minutes > 0)) {
+      continue;
+    }
+
+    // Also check raw presence events in case summary derivation has not run yet
+    const startMs = T.startOfDay(dateKey);
+    const endMs = T.endOfDay(dateKey);
+    const rawEvents = db.prepare(`
+      SELECT COUNT(*) c FROM presence_events
+      WHERE employee_id = ? AND observed_at >= ? AND observed_at <= ?
+    `).get(emp.id, startMs, endMs);
+
+    if (rawEvents && rawEvents.c > 0) {
+      continue;
+    }
+
+    // Check if employee has an approved leave request covering this date
+    const approvedLeave = db.prepare(`
+      SELECT id, leave_type_id FROM leave_requests
+      WHERE employee_id = ? AND status = 'APPROVED' AND start_date <= ? AND end_date >= ?
+    `).get(emp.id, dateKey, dateKey);
+
+    if (approvedLeave) continue;
+
+    // Check if employee already has an absence record for this date
+    const existingAbsence = db.prepare(`
+      SELECT id, absence_type FROM absence_records
+      WHERE employee_id = ? AND date_key = ?
+    `).get(emp.id, dateKey);
+
+    if (existingAbsence) continue;
+
+    // Employee is scheduled, has no attendance, and has no approved leave.
+    const res = recordSuspectedAbsence({ employeeId: emp.id, dateKey, nowMs });
+    if (res && res.recorded) {
+      detected.push({ employeeId: emp.id, employeeName: emp.name, dateKey, absenceId: res.id });
+      try {
+        db.prepare(`
+          INSERT INTO hr_alerts (id, alert_type, title, description, employee_id, severity, created_at)
+          VALUES (?, 'UNAUTHORISED_ABSENCE', ?, ?, ?, 'HIGH', ?)
+        `).run(
+          'alrt_' + crypto.randomBytes(8).toString('hex'),
+          `Suspected No-Show: ${emp.name}`,
+          `Scheduled on ${dateKey} with 0 minutes recorded and no approved leave.`,
+          emp.id,
+          nowMs,
+        );
+      } catch (e) {
+        // Fallback if hr_alerts not initialized
+      }
+    }
+  }
+
+  if (detected.length > 0 && isManualScan) {
+    try {
+      N.notify({
+        category: 'ABSENCE',
+        title: `Suspected Absence: ${detected.length} flagged`,
+        body: `Absence scanner flagged ${detected.length} employee(s) for ${dateKey} awaiting HR review.`,
+        severity: 'warning',
+        link: `/attendance?tab=absences&date=${dateKey}`,
+        nowMs,
+      });
+    } catch (_) {}
+  }
+
+  return { dateKey, scannedCount: employees.length, detectedCount: detected.length, detected };
+}
+
+/**
+ * Self-reporting of sickness / unplanned absence from the mobile app (Spec 2.2).
+ */
+function selfReportAbsence({ employeeId, dateKey, absenceType = 'SICK', reason = '', evidenceDocumentId = null, nowMs = T.now() }) {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error('dateKey must be formatted as YYYY-MM-DD.');
+  }
+
+  const existing = db.prepare(
+    'SELECT * FROM absence_records WHERE employee_id = ? AND date_key = ?'
+  ).get(employeeId, dateKey);
+
+  const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+  const employeeName = emp?.name || employeeId;
+
+  let absenceId;
+  if (existing) {
+    absenceId = existing.id;
+    db.prepare(`
+      UPDATE absence_records
+      SET absence_type = ?, reason = ?, evidence_document_id = ?, status = 'PENDING_REVIEW', detected_at = ?
+      WHERE id = ?
+    `).run(absenceType, reason, evidenceDocumentId, nowMs, existing.id);
+  } else {
+    absenceId = 'abs_' + crypto.randomBytes(8).toString('hex');
+    db.prepare(`
+      INSERT INTO absence_records
+        (id, employee_id, date_key, absence_type, reason, evidence_document_id, detected_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW')
+    `).run(absenceId, employeeId, dateKey, absenceType, reason, evidenceDocumentId, nowMs);
+  }
+
+  notify({
+    category: 'ABSENCE',
+    title: `Sickness / Absence Report: ${employeeName}`,
+    body: `${absenceType} reported for ${dateKey}: ${reason || 'No details provided'}`,
+    severity: 'info',
+    nowMs,
+  });
+
+  audit({
+    actor: `employee:${employeeId}`,
+    action: 'ABSENCE_SELF_REPORTED',
+    targetType: 'employee',
+    targetId: employeeId,
+    after: { absenceId, dateKey, absenceType, reason, evidenceDocumentId },
+    note: `Employee self-reported ${absenceType} for ${dateKey}`,
+  });
+
+  return { id: absenceId, dateKey, absenceType, status: 'PENDING_REVIEW', reportedAt: nowMs };
+}
+
+/**
+ * Returns absence records for HR review or employee history.
+ */
+function listAbsences({ status = 'ALL', from = null, to = null, employeeId = null } = {}) {
+  let query = `
+    SELECT a.*, e.name as employee_name, e.role as employee_role, d.title as document_title
+    FROM absence_records a
+    JOIN employees e ON e.id = a.employee_id
+    LEFT JOIN employee_documents d ON d.id = a.evidence_document_id
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (status && status !== 'ALL') {
+    query += ' AND a.status = ?';
+    params.push(status);
+  }
+  if (from) {
+    query += ' AND a.date_key >= ?';
+    params.push(from);
+  }
+  if (to) {
+    query += ' AND a.date_key <= ?';
+    params.push(to);
+  }
+  if (employeeId) {
+    query += ' AND a.employee_id = ?';
+    params.push(employeeId);
+  }
+
+  query += ' ORDER BY a.date_key DESC, a.detected_at DESC';
+
+  const rows = db.prepare(query).all(...params);
+  return rows.map(r => ({
+    id: r.id,
+    employeeId: r.employee_id,
+    employeeName: r.employee_name,
+    role: r.employee_role,
+    date: r.date_key,
+    absenceType: r.absence_type,
+    reason: r.reason || null,
+    evidenceDocumentId: r.evidence_document_id || null,
+    documentTitle: r.document_title || null,
+    detectedAt: T.displayTime(r.detected_at),
+    status: r.status,
+    reviewedBy: r.reviewed_by || null,
+    reviewedAt: r.reviewed_at ? T.displayTime(r.reviewed_at) : null,
+    reviewNotes: r.review_notes || null,
+    deductAnnualLeave: r.deduct_annual_leave === 1,
+    treatAsUnpaid: r.treat_as_unpaid === 1,
+    createWarningTrigger: r.create_warning_trigger === 1,
+    consequencesAppliedAt: r.consequences_applied_at ? T.displayTime(r.consequences_applied_at) : null,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Notifications (spec 22)
 // ---------------------------------------------------------------------------
 
-function notify({ employeeId = null, userId = null, category, title, body, severity = 'info', link = null, nowMs = T.now() }) {
-  const id = 'ntf_' + crypto.randomBytes(8).toString('hex');
-  db.prepare(`
-    INSERT INTO notifications (id, employee_id, user_id, category, title, body, severity, link, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?)
-  `).run(id, employeeId, userId, category, title, body, severity, link, nowMs);
-  return id;
+function notify(opts) {
+  const payload = N.notify(opts);
+  return payload.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -577,6 +789,6 @@ module.exports = {
   evaluateLateness, evaluateAll,
   reviewTrigger, issueFormalWarning, withdrawWarning, acknowledgeWarning,
   expireWarnings, addMonths,
-  recordSuspectedAbsence, reviewAbsence,
+  recordSuspectedAbsence, reviewAbsence, scanDailyAbsences, selfReportAbsence, listAbsences,
   notify, levelLabel, employeeWarningView,
 };

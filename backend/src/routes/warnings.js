@@ -246,32 +246,77 @@ router.post('/:id/withdraw', requireUserOrAdminKey('warning.issue'), (req, res) 
 // HR: absences (spec 10)
 // ---------------------------------------------------------------------------
 
-router.get('/absences', requireUserOrAdminKey('attendance.read'), (req, res) => {
+// GET /api/warnings/absences/mine - employee view of reported absences & no-shows
+router.get('/absences/mine', requireDevice, (req, res) => {
+  const list = W.listAbsences({ employeeId: req.auth.employeeId });
+  res.json({
+    status: 'SUCCESS',
+    absences: list,
+  });
+});
+
+// POST /api/warnings/absences/self-report - employee self-reports sickness / emergency (Spec 2.2)
+router.post('/absences/self-report', requireDevice, (req, res) => {
+  const { dateKey, absenceType, reason, evidenceDocumentId } = req.body || {};
+  if (!dateKey) {
+    return res.status(400).json({ status: 'ERROR', message: 'dateKey (YYYY-MM-DD) is required.' });
+  }
+
+  try {
+    const result = W.selfReportAbsence({
+      employeeId: req.auth.employeeId,
+      dateKey,
+      absenceType: absenceType || 'SICK',
+      reason: reason || '',
+      evidenceDocumentId: evidenceDocumentId || null,
+    });
+    res.status(201).json({
+      status: 'SUCCESS',
+      ...result,
+      message: `Absence report for ${dateKey} submitted to HR for review.`,
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// HR: Unauthorised absence & no-show management (spec 10)
+// ---------------------------------------------------------------------------
+
+// POST /api/warnings/absences/scan - manual date scan for unscheduled no-shows
+router.post('/absences/scan', requireUserOrAdminKey('attendance.write'), (req, res) => {
+  const dateKey = String(req.body?.dateKey || T.dateKey());
+  try {
+    const result = W.scanDailyAbsences(dateKey, T.now(), true);
+    res.json({
+      status: 'SUCCESS',
+      ...result,
+      message: `Scanned ${result.scannedCount} employees for ${dateKey}. Flagged ${result.detectedCount} suspected absence(s).`,
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// GET /api/warnings/absences?status=ALL|PENDING_REVIEW|CONFIRMED|DISMISSED
+router.get('/absences', requireUserOrAdminKey('warning.read'), (req, res) => {
   const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
-  const rows = db.prepare(`
-    SELECT a.*, e.name FROM absence_records a
-    JOIN employees e ON e.id = a.employee_id
-    WHERE a.status = ? ORDER BY a.date_key DESC
-  `).all(String(req.query.status || 'PENDING_REVIEW'))
-    .filter(r => visible.has(r.employee_id));
+  const status = String(req.query.status || 'ALL');
+  const from = req.query.from ? String(req.query.from) : null;
+  const to = req.query.to ? String(req.query.to) : null;
+
+  const rows = W.listAbsences({ status, from, to })
+    .filter(r => visible.has(r.employeeId));
 
   res.json({
     status: 'SUCCESS',
-    absences: rows.map(r => ({
-      id: r.id,
-      employeeId: r.employee_id,
-      employeeName: r.name,
-      date: r.date_key,
-      type: r.absence_type,
-      detectedAt: T.displayTime(r.detected_at),
-      status: r.status,
-      // Null means nobody has decided. Rendered as "not decided", never as "no".
-      consequences: {
-        deductAnnualLeave: r.deduct_annual_leave === null ? null : !!r.deduct_annual_leave,
-        treatAsUnpaid: r.treat_as_unpaid === null ? null : !!r.treat_as_unpaid,
-        createWarningTrigger: r.create_warning_trigger === null ? null : !!r.create_warning_trigger,
-      },
-    })),
+    absences: rows,
+    counts: {
+      pending: rows.filter(r => r.status === 'PENDING_REVIEW').length,
+      confirmed: rows.filter(r => r.status === 'CONFIRMED').length,
+      dismissed: rows.filter(r => r.status === 'DISMISSED').length,
+    },
     note: 'No consequence is applied automatically. Each outcome is chosen per case and then approved before payroll.',
   });
 });

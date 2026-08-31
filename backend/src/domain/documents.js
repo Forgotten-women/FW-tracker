@@ -17,6 +17,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { db, tx, audit, DATA_DIR } = require('../db');
 const storage = require('./storage');
+const N = require('./notifications');
 const T = require('../util/time');
 
 const STORE = path.join(DATA_DIR, 'documents');
@@ -221,6 +222,21 @@ function upload({
 
   run();
 
+  if (initialStatus === 'PENDING_VERIFICATION') {
+    try {
+      const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+      const empName = emp?.name || employeeId;
+      N.notify({
+        category: 'DOCUMENT',
+        title: `Document Uploaded: ${empName}`,
+        body: `${empName} uploaded ${title || type.name} for HR verification.`,
+        severity: 'info',
+        link: `/documents?employee=${employeeId}`,
+        nowMs,
+      });
+    } catch (_) {}
+  }
+
   return {
     documentId,
     version,
@@ -256,6 +272,18 @@ function verifyDocument({ documentId, verifiedBy, actor }) {
     after: { verifiedBy: verifiedBy || actor, verifiedAt: nowMs },
   });
 
+  try {
+    N.notify({
+      employeeId: doc.employee_id,
+      category: 'DOCUMENT',
+      title: 'Document Verified',
+      body: `Your document "${doc.title}" has been verified by HR.`,
+      severity: 'info',
+      link: '/documents',
+      nowMs,
+    });
+  } catch (_) {}
+
   return { status: 'SUCCESS', documentId, verificationStatus: 'VERIFIED' };
 }
 
@@ -284,6 +312,18 @@ function rejectDocument({ documentId, rejectionReason, rejectedBy, actor }) {
     targetId: documentId,
     after: { rejectedBy: rejectedBy || actor, rejectedAt: nowMs, rejectionReason },
   });
+
+  try {
+    N.notify({
+      employeeId: doc.employee_id,
+      category: 'DOCUMENT',
+      title: 'Document Rejected by HR',
+      body: `Your document "${doc.title}" was rejected. Reason: ${rejectionReason.trim()}`,
+      severity: 'warning',
+      link: '/documents',
+      nowMs,
+    });
+  } catch (_) {}
 
   return { status: 'SUCCESS', documentId, verificationStatus: 'REJECTED' };
 }

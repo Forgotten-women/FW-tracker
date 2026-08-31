@@ -184,14 +184,12 @@ function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
 
   // --- late arrival (spec 8.1, 9.1) ----------------------------------------
   //
-  // Two different questions, and conflating them is a real error:
-  //   late MINUTES are measured from the scheduled start, and feed the deficit
-  //   a late OCCURRENCE is only counted past the grace period, and feeds the
-  //   warning engine
-  // With an 11:00 start and 10 minutes of grace, arriving at 11:08 is 8 deficit
-  // minutes but NOT a late occurrence.
-  const lateMinutes = Math.max(0, Math.round((firstIn - s.scheduledStartAt) / MIN));
+  // 10 minutes grace allowed: arrivals up to 11:10 are on time (0 late minutes, 0 deficit).
+  // Arrivals from 11:11 onwards are late and count late minutes.
   const isLateOccurrence = firstIn > s.latestOnTimeAt;
+  const lateMinutes = isLateOccurrence
+    ? Math.max(0, Math.round((firstIn - s.scheduledStartAt) / MIN))
+    : 0;
 
   // --- excess break (spec 12) ----------------------------------------------
   const excessBreakMinutes = breaks.reduce((a, b) => a + (b.excess_minutes || 0), 0);
@@ -328,6 +326,16 @@ function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     attendance_status: d.attendanceStatus,
     derived_at: nowMs,
   });
+
+  // If the employee is present or has worked minutes, clear any unreviewed suspected no-show records
+  if (d.firstInAt != null || d.workedMinutes > 0) {
+    try {
+      db.prepare(`
+        DELETE FROM absence_records
+        WHERE employee_id = ? AND date_key = ? AND absence_type = 'SUSPECTED_NO_SHOW' AND status = 'PENDING_REVIEW'
+      `).run(employeeId, dateKey);
+    } catch (_) {}
+  }
 
   // The ledger records the day's deficit once it is settled. Writing it while
   // the day is still running would post a figure that keeps changing.

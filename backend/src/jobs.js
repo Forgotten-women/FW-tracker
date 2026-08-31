@@ -105,6 +105,16 @@ function rollover(nowMs = T.now()) {
 
   lastKnownStatus.clear();
   console.log(`[jobs] rolled over ${closedKey}: ${closed} employee-day(s) closed`);
+  
+  try {
+    const absRes = W.scanDailyAbsences(closedKey, nowMs);
+    if (absRes && absRes.detectedCount > 0) {
+      console.log(`[jobs] rollover absence scan flagged ${absRes.detectedCount} no-show(s) for ${closedKey}`);
+    }
+  } catch (e) {
+    console.error('[jobs] rollover absence scan error:', e.message);
+  }
+
   events.broadcast('DAY_ROLLOVER', { closedDate: closedKey });
 }
 
@@ -263,6 +273,23 @@ async function nightlyBackup(nowMs = T.now()) {
   }
 }
 
+let lastAbsenceScanKey = null;
+
+function scanAbsences(nowMs = T.now()) {
+  const todayKey = T.dateKey(nowMs);
+  if (lastAbsenceScanKey === todayKey) return;
+  lastAbsenceScanKey = todayKey;
+
+  try {
+    const result = W.scanDailyAbsences(todayKey, nowMs);
+    if (result && result.detectedCount > 0) {
+      console.log(`[jobs] absence sweep flagged ${result.detectedCount} suspected no-show(s) for ${todayKey}`);
+    }
+  } catch (err) {
+    console.error('[jobs] absence sweep failed:', err.message);
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 let timer = null;
@@ -278,6 +305,7 @@ function start() {
       if (expired) console.log(`[jobs] ${expired} MAC binding(s) expired without reconfirmation`);
       detectTransitions(nowMs);
       evaluateWarnings(nowMs);
+      scanAbsences(nowMs);
       accrueLeave(nowMs);
       notifyHrAlerts(nowMs);
       retention(nowMs);
@@ -303,4 +331,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, accrueLeave, notifyHrAlerts, nightlyBackup };
+module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, nightlyBackup };

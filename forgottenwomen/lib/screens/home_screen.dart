@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../models/attendance.dart';
 import '../services/api_client.dart';
 import '../services/device_probe.dart';
+import '../services/notification_service.dart';
 import '../services/offline_queue.dart';
 import '../services/presence_service.dart';
 import '../services/token_store.dart';
@@ -51,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _bootstrap();
-    _foregroundTimer = Timer.periodic(const Duration(seconds: 10), (_) => _refresh());
+    _foregroundTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refresh());
     _breakTimer = Timer.periodic(const Duration(seconds: 1), (_) => _tickBreak());
   }
 
@@ -145,6 +146,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         });
       }
+
+      // Check for incoming HR approvals and trigger status bar notifications
+      try {
+        await NotificationService().checkAndDispatchUnseenNotifications(store: _store);
+      } catch (_) {}
     } on ApiException catch (e) {
       if (e.needsReEnrollment) {
         await _store.clearToken();
@@ -777,9 +783,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           : RefreshIndicator(
               color: AppColors.primary,
               onRefresh: _refresh,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
-                children: [
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
+                    children: [
                   if (_error != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -859,6 +869,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
+          ),
+        ),
     );
   }
 

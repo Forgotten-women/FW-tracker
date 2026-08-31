@@ -1,9 +1,11 @@
 // Employee warnings screen. Spec sections 9.2, 19.2 and 19.5.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/hr.dart';
 import '../services/api_client.dart';
+import '../services/notification_service.dart';
 import '../theme.dart';
 
 class WarningsScreen extends StatefulWidget {
@@ -15,6 +17,7 @@ class WarningsScreen extends StatefulWidget {
 
 class _WarningsScreenState extends State<WarningsScreen> {
   final _api = ApiClient();
+  Timer? _pollTimer;
   WarningView? _view;
   bool _loading = true;
   String? _error;
@@ -23,12 +26,25 @@ class _WarningsScreenState extends State<WarningsScreen> {
   void initState() {
     super.initState();
     _load();
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _loadSilently());
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _api.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSilently() async {
+    try {
+      final v = await _api.myWarnings();
+      if (!mounted) return;
+      setState(() { _view = v; _error = null; });
+      try {
+        await NotificationService().checkAndDispatchUnseenNotifications();
+      } catch (_) {}
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -114,49 +130,55 @@ class _WarningsScreenState extends State<WarningsScreen> {
           : RefreshIndicator(
               color: AppColors.primary,
               onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
-                children: [
-                  if (_error != null)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.danger.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.danger.withOpacity(0.4)),
-                      ),
-                      child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
-                    )
-                  else if (_view != null) ...[
-                    _bandCard(_view!),
-                    const SizedBox(height: 16),
-                    _latenessCard(_view!.lateness),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'FORMAL NOTICES & WARNINGS',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
-                    ),
-                    const SizedBox(height: 10),
-                    if (_view!.warnings.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceDark,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: const Center(
-                          child: Text(
-                            'No formal warnings or disciplinary records.\nYour attendance standing is clear.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
+                    children: [
+                      if (_error != null)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.danger.withOpacity(0.4)),
                           ),
+                          child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+                        )
+                      else if (_view != null) ...[
+                        _bandCard(_view!),
+                        const SizedBox(height: 16),
+                        _latenessCard(_view!.lateness),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'FORMAL NOTICES & WARNINGS',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
                         ),
-                      )
-                    else
-                      ..._view!.warnings.map(_warningCard),
-                  ],
-                ],
+                        const SizedBox(height: 10),
+                        if (_view!.warnings.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceDark,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: const Center(
+                              child: Text(
+                                'No formal warnings or disciplinary records.\nYour attendance standing is clear.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+                              ),
+                            ),
+                          )
+                        else
+                          ..._view!.warnings.map(_warningCard),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
     );

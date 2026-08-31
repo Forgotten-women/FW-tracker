@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, UnauthorizedError } from '@/lib/api';
-import type { AdminEmployee, DashboardSummary } from '@/lib/types';
+import type { AdminEmployee, DashboardSummary, NotificationItem } from '@/lib/types';
 
 export type ConnectionState = 'live' | 'polling' | 'reconnecting';
 
@@ -19,12 +19,12 @@ interface UseDashboard {
  * Loads the dashboard and keeps it current.
  *
  * Live updates arrive over SSE; the interval is a fallback so a dropped stream
- * degrades to stale-by-15s rather than silently frozen, which is what the old
- * dashboard did when its keepalive-less stream timed out.
+ * degrades to stale-by-15s rather than silently frozen.
  */
 export function useDashboard(
   unlocked: boolean,
   onUnauthorized: (message: string) => void,
+  onNotification?: (notification: NotificationItem) => void,
 ): UseDashboard {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [employees, setEmployees] = useState<AdminEmployee[]>([]);
@@ -34,6 +34,8 @@ export function useDashboard(
   const sourceRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aliveRef = useRef(true);
+  const onNotificationRef = useRef(onNotification);
+  onNotificationRef.current = onNotification;
 
   const refresh = useCallback(async () => {
     try {
@@ -56,9 +58,6 @@ export function useDashboard(
   useEffect(() => {
     if (!unlocked) return;
     aliveRef.current = true;
-    // Queued rather than called straight from the effect body, so the first
-    // load resolves in a callback instead of triggering a synchronous
-    // re-render while React is still committing this one.
     const initial = setTimeout(() => void refresh(), 0);
     const id = setInterval(() => void refresh(), 4000);
     return () => {
@@ -87,12 +86,21 @@ export function useDashboard(
         source.onopen = () => {
           if (!cancelled) setConnection('live');
         };
-        source.onmessage = () => void refresh();
+        source.onmessage = (event) => {
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed && parsed.type === 'NOTIFICATION' && parsed.data) {
+              onNotificationRef.current?.(parsed.data as NotificationItem);
+            }
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('office-tracker-sse', { detail: parsed }));
+            }
+          } catch (_) {}
+          void refresh();
+        };
         source.onerror = () => {
           if (cancelled) return;
           setConnection('reconnecting');
-          // A ticket is single use, so the browser's own reconnect would 401.
-          // Close and negotiate a fresh one instead.
           source.close();
           sourceRef.current = null;
           retryRef.current = setTimeout(() => void connect(), 5000);

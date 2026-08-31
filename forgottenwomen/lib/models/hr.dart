@@ -405,3 +405,54 @@ class KycChecklist {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Unscheduled Absences & Sickness Reporting (Spec 10 & 2.2)
+// ---------------------------------------------------------------------------
+
+class EmployeeAbsenceRecord {
+  final String id;
+  final String date;
+  final String absenceType;
+  final String? reason;
+  final String? evidenceDocumentId;
+  final String? documentTitle;
+  final String detectedAt;
+  final String status;
+  final String? reviewNotes;
+  final bool deductAnnualLeave;
+  final bool treatAsUnpaid;
+  final bool createWarningTrigger;
+
+  const EmployeeAbsenceRecord({
+    required this.id,
+    required this.date,
+    required this.absenceType,
+    this.reason,
+    this.evidenceDocumentId,
+    this.documentTitle,
+    required this.detectedAt,
+    required this.status,
+    this.reviewNotes,
+    this.deductAnnualLeave = false,
+    this.treatAsUnpaid = false,
+    this.createWarningTrigger = false,
+  });
+
+  factory EmployeeAbsenceRecord.fromJson(Map<String, dynamic> json) {
+    return EmployeeAbsenceRecord(
+      id: json['id'] as String? ?? '',
+      date: json['date'] as String? ?? '',
+      absenceType: json['absenceType'] as String? ?? json['type'] as String? ?? 'SICK',
+      reason: json['reason'] as String?,
+      evidenceDocumentId: json['evidenceDocumentId'] as String?,
+      documentTitle: json['documentTitle'] as String?,
+      detectedAt: json['detectedAt'] as String? ?? '',
+      status: json['status'] as String? ?? 'PENDING_REVIEW',
+      reviewNotes: json['reviewNotes'] as String?,
+      deductAnnualLeave: json['deductAnnualLeave'] == true,
+      treatAsUnpaid: json['treatAsUnpaid'] == true,
+      createWarningTrigger: json['createWarningTrigger'] == true,
+    );
+  }
+}
+

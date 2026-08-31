@@ -18,10 +18,11 @@ import { HrAlertsPanel } from '@/components/HrAlerts';
 import { LeaveManagementPanel } from '@/components/LeaveManagementPanel';
 import DocumentVaultPanel from '@/components/DocumentVaultPanel';
 import { WarningBoard } from '@/components/WarningBoard';
+import { NotificationDrawer } from '@/components/NotificationDrawer';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
-import type { AdminEmployee, AttendanceCorrection, EnrollmentCode } from '@/lib/types';
+import type { AdminEmployee, AttendanceCorrection, EnrollmentCode, NotificationItem } from '@/lib/types';
 
 type DashboardTab = 'overview' | 'attendance' | 'leave' | 'disciplinary' | 'documents' | 'workforce';
 
@@ -30,6 +31,10 @@ export default function DashboardPage() {
   const [gateError, setGateError] = useState<string>('');
   const [pairing, setPairing] = useState<(EnrollmentCode & { name: string }) | null>(null);
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
+  const [notificationDrawerOpen, setNotificationDrawerOpen] = useState<boolean>(false);
+  const [toastNotification, setToastNotification] = useState<NotificationItem | null>(null);
 
   // The admin key lives in sessionStorage
   const unlocked = useSyncExternalStore(subscribeToKey, () => Boolean(getKey()), () => false);
@@ -40,9 +45,29 @@ export default function DashboardPage() {
     notifyKeyChanged();
   }, []);
 
+  const loadNotifications = useCallback(async () => {
+    try {
+      const res = await api.notifications();
+      setNotifications(res.notifications || []);
+      setUnreadNotificationsCount(res.unreadCount || 0);
+    } catch (_) {}
+  }, []);
+
+  const handleIncomingNotification = useCallback((n: NotificationItem) => {
+    setToastNotification(n);
+    setNotifications((prev) => [n, ...prev.filter((item) => item.id !== n.id)]);
+    setUnreadNotificationsCount((c) => c + 1);
+
+    // Auto dismiss toast popup after 7 seconds
+    setTimeout(() => {
+      setToastNotification((curr) => (curr?.id === n.id ? null : curr));
+    }, 7000);
+  }, []);
+
   const { summary, employees, connection, error, refresh } = useDashboard(
     unlocked,
     lock,
+    handleIncomingNotification,
   );
 
   const loadCorrections = useCallback(async () => {
@@ -55,10 +80,32 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (unlocked) {
+    if (!unlocked) return;
+
+    loadCorrections();
+    loadNotifications();
+
+    const handleSse = () => {
       loadCorrections();
+      loadNotifications();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('office-tracker-sse', handleSse);
     }
-  }, [unlocked, loadCorrections]);
+
+    const interval = setInterval(() => {
+      loadCorrections();
+      loadNotifications();
+    }, 4000);
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('office-tracker-sse', handleSse);
+      }
+      clearInterval(interval);
+    };
+  }, [unlocked, loadCorrections, loadNotifications]);
 
   const decideCorrection = async (
     id: string,
@@ -121,7 +168,13 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#090D16] text-slate-100 selection:bg-indigo-500 selection:text-white">
       {/* Global Header */}
-      <Header summary={summary} connection={connection} onLock={() => lock('')} />
+      <Header
+        summary={summary}
+        connection={connection}
+        onLock={() => lock('')}
+        unreadNotificationsCount={unreadNotificationsCount}
+        onOpenNotifications={() => setNotificationDrawerOpen(true)}
+      />
 
       {/* Primary Navigation Tabs */}
       <nav className="sticky top-0 z-30 border-b border-slate-800/80 bg-[#0F172A]/90 px-6 backdrop-blur-md">
@@ -350,6 +403,71 @@ export default function DashboardPage() {
           expires={pairing.expiresAtDisplay}
           onClose={() => setPairing(null)}
         />
+      )}
+
+      {/* Slide-out HR Notifications Drawer */}
+      <NotificationDrawer
+        open={notificationDrawerOpen}
+        onClose={() => setNotificationDrawerOpen(false)}
+        notifications={notifications}
+        unreadCount={unreadNotificationsCount}
+        onRefresh={loadNotifications}
+        onNavigateTab={(tab) => {
+          if (tab === 'leave') setActiveTab('leave');
+          else if (tab === 'history') setActiveTab('attendance');
+          else if (tab === 'warnings') setActiveTab('disciplinary');
+          else if (tab === 'documents') setActiveTab('documents');
+          else setActiveTab('overview');
+        }}
+      />
+
+      {/* Real-Time Toast Notification Banner for Incoming Requests */}
+      {toastNotification && (
+        <div className="fixed bottom-6 right-6 z-50 flex max-w-md items-start gap-3.5 rounded-2xl border border-indigo-500/40 bg-zinc-950/95 p-4 text-white shadow-2xl backdrop-blur-xl ring-1 ring-white/10 animate-in slide-in-from-bottom-5 duration-300">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-xl shadow-inner">
+            🔔
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex rounded-md bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-300">
+                {toastNotification.category}
+              </span>
+              <span className="text-[11px] text-zinc-400">{toastNotification.at}</span>
+            </div>
+            <h4 className="mt-1 text-sm font-bold tracking-tight text-white line-clamp-1">
+              {toastNotification.title}
+            </h4>
+            <p className="mt-0.5 text-xs text-zinc-300 line-clamp-2">
+              {toastNotification.body}
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setNotificationDrawerOpen(true);
+                  setToastNotification(null);
+                }}
+                className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-indigo-600/30 transition"
+              >
+                Review Now
+              </button>
+              <button
+                type="button"
+                onClick={() => setToastNotification(null)}
+                className="rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 transition"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToastNotification(null)}
+            className="text-zinc-400 hover:text-zinc-200"
+          >
+            ✕
+          </button>
+        </div>
       )}
     </div>
   );

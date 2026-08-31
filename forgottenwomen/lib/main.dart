@@ -1,13 +1,19 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 import 'screens/enroll_screen.dart';
 import 'screens/main_shell.dart';
+import 'services/notification_service.dart';
 import 'services/presence_service.dart';
 import 'services/token_store.dart';
 import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await NotificationService().initialize();
+  } catch (e) {
+    debugPrint('NotificationService.initialize error: $e');
+  }
   try {
     await PresenceService.configure();
   } catch (e) {

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../models/hr.dart';
 import '../services/api_client.dart';
+import '../services/notification_service.dart';
 
 class DocumentsScreen extends StatefulWidget {
   final ApiClient api;
@@ -14,6 +16,7 @@ class DocumentsScreen extends StatefulWidget {
 }
 
 class _DocumentsScreenState extends State<DocumentsScreen> {
+  Timer? _pollTimer;
   bool _loading = true;
   String? _error;
   KycChecklist? _checklist;
@@ -23,6 +26,30 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   void initState() {
     super.initState();
     _loadData();
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _loadSilently());
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadSilently() async {
+    try {
+      final checklist = await widget.api.myKycChecklist();
+      final docs = await widget.api.myDocuments();
+      if (mounted) {
+        setState(() {
+          _checklist = checklist;
+          _documents = docs;
+          _error = null;
+        });
+      }
+      try {
+        await NotificationService().checkAndDispatchUnseenNotifications();
+      } catch (_) {}
+    } catch (_) {}
   }
 
   Future<void> _loadData() async {
@@ -183,53 +210,59 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               : RefreshIndicator(
                   onRefresh: _loadData,
                   color: const Color(0xFF4F46E5),
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                    children: [
-                      if (_checklist != null) _buildProgressCard(_checklist!),
-                      const SizedBox(height: 20),
-                      const Text(
-                        'MANDATORY PERSONNEL KYC',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.1,
-                          color: Colors.white54,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_checklist != null)
-                        ..._checklist!.mandatoryChecklist.map((item) => _buildKycItemCard(item)),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'MY DOCUMENT VAULT',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.1,
-                          color: Colors.white54,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_documents.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white10),
-                          ),
-                          child: const Center(
-                            child: Text(
-                              'No documents uploaded yet.\nTap "Upload Document" to submit your CV, CNIC, or Utility Bill.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.5),
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 720),
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                        children: [
+                          if (_checklist != null) _buildProgressCard(_checklist!),
+                          const SizedBox(height: 20),
+                          const Text(
+                            'MANDATORY PERSONNEL KYC',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.1,
+                              color: Colors.white54,
                             ),
                           ),
-                        )
-                      else
-                        ..._documents.map((doc) => _buildDocumentCard(doc)),
-                    ],
+                          const SizedBox(height: 10),
+                          if (_checklist != null)
+                            ..._checklist!.mandatoryChecklist.map((item) => _buildKycItemCard(item)),
+                          const SizedBox(height: 24),
+                          const Text(
+                            'MY DOCUMENT VAULT',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.1,
+                              color: Colors.white54,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (_documents.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E293B),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.white10),
+                              ),
+                              child: const Center(
+                                child: Text(
+                                  'No documents uploaded yet.\nTap "Upload Document" to submit your CV, CNIC, or Utility Bill.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.5),
+                                ),
+                              ),
+                            )
+                          else
+                            ..._documents.map((doc) => _buildDocumentCard(doc)),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
     );
