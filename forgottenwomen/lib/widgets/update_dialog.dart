@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:ota_update/ota_update.dart';
 
 import '../models/ota.dart';
 import '../services/ota_service.dart';
@@ -86,39 +85,35 @@ class _UpdateDialogState extends State<UpdateDialog> {
         (OtaEvent event) {
           if (!mounted) return;
           switch (event.status) {
-            case OtaStatus.DOWNLOADING:
-              final p = int.tryParse(event.value ?? '0') ?? 0;
+            case OtaStatus.downloading:
+              final p = event.progress ?? 0;
               setState(() {
                 _progress = p;
                 _statusText = 'Downloading update… $p%';
               });
               break;
-            case OtaStatus.INSTALLING:
+            case OtaStatus.installing:
               setState(() {
                 _progress = 100;
                 _statusText = 'Opening package installer…';
               });
               break;
-            case OtaStatus.ALREADY_RUNNING_ERROR:
+            case OtaStatus.already_running_error:
               setState(() {
                 _statusText = 'Download already in progress…';
               });
               break;
-            case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
+            case OtaStatus.permission_not_granted_error:
               setState(() {
                 _downloading = false;
                 _errorMessage = 'Permission to install unknown packages was denied. Please allow it in device settings.';
               });
               break;
-            case OtaStatus.INTERNAL_ERROR:
-            case OtaStatus.DOWNLOAD_ERROR:
-            case OtaStatus.CHECKSUM_ERROR:
+            case OtaStatus.internal_error:
               setState(() {
                 _downloading = false;
-                _errorMessage = 'Download error: ${event.value ?? 'Failed to download update'}';
+                _errorMessage = 'Download failed. Please try again.';
               });
-              break;
-            default:
               break;
           }
         },
