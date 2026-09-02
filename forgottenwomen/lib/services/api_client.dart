@@ -118,12 +118,20 @@ class ApiClient {
   /// timestamps; the server dedupes, so replay is safe.
   Future<PingResult> ping(List<QueuedObservation> observations) =>
       _guard(() async {
+        // Extract the most recent localIp to send as a top-level field.
+        // The backend uses it as a fallback subnet check when running on Vercel
+        // (where req.ip is the public internet IP, not 192.168.x.x).
+        final localIp = observations
+            .where((o) => o.localIp != null)
+            .map((o) => o.localIp)
+            .lastOrNull;
         final res = await _http
             .post(
               await _uri('/api/attendance/ping'),
               headers: await _authHeaders(),
               body: jsonEncode({
                 'observations': observations.map((o) => o.toJson()).toList(),
+                if (localIp != null) 'localIp': localIp,
               }),
             )
             .timeout(timeout);

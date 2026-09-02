@@ -28,6 +28,7 @@ Future<PingResult?> sendHeartbeat({
     observedAt: DateTime.now().millisecondsSinceEpoch,
     ssid: facts.ssid,
     bssid: facts.bssid,
+    localIp: facts.localIp,
   );
 
   try {

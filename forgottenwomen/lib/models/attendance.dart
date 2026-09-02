@@ -173,13 +173,15 @@ class QueuedObservation {
   final int observedAt;
   final String? ssid;
   final String? bssid;
+  final String? localIp;
 
-  const QueuedObservation({required this.observedAt, this.ssid, this.bssid});
+  const QueuedObservation({required this.observedAt, this.ssid, this.bssid, this.localIp});
 
   Map<String, dynamic> toJson() => {
         'observedAt': observedAt,
         if (ssid != null) 'ssid': ssid,
         if (bssid != null) 'bssid': bssid,
+        if (localIp != null) 'localIp': localIp,
       };
 
   factory QueuedObservation.fromJson(Map<String, dynamic> json) =>
@@ -187,6 +189,7 @@ class QueuedObservation {
         observedAt: (json['observedAt'] as num).toInt(),
         ssid: json['ssid'] as String?,
         bssid: json['bssid'] as String?,
+        localIp: json['localIp'] as String?,
       );
 }
 

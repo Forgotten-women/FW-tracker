@@ -116,6 +116,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         observedAt: DateTime.now().millisecondsSinceEpoch,
         ssid: net.ssid,
         bssid: net.bssid,
+        localIp: net.localIp,
       );
 
       final ping = await _api.ping([...pending, currentObs]);
