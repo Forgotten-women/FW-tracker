@@ -1,4 +1,4 @@
-﻿// Device enrolment.
+// Device enrolment.
 
 const express = require('express');
 const router = express.Router();
@@ -61,9 +61,30 @@ router.post('/', (req, res) => {
     message: 'That enrolment code is not valid, has expired, or has already been used.',
   });
 
+  const plat = String(platform || 'unknown').toLowerCase();
+  const isDesktop = plat.includes('win') || plat.includes('mac') || plat.includes('darwin') || plat.includes('linux');
+  const isMobile = plat.includes('android') || plat.includes('ios');
+  const deviceType = isDesktop ? 'desktop' : 'mobile';
+
   if (!row) return reject();
-  if (row.used_at) return reject();
   if (row.expires_at < nowMs) return reject();
+
+  if (row.used_at) {
+    // Check if the previous enrollment was for the complementary device type (1 mobile + 1 desktop per code)
+    const prevDevice = row.used_by_device ? db.prepare('SELECT platform, device_type FROM devices WHERE id = ?').get(row.used_by_device) : null;
+    if (prevDevice) {
+      const prevPlat = String(prevDevice.platform || '').toLowerCase();
+      const prevIsDesktop = prevPlat.includes('win') || prevPlat.includes('mac') || prevPlat.includes('darwin') || prevPlat.includes('linux') || prevDevice.device_type === 'desktop';
+      const prevIsMobile = prevPlat.includes('android') || prevPlat.includes('ios') || prevDevice.device_type === 'mobile';
+
+      // If already used for desktop and this is desktop, or already used for mobile and this is mobile, reject
+      if ((prevIsDesktop && isDesktop) || (prevIsMobile && isMobile)) {
+        return reject();
+      }
+    } else {
+      return reject();
+    }
+  }
 
   const employee = selectEmployee.get(row.employee_id);
   if (!employee || !employee.active) return reject();
@@ -77,7 +98,7 @@ router.post('/', (req, res) => {
       employee_id: employee.id,
       platform: String(platform || 'unknown').slice(0, 20),
       model: String(model || '').slice(0, 80),
-      label: String(label || '').slice(0, 80),
+      label: String(label || (isDesktop ? 'Work Laptop' : 'Mobile Phone')).slice(0, 80),
       enrolled_at: nowMs,
     });
     insertToken.run(hash, deviceId, nowMs, nowMs + TOKEN_TTL_MS);

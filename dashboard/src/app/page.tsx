@@ -21,12 +21,13 @@ import { WarningBoard } from '@/components/WarningBoard';
 import { NotificationDrawer } from '@/components/NotificationDrawer';
 import { PayrollPanel } from '@/components/PayrollPanel';
 import { OtaPanel } from '@/components/OtaPanel';
+import { WorkstationsPanel } from '@/components/WorkstationsPanel';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, AttendanceCorrection, EnrollmentCode, NotificationItem } from '@/lib/types';
 
-type DashboardTab = 'overview' | 'attendance' | 'leave' | 'disciplinary' | 'documents' | 'workforce' | 'payroll' | 'ota';
+type DashboardTab = 'overview' | 'attendance' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'workforce' | 'payroll' | 'ota';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -194,6 +195,15 @@ export default function DashboardPage() {
       ),
     },
     {
+      id: 'workstations',
+      label: 'Workstations & Laptops',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+      ),
+    },
+    {
       id: 'leave',
       label: 'Leave & Holidays',
       icon: (
@@ -356,7 +366,14 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* 3. LEAVE & HOLIDAYS TAB */}
+            {/* 3. WORKSTATIONS & LAPTOPS TAB */}
+            {activeTab === 'workstations' && (
+              <div className="flex flex-col gap-6">
+                <WorkstationsPanel />
+              </div>
+            )}
+
+            {/* 4. LEAVE & HOLIDAYS TAB */}
             {activeTab === 'leave' && (
               <div className="flex flex-col gap-6">
                 <LeaveManagementPanel />

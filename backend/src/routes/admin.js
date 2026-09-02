@@ -165,7 +165,7 @@ router.post('/employees/:id/enrollment-code', (req, res) => {
   });
 });
 
-// --- devices ---------------------------------------------------------------
+// --- devices & workstations -------------------------------------------------
 
 router.get('/devices', (req, res) => {
   const rows = db.prepare(`
@@ -181,6 +181,76 @@ router.get('/devices', (req, res) => {
       revoked: !!d.revoked_at,
     })),
   });
+});
+
+router.get('/workstations', (req, res) => {
+  const nowMs = T.now();
+  const dateKey = T.dateKey(nowMs);
+  const rows = db.prepare(`
+    SELECT ws.*, e.name AS employee_name, e.role AS employee_role, d.platform, d.model, d.label
+    FROM workstation_sessions ws
+    JOIN employees e ON e.id = ws.employee_id
+    JOIN devices d ON d.id = ws.device_id
+    WHERE ws.session_date = ?
+    ORDER BY ws.last_heartbeat_at DESC
+  `).all(dateKey);
+
+  res.json({
+    status: 'SUCCESS',
+    dateKey,
+    workstations: rows.map(r => ({
+      id: r.id,
+      employeeId: r.employee_id,
+      employeeName: r.employee_name,
+      employeeRole: r.employee_role,
+      deviceId: r.device_id,
+      platform: r.platform,
+      model: r.model,
+      label: r.label,
+      status: r.status,
+      activeMinutes: Math.round(r.active_seconds / 60),
+      idleMinutes: Math.round(r.idle_seconds / 60),
+      breakMinutes: Math.round(r.break_seconds / 60),
+      inOffice: !!r.in_office,
+      lockState: r.lock_state,
+      connectedBssid: r.connected_bssid,
+      lastHeartbeat: T.displayTime(r.last_heartbeat_at),
+    })),
+  });
+});
+
+router.get('/anomalies', (req, res) => {
+  const rows = db.prepare(`
+    SELECT pa.*, e.name AS employee_name, d.model, d.platform
+    FROM process_anomalies pa
+    JOIN employees e ON e.id = pa.employee_id
+    JOIN devices d ON d.id = pa.device_id
+    ORDER BY pa.detected_at DESC
+    LIMIT 100
+  `).all();
+
+  res.json({
+    status: 'SUCCESS',
+    anomalies: rows.map(r => ({
+      id: r.id,
+      employeeId: r.employee_id,
+      employeeName: r.employee_name,
+      deviceModel: r.model,
+      platform: r.platform,
+      processName: r.process_name,
+      windowTitle: r.window_title,
+      durationMinutes: Math.round(r.duration_seconds / 60),
+      detectedAt: T.displayTime(r.detected_at),
+      detectedDate: T.displayDate(r.detected_at),
+      resolved: !!r.resolved,
+      notes: r.notes,
+    })),
+  });
+});
+
+router.post('/anomalies/:id/resolve', (req, res) => {
+  db.prepare('UPDATE process_anomalies SET resolved = 1 WHERE id = ?').run(req.params.id);
+  res.json({ status: 'SUCCESS' });
 });
 
 // Revoking cuts the device off immediately: its token stops authenticating.

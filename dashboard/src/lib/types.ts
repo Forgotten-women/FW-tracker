@@ -570,3 +570,38 @@ export interface OtaConfig {
   githubRepoName: string;
 }
 
+export interface WorkstationItem {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeRole: string;
+  deviceId: string;
+  platform: string;
+  model: string;
+  label: string;
+  status: 'ACTIVE' | 'IDLE' | 'ON_BREAK' | 'AWAY' | 'OFFLINE';
+  activeMinutes: number;
+  idleMinutes: number;
+  breakMinutes: number;
+  inOffice: boolean;
+  lockState: string;
+  connectedBssid: string | null;
+  lastHeartbeat: string;
+}
+
+export interface ProcessAnomalyItem {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  deviceModel: string;
+  platform: string;
+  processName: string;
+  windowTitle: string | null;
+  durationMinutes: number;
+  detectedAt: string;
+  detectedDate: string;
+  resolved: boolean;
+  notes: string | null;
+}
+
+

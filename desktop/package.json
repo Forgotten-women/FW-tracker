@@ -1,0 +1,14 @@
+{
+  "name": "office-tracker-desktop",
+  "version": "1.0.0",
+  "description": "Office Tracker - Cross-Platform Workstation Presence & Desktop Agent",
+  "private": true,
+  "scripts": {
+    "start": "node run-agent.js",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.14"
+  }
+}

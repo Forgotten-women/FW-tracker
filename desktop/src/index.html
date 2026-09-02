@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Office Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="widget-card">
+    <!-- Header -->
+    <div class="header">
+      <div class="brand">
+        <div class="logo-icon">🏢</div>
+        <div>
+          <div class="app-title">Office Tracker</div>
+          <div id="employee-badge" class="sub-title">Not Enrolled</div>
+        </div>
+      </div>
+      <button id="close-btn" class="icon-btn" title="Hide to Tray">✕</button>
+    </div>
+
+    <!-- Enrollment View -->
+    <div id="enroll-section" class="section">
+      <p class="desc">Enter your server URL and enrollment code provided by HR to link this laptop to your account.</p>
+      <input type="text" id="server-url-input" placeholder="Server URL (e.g. https://your-backend.vercel.app)" value="https://backend-ten-lyart-57.vercel.app" />
+      <input type="text" id="enroll-code-input" placeholder="Enrollment Code (e.g. ABCD-1234)" />
+      <button id="enroll-btn" class="primary-btn">Pair This Laptop</button>
+      <div id="enroll-error" class="error-msg"></div>
+    </div>
+
+    <!-- Live Status View -->
+    <div id="status-section" class="section hidden">
+      <!-- Status Badge -->
+      <div class="status-banner" id="status-banner">
+        <div class="pulse-dot" id="status-dot"></div>
+        <span id="status-text">Active · In Office</span>
+      </div>
+
+      <!-- Live Active Timer -->
+      <div class="timer-container">
+        <div class="timer-label">TODAY'S ACTIVE TIME</div>
+        <div class="timer-display" id="active-timer">00:00:00</div>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-break">0m</div>
+          <div class="stat-label">Break / Away</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-idle">0m</div>
+          <div class="stat-label">Idle Time</div>
+        </div>
+      </div>
+
+      <!-- Network Location Pill -->
+      <div class="network-pill" id="network-pill">
+        <span class="net-icon">📶</span>
+        <span id="network-text">Checking Office Wi-Fi...</span>
+      </div>
+
+      <!-- Quick Action Buttons -->
+      <div class="action-row">
+        <button id="break-toggle-btn" class="action-btn">☕ Take Break</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

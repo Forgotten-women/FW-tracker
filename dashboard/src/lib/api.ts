@@ -34,6 +34,8 @@ import type {
   TeamCalendarLeave,
   WarningBoardSummary,
   WarningTrigger,
+  WorkstationItem,
+  ProcessAnomalyItem,
 } from './types';
 
 
@@ -612,6 +614,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  fetchWorkstations: () =>
+    request<{ status: string; dateKey: string; workstations: WorkstationItem[] }>('/api/admin/workstations'),
+
+  fetchAnomalies: () =>
+    request<{ status: string; anomalies: ProcessAnomalyItem[] }>('/api/admin/anomalies'),
+
+  resolveAnomaly: (id: string) =>
+    request<{ status: string }>(`/api/admin/anomalies/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+    }),
 };
+
 
 
