@@ -58,7 +58,18 @@ db.pragma('synchronous = FULL');
 db.pragma('foreign_keys = ON');
 db.pragma('busy_timeout = 5000');
 
-db.exec(fs.readFileSync(SCHEMA_FILE, 'utf-8'));
+let embedded = null;
+try {
+  embedded = require('./embedded-migrations');
+} catch (_) {}
+
+const initialSql = fs.existsSync(SCHEMA_FILE) 
+  ? fs.readFileSync(SCHEMA_FILE, 'utf-8')
+  : (embedded?.schemaSql || '');
+
+if (initialSql) {
+  db.exec(initialSql);
+}
 
 // Incremental schema changes on top of the baseline. Runs on every start, and
 // is a no-op once everything has been applied.

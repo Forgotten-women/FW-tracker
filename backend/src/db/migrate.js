@@ -26,16 +26,22 @@ function checksum(sql) {
   return require('crypto').createHash('sha256').update(sql).digest('hex').slice(0, 16);
 }
 
+let embedded = null;
+try {
+  embedded = require('./embedded-migrations');
+} catch (_) {}
+
 function listMigrations() {
-  if (!fs.existsSync(MIGRATIONS_DIR)) return [];
-  return fs
-    .readdirSync(MIGRATIONS_DIR)
-    .filter(f => f.endsWith('.sql'))
-    .sort()
-    .map(f => ({
-      id: f,
-      sql: fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf-8'),
-    }));
+  if (fs.existsSync(MIGRATIONS_DIR)) {
+    const files = fs.readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith('.sql')).sort();
+    if (files.length > 0) {
+      return files.map(f => ({
+        id: f,
+        sql: fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf-8'),
+      }));
+    }
+  }
+  return (embedded && Array.isArray(embedded.migrations)) ? embedded.migrations : [];
 }
 
 /**
