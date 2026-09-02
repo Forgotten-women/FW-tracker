@@ -67,6 +67,25 @@ function getConnectedBssid() {
   return null;
 }
 
+/** Returns the first private-range IPv4 address on any active network interface. */
+function getLocalIp() {
+  try {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const iface of ifaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          const parts = iface.address.split('.');
+          // 10.x, 172.16-31.x, 192.168.x
+          if (parts[0] === '10') return iface.address;
+          if (parts[0] === '172' && Number(parts[1]) >= 16 && Number(parts[1]) <= 31) return iface.address;
+          if (parts[0] === '192' && parts[1] === '168') return iface.address;
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 function parseActiveApplication(procName, title) {
   const p = (procName || '').toLowerCase().replace(/\.exe$/, '');
   const t = (title || '').trim();
@@ -240,6 +259,7 @@ async function startAgent() {
     sampleCount++;
     const idleSecs = getIdleSeconds();
     const bssid = getConnectedBssid();
+    const localIp = getLocalIp();
     const isIdle = idleSecs >= 300; // 5 min idle threshold
 
     if (isManualBreak || isIdle) {
@@ -271,6 +291,7 @@ async function startAgent() {
             lockState: 'UNLOCKED',
             lockDurationSeconds: 0,
             connectedBssid: bssid,
+            localIp,
             isManualBreak,
           }),
         });

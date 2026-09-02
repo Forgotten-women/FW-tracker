@@ -1,4 +1,4 @@
-﻿// Device and network facts.
+// Device and network facts.
 
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -8,8 +8,9 @@ import 'package:permission_handler/permission_handler.dart';
 class NetworkFacts {
   final String? ssid;
   final String? bssid;
+  final String? localIp;
 
-  const NetworkFacts({this.ssid, this.bssid});
+  const NetworkFacts({this.ssid, this.bssid, this.localIp});
 
   bool get hasBssid => bssid != null && bssid!.isNotEmpty;
 }
@@ -68,9 +69,11 @@ class DeviceProbe {
     try {
       final ssid = await _network.getWifiName();
       final bssid = await _network.getWifiBSSID();
+      final ip = await _network.getWifiIP();
       return NetworkFacts(
         ssid: _clean(ssid),
         bssid: _clean(bssid)?.toLowerCase(),
+        localIp: _clean(ip),
       );
     } catch (_) {
       return const NetworkFacts();

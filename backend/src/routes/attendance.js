@@ -98,6 +98,7 @@ router.post('/ping', requireDevice, (req, res) => {
     const r = P.recordEvent({
       employeeId, deviceId, source: 'APP',
       srcIp,
+      localIp,
       ssid: o?.ssid ?? body.ssid ?? null,
       bssid: o?.bssid ?? body.bssid ?? null,
       observedAt,
