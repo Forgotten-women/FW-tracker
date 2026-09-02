@@ -1,7 +1,10 @@
 # Dependencies
 node_modules/
 backend/node_modules/
-*.sql
+
+# Database migrations are code and must be tracked
+!backend/src/db/**/*.sql
+!backend/src/db/*.sql
 # Environment & secrets
 .env
 .env.*
