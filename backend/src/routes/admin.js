@@ -10,6 +10,7 @@ const crypto = require('crypto');
 
 const { db, tx, audit, backup } = require('../db');
 const { requireAdmin, newEnrollmentCode, issueSseTicket } = require('../middleware/auth');
+const { pushEmployee, pushEnrollmentCode } = require('../db/supabase-sync');
 const P = require('../domain/presence');
 const bindings = require('../domain/bindings');
 const T = require('../util/time');
@@ -109,6 +110,8 @@ router.post('/employees', (req, res) => {
   });
   run();
 
+  pushEmployee(employee).catch(() => {});
+
   res.status(201).json({ status: 'SUCCESS', employee });
 });
 
@@ -130,6 +133,8 @@ router.patch('/employees/:id', (req, res) => {
     });
   });
   run();
+
+  pushEmployee({ id: req.params.id, name, role, active: !!active, updated_at: T.now() }).catch(() => {});
 
   res.json({ status: 'SUCCESS', employee: { id: req.params.id, name, role, active: !!active } });
 });
@@ -154,6 +159,8 @@ router.post('/employees/:id/enrollment-code', (req, res) => {
     audit({ actor: 'admin', action: 'ENROLLMENT_CODE_ISSUED', targetType: 'employee', targetId: employee.id });
   });
   run();
+
+  pushEnrollmentCode({ code_hash: hash, employee_id: employee.id, created_at: nowMs, expires_at: expiresAt }).catch(() => {});
 
   res.status(201).json({
     status: 'SUCCESS',

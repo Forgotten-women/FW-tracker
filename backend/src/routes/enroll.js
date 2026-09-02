@@ -5,6 +5,7 @@ const router = express.Router();
 
 const { db, tx, audit } = require('../db');
 const { newToken, sha256 } = require('../middleware/auth');
+const { pushDeviceAndToken, pushEnrollmentCode } = require('../db/supabase-sync');
 const T = require('../util/time');
 const crypto = require('crypto');
 
@@ -115,6 +116,12 @@ router.post('/', (req, res) => {
       .run(nowMs, 'DEVICE_ENROLLED', employee.id, employee.name, `${model || 'Device'} paired`);
   });
   run();
+
+  pushDeviceAndToken(
+    { id: deviceId, employee_id: employee.id, platform: String(platform || 'unknown'), model: String(model || ''), label: String(label || ''), enrolled_at: nowMs },
+    { token_hash: hash, device_id: deviceId, issued_at: nowMs, expires_at: nowMs + TOKEN_TTL_MS }
+  ).catch(() => {});
+  pushEnrollmentCode({ code_hash: row.code_hash, employee_id: employee.id, created_at: row.created_at, expires_at: row.expires_at, used_at: nowMs, used_by_device: deviceId }).catch(() => {});
 
   res.status(201).json({
     status: 'SUCCESS',

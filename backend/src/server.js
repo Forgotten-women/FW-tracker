@@ -54,6 +54,18 @@ app.use((err, req, res, next) => {
 morgan.token('actor', req => (req.auth ? req.auth.kind : '-'));
 app.use(morgan(':date[iso] :method :url :status :actor :response-time ms'));
 
+const { ensureHydrated } = require('./db/supabase-sync');
+
+// Hydrate SQLite state from Supabase PostgreSQL before handling requests
+app.use(async (req, res, next) => {
+  try {
+    await ensureHydrated(db);
+  } catch (err) {
+    console.warn('[server] DB hydration notice:', err.message);
+  }
+  next();
+});
+
 // No static dashboard is served from here any more. The dashboard is a separate
 // Next.js app in /dashboard, which proxies /api/* to this server, so the browser
 // stays same-origin with it and this server's CORS stays locked down.
