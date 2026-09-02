@@ -466,9 +466,18 @@ function presentDay(d, employee) {
   };
 }
 
-const selectActiveEmployees = db.prepare(
-  'SELECT id, name, role FROM employees WHERE active = 1 ORDER BY name'
-);
+const selectActiveEmployees = db.prepare(`
+  SELECT e.id, e.name, COALESCE(er.job_title, e.role) AS role, e.role AS department
+  FROM employees e
+  LEFT JOIN (
+    SELECT employee_id, job_title
+    FROM employment_records
+    ORDER BY effective_from DESC
+  ) er ON er.employee_id = e.id
+  WHERE e.active = 1
+  GROUP BY e.id
+  ORDER BY e.name
+`);
 
 /** Live board for every active employee, all from the same derivation. */
 function liveBoard(nowMs = T.now()) {

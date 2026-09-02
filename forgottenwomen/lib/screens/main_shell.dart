@@ -6,6 +6,7 @@ import '../theme.dart';
 import 'documents_screen.dart';
 import 'home_screen.dart';
 import 'leave_screen.dart';
+import 'salary_screen.dart';
 import 'warnings_screen.dart';
 
 class MainShell extends StatefulWidget {
@@ -31,10 +32,12 @@ class _MainShellState extends State<MainShell> {
     final clean = payload.toUpperCase();
     if (clean.contains('LEAVE')) {
       setState(() => _index = 1);
-    } else if (clean.contains('WARN')) {
+    } else if (clean.contains('SALARY') || clean.contains('PAYROLL') || clean.contains('PAY')) {
       setState(() => _index = 2);
-    } else if (clean.contains('DOC')) {
+    } else if (clean.contains('WARN')) {
       setState(() => _index = 3);
+    } else if (clean.contains('DOC')) {
+      setState(() => _index = 4);
     } else {
       setState(() => _index = 0);
     }
@@ -52,6 +55,7 @@ class _MainShellState extends State<MainShell> {
     final tabs = [
       HomeScreen(onSignedOut: widget.onSignedOut),
       const LeaveScreen(),
+      const SalaryScreen(),
       const WarningsScreen(),
       DocumentsScreen(api: _api),
     ];
@@ -80,6 +84,11 @@ class _MainShellState extends State<MainShell> {
                       icon: Icon(Icons.event_available_outlined),
                       selectedIcon: Icon(Icons.event_available, color: AppColors.teal),
                       label: Text('Leave'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.account_balance_wallet_outlined),
+                      selectedIcon: Icon(Icons.account_balance_wallet, color: AppColors.teal),
+                      label: Text('Salary'),
                     ),
                     NavigationRailDestination(
                       icon: Icon(Icons.gavel_outlined),
@@ -125,6 +134,11 @@ class _MainShellState extends State<MainShell> {
                 label: 'Leave',
               ),
               NavigationDestination(
+                icon: Icon(Icons.account_balance_wallet_outlined),
+                selectedIcon: Icon(Icons.account_balance_wallet, color: AppColors.teal),
+                label: 'Salary',
+              ),
+              NavigationDestination(
                 icon: Icon(Icons.gavel_outlined),
                 selectedIcon: Icon(Icons.gavel, color: AppColors.teal),
                 label: 'Warnings',
@@ -141,4 +155,5 @@ class _MainShellState extends State<MainShell> {
     );
   }
 }
+
 

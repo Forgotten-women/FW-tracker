@@ -109,6 +109,10 @@ export interface AdminEmployee {
   active: boolean;
   deviceCount: number;
   createdAt: string;
+  baseSalary?: number | null;
+  currency?: string | null;
+  dailyRate?: number | null;
+  startDate?: string | null;
 }
 
 export interface EnrollmentCode {

@@ -1,4 +1,4 @@
-﻿// Enrolment Screen
+// Enrolment Screen
 
 import 'package:flutter/material.dart';
 
@@ -108,7 +108,12 @@ class _EnrollScreenState extends State<EnrollScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pair this device')),
+      appBar: AppBar(
+        title: const Text(
+          'Pair this device',
+          style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textLight),
+        ),
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -120,21 +125,34 @@ class _EnrollScreenState extends State<EnrollScreen> {
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surfaceDark,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.grey.shade200),
+                    border: Border.all(color: AppColors.border),
                   ),
                   child: Column(
                     children: [
-                      const Icon(Icons.badge_outlined, size: 44, color: AppColors.teal),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.teal.withOpacity(0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.badge_outlined, size: 36, color: AppColors.teal),
+                      ),
                       const SizedBox(height: 16),
-                      const Text('Office Tracker',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      const Text(
+                        'Office Tracker',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textLight,
+                        ),
+                      ),
                       const SizedBox(height: 6),
-                      Text(
+                      const Text(
                         'Enter the pairing code shown on your admin dashboard.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                       ),
                       const SizedBox(height: 24),
                       TextField(
@@ -145,11 +163,28 @@ class _EnrollScreenState extends State<EnrollScreen> {
                           fontSize: 22,
                           letterSpacing: 3,
                           fontWeight: FontWeight.bold,
+                          color: AppColors.textLight,
                         ),
                         textAlign: TextAlign.center,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Pairing code',
+                          labelStyle: const TextStyle(color: AppColors.textMuted),
                           hintText: 'e.g. WKYJ-UPNM',
+                          hintStyle: TextStyle(color: AppColors.textMuted.withOpacity(0.4)),
+                          filled: true,
+                          fillColor: AppColors.bgDark,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.border),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.border),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -157,9 +192,25 @@ class _EnrollScreenState extends State<EnrollScreen> {
                         controller: _serverController,
                         keyboardType: TextInputType.url,
                         autocorrect: false,
-                        decoration: const InputDecoration(
+                        style: const TextStyle(color: AppColors.textLight, fontSize: 14),
+                        decoration: InputDecoration(
                           labelText: 'Server address',
-                          prefixIcon: Icon(Icons.dns_outlined),
+                          labelStyle: const TextStyle(color: AppColors.textMuted),
+                          prefixIcon: const Icon(Icons.dns_outlined, color: AppColors.textMuted),
+                          filled: true,
+                          fillColor: AppColors.bgDark,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.border),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.border),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                          ),
                         ),
                       ),
                     ],
@@ -175,17 +226,23 @@ class _EnrollScreenState extends State<EnrollScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade50,
+                      color: AppColors.danger.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.red.shade200),
+                      border: Border.all(color: AppColors.danger.withOpacity(0.3)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                        const Icon(Icons.error_outline, color: AppColors.danger, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text(_error!,
-                              style: TextStyle(color: Colors.red.shade800, fontSize: 12)),
+                          child: Text(
+                            _error!,
+                            style: const TextStyle(
+                              color: Color(0xFFFCA5A5),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -196,13 +253,19 @@ class _EnrollScreenState extends State<EnrollScreen> {
                   height: 50,
                   child: FilledButton.icon(
                     onPressed: (_busy || !_consentGiven) ? null : _enroll,
-                    style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.teal,
+                      disabledBackgroundColor: AppColors.surfaceLight,
+                      disabledForegroundColor: AppColors.textMuted.withOpacity(0.5),
+                    ),
                     icon: _busy
                         ? const SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : const Icon(Icons.link),
                     label: Text(_busy ? 'Pairing...' : 'Pair device'),
@@ -228,29 +291,39 @@ class _ConsentNotice extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              Icon(Icons.privacy_tip_outlined, size: 18, color: Colors.grey.shade700),
-              const SizedBox(width: 8),
-              const Text('What this app records',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              Icon(Icons.privacy_tip_outlined, size: 18, color: AppColors.teal),
+              SizedBox(width: 8),
+              Text(
+                'What this app records',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: AppColors.textLight,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             'While paired, this app reports the time you are connected to the '
             'office Wi-Fi network, so your working hours can be recorded.\n\n'
             'It records: connected Wi-Fi network name, access point identifier, '
             'and timestamps. It does NOT record personal GPS location when away '
             'from the office or internet browsing activity.',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.45),
+            style: TextStyle(
+              fontSize: 12,
+              color: AppColors.textMuted,
+              height: 1.45,
+            ),
           ),
           const SizedBox(height: 4),
           CheckboxListTile(
@@ -260,8 +333,16 @@ class _ConsentNotice extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
             activeColor: AppColors.teal,
-            title: const Text('I understand and agree',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+            checkColor: Colors.white,
+            side: const BorderSide(color: AppColors.textMuted, width: 1.5),
+            title: const Text(
+              'I understand and agree',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textLight,
+              ),
+            ),
           ),
         ],
       ),

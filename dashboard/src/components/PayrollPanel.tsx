@@ -141,6 +141,9 @@ interface PrepareEmployee {
   employeeId: string;
   employeeName: string;
   salary: { monthly: number; daily: number; annual: number; currency?: string };
+  workingDaysCount?: number;
+  fullPeriodDays?: number;
+  calculatedPeriodGross?: number;
   isStarter: boolean;
   starter: { startDate: string; eligibleWorkingDays: number; calculatedGross: number } | null;
   attendanceDeficit: {
@@ -318,7 +321,7 @@ function CreatePeriodModal({
 // Set Salary Modal
 // ---------------------------------------------------------------------------
 
-function SetSalaryModal({
+export function SetSalaryModal({
   employees,
   prefilledEmployeeId,
   defaultEffectiveFrom,
@@ -1106,8 +1109,9 @@ function PeriodDetailView({
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
                     <th className="pb-2 text-left font-semibold">Employee</th>
-                    <th className="pb-2 text-right font-semibold">Monthly Salary</th>
+                    <th className="pb-2 text-right font-semibold">Calculated Period Pay</th>
                     <th className="pb-2 text-right font-semibold">Daily Rate</th>
+                    <th className="pb-2 text-right font-semibold">Contract Monthly</th>
                     <th className="pb-2 text-right font-semibold">Leave Available</th>
                     <th className="pb-2 text-right font-semibold">Deficit Equiv.</th>
                     <th className="pb-2 text-right font-semibold">Adjustments</th>
@@ -1118,11 +1122,11 @@ function PeriodDetailView({
                   {sheet.employees.map((emp) => {
                     const approvedAdjs = emp.adjustments.filter((a) => a.status === 'APPROVED');
                     const adjTotal = approvedAdjs.reduce((s, a) => s + (a.approvedAmount ?? a.calculatedAmount), 0);
+                    const gross = emp.calculatedPeriodGross ?? (emp.isStarter && emp.starter ? emp.starter.calculatedGross : emp.salary.monthly);
                     return (
                       <tr key={emp.employeeId} className="hover:bg-slate-800/30 transition-colors">
                         <td className="py-2.5 font-medium text-white">
                           {emp.employeeName}
-                          {emp.isStarter && <span className="ml-2 rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] text-sky-400">Starter</span>}
                           {emp.salary.currency && (
                             <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400 border border-slate-700">
                               {emp.salary.currency}
@@ -1130,10 +1134,20 @@ function PeriodDetailView({
                           )}
                         </td>
                         <td className="py-2.5 text-right font-mono text-slate-200">
-                          {formatMoney(emp.salary.monthly, currency, emp.salary.currency, periodRate)}
+                          <div>
+                            <div className="text-emerald-400 font-bold">
+                              {formatMoney(gross, currency, emp.salary.currency, periodRate)}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-sans">
+                              {emp.workingDaysCount !== undefined ? `${emp.workingDaysCount} working days` : `${formatMoney(emp.salary.daily, currency, emp.salary.currency, periodRate)}/d`}
+                            </div>
+                          </div>
                         </td>
                         <td className="py-2.5 text-right font-mono text-slate-300">
                           {formatMoney(emp.salary.daily, currency, emp.salary.currency, periodRate)}
+                        </td>
+                        <td className="py-2.5 text-right font-mono text-slate-400">
+                          {formatMoney(emp.salary.monthly, currency, emp.salary.currency, periodRate)}
                         </td>
                         <td className={`py-2.5 text-right font-mono ${emp.leave.isNegative ? 'text-rose-400' : 'text-emerald-400'}`}>
                           {emp.leave.blocked ? <span className="text-slate-500">—</span> : `${emp.leave.available?.toFixed(2)} d`}

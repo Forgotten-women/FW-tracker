@@ -118,8 +118,14 @@ export default function DashboardPage() {
     await Promise.all([refresh(), loadCorrections()]);
   };
 
-  const addEmployee = async (name: string, role: string) => {
-    await api.createEmployee(name, role);
+  const addEmployee = async (
+    name: string,
+    role: string,
+    baseSalary?: number,
+    currency?: string,
+    startDate?: string
+  ) => {
+    await api.createEmployee(name, role, { baseSalary, currency, startDate });
     await refresh();
   };
 
@@ -141,10 +147,10 @@ export default function DashboardPage() {
 
   if (unlocked === undefined) {
     return (
-      <div className="grid min-h-screen place-items-center bg-[#0F172A] text-sm text-slate-400">
-        <div className="flex items-center gap-3">
+      <div className="grid min-h-screen place-items-center bg-[#07090E] text-sm text-slate-400">
+        <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl backdrop-blur-xl">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
-          <span>Authenticating HR Dashboard…</span>
+          <span className="font-semibold text-slate-200">Authenticating HR Dashboard…</span>
         </div>
       </div>
     );
@@ -166,8 +172,75 @@ export default function DashboardPage() {
     (c) => c.status === 'PENDING',
   ).length;
 
+  const navTabs: { id: DashboardTab; label: string; icon: React.ReactNode; badge?: number }[] = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+        </svg>
+      ),
+    },
+    {
+      id: 'attendance',
+      label: 'Time & Attendance',
+      badge: pendingCorrectionsCount,
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
+    {
+      id: 'leave',
+      label: 'Leave & Holidays',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+      ),
+    },
+    {
+      id: 'disciplinary',
+      label: 'Disciplinary & Warnings',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      ),
+    },
+    {
+      id: 'documents',
+      label: 'Document Vault & KYC',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      ),
+    },
+    {
+      id: 'workforce',
+      label: 'Workforce Directory',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      ),
+    },
+    {
+      id: 'payroll',
+      label: 'Payroll Prep',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      ),
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#090D16] text-slate-100 selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen bg-[#07090E] text-slate-100 selection:bg-indigo-500 selection:text-white">
       {/* Global Header */}
       <Header
         summary={summary}
@@ -178,122 +251,36 @@ export default function DashboardPage() {
       />
 
       {/* Primary Navigation Tabs */}
-      <nav className="sticky top-0 z-30 border-b border-slate-800/80 bg-[#0F172A]/90 px-6 backdrop-blur-md">
-        <div className="flex items-center justify-between overflow-x-auto">
-          <div className="flex items-center gap-1 py-2">
-            <button
-              type="button"
-              onClick={() => setActiveTab('overview')}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
-                activeTab === 'overview'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-              <span>Overview</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('attendance')}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
-                activeTab === 'attendance'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>Time & Attendance</span>
-              {pendingCorrectionsCount > 0 && (
-                <span className="ml-1 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">
-                  {pendingCorrectionsCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('leave')}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
-                activeTab === 'leave'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>Leave & Holidays</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('disciplinary')}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
-                activeTab === 'disciplinary'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <span>Disciplinary & Lateness</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('documents')}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
-                activeTab === 'documents'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span>Document Vault & KYC</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('workforce')}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
-                activeTab === 'workforce'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              <span>Workforce Directory</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('payroll')}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold tracking-wide transition-all ${
-                activeTab === 'payroll'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              <span>Payroll</span>
-            </button>
+      <nav className="sticky top-[65px] z-30 border-b border-white/8 bg-slate-950/70 px-6 backdrop-blur-xl">
+        <div className="flex items-center justify-between overflow-x-auto py-2">
+          <div className="flex items-center gap-1.5">
+            {navTabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`relative flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold tracking-tight transition-all duration-200 cursor-pointer ${
+                    isActive
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/30'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  <span className={isActive ? 'text-white' : 'text-slate-400'}>{tab.icon}</span>
+                  <span>{tab.label}</span>
+                  {tab.badge !== undefined && tab.badge > 0 && (
+                    <span className="ml-1 rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-black text-white shadow-md">
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="hidden items-center gap-3 md:flex">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 border border-emerald-500/20">
+          <div className="hidden items-center gap-3 lg:flex">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400 border border-emerald-500/20">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Office Beacon Active
             </span>
@@ -304,8 +291,11 @@ export default function DashboardPage() {
       {summary && <WarningBar summary={summary} />}
 
       {error && (
-        <div className="mx-6 mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">
-          ⚠️ {error} — displaying cached state.
+        <div className="mx-6 mt-4 flex items-center gap-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300 shadow-lg shadow-rose-500/5">
+          <svg className="h-4 w-4 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{error} — displaying cached state.</span>
         </div>
       )}
 
@@ -313,7 +303,7 @@ export default function DashboardPage() {
         {!summary ? (
           <div className="flex h-64 flex-col items-center justify-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
-            <p className="text-sm text-slate-400">Loading workforce data…</p>
+            <p className="text-sm font-medium text-slate-400">Synchronizing workforce intelligence…</p>
           </div>
         ) : (
           <>
@@ -384,10 +374,11 @@ export default function DashboardPage() {
                   employees={employees}
                   onAdd={addEmployee}
                   onPair={pairDevice}
+                  onRefresh={refresh}
                 />
                 <div className="flex flex-col gap-6">
-                  <div className="rounded-2xl border border-slate-800 bg-[#141E33] p-6 shadow-xl">
-                    <h3 className="text-base font-bold text-white">Staff Management Guide</h3>
+                  <div className="glass-panel rounded-2xl p-6">
+                    <h3 className="text-base font-bold text-white">Staff Management & Onboarding</h3>
                     <p className="mt-2 text-xs leading-relaxed text-slate-400">
                       Generate 6-digit pairing codes to onboard staff devices onto the Office Tracker system.
                       Once enrolled, their mobile presence will automatically synchronize via office beacons and Wi-Fi sniffer sensors.
@@ -446,8 +437,8 @@ export default function DashboardPage() {
 
       {/* Real-Time Toast Notification Banner for Incoming Requests */}
       {toastNotification && (
-        <div className="fixed bottom-6 right-6 z-50 flex max-w-md items-start gap-3.5 rounded-2xl border border-indigo-500/40 bg-zinc-950/95 p-4 text-white shadow-2xl backdrop-blur-xl ring-1 ring-white/10 animate-in slide-in-from-bottom-5 duration-300">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-xl shadow-inner">
+        <div className="fixed bottom-6 right-6 z-50 flex max-w-md items-start gap-3.5 rounded-2xl border border-indigo-500/40 bg-slate-900/95 p-4 text-white shadow-2xl backdrop-blur-xl ring-1 ring-white/10 animate-in slide-in-from-bottom-5 duration-300">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-xl shadow-inner">
             🔔
           </div>
           <div className="flex-1 min-w-0">
@@ -455,12 +446,12 @@ export default function DashboardPage() {
               <span className="inline-flex rounded-md bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-300">
                 {toastNotification.category}
               </span>
-              <span className="text-[11px] text-zinc-400">{toastNotification.at}</span>
+              <span className="text-[11px] text-slate-400">{toastNotification.at}</span>
             </div>
             <h4 className="mt-1 text-sm font-bold tracking-tight text-white line-clamp-1">
               {toastNotification.title}
             </h4>
-            <p className="mt-0.5 text-xs text-zinc-300 line-clamp-2">
+            <p className="mt-0.5 text-xs text-slate-300 line-clamp-2">
               {toastNotification.body}
             </p>
             <div className="mt-3 flex items-center gap-2">
@@ -470,26 +461,19 @@ export default function DashboardPage() {
                   setNotificationDrawerOpen(true);
                   setToastNotification(null);
                 }}
-                className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-indigo-600/30 transition"
+                className="rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-indigo-600/30 transition cursor-pointer"
               >
                 Review Now
               </button>
               <button
                 type="button"
                 onClick={() => setToastNotification(null)}
-                className="rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 transition"
+                className="rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition cursor-pointer"
               >
                 Dismiss
               </button>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setToastNotification(null)}
-            className="text-zinc-400 hover:text-zinc-200"
-          >
-            ✕
-          </button>
         </div>
       )}
     </div>

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
 import { api } from '@/lib/api';
 import type {
   AdminEmployee,
@@ -12,6 +11,7 @@ import type {
   PresenceStatus,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel, STATUS_META } from './primitives';
+import { SetSalaryModal } from './PayrollPanel';
 
 // --- header ----------------------------------------------------------------
 
@@ -48,13 +48,13 @@ export function Header({
         setDate(
           new Intl.DateTimeFormat('en-US', {
             timeZone: tz,
-            weekday: 'long',
+            weekday: 'short',
             month: 'short',
             day: 'numeric',
           }).format(now),
         );
       } catch {
-        // An unexpected zone from the server must not stop the clock.
+        // Fallback
       }
     };
     tick();
@@ -63,86 +63,146 @@ export function Header({
   }, [tz]);
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-6 py-4">
-      <div>
-        <h1 className="text-lg font-bold">
-          {summary?.officeConfig.officeName ?? 'Office Tracker'}
-        </h1>
-        <p className="text-xs text-muted">
-          {summary
-            ? `${summary.officeConfig.networks.join(' · ')} — grace ${summary.officeConfig.gracePeriod}`
-            : ''}
-        </p>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="text-right">
-          <div className="font-mono text-sm">{clock || '--:--:--'}</div>
-          <div className="text-[11px] text-dim">{date}</div>
+    <header className="sticky top-0 z-40 border-b border-white/8 bg-slate-950/80 px-6 py-3.5 backdrop-blur-xl">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        {/* Brand & Location */}
+        <div className="flex items-center gap-3.5">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-lg shadow-indigo-500/25 border border-indigo-400/30">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+              />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-extrabold tracking-tight text-white">
+                {summary?.officeConfig.officeName ?? 'Office Tracker'}
+              </h1>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live Engine
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">
+              {summary
+                ? `${summary.officeConfig.networks.join(' · ')} — ${summary.officeConfig.gracePeriod} grace window`
+                : 'Connecting to office presence engine…'}
+            </p>
+          </div>
         </div>
 
-        {/* Notifications Bell */}
-        {onOpenNotifications && (
-          <button
-            type="button"
-            onClick={onOpenNotifications}
-            title="Notifications & Requests"
-            className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:border-slate-700 hover:bg-slate-800 transition shadow-inner"
-          >
-            <span className="text-base">🔔</span>
-            {unreadNotificationsCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white shadow-md ring-2 ring-[#090D16] animate-pulse">
-                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
-              </span>
-            )}
-          </button>
-        )}
+        {/* Global Stats Clock & Actions */}
+        <div className="flex items-center gap-3.5">
+          {/* Time & Timezone Pill */}
+          <div className="hidden sm:flex items-center gap-2.5 rounded-xl border border-white/8 bg-slate-900/80 px-3.5 py-1.5 shadow-inner">
+            <div className="text-right">
+              <div className="font-mono text-xs font-bold text-slate-200 tnum">
+                {clock || '--:--:--'}
+              </div>
+              <div className="text-[10px] text-slate-400">{date}</div>
+            </div>
+            <span className="rounded-md bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-300">
+              {tz}
+            </span>
+          </div>
 
-        <Badge tone={connection === 'live' ? 'ok' : 'muted'}>{connection}</Badge>
-        <Button onClick={onLock} title="Forget the admin key on this browser">
-          Lock
-        </Button>
+          {/* Notifications Bell */}
+          {onOpenNotifications && (
+            <button
+              type="button"
+              onClick={onOpenNotifications}
+              title="Notifications & Requests"
+              className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:border-indigo-500/50 hover:bg-slate-800 hover:text-white transition shadow-sm active:scale-95 cursor-pointer"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                />
+              </svg>
+              {unreadNotificationsCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white shadow-md ring-2 ring-[#07090E] animate-pulse">
+                  {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Live Status Pill */}
+          <Badge
+            tone={connection === 'live' ? 'ok' : 'muted'}
+            dot
+            size="md"
+          >
+            {connection === 'live' ? 'SSE Sync Live' : connection}
+          </Badge>
+
+          {/* Lock Action Button */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onLock}
+            title="Lock administrative console"
+            icon={
+              <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            }
+          >
+            Lock
+          </Button>
+        </div>
       </div>
     </header>
   );
 }
 
 /**
- * The weaker anti-spoofing posture is shown in the UI, not only in a startup
- * log line nobody reads.
+ * Modern Security Posture Banner
  */
 export function WarningBar({ summary }: { summary: DashboardSummary }) {
   const { bssidVerification, bssidListed } = summary.officeConfig;
   if (bssidVerification === 'enforced') return null;
 
-  const code = 'rounded bg-black/30 px-1.5 py-0.5';
+  const code = 'rounded-md bg-black/40 px-1.5 py-0.5 font-mono text-amber-200 border border-amber-500/20';
 
-  // Collected-but-not-enforced is a deliberate step, not an outstanding task.
-  // Telling the operator to add BSSIDs they had already added sent them to redo
-  // finished work and hid the one thing actually left to do.
   if (bssidVerification === 'listed-not-enforced') {
     return (
-      <div className="mx-6 mb-4 rounded-lg border border-warn bg-warn-dim px-4 py-3 text-xs leading-relaxed">
-        <strong>{bssidListed} access point radio(s) listed, not yet enforced.</strong>{' '}
-        Presence is still verified by source IP only. Check every radio your staff
-        actually connect to is listed — run{' '}
-        <code className={code}>npm run bssids</code> a few times, since the scan is
-        cached — then set <code className={code}>&quot;enforceBssid&quot;: true</code> in{' '}
-        <code className={code}>backend/config/office.json</code>.
-        <div className="mt-1 text-muted">
-          Turning it on with a radio missing silently stops counting everyone
-          connected to that radio.
+      <div className="mx-6 mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-200 shadow-lg shadow-amber-500/5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
+            ⚠️
+          </div>
+          <div>
+            <strong>{bssidListed} access point radio(s) listed, not yet enforced.</strong>{' '}
+            Presence is verified by source IP only. To fully prevent off-site spoofing, verify radios with{' '}
+            <code className={code}>npm run bssids</code> and set{' '}
+            <code className={code}>&quot;enforceBssid&quot;: true</code> in{' '}
+            <code className={code}>backend/config/office.json</code>.
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-6 mb-4 rounded-lg border border-warn bg-warn-dim px-4 py-3 text-xs leading-relaxed">
-      No office BSSIDs configured — presence is verified by source IP only. Run{' '}
-      <code className={code}>npm run bssids</code> and add them to{' '}
-      <code className={code}>backend/config/office.json</code> to fully prevent
-      off-site check-ins.
+    <div className="mx-6 mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-200 shadow-lg shadow-amber-500/5">
+      <div className="flex items-start gap-3">
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
+          ⚠️
+        </div>
+        <div>
+          No office BSSIDs configured — presence is verified by source IP only. Run{' '}
+          <code className={code}>npm run bssids</code> and configure radios in{' '}
+          <code className={code}>backend/config/office.json</code>.
+        </div>
+      </div>
     </div>
   );
 }
@@ -151,32 +211,90 @@ export function WarningBar({ summary }: { summary: DashboardSummary }) {
 
 export function Stats({ summary }: { summary: DashboardSummary }) {
   const s = summary.stats;
-  const cards: [string, string | number, string][] = [
-    ['In office', s.currentlyInOffice, 'text-brand'],
-    ['Grace period', s.currentlyInGracePeriod, 'text-warn'],
-    ['Away', s.currentlyAway, 'text-text'],
-    ['Attended today', s.totalAttendeesToday, 'text-text'],
-    ['Avg worked', s.averageTimeWorkedToday, 'text-text'],
-    ['Unrecognised devices', s.unknownDevicesSeen24h, 'text-text'],
+  const cards = [
+    {
+      label: 'In Office Now',
+      value: s.currentlyInOffice,
+      tone: 'text-emerald-400',
+      badgeTone: 'ok',
+      icon: (
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+      subtext: 'Active attendance',
+    },
+    {
+      label: 'Grace Window',
+      value: s.currentlyInGracePeriod,
+      tone: 'text-amber-400',
+      badgeTone: 'warn',
+      icon: (
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+      subtext: 'Within 10m buffer',
+    },
+    {
+      label: 'Away / Out',
+      value: s.currentlyAway,
+      tone: 'text-slate-200',
+      badgeTone: 'muted',
+      icon: (
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        </svg>
+      ),
+      subtext: 'Checked out or stepped away',
+    },
+    {
+      label: 'Attended Today',
+      value: s.totalAttendeesToday,
+      tone: 'text-indigo-400',
+      badgeTone: 'accent',
+      icon: (
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+        </svg>
+      ),
+      subtext: 'Total unique staff',
+    },
+    {
+      label: 'Avg Worked Time',
+      value: s.averageTimeWorkedToday,
+      tone: 'text-sky-400',
+      badgeTone: 'info',
+      icon: (
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      ),
+      subtext: 'Daily average',
+    },
   ];
 
   return (
-    <div className="mb-5 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
-      {cards.map(([label, value, tone]) => (
-        <div key={label} className="rounded-xl border border-line bg-surface/70 p-4">
-          <div className={`text-2xl font-bold ${tone}`}>{value}</div>
-          <div className="mt-1 text-[11px] text-muted">{label}</div>
-          {label === 'Unrecognised devices' && (
-            <div className="mt-1 text-[10px] leading-snug text-muted">
-              seen {s.unknownDeviceMinSightings}+ times in 24h
-              {s.unknownDevicesTransient24h > 0 && (
-                <>
-                  {' '}&middot; {s.unknownDevicesTransient24h} one-off sighting
-                  {s.unknownDevicesTransient24h === 1 ? '' : 's'} excluded
-                </>
-              )}
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      {cards.map((c) => (
+        <div
+          key={c.label}
+          className="glass-panel rounded-2xl p-4.5 transition-all duration-200 hover:border-white/15 hover:shadow-xl relative overflow-hidden group"
+        >
+          {/* Subtle gradient accent */}
+          <div className="absolute top-0 right-0 h-16 w-16 bg-white/[0.02] rounded-bl-full pointer-events-none group-hover:bg-white/[0.04] transition-all" />
+
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-semibold text-slate-400">{c.label}</span>
+            <div className={`p-2 rounded-xl bg-slate-800/80 border border-white/5 ${c.tone}`}>
+              {c.icon}
             </div>
-          )}
+          </div>
+
+          <div className={`text-2xl font-extrabold tracking-tight ${c.tone} tnum`}>
+            {c.value}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-400">{c.subtext}</div>
         </div>
       ))}
     </div>
@@ -184,13 +302,6 @@ export function Stats({ summary }: { summary: DashboardSummary }) {
 }
 
 // --- presence --------------------------------------------------------------
-
-const BORDER: Record<string, string> = {
-  ok: 'border-l-brand',
-  warn: 'border-l-warn',
-  muted: 'border-l-dim',
-  dim: 'border-l-transparent opacity-60',
-};
 
 export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
   const all = [
@@ -201,60 +312,100 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
   ];
 
   return (
-    <Panel title="Presence" note={`${all.length} active employee(s)`}>
+    <Panel
+      title="Live Office Presence"
+      subtitle={`${all.length} enrolled workforce members`}
+      icon={
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      }
+    >
       {all.length === 0 ? (
-        <Empty>No employees yet. Add someone in the Team panel.</Empty>
+        <Empty
+          title="No Workforce Members Enrolled"
+          description="Register employees and pair mobile devices to start monitoring real-time presence."
+        />
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {all.map((e) => {
             const meta = STATUS_META[e.status] ?? STATUS_META.NOT_CHECKED_IN;
+            const initials = e.employeeName
+              .split(' ')
+              .map((n) => n[0])
+              .slice(0, 2)
+              .join('')
+              .toUpperCase();
+
             return (
               <div
                 key={e.employeeId}
-                className={`rounded-lg border border-line border-l-[3px] bg-raised p-3.5 ${BORDER[meta.tone]}`}
+                className="glass-panel-elevated rounded-2xl p-4 transition-all duration-200 hover:border-white/20 hover:shadow-2xl relative overflow-hidden"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold">{e.employeeName}</span>
-                  <div className="flex items-center gap-1.5">
-                    {e.onBreak && (
-                      <span className="rounded border border-warn bg-warn-dim px-1.5 py-0.5 text-[10px] font-semibold text-warn">
-                        ☕ On Break · {e.activeBreakMinutes ?? 0}m
-                      </span>
-                    )}
-                    <Badge tone={meta.tone}>{meta.label}</Badge>
+                <div className="flex items-start justify-between gap-3">
+                  {/* Avatar & Name */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 border border-white/10 text-xs font-bold text-white shadow-inner">
+                      {initials}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="truncate text-sm font-bold text-white">
+                        {e.employeeName}
+                      </h4>
+                      <p className="truncate text-xs text-slate-400">{e.role}</p>
+                    </div>
                   </div>
+
+                  {/* Status Badge */}
+                  <Badge tone={meta.tone} dot size="sm">
+                    {meta.label}
+                  </Badge>
                 </div>
-                <div className="mt-0.5 text-[11px] text-muted">{e.role}</div>
-                <div className="mt-2.5 flex justify-between gap-2 text-[11px] text-muted">
-                  <span title="First seen today">in {e.firstCheckIn}</span>
-                  <span title="Last sighting">seen {e.lastActiveTime}</span>
-                  <strong className="text-text">{e.timeWorkedFormatted}</strong>
-                </div>
-                {e.presenceSource && (
-                  <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted">
-                    <span
-                      aria-hidden
-                      className={`inline-block h-1.5 w-1.5 rounded-full ${
-                        e.sensorCarried ? 'bg-brand' : 'bg-warn'
-                      }`}
-                    />
-                    <span>via {e.presenceSource}</span>
-                    {!e.sensorCarried && (
-                      // The app closing would stop this person's clock, which is
-                      // the failure mode HR would otherwise only discover from a
-                      // wrong timesheet at the end of the month.
-                      <span
-                        className="text-warn"
-                        title="The office sensor has not recognised this phone yet, so closing the app will stop the clock."
-                      >
-                        — app must stay open
-                      </span>
-                    )}
+
+                {/* On Break Pill */}
+                {e.onBreak && (
+                  <div className="mt-3 flex items-center justify-between rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-1.5 text-xs text-amber-300">
+                    <span className="font-semibold flex items-center gap-1.5">
+                      <span>☕</span> On Official Break
+                    </span>
+                    <span className="font-mono font-bold">
+                      {e.activeBreakMinutes ?? 0}m active
+                    </span>
                   </div>
                 )}
-                {e.needsReview && (
-                  <div className="mt-2 text-[10px] text-warn">
-                    Unusually long session — review
+
+                {/* Stats Row */}
+                <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-xl bg-slate-900/60 p-2.5 text-center text-[11px] border border-white/5">
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">First In</span>
+                    <span className="font-semibold text-slate-200">{e.firstCheckIn}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Last Seen</span>
+                    <span className="font-semibold text-slate-200">{e.lastActiveTime}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Worked</span>
+                    <span className="font-bold text-emerald-400">{e.timeWorkedFormatted}</span>
+                  </div>
+                </div>
+
+                {/* Sensor Posture */}
+                {e.presenceSource && (
+                  <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-white/5">
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          e.sensorCarried ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-amber-400'
+                        }`}
+                      />
+                      <span>via {e.presenceSource}</span>
+                    </span>
+                    {!e.sensorCarried && (
+                      <span className="text-amber-400 font-medium text-[10px]">
+                        App active sync
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -266,7 +417,7 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
   );
 }
 
-// --- attendance ------------------------------------------------------------
+// --- attendance table ------------------------------------------------------
 
 export function AttendanceTable({
   rows,
@@ -317,92 +468,100 @@ export function AttendanceTable({
 
   return (
     <Panel
-      title={
-        <div className="flex items-center gap-3">
-          <span>Timesheets & Attendance</span>
-          <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-indigo-400 font-semibold border border-indigo-900/50">
-            {isToday ? '🟢 Live (Today)' : `📅 ${selectedDate}`}
-          </span>
-        </div>
+      title="Timesheets & Daily Ledger"
+      subtitle={isToday ? 'Live real-time observations' : `Historical log for ${selectedDate}`}
+      icon={
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
       }
       actions={
         <div className="flex flex-wrap items-center gap-3">
           {/* Historical Date Picker Navigation */}
-          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-0.5">
+          <div className="flex items-center rounded-xl border border-white/10 bg-slate-900/90 p-1 shadow-inner">
             <button
               onClick={() => shiftDate(-1)}
-              className="px-2.5 py-1 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded transition font-medium"
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition"
               title="Previous Day"
             >
-              ◀ Prev
+              ◀
             </button>
-            <Input
+            <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="py-1 px-2 text-xs border-0 bg-transparent text-white font-mono focus:ring-0 cursor-pointer"
+              className="bg-transparent px-2 py-0.5 text-xs font-mono text-white focus:outline-none cursor-pointer"
             />
             <button
               onClick={() => shiftDate(1)}
-              className="px-2.5 py-1 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded transition font-medium"
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition"
               title="Next Day"
             >
-              Next ▶
+              ▶
             </button>
             {!isToday && (
-              <button
+              <Button
+                size="sm"
+                variant="accent"
                 onClick={() => setSelectedDate(dateKey)}
-                className="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded ml-1 transition shadow-sm"
+                className="ml-1 py-1 text-[11px]"
               >
                 Today
-              </button>
+              </Button>
             )}
           </div>
 
-          {/* CSV Export Range */}
-          <div className="flex items-center gap-1.5 pl-3 border-l border-slate-700">
+          {/* Export Range */}
+          <div className="flex items-center gap-2 pl-3 border-l border-white/10">
             <Input
               type="date"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
-              className="py-1 text-xs w-32"
-              title="Export Range Start"
+              className="py-1 text-xs w-28"
             />
-            <span className="text-xs text-slate-500">to</span>
+            <span className="text-xs text-slate-400">to</span>
             <Input
               type="date"
               value={to}
               onChange={(e) => setTo(e.target.value)}
-              className="py-1 text-xs w-32"
-              title="Export Range End"
+              className="py-1 text-xs w-28"
             />
-            <Button onClick={() => onExport(from, to)}>Export CSV</Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onExport(from, to)}
+              icon={
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              }
+            >
+              Export CSV
+            </Button>
           </div>
         </div>
       }
     >
-      <div className="scroll-x">
-        <table className="w-full min-w-[720px] border-collapse text-sm">
-          <thead>
+      <div className="overflow-x-auto rounded-xl border border-white/8">
+        <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+          <thead className="bg-slate-900/90 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/8">
             <tr>
-              {['Employee', 'First in', 'Last seen', 'Sessions Breakdown', 'Worked', 'Break / Notes', 'Deficit', 'Status'].map(
-                (h) => (
-                  <th
-                    key={h}
-                    className="border-b border-line px-2.5 py-2 text-left text-[11px] font-semibold tracking-wide text-dim uppercase"
-                  >
-                    {h}
-                  </th>
-                ),
-              )}
+              <th className="px-4 py-3.5">Employee</th>
+              <th className="px-3 py-3.5">First In</th>
+              <th className="px-3 py-3.5">Last Seen</th>
+              <th className="px-3 py-3.5">Sessions</th>
+              <th className="px-3 py-3.5">Worked</th>
+              <th className="px-3 py-3.5">Break Taken</th>
+              <th className="px-3 py-3.5">Deficit</th>
+              <th className="px-4 py-3.5 text-right">Status</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-white/5 bg-slate-950/40">
             {isToday ? (
               rows.length === 0 ? (
                 <tr>
                   <td colSpan={8}>
-                    <Empty>Nobody has checked in today.</Empty>
+                    <Empty title="No Check-Ins Recorded Today" description="Staff will appear here as they clock in or connect to the office beacon." />
                   </td>
                 </tr>
               ) : (
@@ -412,18 +571,14 @@ export function AttendanceTable({
                   const hasDeficit = (a.dailyDeficitMinutes ?? 0) > 0;
 
                   return (
-                    <tr key={a.employeeId}>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top">
-                        <span className="font-semibold text-white">{a.employeeName}</span>
-                        <div className="text-[11px] text-muted">{a.role}</div>
+                    <tr key={a.employeeId} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-4 py-3.5">
+                        <span className="font-bold text-white block">{a.employeeName}</span>
+                        <span className="text-[11px] text-slate-400">{a.role}</span>
                       </td>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top">
-                        {a.firstCheckIn}
-                      </td>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top">
-                        {a.lastActiveTime}
-                      </td>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top text-[11px] leading-relaxed text-muted">
+                      <td className="px-3 py-3.5 font-mono text-slate-300">{a.firstCheckIn}</td>
+                      <td className="px-3 py-3.5 font-mono text-slate-300">{a.lastActiveTime}</td>
+                      <td className="px-3 py-3.5 text-[11px] text-slate-400">
                         {a.sessions.length
                           ? a.sessions.map((s, i) => (
                               <div key={i} className="font-mono text-slate-300">
@@ -432,48 +587,44 @@ export function AttendanceTable({
                             ))
                           : '—'}
                       </td>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top">
-                        <strong>{a.timeWorkedFormatted}</strong>
+                      <td className="px-3 py-3.5">
+                        <strong className="text-emerald-400 text-sm font-bold block">{a.timeWorkedFormatted}</strong>
                         {a.adjustmentMinutes !== 0 && (
-                          <div className="text-[11px] text-muted">
+                          <span className="text-[10px] text-amber-400 font-semibold">
                             incl. {a.adjustmentMinutes}m adj.
-                          </div>
+                          </span>
                         )}
                       </td>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top">
-                        <div>
-                          {a.onBreak ? (
-                            <span className="font-semibold text-warn">
-                              On break ({a.activeBreakMinutes ?? 0}m)
-                            </span>
-                          ) : a.breakMinutes ? (
-                            <span>{a.breakMinutes}m</span>
-                          ) : (
-                            <span className="text-dim">0m</span>
-                          )}
-                        </div>
+                      <td className="px-3 py-3.5">
+                        {a.onBreak ? (
+                          <span className="font-bold text-amber-400">
+                            ☕ On break ({a.activeBreakMinutes ?? 0}m)
+                          </span>
+                        ) : a.breakMinutes ? (
+                          <span className="text-slate-300">{a.breakMinutes}m</span>
+                        ) : (
+                          <span className="text-slate-400">0m</span>
+                        )}
                         {hasExcessBreak && (
-                          <div className="text-[10px] font-semibold text-danger">
+                          <div className="text-[10px] font-bold text-rose-400">
                             +{a.excessBreakMinutes}m excess
                           </div>
                         )}
                       </td>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top">
+                      <td className="px-3 py-3.5">
                         {hasDeficit ? (
-                          <span className="font-semibold text-danger">
-                            {a.dailyDeficitMinutes}m
-                          </span>
+                          <span className="font-bold text-rose-400">{a.dailyDeficitMinutes}m</span>
                         ) : (
-                          <span className="text-dim">0m</span>
+                          <span className="text-slate-400">0m</span>
                         )}
                         {(a.lateMinutes ?? 0) > 0 && (
-                          <div className="text-[10px] text-muted">
-                            late: {a.lateMinutes}m
-                          </div>
+                          <div className="text-[10px] text-amber-400">late: {a.lateMinutes}m</div>
                         )}
                       </td>
-                      <td className="border-b border-line px-2.5 py-2.5 align-top">
-                        <Badge tone={meta.tone}>{meta.label}</Badge>
+                      <td className="px-4 py-3.5 text-right">
+                        <Badge tone={meta.tone} dot size="sm">
+                          {meta.label}
+                        </Badge>
                       </td>
                     </tr>
                   );
@@ -481,35 +632,31 @@ export function AttendanceTable({
               )
             ) : loadingHistory ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-400">
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="animate-spin rounded-full h-4 w-4 border-2 border-indigo-500 border-t-transparent"></span>
-                    <span>Loading timesheet records for {selectedDate}...</span>
+                <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <div className="flex items-center justify-center gap-3">
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+                    <span>Loading historical records for {selectedDate}…</span>
                   </div>
                 </td>
               </tr>
             ) : historyRows.length === 0 ? (
               <tr>
                 <td colSpan={8}>
-                  <Empty>No attendance records found for {selectedDate}.</Empty>
+                  <Empty title={`No records for ${selectedDate}`} description="There were no active working sessions logged on this date." />
                 </td>
               </tr>
             ) : (
               historyRows.map((h) => {
                 const meta = STATUS_META[h.status as PresenceStatus] ?? STATUS_META.NOT_CHECKED_IN;
                 return (
-                  <tr key={h.employeeId}>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <span className="font-semibold text-white">{h.employeeName}</span>
-                      <div className="text-[11px] text-muted">{h.role}</div>
+                  <tr key={h.employeeId} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 py-3.5">
+                      <span className="font-bold text-white block">{h.employeeName}</span>
+                      <span className="text-[11px] text-slate-400">{h.role}</span>
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top font-mono text-slate-300">
-                      {h.firstCheckIn}
-                    </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top font-mono text-slate-300">
-                      {h.lastActive}
-                    </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top text-[11px] leading-relaxed text-muted">
+                    <td className="px-3 py-3.5 font-mono text-slate-300">{h.firstCheckIn}</td>
+                    <td className="px-3 py-3.5 font-mono text-slate-300">{h.lastActive}</td>
+                    <td className="px-3 py-3.5 text-[11px] text-slate-400">
                       {h.sessions && h.sessions.length
                         ? h.sessions.map((s: any, i: number) => (
                             <div key={i} className="font-mono text-slate-300">
@@ -518,29 +665,31 @@ export function AttendanceTable({
                           ))
                         : '—'}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <strong className="text-white">{h.timeWorked}</strong>
+                    <td className="px-3 py-3.5">
+                      <strong className="text-white text-sm font-bold block">{h.timeWorked}</strong>
                       {h.adjustmentMinutes !== 0 && h.adjustmentMinutes != null && (
-                        <div className="text-[11px] text-amber-400 font-medium">
+                        <div className="text-[10px] text-amber-400 font-semibold">
                           {h.adjustmentMinutes > 0 ? `+${h.adjustmentMinutes}m` : `${h.adjustmentMinutes}m`} adj.
                           {h.adjustmentNote ? ` (${h.adjustmentNote})` : ''}
                         </div>
                       )}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top text-xs text-slate-400">
+                    <td className="px-3 py-3.5 text-slate-400">
                       {h.adjustmentNote ? h.adjustmentNote : '—'}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                    <td className="px-3 py-3.5">
                       {h.totalMinutes >= 480 ? (
-                        <span className="text-xs text-emerald-400 font-semibold">Completed</span>
+                        <span className="text-xs text-emerald-400 font-bold">Completed</span>
                       ) : (
-                        <span className="text-xs text-amber-400 font-semibold">
+                        <span className="text-xs text-amber-400 font-bold">
                           {480 - h.totalMinutes}m deficit
                         </span>
                       )}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <Badge tone={meta.tone}>{meta.label}</Badge>
+                    <td className="px-4 py-3.5 text-right">
+                      <Badge tone={meta.tone} dot size="sm">
+                        {meta.label}
+                      </Badge>
                     </td>
                   </tr>
                 );
@@ -559,119 +708,239 @@ export function TeamPanel({
   employees,
   onAdd,
   onPair,
+  onRefresh,
 }: {
   employees: AdminEmployee[];
-  onAdd: (name: string, role: string) => Promise<void>;
+  onAdd: (name: string, role: string, baseSalary?: number, currency?: string) => Promise<void>;
   onPair: (employee: AdminEmployee) => Promise<void>;
+  onRefresh?: () => void;
 }) {
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
+  const [baseSalary, setBaseSalary] = useState('');
+  const [currency, setCurrency] = useState('PKR');
   const [busy, setBusy] = useState(false);
+  const [showSalaryModal, setShowSalaryModal] = useState(false);
+  const [selectedEmpId, setSelectedEmpId] = useState<string | undefined>(undefined);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
     try {
-      await onAdd(name.trim(), role.trim());
+      const parsedSalary = baseSalary ? parseFloat(baseSalary) : undefined;
+      await onAdd(name.trim(), role.trim(), parsedSalary, currency);
       setName('');
       setRole('');
+      setBaseSalary('');
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Panel title="Team">
-      <form onSubmit={submit} className="mb-3.5 flex flex-wrap gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Full name"
-          className="flex-1 py-1.5 text-xs"
-          required
-        />
-        <Input
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          placeholder="Role"
-          className="flex-1 py-1.5 text-xs"
-        />
-        <Button variant="primary" type="submit" disabled={busy}>
-          Add
-        </Button>
-      </form>
-
-      {employees.length === 0 ? (
-        <Empty>No employees yet.</Empty>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {employees.map((e) => (
-            <div
-              key={e.id}
-              className={`flex items-center justify-between gap-2 rounded-lg bg-raised px-3 py-2.5 ${
-                e.active ? '' : 'opacity-50'
-              }`}
+    <>
+      <Panel
+        title="Workforce Enrolment & Compensation"
+        subtitle={`${employees.length} registered employee(s)`}
+        icon={
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+        }
+      >
+        {/* Quick Add Form */}
+        <form onSubmit={submit} className="mb-5 flex flex-wrap gap-3 rounded-2xl border border-white/8 bg-slate-900/60 p-4">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Employee Full Name *"
+            className="flex-1 min-w-[160px]"
+            required
+          />
+          <Input
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            placeholder="Designation / Department (e.g. Software Engineer)"
+            className="flex-1 min-w-[160px]"
+          />
+          <div className="flex gap-2 min-w-[200px] flex-1">
+            <Input
+              type="number"
+              step="0.01"
+              value={baseSalary}
+              onChange={(e) => setBaseSalary(e.target.value)}
+              placeholder="Base Monthly Salary (e.g. 100000)"
+              className="flex-1"
+            />
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="rounded-xl border border-white/10 bg-slate-900 px-3 text-xs font-mono text-white focus:border-indigo-500 focus:outline-none"
             >
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">{e.name}</div>
-                <div className="text-[11px] text-muted">
-                  {e.role} · {e.deviceCount} device(s)
+              <option value="PKR">PKR (₨)</option>
+              <option value="GBP">GBP (£)</option>
+              <option value="USD">USD ($)</option>
+              <option value="EUR">EUR (€)</option>
+            </select>
+          </div>
+          <Button variant="accent" type="submit" disabled={busy}>
+            {busy ? 'Registering…' : '+ Register Employee'}
+          </Button>
+        </form>
+
+        {employees.length === 0 ? (
+          <Empty title="No Employees Registered" description="Add your first team member above to issue mobile pairing credentials and set base pay." />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {employees.map((e) => {
+              const cur = e.currency || 'PKR';
+              const curSymbol = cur === 'GBP' ? '£' : cur === 'PKR' ? '₨' : '$';
+              return (
+                <div
+                  key={e.id}
+                  className={`glass-panel rounded-2xl p-4 flex flex-col justify-between gap-3 transition-all hover:border-white/20 ${
+                    e.active ? '' : 'opacity-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <h4 className="truncate font-bold text-sm text-white">{e.name}</h4>
+                      <p className="truncate text-xs text-slate-400">
+                        {e.role} · <span className="text-indigo-400 font-semibold">{e.deviceCount} paired device(s)</span>
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {e.baseSalary ? (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[11px] font-mono font-bold text-emerald-400 border border-emerald-500/20">
+                            💰 {curSymbol}{e.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })} / mo
+                            {e.dailyRate && (
+                              <span className="text-[10px] font-normal text-emerald-300/70">
+                                ({curSymbol}{e.dailyRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}/d)
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-300 border border-amber-500/20">
+                            ⚠️ No Base Salary Set
+                          </span>
+                        )}
+                        {e.startDate && (
+                          <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400 border border-slate-700">
+                            Joined {e.startDate}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 border-t border-white/5 pt-2.5">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setSelectedEmpId(e.id);
+                        setShowSalaryModal(true);
+                      }}
+                      icon={
+                        <svg className="h-3.5 w-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                      }
+                    >
+                      {e.baseSalary ? 'Update Salary' : 'Set Base Salary'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void onPair(e)}
+                      icon={
+                        <svg className="h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                      }
+                    >
+                      Pair App
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <Button onClick={() => void onPair(e)}>Pair device</Button>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
+
+      {showSalaryModal && (
+        <SetSalaryModal
+          employees={employees}
+          prefilledEmployeeId={selectedEmpId}
+          onClose={() => {
+            setShowSalaryModal(false);
+            setSelectedEmpId(undefined);
+          }}
+          onSuccess={() => {
+            onRefresh?.();
+          }}
+        />
       )}
-    </Panel>
+    </>
   );
 }
 
 // --- activity --------------------------------------------------------------
 
-const FEED_TONE: Record<string, string> = {
-  ARRIVED: 'bg-brand-dim text-brand',
-  RECONNECTED: 'bg-brand-dim text-brand',
-  DEPARTED: 'bg-warn-dim text-warn',
-  NEEDS_REVIEW: 'bg-danger-dim text-danger',
-};
-
 export function ActivityFeed({ movements }: { movements: Movement[] }) {
+  const feedColors: Record<string, { bg: string; text: string; dot: string }> = {
+    ARRIVED: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400' },
+    RECONNECTED: { bg: 'bg-indigo-500/10', text: 'text-indigo-400', dot: 'bg-indigo-400' },
+    DEPARTED: { bg: 'bg-amber-500/10', text: 'text-amber-400', dot: 'bg-amber-400' },
+    NEEDS_REVIEW: { bg: 'bg-rose-500/10', text: 'text-rose-400', dot: 'bg-rose-400' },
+  };
+
   return (
-    <Panel title="Activity">
+    <Panel
+      title="Live Activity Stream"
+      subtitle="Sensor & beacon event log"
+      icon={
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      }
+    >
       {movements.length === 0 ? (
-        <Empty>No activity recorded yet.</Empty>
+        <Empty title="No Activity Logged" description="Recent arrivals and departures will appear here in real-time." />
       ) : (
-        <div className="flex max-h-[460px] flex-col gap-2 overflow-y-auto">
-          {movements.map((m) => (
-            <div key={m.id} className="flex items-start gap-2.5 text-xs">
-              <span
-                className={`rounded px-1.5 py-0.5 text-[9px] font-bold tracking-wide whitespace-nowrap ${
-                  FEED_TONE[m.type] ?? 'bg-white/6 text-muted'
-                }`}
+        <div className="flex max-h-[420px] flex-col gap-2.5 overflow-y-auto pr-1">
+          {movements.map((m) => {
+            const style = feedColors[m.type] ?? {
+              bg: 'bg-slate-800',
+              text: 'text-slate-400',
+              dot: 'bg-slate-400',
+            };
+            return (
+              <div
+                key={m.id}
+                className="flex items-start gap-3 rounded-xl border border-white/5 bg-slate-900/50 p-3 transition-colors hover:bg-slate-900/80"
               >
-                {m.type}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{m.name}</div>
-                <div className="truncate text-[11px] text-dim">{m.details}</div>
+                <span
+                  className={`mt-0.5 rounded-md px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider ${style.bg} ${style.text}`}
+                >
+                  {m.type}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-bold text-slate-200">{m.name}</div>
+                  <div className="truncate text-[11px] text-slate-400">{m.details}</div>
+                </div>
+                <span className="font-mono text-[11px] text-slate-400 shrink-0">{m.time}</span>
               </div>
-              <span className="text-[11px] whitespace-nowrap text-dim">{m.time}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Panel>
   );
 }
 
-// --- pairing code ----------------------------------------------------------
+// --- pairing code modal ----------------------------------------------------
 
-/**
- * A pairing code is a credential. It is shown once and never persisted in the
- * browser.
- */
 export function CodeModal({
   code,
   employeeName,
@@ -683,22 +952,39 @@ export function CodeModal({
   expires: string;
   onClose: () => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
-      <div className="w-full max-w-sm rounded-2xl border border-line bg-surface p-7 text-center">
-        <h2 className="text-lg font-bold">Pairing code</h2>
-        <p className="mb-5 text-sm text-muted">for {employeeName}</p>
+  const [copied, setCopied] = useState(false);
 
-        <div className="mb-4 rounded-lg bg-raised p-4 font-mono text-3xl font-bold tracking-widest break-all text-brand">
+  const copy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6 backdrop-blur-md">
+      <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900 p-8 text-center shadow-2xl">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+          <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          </svg>
+        </div>
+
+        <h2 className="text-xl font-extrabold text-white">Single-Use Pairing Key</h2>
+        <p className="mt-1 text-xs text-slate-400">for {employeeName}</p>
+
+        <div
+          onClick={copy}
+          title="Click to copy"
+          className="my-5 cursor-pointer rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 font-mono text-3xl font-black tracking-widest text-emerald-400 transition-all hover:bg-emerald-500/20 active:scale-95"
+        >
           {code}
         </div>
 
-        <p className="mb-5 text-[11px] leading-relaxed text-dim">
-          Single use · Valid until {expires}. Give it to the employee to enter in the app. It
-          will not be shown again.
+        <p className="mb-6 text-xs text-slate-400">
+          {copied ? '✅ Copied to clipboard!' : `Single use · Valid until ${expires}. Enter in mobile app.`}
         </p>
 
-        <Button variant="primary" onClick={onClose} className="w-full py-2.5 text-sm">
+        <Button variant="accent" onClick={onClose} size="lg" className="w-full">
           Done
         </Button>
       </div>
@@ -706,7 +992,7 @@ export function CodeModal({
   );
 }
 
-// --- attendance corrections (spec 11) --------------------------------------
+// --- attendance corrections panel ------------------------------------------
 
 export function AttendanceCorrectionsPanel({
   corrections,
@@ -778,112 +1064,111 @@ export function AttendanceCorrectionsPanel({
 
   return (
     <Panel
-      title="Attendance Disputes & Corrections"
-      note={pendingCount > 0 ? `${pendingCount} pending review` : undefined}
+      title="Attendance Disputes & Correction Appeals"
+      subtitle={pendingCount > 0 ? `${pendingCount} dispute(s) pending administrative decision` : 'All disputes reviewed'}
+      icon={
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      }
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as 'PENDING' | 'ALL')}
-            className="rounded border border-line bg-raised px-2 py-1 text-xs text-text"
+            className="rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 focus:outline-none"
           >
-            <option value="PENDING">Pending ({pendingCount})</option>
-            <option value="ALL">All Disputes</option>
+            <option value="PENDING">Pending Review ({pendingCount})</option>
+            <option value="ALL">All History</option>
           </select>
-          <Button onClick={onRefresh} className="py-1 text-xs">
+          <Button size="sm" variant="secondary" onClick={onRefresh}>
             Refresh
           </Button>
         </div>
       }
     >
       {filtered.length === 0 ? (
-        <Empty>No attendance disputes {statusFilter === 'PENDING' ? 'awaiting review' : 'recorded'}.</Empty>
+        <Empty
+          title={statusFilter === 'PENDING' ? 'No Pending Disputes' : 'No Dispute Records'}
+          description="Submitted employee attendance adjustments will appear here for HR adjudication."
+        />
       ) : (
-        <div className="scroll-x">
-          <table className="w-full min-w-[680px] border-collapse text-sm">
-            <thead>
+        <div className="overflow-x-auto rounded-xl border border-white/8">
+          <table className="w-full min-w-[700px] border-collapse text-left text-xs">
+            <thead className="bg-slate-900/90 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/8">
               <tr>
-                {['Employee', 'Date', 'Reason & Details', 'Proposed Adjustment', 'Status', 'Actions'].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="border-b border-line px-2.5 py-2 text-left text-[11px] font-semibold tracking-wide text-dim uppercase"
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                <th className="px-4 py-3.5">Employee</th>
+                <th className="px-3 py-3.5">Disputed Date</th>
+                <th className="px-3 py-3.5">Reason & Evidence</th>
+                <th className="px-3 py-3.5">Requested Credit</th>
+                <th className="px-3 py-3.5">Status</th>
+                <th className="px-4 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-white/5 bg-slate-950/40">
               {filtered.map((c) => {
                 const isPending = c.status === 'PENDING';
                 const requestedMins = c.requestedChange?.adjustmentMinutes as number | undefined;
                 const statusTone =
-                  c.status === 'APPROVED'
-                    ? 'brand'
-                    : c.status === 'REJECTED'
-                      ? 'danger'
-                      : 'warn';
+                  c.status === 'APPROVED' ? 'ok' : c.status === 'REJECTED' ? 'danger' : 'warn';
 
                 return (
-                  <tr key={c.id} className="hover:bg-white/[0.02]">
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <div className="font-semibold">{c.employeeName}</div>
-                      <div className="text-[11px] text-muted">{c.role}</div>
+                  <tr key={c.id} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 py-3.5">
+                      <span className="font-bold text-white block">{c.employeeName}</span>
+                      <span className="text-[11px] text-slate-400">{c.role}</span>
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <span className="font-mono text-xs">{c.date}</span>
-                      <div className="text-[10px] text-dim">{c.requestedAt}</div>
+                    <td className="px-3 py-3.5 font-mono text-slate-300">
+                      {c.date}
+                      <span className="block text-[10px] text-slate-400">{c.requestedAt}</span>
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top max-w-[240px]">
-                      <div className="text-xs leading-snug">{c.reason}</div>
+                    <td className="px-3 py-3.5 max-w-[260px]">
+                      <div className="text-xs text-slate-200 leading-snug">{c.reason}</div>
                       {c.reviewNotes && (
-                        <div className="mt-1 text-[11px] italic text-muted">
+                        <div className="mt-1 text-[11px] text-indigo-400 italic">
                           HR: {c.reviewNotes}
                         </div>
                       )}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                    <td className="px-3 py-3.5">
                       {requestedMins !== undefined ? (
-                        <span className="font-semibold text-brand">+{requestedMins}m</span>
+                        <span className="font-bold text-emerald-400">+{requestedMins}m</span>
                       ) : (
-                        <span className="text-dim">—</span>
-                      )}
-                      {c.appliedChange?.adjustmentMinutes !== undefined && (
-                        <div className="text-[10px] text-dim">
-                          applied: +{String(c.appliedChange.adjustmentMinutes)}m
-                        </div>
+                        <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
-                      <Badge tone={statusTone}>{c.status}</Badge>
+                    <td className="px-3 py-3.5">
+                      <Badge tone={statusTone} dot size="sm">
+                        {c.status}
+                      </Badge>
                     </td>
-                    <td className="border-b border-line px-2.5 py-2.5 align-top">
+                    <td className="px-4 py-3.5 text-right">
                       {isPending ? (
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center justify-end gap-1.5">
                           <Button
                             variant="primary"
+                            size="sm"
                             onClick={() => openDecision(c, 'APPROVED')}
-                            className="py-1 px-2 text-[11px]"
                           >
                             Approve
                           </Button>
                           <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={() => openDecision(c, 'AMENDED')}
-                            className="py-1 px-2 text-[11px]"
                           >
                             Amend
                           </Button>
                           <Button
+                            variant="danger"
+                            size="sm"
                             onClick={() => openDecision(c, 'REJECTED')}
-                            className="py-1 px-2 text-[11px] text-danger hover:bg-danger-dim"
                           >
                             Reject
                           </Button>
                         </div>
                       ) : (
-                        <span className="text-[11px] text-dim">Decided {c.reviewedAt ?? ''}</span>
+                        <span className="text-[11px] text-slate-400">Decided {c.reviewedAt ?? ''}</span>
                       )}
                     </td>
                   </tr>
@@ -894,64 +1179,63 @@ export function AttendanceCorrectionsPanel({
         </div>
       )}
 
+      {/* Decision Modal */}
       {activeCorrection && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
-          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6">
-            <h2 className="text-base font-bold text-text">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-7 shadow-2xl">
+            <h2 className="text-lg font-bold text-white">
               {decisionAction === 'APPROVED'
                 ? 'Approve Attendance Dispute'
                 : decisionAction === 'AMENDED'
-                  ? 'Amend & Approve Attendance Dispute'
+                  ? 'Amend & Approve Dispute'
                   : 'Reject Attendance Dispute'}
             </h2>
-            <p className="mt-1 text-xs text-muted">
+            <p className="mt-1 text-xs text-slate-400">
               {activeCorrection.employeeName} · {activeCorrection.date}
             </p>
 
-            <div className="my-4 rounded-lg bg-raised p-3 text-xs">
-              <div className="text-dim">Reason:</div>
-              <div className="mt-0.5 text-text font-medium">{activeCorrection.reason}</div>
+            <div className="my-4 rounded-xl bg-slate-950/70 border border-white/5 p-3.5 text-xs">
+              <span className="text-slate-400 block mb-1">Employee Explanation:</span>
+              <p className="text-slate-200 font-medium">{activeCorrection.reason}</p>
             </div>
 
             {decisionAction !== 'REJECTED' && (
               <div className="mb-4">
-                <label className="block text-xs font-semibold text-text mb-1">
-                  Adjustment Minutes to Credit (Spec 11)
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Adjustment Minutes to Credit
                 </label>
                 <Input
                   type="number"
                   value={adjustmentMinutes}
                   onChange={(e) => setAdjustmentMinutes(Math.max(0, parseInt(e.target.value) || 0))}
-                  className="w-full"
                 />
-                <span className="text-[11px] text-muted mt-1 block">
-                  This will reduce the employee&apos;s daily deficit balance and recompute attendance.
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Reduces employee deficit balance by this amount.
                 </span>
               </div>
             )}
 
             <div className="mb-5">
-              <label className="block text-xs font-semibold text-text mb-1">
-                Decision Note {decisionAction === 'REJECTED' ? '(Required - explain rejection)' : '(Required)'}
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Decision Note & Audit Rationale
               </label>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Explain the decision rationale for the audit log and employee..."
+                placeholder="Enter justification for the audit log…"
                 rows={3}
-                className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                className="w-full rounded-xl border border-white/10 bg-slate-950 p-3 text-xs text-slate-200 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
               />
             </div>
 
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setActiveCorrection(null)} disabled={submitting}>
+            <div className="flex justify-end gap-2.5">
+              <Button variant="secondary" onClick={() => setActiveCorrection(null)} disabled={submitting}>
                 Cancel
               </Button>
               <Button
-                variant={decisionAction === 'REJECTED' ? 'ghost' : 'primary'}
+                variant={decisionAction === 'REJECTED' ? 'danger' : 'primary'}
                 onClick={handleConfirm}
                 disabled={submitting}
-                className={decisionAction === 'REJECTED' ? 'bg-danger text-white hover:bg-danger/90' : ''}
               >
                 {submitting ? 'Submitting…' : `Confirm ${decisionAction}`}
               </Button>
@@ -962,4 +1246,3 @@ export function AttendanceCorrectionsPanel({
     </Panel>
   );
 }
-

@@ -163,15 +163,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surfaceDark,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade200),
+              border: Border.all(color: AppColors.border),
             ),
-            child: Text(
+            child: const Text(
               'Detailed presence readings are deleted after 90 days. Your daily '
               'hours are retained as part of the payroll record. To request a '
               'copy of your data, or its deletion, contact your administrator.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.45),
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.45),
             ),
           ),
           const SizedBox(height: 24),
@@ -180,8 +180,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: OutlinedButton.icon(
               onPressed: _unpair,
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red.shade700,
-                side: BorderSide(color: Colors.red.shade200),
+                foregroundColor: AppColors.danger,
+                side: BorderSide(color: AppColors.danger.withOpacity(0.4)),
               ),
               icon: const Icon(Icons.link_off, size: 16),
               label: const Text('Unpair this device'),
@@ -200,9 +200,14 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(title,
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.slateDark)),
+        child: Text(
+          title,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: AppColors.textLight,
+          ),
+        ),
       );
 }
 
@@ -219,9 +224,9 @@ class _InfoTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,22 +234,30 @@ class _InfoTile extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(label,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                ),
               ),
               Flexible(
                 child: Text(
                   value,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textLight,
+                  ),
                 ),
               ),
             ],
           ),
           if (hint != null) ...[
             const SizedBox(height: 6),
-            Text(hint!,
-                style: TextStyle(fontSize: 11, color: Colors.orange.shade800, height: 1.3)),
+            Text(
+              hint!,
+              style: const TextStyle(fontSize: 11, color: AppColors.amber, height: 1.3),
+            ),
           ],
         ],
       ),

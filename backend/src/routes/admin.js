@@ -24,31 +24,87 @@ const CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 router.get('/employees', (req, res) => {
   const rows = db.prepare(`
     SELECT e.*,
+           COALESCE(er.job_title, e.role) AS effective_job_title,
+           er.start_date AS employment_start_date,
+           sh.amount AS base_salary,
+           sh.currency AS salary_currency,
+           sh.daily_rate AS salary_daily_rate,
            (SELECT COUNT(*) FROM devices d WHERE d.employee_id = e.id AND d.revoked_at IS NULL) AS device_count
-    FROM employees e ORDER BY e.active DESC, e.name
+    FROM employees e
+    LEFT JOIN (
+      SELECT employee_id, job_title, start_date FROM employment_records
+      WHERE effective_to IS NULL
+      GROUP BY employee_id
+      ORDER BY effective_from DESC
+    ) er ON er.employee_id = e.id
+    LEFT JOIN (
+      SELECT employee_id, amount, currency, daily_rate FROM salary_history
+      WHERE effective_to IS NULL
+      GROUP BY employee_id
+      ORDER BY effective_from DESC
+    ) sh ON sh.employee_id = e.id
+    ORDER BY e.active DESC, e.name
   `).all();
   res.json({
     status: 'SUCCESS',
     employees: rows.map(r => ({
-      id: r.id, name: r.name, role: r.role, active: !!r.active,
+      id: r.id,
+      name: r.name,
+      role: r.effective_job_title || r.role,
+      active: !!r.active,
       deviceCount: r.device_count,
+      baseSalary: r.base_salary !== null && r.base_salary !== undefined ? Number(r.base_salary) : null,
+      currency: r.salary_currency || null,
+      dailyRate: r.salary_daily_rate !== null && r.salary_daily_rate !== undefined ? Number(r.salary_daily_rate) : null,
+      startDate: r.employment_start_date || null,
       createdAt: T.displayTime(r.created_at),
     })),
   });
 });
 
 router.post('/employees', (req, res) => {
-  const { name, role } = req.body || {};
+  const { name, role, baseSalary, currency, startDate, reason } = req.body || {};
   if (!name || !String(name).trim()) {
     return res.status(400).json({ status: 'ERROR', message: 'Employee name is required.' });
   }
   const id = 'emp_' + crypto.randomBytes(6).toString('hex');
   const nowMs = T.now();
   const employee = { id, name: String(name).trim(), role: String(role || 'Team Member').trim() };
+  const PR = require('../domain/payroll');
 
   const run = tx(() => {
     db.prepare('INSERT INTO employees (id,name,role,active,created_at,updated_at) VALUES (?,?,?,1,?,?)')
       .run(employee.id, employee.name, employee.role, nowMs, nowMs);
+
+    if (startDate) {
+      db.prepare(`
+        INSERT INTO employment_records
+          (id, employee_id, job_title, employment_type, start_date, effective_from, created_at, created_by, change_reason)
+        VALUES (?,?,?,?,?,?,?,?,?)
+      `).run(
+        'er_' + crypto.randomBytes(6).toString('hex'),
+        id,
+        employee.role,
+        'Full-time',
+        startDate,
+        startDate,
+        nowMs,
+        'admin',
+        reason || 'Initial employment record'
+      );
+    }
+
+    if (baseSalary !== undefined && baseSalary !== null && Number(baseSalary) > 0) {
+      PR.setSalary({
+        employeeId: id,
+        amount: Number(baseSalary),
+        currency: currency || 'PKR',
+        effectiveFrom: startDate || T.dateKey(),
+        reason: reason || 'Initial base salary on onboarding',
+        actor: 'admin',
+      });
+    }
+
     audit({ actor: 'admin', action: 'EMPLOYEE_CREATED', targetType: 'employee', targetId: id, after: employee });
   });
   run();

@@ -420,6 +420,14 @@ class ApiClient {
         return EmployeeProfile.fromJson(body['profile'] as Map<String, dynamic>);
       });
 
+  /// Fetches this employee's monthly payroll statements across all periods.
+  Future<EmployeePayrollStatement> fetchMyPayrollStatements() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/payroll/mine/statements'), headers: await _authHeaders())
+            .timeout(timeout);
+        return EmployeePayrollStatement.fromJson(_decode(res));
+      });
+
   /// Unauthenticated reachability check, used by the settings screen so the
   /// user can tell a wrong address apart from a rejected credential.
   Future<bool> health() async {

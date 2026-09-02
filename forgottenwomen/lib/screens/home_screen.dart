@@ -711,6 +711,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         backgroundColor: AppColors.surfaceDark,
         elevation: 0,
+        titleSpacing: 12,
         title: GestureDetector(
           onTap: () {
             Navigator.of(context).push(
@@ -720,18 +721,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             );
           },
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
               CircleAvatar(
-                radius: 18,
-                backgroundColor: AppColors.primary.withOpacity(0.2),
+                radius: 17,
+                backgroundColor: AppColors.primary.withValues(alpha: 0.2),
                 child: Text(
                   _employeeName.isNotEmpty ? _employeeName.substring(0, 1).toUpperCase() : 'U',
-                  style: const TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold, fontSize: 14),
+                  style: const TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),
               const SizedBox(width: 10),
-              Flexible(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -740,7 +740,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       _employeeName.isEmpty ? 'Employee Portal' : _employeeName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                     Text(
                       _employeeRole.isNotEmpty ? _employeeRole : 'Staff Attendance',
@@ -755,21 +755,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.person_outline_rounded, color: Colors.white70),
-            tooltip: 'My Profile & Salary',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const ProfileScreen(),
-                ),
-              );
-            },
-          ),
           Stack(
             children: [
               IconButton(
-                icon: const Icon(Icons.rate_review_outlined, color: Colors.white70),
+                icon: const Icon(Icons.rate_review_outlined, color: Colors.white70, size: 20),
                 tooltip: 'My Disputes',
                 onPressed: _showMyDisputesSheet,
               ),
@@ -789,7 +778,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Colors.white70),
+            icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 20),
+            tooltip: 'Settings',
             onPressed: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(
@@ -802,7 +792,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           IconButton(
             icon: _sending
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.refresh, color: Colors.white70),
+                : const Icon(Icons.refresh, color: Colors.white70, size: 20),
+            tooltip: 'Refresh',
             onPressed: _sending ? null : _refresh,
           ),
         ],
@@ -1156,6 +1147,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildHistoryTile(Attendance d, CorrectionRequest? correction) {
+    final parsedDate = DateTime.tryParse(d.date);
+    final isWeekend = parsedDate != null &&
+        (parsedDate.weekday == DateTime.saturday || parsedDate.weekday == DateTime.sunday);
+    final isToday = d.date == _attendance.date;
+
+    String statusText;
+    Color statusColor;
+    String timingSubtext;
+
+    if (isWeekend) {
+      if (d.totalMinutes == 0) {
+        statusText = 'Weekend / Off Day';
+        statusColor = AppColors.textMuted;
+        timingSubtext = 'Non-working day';
+      } else {
+        statusText = 'Overtime (+${d.timeWorkedFormatted})';
+        statusColor = AppColors.teal;
+        timingSubtext = 'In: ${d.firstCheckIn} • Last: ${d.lastActiveTime}';
+      }
+    } else if (isToday) {
+      timingSubtext = 'In: ${d.firstCheckIn} • Last: ${d.lastActiveTime}';
+      if (d.totalMinutes >= 480) {
+        statusText = 'Completed';
+        statusColor = AppColors.teal;
+      } else {
+        final rem = 480 - d.totalMinutes;
+        final h = rem ~/ 60;
+        final m = rem % 60;
+        statusText = h > 0 ? '${h}h ${m}m left' : '${m}m left';
+        statusColor = AppColors.amber;
+      }
+    } else {
+      timingSubtext = 'In: ${d.firstCheckIn} • Last: ${d.lastActiveTime}';
+      if (d.totalMinutes >= 480) {
+        statusText = 'Completed';
+        statusColor = AppColors.teal;
+      } else if (d.totalMinutes == 0) {
+        statusText = 'Not checked in';
+        statusColor = AppColors.textMuted;
+      } else {
+        statusText = '${480 - d.totalMinutes}m deficit';
+        statusColor = AppColors.amber;
+      }
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -1173,10 +1209,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
+                  color: isWeekend
+                      ? AppColors.slateDark
+                      : AppColors.primary.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.calendar_month, color: AppColors.primaryLight, size: 18),
+                child: Icon(
+                  isWeekend ? Icons.weekend_outlined : Icons.calendar_month,
+                  color: isWeekend ? AppColors.textMuted : AppColors.primaryLight,
+                  size: 18,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1190,8 +1232,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       children: [
                         Text(
                           d.date,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: TextStyle(
+                            color: isWeekend ? AppColors.textMuted : Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
+                        if (isWeekend && d.totalMinutes == 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.slateDark,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: const Text(
+                              'WEEKEND',
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 9, fontWeight: FontWeight.bold),
+                            ),
+                          ),
                         if (correction != null)
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1209,7 +1268,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'In: ${d.firstCheckIn} • Last: ${d.lastActiveTime}',
+                      timingSubtext,
                       style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                     ),
                   ],
@@ -1221,16 +1280,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    d.timeWorkedFormatted,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                    isWeekend && d.totalMinutes == 0 ? '—' : d.timeWorkedFormatted,
+                    style: TextStyle(
+                      color: isWeekend && d.totalMinutes == 0 ? AppColors.textMuted : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    d.totalMinutes >= 480 ? 'Completed' : '${480 - d.totalMinutes}m remaining',
+                    statusText,
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      color: d.totalMinutes >= 480 ? AppColors.teal : AppColors.amber,
+                      color: statusColor,
                     ),
                   ),
                 ],

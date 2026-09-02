@@ -653,4 +653,130 @@ class EmployeeProfile {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Employee Payroll Statements & Period History (Spec 17, 18, 29)
+// ---------------------------------------------------------------------------
+
+class PeriodAdjustmentItem {
+  final String id;
+  final String type;
+  final String explanation;
+  final double amount;
+  final double? days;
+
+  const PeriodAdjustmentItem({
+    required this.id,
+    required this.type,
+    required this.explanation,
+    required this.amount,
+    this.days,
+  });
+
+  factory PeriodAdjustmentItem.fromJson(Map<String, dynamic> json) {
+    return PeriodAdjustmentItem(
+      id: json['id'] as String? ?? '',
+      type: json['type'] as String? ?? 'OTHER',
+      explanation: json['explanation'] as String? ?? '',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      days: (json['days'] as num?)?.toDouble(),
+    );
+  }
+}
+
+class PayrollPeriodStatement {
+  final String periodId;
+  final String name;
+  final String startDate;
+  final String endDate;
+  final String status;
+  final double exchangeRate;
+  final String currency;
+  final double monthlyGross;
+  final double dailyRate;
+  final int workingDaysCount;
+  final int fullPeriodDays;
+  final bool isStarter;
+  final double basePayable;
+  final double adjustmentsTotal;
+  final double netPayable;
+  final List<PeriodAdjustmentItem> adjustments;
+  final String? effectiveFrom;
+
+  const PayrollPeriodStatement({
+    required this.periodId,
+    required this.name,
+    required this.startDate,
+    required this.endDate,
+    required this.status,
+    required this.exchangeRate,
+    required this.currency,
+    required this.monthlyGross,
+    required this.dailyRate,
+    required this.workingDaysCount,
+    required this.fullPeriodDays,
+    required this.isStarter,
+    required this.basePayable,
+    required this.adjustmentsTotal,
+    required this.netPayable,
+    required this.adjustments,
+    this.effectiveFrom,
+  });
+
+  factory PayrollPeriodStatement.fromJson(Map<String, dynamic> json) {
+    return PayrollPeriodStatement(
+      periodId: json['periodId'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      startDate: json['startDate'] as String? ?? '',
+      endDate: json['endDate'] as String? ?? '',
+      status: json['status'] as String? ?? 'OPEN',
+      exchangeRate: (json['exchangeRate'] as num?)?.toDouble() ?? 350.0,
+      currency: (json['currency'] as String?)?.toUpperCase() ?? 'PKR',
+      monthlyGross: (json['monthlyGross'] as num?)?.toDouble() ?? 0,
+      dailyRate: (json['dailyRate'] as num?)?.toDouble() ?? 0,
+      workingDaysCount: (json['workingDaysCount'] as num?)?.toInt() ?? 0,
+      fullPeriodDays: (json['fullPeriodDays'] as num?)?.toInt() ?? 0,
+      isStarter: json['isStarter'] == true,
+      basePayable: (json['basePayable'] as num?)?.toDouble() ?? 0,
+      adjustmentsTotal: (json['adjustmentsTotal'] as num?)?.toDouble() ?? 0,
+      netPayable: (json['netPayable'] as num?)?.toDouble() ?? 0,
+      adjustments: (json['adjustments'] as List<dynamic>? ?? [])
+          .map((a) => PeriodAdjustmentItem.fromJson(a as Map<String, dynamic>))
+          .toList(),
+      effectiveFrom: json['effectiveFrom'] as String?,
+    );
+  }
+}
+
+class EmployeePayrollStatement {
+  final bool enabled;
+  final String? message;
+  final SalaryInfo? currentSalary;
+  final List<PayrollPeriodStatement> periods;
+
+  const EmployeePayrollStatement({
+    required this.enabled,
+    this.message,
+    this.currentSalary,
+    this.periods = const [],
+  });
+
+  factory EmployeePayrollStatement.fromJson(Map<String, dynamic> json) {
+    final enabled = json['enabled'] == true;
+    return EmployeePayrollStatement(
+      enabled: enabled,
+      message: json['message'] as String?,
+      currentSalary: json['currentSalary'] != null
+          ? SalaryInfo.fromJson({
+              'enabled': enabled,
+              ...(json['currentSalary'] as Map<String, dynamic>),
+            })
+          : null,
+      periods: (json['periods'] as List<dynamic>? ?? [])
+          .map((p) => PayrollPeriodStatement.fromJson(p as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+
 

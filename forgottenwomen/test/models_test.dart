@@ -546,6 +546,63 @@ void main() {
       expect(hiddenSalary.enabled, isFalse);
       expect(hiddenSalary.message, contains('disabled by HR policy'));
     });
+
+    test('EmployeePayrollStatement parses full period history & adjustments', () {
+      final stmt = EmployeePayrollStatement.fromJson({
+        'enabled': true,
+        'currentSalary': {
+          'monthly': 200000.0,
+          'daily': 9230.77,
+          'annual': 2400000.0,
+          'currency': 'PKR',
+          'effectiveFrom': '2026-08-01',
+        },
+        'periods': [
+          {
+            'periodId': 'pp_aug2026',
+            'name': 'August 2026 Payroll',
+            'startDate': '2026-08-01',
+            'endDate': '2026-08-31',
+            'status': 'OPEN',
+            'exchangeRate': 365.0,
+            'currency': 'PKR',
+            'monthlyGross': 200000.0,
+            'dailyRate': 9230.77,
+            'workingDaysCount': 21,
+            'fullPeriodDays': 21,
+            'isStarter': false,
+            'basePayable': 193846.15,
+            'adjustmentsTotal': 15000.0,
+            'netPayable': 208846.15,
+            'adjustments': [
+              {
+                'id': 'adj_1',
+                'type': 'OVERTIME',
+                'explanation': 'Server migration support',
+                'amount': 15000.0,
+                'days': 1.0,
+              }
+            ],
+            'effectiveFrom': '2026-08-01',
+          }
+        ],
+      });
+
+      expect(stmt.enabled, isTrue);
+      expect(stmt.currentSalary?.monthly, 200000.0);
+      expect(stmt.periods.length, 1);
+      final p = stmt.periods.first;
+      expect(p.periodId, 'pp_aug2026');
+      expect(p.name, 'August 2026 Payroll');
+      expect(p.workingDaysCount, 21);
+      expect(p.fullPeriodDays, 21);
+      expect(p.exchangeRate, 365.0);
+      expect(p.adjustmentsTotal, 15000.0);
+      expect(p.netPayable, 208846.15);
+      expect(p.adjustments.length, 1);
+      expect(p.adjustments.first.type, 'OVERTIME');
+    });
   });
 }
+
 

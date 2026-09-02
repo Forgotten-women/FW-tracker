@@ -362,6 +362,24 @@ function preparePeriod(periodId) {
     const starter = starterCalculation({
       employeeId: e.id, periodStart: period.start_date, periodEnd: period.end_date,
     });
+
+    const employment = selectEmploymentDates.get(e.id);
+    const effectiveStart = (employment?.start_date && employment.start_date > period.start_date)
+      ? employment.start_date
+      : period.start_date;
+    const effectiveEnd = (employment?.contract_end_date && employment.contract_end_date < period.end_date)
+      ? employment.contract_end_date
+      : period.end_date;
+
+    let workingDaysCount = 0;
+    if (effectiveStart <= period.end_date && effectiveEnd >= period.start_date) {
+      const workedDays = eligibleWorkingDays(e.id, effectiveStart, effectiveEnd);
+      workingDaysCount = workedDays.length;
+    }
+
+    const fullPeriodDays = eligibleWorkingDays(e.id, period.start_date, period.end_date).length;
+    const calculatedPeriodGross = money(salary.dailyPrecise * workingDaysCount);
+
     const deficit = attendance.balanceFor(e.id);
     const balance = leave.balanceFor(e.id, period.end_date);
 
@@ -373,6 +391,9 @@ function preparePeriod(periodId) {
       employeeId: e.id,
       employeeName: e.name,
       salary: { monthly: salary.monthly, daily: salary.daily, annual: salary.annual, currency: salary.currency || 'GBP' },
+      workingDaysCount,
+      fullPeriodDays,
+      calculatedPeriodGross,
       isStarter: starter.applicable && !starter.blocked,
       starter: starter.applicable && !starter.blocked ? {
         startDate: starter.startDate,
@@ -506,8 +527,117 @@ function closePeriod({ periodId, actor }) {
   return { closed: true };
 }
 
+/**
+ * Employee self-service statement retrieval across all payroll periods.
+ * Gated by org_settings.show_salary_to_employees.
+ */
+function employeeStatements(employeeId) {
+  const setting = db.prepare("SELECT value FROM org_settings WHERE key = 'show_salary_to_employees'").get();
+  const enabled = setting ? String(setting.value).trim() === '1' : false;
+  if (!enabled) {
+    return {
+      enabled: false,
+      message: 'Salary and monthly statements are restricted by company HR policy.',
+      currentSalary: null,
+      periods: [],
+    };
+  }
+
+  const currentSalary = salaryAt(employeeId, T.dateKey());
+
+  const periods = db.prepare('SELECT * FROM payroll_periods ORDER BY start_date DESC').all();
+  const periodStatements = [];
+
+  for (const p of periods) {
+    const salary = salaryAt(employeeId, p.end_date);
+    if (salary.blocked) continue;
+
+    const starter = starterCalculation({
+      employeeId,
+      periodStart: p.start_date,
+      periodEnd: p.end_date,
+    });
+
+    const employment = selectEmploymentDates.get(employeeId);
+    const effectiveStart = (employment?.start_date && employment.start_date > p.start_date)
+      ? employment.start_date
+      : p.start_date;
+    const effectiveEnd = (employment?.contract_end_date && employment.contract_end_date < p.end_date)
+      ? employment.contract_end_date
+      : p.end_date;
+
+    let workingDaysCount = 0;
+    if (effectiveStart <= p.end_date && effectiveEnd >= p.start_date) {
+      const workedDays = eligibleWorkingDays(employeeId, effectiveStart, effectiveEnd);
+      workingDaysCount = workedDays.length;
+    }
+
+    const fullPeriodDays = eligibleWorkingDays(employeeId, p.start_date, p.end_date).length;
+    const isStarter = starter.applicable && !starter.blocked;
+    const baseGross = money(salary.dailyPrecise * workingDaysCount);
+
+    const adjustments = db.prepare(`
+      SELECT id, adjustment_type, explanation, approved_amount, approved_days, status, approved_at
+      FROM payroll_adjustments
+      WHERE period_id = ? AND employee_id = ? AND status = 'APPROVED'
+      ORDER BY created_at ASC
+    `).all(p.id, employeeId);
+
+    let adjustmentsTotal = 0;
+    for (const a of adjustments) {
+      if (a.approved_amount) {
+        adjustmentsTotal += Number(a.approved_amount);
+      }
+    }
+
+    const netPayable = money(baseGross + adjustmentsTotal);
+
+    periodStatements.push({
+      periodId: p.id,
+      name: p.name,
+      startDate: p.start_date,
+      endDate: p.end_date,
+      status: p.status,
+      exchangeRate: p.exchange_rate || 350.0,
+      currency: salary.currency || 'PKR',
+      monthlyGross: salary.monthly,
+      dailyRate: salary.daily,
+      workingDaysCount,
+      fullPeriodDays,
+      isStarter,
+      basePayable: baseGross,
+      adjustmentsTotal: money(adjustmentsTotal),
+      netPayable,
+      adjustments: adjustments.map((a) => ({
+        id: a.id,
+        type: a.adjustment_type,
+        explanation: a.explanation,
+        amount: a.approved_amount,
+        days: a.approved_days,
+      })),
+      effectiveFrom: salary.effectiveFrom,
+    });
+  }
+
+  return {
+    enabled: true,
+    currentSalary: {
+      monthly: currentSalary.monthly,
+      daily: currentSalary.daily,
+      annual: currentSalary.annual,
+      currency: currentSalary.currency || 'PKR',
+      effectiveFrom: currentSalary.effectiveFrom,
+      blocked: currentSalary.blocked,
+      message: currentSalary.message,
+    },
+    periods: periodStatements,
+  };
+}
+
 module.exports = {
   rates, money, salaryAt, setSalary, salaryHistoryFor,
   eligibleWorkingDays, starterCalculation, leaverCalculation,
   createPeriod, updatePeriodExchangeRate, preparePeriod, proposeAdjustment, decideAdjustment, closePeriod,
+  employeeStatements,
 };
+

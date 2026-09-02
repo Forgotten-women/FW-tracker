@@ -111,10 +111,14 @@ export const api = {
   employees: () =>
     request<{ employees: AdminEmployee[] }>('/api/admin/employees'),
 
-  createEmployee: (name: string, role: string) =>
+  createEmployee: (
+    name: string,
+    role: string,
+    options?: { baseSalary?: number; currency?: string; startDate?: string; reason?: string }
+  ) =>
     request<{ employee: AdminEmployee }>('/api/admin/employees', {
       method: 'POST',
-      body: JSON.stringify({ name, role }),
+      body: JSON.stringify({ name, role, ...options }),
     }),
 
   enrollmentCode: (employeeId: string) =>

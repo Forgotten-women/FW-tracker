@@ -60,11 +60,17 @@ function newEnrollmentCode() {
 const selectToken = db.prepare(`
   SELECT t.token_hash, t.device_id, t.expires_at, t.revoked_at,
          d.employee_id, d.revoked_at AS device_revoked, d.model, d.platform,
-         e.name AS employee_name, e.role AS employee_role, e.active AS employee_active
+         e.name AS employee_name, COALESCE(er.job_title, e.role) AS employee_role, e.active AS employee_active
   FROM device_tokens t
   JOIN devices d   ON d.id = t.device_id
   JOIN employees e ON e.id = d.employee_id
+  LEFT JOIN (
+    SELECT employee_id, job_title
+    FROM employment_records
+    ORDER BY effective_from DESC
+  ) er ON er.employee_id = e.id
   WHERE t.token_hash = ?
+  GROUP BY t.token_hash
 `);
 const markTokenUsed = db.prepare('UPDATE device_tokens SET last_used_at = ? WHERE token_hash = ?');
 

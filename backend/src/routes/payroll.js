@@ -7,10 +7,23 @@ const express = require('express');
 const router = express.Router();
 
 const { db } = require('../db');
-const { requirePermission, requireEmployeeAccess, requireUserOrAdminKey } = require('../middleware/auth');
+const { requireDevice, requirePermission, requireEmployeeAccess, requireUserOrAdminKey } = require('../middleware/auth');
 const PR = require('../domain/payroll');
 const rbac = require('../domain/rbac');
 const T = require('../util/time');
+
+// ---------------------------------------------------------------------------
+// Employee self-service: Monthly Statements & Period History
+// ---------------------------------------------------------------------------
+
+router.get('/mine/statements', requireDevice, (req, res) => {
+  const { employeeId } = req.auth;
+  const result = PR.employeeStatements(employeeId);
+  res.json({
+    status: 'SUCCESS',
+    ...result,
+  });
+});
 
 // Reading pay is a sensitive permission; spec 3.2 keeps it away from managers
 // unless it has been explicitly granted.
