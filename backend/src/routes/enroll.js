@@ -39,7 +39,7 @@ const insertToken = db.prepare(`
 const selectEmployee = db.prepare('SELECT id, name, role, active FROM employees WHERE id = ?');
 
 // POST /api/enroll  { code, platform, model, label }
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   if (rateLimited(ip)) {
     return res.status(429).json({ status: 'ERROR', code: 'RATE_LIMITED', message: 'Too many enrolment attempts. Try again later.' });
@@ -117,11 +117,30 @@ router.post('/', (req, res) => {
   });
   run();
 
-  pushDeviceAndToken(
-    { id: deviceId, employee_id: employee.id, platform: String(platform || 'unknown'), model: String(model || ''), label: String(label || ''), enrolled_at: nowMs },
-    { token_hash: hash, device_id: deviceId, issued_at: nowMs, expires_at: nowMs + TOKEN_TTL_MS }
-  ).catch(() => {});
-  pushEnrollmentCode({ code_hash: row.code_hash, employee_id: employee.id, created_at: row.created_at, expires_at: row.expires_at, used_at: nowMs, used_by_device: deviceId }).catch(() => {});
+  // AWAITED, not fire-and-forget.
+  //
+  // These writes used to be started and abandoned, with the 201 sent
+  // immediately afterwards. On a serverless host the instance freezes the
+  // moment the response goes out, so the writes were routinely killed in
+  // flight: the token existed only in that instance's local database. The
+  // phone's very next request reached a different instance, got BAD_TOKEN, and
+  // the app treated that as "not enrolled" and returned to the pairing screen.
+  //
+  // The token must be durable BEFORE we hand it to the device, otherwise we are
+  // issuing a credential we have not actually saved.
+  try {
+    await pushDeviceAndToken(
+      { id: deviceId, employee_id: employee.id, platform: String(platform || 'unknown'), model: String(model || ''), label: String(label || ''), enrolled_at: nowMs },
+      { token_hash: hash, device_id: deviceId, issued_at: nowMs, expires_at: nowMs + TOKEN_TTL_MS }
+    );
+    await pushEnrollmentCode({ code_hash: row.code_hash, employee_id: employee.id, created_at: row.created_at, expires_at: row.expires_at, used_at: nowMs, used_by_device: deviceId });
+  } catch (err) {
+    console.error('[enroll] could not persist the device token:', err.message);
+    return res.status(503).json({
+      status: 'ERROR', code: 'ENROLMENT_NOT_SAVED',
+      message: 'Could not save this device. Please try enrolling again.',
+    });
+  }
 
   res.status(201).json({
     status: 'SUCCESS',

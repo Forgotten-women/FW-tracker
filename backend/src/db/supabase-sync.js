@@ -342,6 +342,76 @@ async function hydrateAllTables(db) {
 }
 
 /**
+ * Pulls ONE device token, with its device and employee, straight from Postgres.
+ *
+ * The periodic hydration is up to 15 seconds stale and instance-local, so a
+ * token issued a moment ago on one instance is simply absent on the next one -
+ * and the app reads that 401 as "no longer enrolled" and drops the user back to
+ * the pairing screen. A miss is rare and cheap to resolve exactly, so resolve
+ * it exactly rather than rejecting a credential we did in fact issue.
+ *
+ * Returns true if the token was found and copied in.
+ */
+async function hydrateDeviceToken(db, tokenHash) {
+  const p = getPool();
+  if (!p || !tokenHash) return false;
+
+  try {
+    const res = await p.query(
+      `SELECT t.token_hash, t.device_id, t.issued_at, t.expires_at, t.last_used_at, t.revoked_at,
+              d.employee_id, d.platform, d.model, d.label, d.enrolled_at,
+              d.last_seen_at, d.revoked_at AS device_revoked_at,
+              e.name AS employee_name, e.role AS employee_role, e.active AS employee_active,
+              e.created_at AS employee_created_at, e.updated_at AS employee_updated_at
+         FROM device_tokens t
+         JOIN devices d   ON d.id = t.device_id
+         JOIN employees e ON e.id = d.employee_id
+        WHERE t.token_hash = $1`,
+      [tokenHash],
+    );
+    if (res.rows.length === 0) return false;
+    const r = res.rows[0];
+
+    // Employee, then device, then token: the foreign keys require that order.
+    db.transaction(() => {
+      db.prepare(`
+        INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at)
+        VALUES (?,?,?,?,?,?)
+      `).run(
+        r.employee_id, r.employee_name, r.employee_role || 'Team Member',
+        r.employee_active ? 1 : 0,
+        Number(r.employee_created_at) || Date.now(),
+        Number(r.employee_updated_at) || Date.now(),
+      );
+      db.prepare(`
+        INSERT OR REPLACE INTO devices (id, employee_id, platform, model, label, enrolled_at, last_seen_at, revoked_at)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(
+        r.device_id, r.employee_id, r.platform || 'unknown', r.model || '', r.label || '',
+        Number(r.enrolled_at) || Date.now(),
+        r.last_seen_at ? Number(r.last_seen_at) : null,
+        r.device_revoked_at ? Number(r.device_revoked_at) : null,
+      );
+      db.prepare(`
+        INSERT OR REPLACE INTO device_tokens (token_hash, device_id, issued_at, expires_at, last_used_at, revoked_at)
+        VALUES (?,?,?,?,?,?)
+      `).run(
+        r.token_hash, r.device_id,
+        Number(r.issued_at) || Date.now(),
+        r.expires_at ? Number(r.expires_at) : null,
+        r.last_used_at ? Number(r.last_used_at) : null,
+        r.revoked_at ? Number(r.revoked_at) : null,
+      );
+    })();
+
+    return true;
+  } catch (err) {
+    console.warn('[supabase-sync] hydrateDeviceToken:', err.message);
+    return false;
+  }
+}
+
+/**
  * Ensures SQLite is hydrated from Supabase within the last 15 seconds.
  */
 async function ensureHydrated(db) {
@@ -456,6 +526,7 @@ async function pushDeviceAndToken(dev, token) {
 module.exports = {
   getPool,
   hydrateAllTables,
+  hydrateDeviceToken,
   ensureHydrated,
   pushEmployee,
   pushSalary,

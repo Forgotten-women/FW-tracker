@@ -13,6 +13,7 @@
 const crypto = require('crypto');
 const { db } = require('../db');
 const { config } = require('../config');
+const { hydrateDeviceToken } = require('../db/supabase-sync');
 const T = require('../util/time');
 
 // --- helpers ---------------------------------------------------------------
@@ -81,14 +82,29 @@ const markTokenUsed = db.prepare('UPDATE device_tokens SET last_used_at = ? WHER
  * The employee identity comes from the TOKEN. Any employeeId in the request
  * body is ignored - that is what closes the buddy-punching hole.
  */
-function requireDevice(req, res, next) {
+async function requireDevice(req, res, next) {
   const token = bearer(req);
   if (!token) {
     return res.status(401).json({ status: 'ERROR', code: 'NO_TOKEN', message: 'Missing bearer token. Enrol this device first.' });
   }
 
-  const row = selectToken.get(sha256(token));
+  const tokenHash = sha256(token);
+  let row = selectToken.get(tokenHash);
   const nowMs = T.now();
+
+  // A miss may mean the token is genuinely unknown, or simply that this
+  // instance has not caught up yet - it holds its own copy of the data and the
+  // periodic refresh is up to 15 seconds behind. Those two are not the same
+  // thing, and treating the second as the first is what sent freshly enrolled
+  // phones back to the pairing screen. So confirm against the shared database
+  // before rejecting a credential.
+  if (!row) {
+    try {
+      if (await hydrateDeviceToken(db, tokenHash)) row = selectToken.get(tokenHash);
+    } catch (err) {
+      console.warn('[auth] device token lookup fallback failed:', err.message);
+    }
+  }
 
   if (!row) return res.status(401).json({ status: 'ERROR', code: 'BAD_TOKEN', message: 'Unrecognised device token.' });
   if (row.revoked_at) return res.status(401).json({ status: 'ERROR', code: 'REVOKED', message: 'This device token has been revoked.' });
