@@ -16,12 +16,14 @@
     "user:create": "node scripts/create-user.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1124.0",
     "@supabase/supabase-js": "^2.112.4",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "morgan": "^1.10.0",
-    "multer": "^2.2.0"
+    "multer": "^2.2.0",
+    "pg": "^8.23.0"
   }
 }
