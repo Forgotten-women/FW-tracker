@@ -221,7 +221,33 @@ CREATE TABLE IF NOT EXISTS warning_triggers (
   warning_id     TEXT REFERENCES formal_warnings(id)
 );
 
--- HR Profiles, Compensation & Payroll
+-- HR Profiles, Employment & Salary History
+CREATE TABLE IF NOT EXISTS employment_records (
+  id              TEXT PRIMARY KEY,
+  employee_id     TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  job_title       TEXT NOT NULL,
+  start_date      TEXT NOT NULL,
+  effective_from  TEXT NOT NULL,
+  effective_to    TEXT,
+  employment_type TEXT NOT NULL DEFAULT 'FULL_TIME',
+  updated_at      BIGINT NOT NULL,
+  updated_by      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_employment_emp ON employment_records(employee_id);
+
+CREATE TABLE IF NOT EXISTS salary_history (
+  id              TEXT PRIMARY KEY,
+  employee_id     TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  amount          DOUBLE PRECISION NOT NULL,
+  currency        TEXT NOT NULL DEFAULT 'PKR',
+  effective_from  TEXT NOT NULL,
+  effective_to    TEXT,
+  daily_rate      DOUBLE PRECISION,
+  updated_at      BIGINT NOT NULL,
+  updated_by      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_salary_history_emp ON salary_history(employee_id);
+
 CREATE TABLE IF NOT EXISTS employee_salaries (
   id              BIGSERIAL PRIMARY KEY,
   employee_id     TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,

@@ -33,16 +33,21 @@ export function useDashboard(
 
   const sourceRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightRef = useRef(false);
   const aliveRef = useRef(true);
   const onNotificationRef = useRef(onNotification);
   onNotificationRef.current = onNotification;
 
   const refresh = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const [s, e] = await Promise.all([api.summary(), api.employees()]);
       if (!aliveRef.current) return;
-      setSummary(s);
-      setEmployees(e.employees);
+      if (s) setSummary(s);
+      if (e && Array.isArray(e.employees)) {
+        setEmployees(e.employees);
+      }
       setError(null);
     } catch (err) {
       if (!aliveRef.current) return;
@@ -50,7 +55,10 @@ export function useDashboard(
         onUnauthorized(err.message);
         return;
       }
+      // Don't overwrite existing valid data on transient poll failures
       setError(err instanceof Error ? err.message : 'Failed to load');
+    } finally {
+      inFlightRef.current = false;
     }
   }, [onUnauthorized]);
 
@@ -59,7 +67,7 @@ export function useDashboard(
     if (!unlocked) return;
     aliveRef.current = true;
     const initial = setTimeout(() => void refresh(), 0);
-    const id = setInterval(() => void refresh(), 4000);
+    const id = setInterval(() => void refresh(), 6000);
     return () => {
       aliveRef.current = false;
       clearTimeout(initial);
