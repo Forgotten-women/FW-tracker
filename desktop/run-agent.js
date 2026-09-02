@@ -15,7 +15,14 @@ const CONFIG_FILE = path.join(__dirname, 'config.json');
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      if (process.env.BACKEND_URL) {
+        cfg.serverUrl = process.env.BACKEND_URL.replace(/\/+$/, '');
+      } else if (!cfg.serverUrl || cfg.serverUrl.includes('127.0.0.1') || cfg.serverUrl.includes('localhost') || cfg.serverUrl.includes('192.168.')) {
+        cfg.serverUrl = 'https://backend-ten-lyart-57.vercel.app';
+        saveConfig(cfg);
+      }
+      return cfg;
     }
   } catch (_) {}
   return null;

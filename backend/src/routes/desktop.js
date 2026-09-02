@@ -35,6 +35,7 @@ router.post('/heartbeat', requireDevice, (req, res) => {
     lockDurationSeconds = 0,
     connectedBssid = null,
     currentWifiMac = null,
+    localIp = null,
     isManualBreak = false,
   } = req.body || {};
 
@@ -46,6 +47,7 @@ router.post('/heartbeat', requireDevice, (req, res) => {
   const locationVerdict = presence.classifyLocation({
     bssid: connectedBssid,
     srcIp,
+    localIp,
     source: 'APP',
   });
   const inOffice = locationVerdict === 'OFFICE';

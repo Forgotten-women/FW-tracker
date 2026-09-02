@@ -75,13 +75,21 @@ const upsertUnknown = db.prepare(`
  * AP are simply two allowlisted BSSIDs, so the 2.4/5GHz split needs no special
  * handling.
  */
-function classifyLocation({ bssid, srcIp, source }) {
+function classifyLocation({ bssid, srcIp, localIp, source }) {
   // Hardware sensors are physically installed in the office; anything they see
   // is by definition on the office network.
   if (source === 'ESP_SNIFFER' || source === 'ARP' || source === 'ROUTER') return 'OFFICE';
   if (source === 'ADMIN') return 'OFFICE';
 
-  const ipOk = config.isOfficeIp(srcIp);
+  // When the backend runs on Vercel (or any cloud host), req.ip is the public
+  // internet IP of the office router, never a 192.168.x.x address. In that
+  // case we fall back to the client-reported localIp — but ONLY when the BSSID
+  // is simultaneously verified, so spoofing requires physical proximity to the
+  // access point (impossible from home).
+  const effectiveSrcIp = config.isOfficeIp(srcIp)
+    ? srcIp
+    : (localIp && config.isOfficeIp(localIp) ? localIp : srcIp);
+  const ipOk = config.isOfficeIp(effectiveSrcIp);
 
   // With no BSSIDs configured the BSSID check is vacuous, so it must not count
   // as positive evidence - otherwise a heartbeat from a home network would be
@@ -107,11 +115,14 @@ function classifyLocation({ bssid, srcIp, source }) {
  * reason has to be surfaced rather than left for someone to discover from a
  * short timesheet at the end of the month.
  */
-function explainLocation({ bssid, srcIp, source, location }) {
+function explainLocation({ bssid, srcIp, localIp, source, location }) {
   if (location === 'OFFICE') return null;
   if (source !== 'APP') return null;
 
-  const ipOk = config.isOfficeIp(srcIp);
+  const effectiveSrcIp = config.isOfficeIp(srcIp)
+    ? srcIp
+    : (localIp && config.isOfficeIp(localIp) ? localIp : srcIp);
+  const ipOk = config.isOfficeIp(effectiveSrcIp);
 
   if (config.bssidEnforced && ipOk && !bssid) {
     return {
@@ -145,13 +156,13 @@ function explainLocation({ bssid, srcIp, source, location }) {
  * dedupe_key ensures each inserts exactly once.
  */
 function recordEvent({
-  employeeId = null, deviceId = null, source, mac = null, srcIp = null,
+  employeeId = null, deviceId = null, source, mac = null, srcIp = null, localIp = null,
   ssid = null, bssid = null, rssi = null, observedAt = null, note = null,
 }) {
   const receivedAt = T.now();
   const observed = Number(observedAt) || receivedAt;
   const macHash = mac ? T.hashMac(mac, MAC_SALT) : null;
-  const location = classifyLocation({ bssid, srcIp, source });
+  const location = classifyLocation({ bssid, srcIp, localIp, source });
 
   // A network sighting carries no identity of its own. But if this MAC was
   // bound to an employee by an authenticated app heartbeat, presence keeps
@@ -215,7 +226,7 @@ function recordEvent({
 
   return {
     inserted: info.changes > 0, location, observedAt: observed, employeeId, attributedVia,
-    reason: explainLocation({ bssid, srcIp, source, location }),
+    reason: explainLocation({ bssid, srcIp, localIp, source, location }),
   };
 }
 
