@@ -80,6 +80,7 @@ router.post('/heartbeat', requireDevice, (req, res) => {
         deviceId,
         source: 'APP',
         srcIp,
+        localIp,
         bssid: connectedBssid,
         mac: currentWifiMac,
         observedAt: nowMs,

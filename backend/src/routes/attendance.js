@@ -1,4 +1,4 @@
-﻿// Presence ingest and read APIs.
+// Presence ingest and read APIs.
 //
 // Every route is authenticated. The employee identity on an app heartbeat comes
 // from the bearer token, never from the request body - the old /mobile-ping
@@ -61,6 +61,7 @@ router.post('/ping', requireDevice, (req, res) => {
   const srcIp = T.normalizeIp(req.ip || req.socket.remoteAddress);
 
   const body = req.body || {};
+  const localIp = body.localIp || null;
   const observations = Array.isArray(body.observations) && body.observations.length
     ? body.observations
     : [{ observedAt: body.observedAt, ssid: body.ssid, bssid: body.bssid }];
