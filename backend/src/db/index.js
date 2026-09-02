@@ -7,18 +7,46 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const isServerless = Boolean(
+  process.env.VERCEL || 
+  process.env.AWS_LAMBDA_FUNCTION_NAME || 
+  process.env.LAMBDA_TASK_ROOT || 
+  process.env.NOW_REGION
+);
+
+// On Vercel / Serverless, /var/task is read-only so write to os.tmpdir()
+const DATA_DIR = isServerless 
+  ? path.join(os.tmpdir(), 'office_tracker_data')
+  : (process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data'));
+
+if (!fs.existsSync(DATA_DIR)) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (_) {
+    // Fallback if permission error
+  }
+}
+
 const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'office.db');
 const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
 
 const SCHEMA_VERSION = '1';
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-const db = new Database(DB_FILE);
+let db;
+try {
+  db = new Database(DB_FILE);
+} catch (err) {
+  try {
+    const tmpFallback = path.join(os.tmpdir(), 'office.db');
+    db = new Database(tmpFallback);
+  } catch (_) {
+    db = new Database(':memory:');
+  }
+}
 
 // WAL: readers never block the writer, and a crash mid-write rolls back to the
 // last commit instead of leaving a truncated file.

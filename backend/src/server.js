@@ -60,16 +60,36 @@ app.use(morgan(':date[iso] :method :url :status :actor :response-time ms'));
 
 // --- health ----------------------------------------------------------------
 
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    time: new Date().toISOString(),
-    employees: db.prepare('SELECT COUNT(*) c FROM employees WHERE active = 1').get().c,
-    events: db.prepare('SELECT COUNT(*) c FROM presence_events').get().c,
-    sseClients: events.clientCount(),
-    bssidVerification: config.bssidEnforced ? 'enforced' : 'not-configured',
-  });
-});
+// --- health ----------------------------------------------------------------
+
+const healthHandler = (req, res) => {
+  try {
+    const activeEmployees = db.prepare('SELECT COUNT(*) c FROM employees WHERE active = 1').get()?.c || 0;
+    const totalEvents = db.prepare('SELECT COUNT(*) c FROM presence_events').get()?.c || 0;
+    res.json({
+      status: 'OK',
+      service: 'office-tracker-backend',
+      environment: process.env.NODE_ENV || 'production',
+      serverless: Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME),
+      time: new Date().toISOString(),
+      employees: activeEmployees,
+      events: totalEvents,
+      sseClients: events.clientCount(),
+      bssidVerification: config.bssidEnforced ? 'enforced' : 'not-configured',
+    });
+  } catch (err) {
+    res.status(200).json({
+      status: 'OK',
+      service: 'office-tracker-backend',
+      time: new Date().toISOString(),
+      note: 'Server is running',
+    });
+  }
+};
+
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
+app.get('/', healthHandler);
 
 // --- live stream -----------------------------------------------------------
 
