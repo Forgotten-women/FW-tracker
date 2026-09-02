@@ -5,6 +5,7 @@ import '../services/device_probe.dart';
 import '../services/offline_queue.dart';
 import '../services/presence_service.dart';
 import '../services/token_store.dart';
+import '../services/ota_service.dart';
 import '../widgets/update_dialog.dart';
 import '../theme.dart';
 
