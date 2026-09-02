@@ -147,7 +147,30 @@ router.post('/heartbeat', requireDevice, (req, res) => {
     console.error('[desktop/heartbeat] session update error:', err);
   }
 
-  // 6. Fetch updated daily summary
+  // 6. Record Application Usage
+  const appName = String(req.body?.currentApp || '').trim();
+  if (appName && appName !== 'unknown.exe' && status === 'ACTIVE') {
+    const appUsageId = `app_${deviceId}_${dateKey}_${crypto.createHash('md5').update(appName).digest('hex').slice(0, 8)}`;
+    try {
+      const existingApp = db.prepare('SELECT id, active_seconds FROM workstation_app_usage WHERE device_id = ? AND session_date = ? AND app_name = ?').get(deviceId, dateKey, appName);
+      if (existingApp) {
+        db.prepare(`
+          UPDATE workstation_app_usage
+          SET active_seconds = active_seconds + ?, last_used_at = ?
+          WHERE id = ?
+        `).run(parseInt(activeSeconds, 10) || 60, nowMs, existingApp.id);
+      } else {
+        db.prepare(`
+          INSERT INTO workstation_app_usage (id, employee_id, device_id, session_date, app_name, active_seconds, last_used_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(appUsageId, employeeId, deviceId, dateKey, appName, parseInt(activeSeconds, 10) || 60, nowMs);
+      }
+    } catch (err) {
+      console.error('[desktop/heartbeat] app_usage error:', err);
+    }
+  }
+
+  // 7. Fetch updated daily summary
   const sessionRow = db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
 
   res.json({

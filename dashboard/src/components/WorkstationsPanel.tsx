@@ -2,25 +2,26 @@
 
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { WorkstationItem, ProcessAnomalyItem } from '../lib/types';
+import type { WorkstationItem, AppUsageItem } from '../lib/types';
 import { Badge } from './primitives';
 
 export function WorkstationsPanel() {
   const [workstations, setWorkstations] = useState<WorkstationItem[]>([]);
-  const [anomalies, setAnomalies] = useState<ProcessAnomalyItem[]>([]);
+  const [appUsage, setAppUsage] = useState<AppUsageItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'workstations' | 'anomalies'>('workstations');
+  const [activeTab, setActiveTab] = useState<'workstations' | 'app_usage'>('workstations');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [wsRes, anomRes] = await Promise.all([
+      const [wsRes, appRes] = await Promise.all([
         api.fetchWorkstations(),
-        api.fetchAnomalies(),
+        api.fetchAppUsage(),
       ]);
       setWorkstations(wsRes.workstations || []);
-      setAnomalies(anomRes.anomalies || []);
+      setAppUsage(appRes.appUsage || []);
       setError(null);
     } catch (err: any) {
       setError(err?.message || 'Failed to load workstation data');
@@ -35,38 +36,34 @@ export function WorkstationsPanel() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleResolveAnomaly = async (id: string) => {
-    try {
-      await api.resolveAnomaly(id);
-      setAnomalies(prev => prev.map(a => a.id === id ? { ...a, resolved: true } : a));
-    } catch (err: any) {
-      alert('Failed to resolve anomaly: ' + err.message);
-    }
-  };
-
   const activeCount = workstations.filter(w => w.status === 'ACTIVE').length;
   const inOfficeCount = workstations.filter(w => w.inOffice).length;
   const breakCount = workstations.filter(w => w.status === 'ON_BREAK' || w.status === 'AWAY' || w.status === 'IDLE').length;
-  const unresolvedAnomalies = anomalies.filter(a => !a.resolved).length;
+  const totalAppsTracked = appUsage.length;
+
+  const filteredApps = appUsage.filter(a =>
+    a.appName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    a.employeeName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            💻 Workstations & Desktop Agents
+            💻 Workstations & Application Activity
           </h2>
           <p className="text-sm text-slate-400">
-            Real-time tracking of employee laptops (active time, screen locks, and unknown process alerts).
+            Real-time tracking of employee workstations, active work hours, and software usage records.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={loadData}
             disabled={loading}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10 transition-colors disabled:opacity-50"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10 transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
           >
-            🔄 Refresh
+            <span>🔄</span> Refresh
           </button>
         </div>
       </div>
@@ -97,10 +94,10 @@ export function WorkstationsPanel() {
           <div className="mt-1 text-[11px] text-slate-400">Paused or locked screen</div>
         </div>
 
-        <div className={`glass-panel rounded-2xl p-4 border ${unresolvedAnomalies > 0 ? 'border-rose-500/30 bg-rose-500/10' : 'border-slate-800 bg-slate-900/40'}`}>
-          <div className="text-xs font-semibold uppercase tracking-wider text-rose-400">Process Anomalies</div>
-          <div className="mt-2 text-2xl font-bold text-white">{unresolvedAnomalies}</div>
-          <div className="mt-1 text-[11px] text-slate-400">Unknown / unapproved apps</div>
+        <div className="glass-panel rounded-2xl p-4 border border-indigo-500/20 bg-indigo-500/5">
+          <div className="text-xs font-semibold uppercase tracking-wider text-indigo-400">Apps Tracked Today</div>
+          <div className="mt-2 text-2xl font-bold text-white">{totalAppsTracked}</div>
+          <div className="mt-1 text-[11px] text-slate-400">Software activity logs</div>
         </div>
       </div>
 
@@ -108,7 +105,7 @@ export function WorkstationsPanel() {
       <div className="flex border-b border-slate-800 gap-6">
         <button
           onClick={() => setActiveTab('workstations')}
-          className={`pb-3 text-sm font-semibold transition-colors flex items-center gap-2 ${
+          className={`pb-3 text-sm font-semibold transition-colors flex items-center gap-2 cursor-pointer ${
             activeTab === 'workstations'
               ? 'text-teal-400 border-b-2 border-teal-400'
               : 'text-slate-400 hover:text-slate-200'
@@ -117,19 +114,14 @@ export function WorkstationsPanel() {
           🖥️ Active Workstations ({workstations.length})
         </button>
         <button
-          onClick={() => setActiveTab('anomalies')}
-          className={`pb-3 text-sm font-semibold transition-colors flex items-center gap-2 ${
-            activeTab === 'anomalies'
+          onClick={() => setActiveTab('app_usage')}
+          className={`pb-3 text-sm font-semibold transition-colors flex items-center gap-2 cursor-pointer ${
+            activeTab === 'app_usage'
               ? 'text-teal-400 border-b-2 border-teal-400'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          ⚠️ Process Anomalies
-          {unresolvedAnomalies > 0 && (
-            <span className="px-2 py-0.5 text-xs font-bold bg-rose-500/20 text-rose-300 rounded-full border border-rose-500/30">
-              {unresolvedAnomalies}
-            </span>
-          )}
+          📊 Application & Software Usage ({appUsage.length})
         </button>
       </div>
 
@@ -214,63 +206,62 @@ export function WorkstationsPanel() {
         </div>
       )}
 
-      {/* Tab: Anomalies */}
-      {activeTab === 'anomalies' && (
+      {/* Tab: App Usage */}
+      {activeTab === 'app_usage' && (
         <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+          <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="text-xs font-semibold text-slate-300">
+              Software Application Activity Logs (Recorded with Exact Usage Times)
+            </div>
+            <input
+              type="text"
+              placeholder="Search by app or employee..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-teal-500 w-full sm:w-64"
+            />
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="bg-slate-900/80 text-xs font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800">
                 <tr>
                   <th className="py-3 px-4">Employee</th>
-                  <th className="py-3 px-4">Unapproved Process</th>
-                  <th className="py-3 px-4">Duration</th>
-                  <th className="py-3 px-4">Detected At</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Action</th>
+                  <th className="py-3 px-4">Application / Software</th>
+                  <th className="py-3 px-4">Usage Time Today</th>
+                  <th className="py-3 px-4">Platform</th>
+                  <th className="py-3 px-4">Last Active</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {anomalies.length === 0 ? (
+                {filteredApps.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-500">
-                      No unapproved process anomalies detected. All workstation activity is within policy!
+                    <td colSpan={5} className="py-8 text-center text-slate-500">
+                      No application usage logged yet today. As employees work on their laptops, their software activity will record here.
                     </td>
                   </tr>
                 ) : (
-                  anomalies.map(a => (
-                    <tr key={a.id} className="hover:bg-slate-800/30 transition-colors">
+                  filteredApps.map(app => (
+                    <tr key={app.id} className="hover:bg-slate-800/30 transition-colors">
                       <td className="py-3.5 px-4 font-medium text-slate-100">
-                        {a.employeeName}
-                        <div className="text-xs text-slate-400">{a.deviceModel}</div>
+                        {app.employeeName}
                       </td>
                       <td className="py-3.5 px-4">
-                        <div className="font-mono font-semibold text-rose-400">{a.processName}</div>
-                        {a.windowTitle && (
-                          <div className="text-xs text-slate-400 max-w-xs truncate">{a.windowTitle}</div>
-                        )}
+                        <div className="font-mono font-semibold text-indigo-300 flex items-center gap-2">
+                          <span className="p-1 rounded bg-indigo-500/10 border border-indigo-500/20 text-xs">💻</span>
+                          {app.appName}
+                        </div>
                       </td>
-                      <td className="py-3.5 px-4 font-mono font-semibold text-slate-200">
-                        {a.durationMinutes} minutes
+                      <td className="py-3.5 px-4">
+                        <span className="font-mono font-bold text-emerald-400">
+                          {app.activeMinutes >= 60 ? `${Math.floor(app.activeMinutes / 60)}h ${app.activeMinutes % 60}m` : `${app.activeMinutes}m`}
+                        </span>
+                        <span className="text-xs text-slate-500 ml-2">({app.activeSeconds}s)</span>
+                      </td>
+                      <td className="py-3.5 px-4 text-xs text-slate-400 capitalize">
+                        {app.platform} ({app.deviceModel})
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-400">
-                        {a.detectedDate} at {a.detectedAt}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        {a.resolved ? (
-                          <Badge tone="ok">Resolved</Badge>
-                        ) : (
-                          <Badge tone="danger">⚠️ Unresolved</Badge>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        {!a.resolved && (
-                          <button
-                            onClick={() => handleResolveAnomaly(a.id)}
-                            className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-white/10 transition-colors"
-                          >
-                            Mark Reviewed
-                          </button>
-                        )}
+                        {app.lastUsedAt}
                       </td>
                     </tr>
                   ))

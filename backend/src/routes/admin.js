@@ -248,6 +248,35 @@ router.get('/anomalies', (req, res) => {
   });
 });
 
+router.get('/app-usage', (req, res) => {
+  const nowMs = T.now();
+  const dateKey = String(req.query.date || T.dateKey(nowMs));
+  const rows = db.prepare(`
+    SELECT au.*, e.name AS employee_name, d.model, d.platform
+    FROM workstation_app_usage au
+    JOIN employees e ON e.id = au.employee_id
+    JOIN devices d ON d.id = au.device_id
+    WHERE au.session_date = ?
+    ORDER BY au.active_seconds DESC
+  `).all(dateKey);
+
+  res.json({
+    status: 'SUCCESS',
+    dateKey,
+    appUsage: rows.map(r => ({
+      id: r.id,
+      employeeId: r.employee_id,
+      employeeName: r.employee_name,
+      deviceModel: r.model,
+      platform: r.platform,
+      appName: r.app_name,
+      activeSeconds: r.active_seconds,
+      activeMinutes: Math.round(r.active_seconds / 60),
+      lastUsedAt: T.displayTime(r.last_used_at),
+    })),
+  });
+});
+
 router.post('/anomalies/:id/resolve', (req, res) => {
   db.prepare('UPDATE process_anomalies SET resolved = 1 WHERE id = ?').run(req.params.id);
   res.json({ status: 'SUCCESS' });

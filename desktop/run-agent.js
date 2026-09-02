@@ -32,25 +32,8 @@ function saveConfig(cfg) {
 function getIdleSeconds() {
   if (process.platform === 'win32') {
     try {
-      const psScript = `
-        Add-Type @'
-        using System;
-        using System.Runtime.InteropServices;
-        public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
-        public class UserInput {
-          [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
-          [DllImport("kernel32.dll")] public static extern uint GetTickCount();
-          public static uint GetIdle() {
-            LASTINPUTINFO lii = new LASTINPUTINFO();
-            lii.cbSize = (uint)Marshal.SizeOf(lii);
-            if (GetLastInputInfo(ref lii)) { return (GetTickCount() - lii.dwTime) / 1000; }
-            return 0;
-          }
-        }
-'@
-        [UserInput]::GetIdle()
-      `;
-      const out = execSync(`powershell -NoProfile -Command "${psScript.replace(/\n/g, ' ')}"`, { timeout: 3000 }).toString().trim();
+      const scriptPath = path.join(__dirname, 'get-idle.ps1');
+      const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000 }).toString().trim();
       return parseInt(out, 10) || 0;
     } catch (_) {
       return 0;
@@ -173,36 +156,14 @@ async function startAgent() {
       accumulatedActive += 10;
     }
 
-    // Check foreground process anomaly
-    if (lastApprovedCsv && sampleCount % 6 === 0) {
-      const proc = getForegroundProcess();
-      const approved = lastApprovedCsv.split(',').map(s => s.trim().toLowerCase());
-      if (!approved.includes(proc) && !proc.includes('explorer') && !proc.includes('office')) {
-        // Unknown process
-        try {
-          await fetch(`${cfg.serverUrl}/api/desktop/anomaly`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${cfg.token}`,
-            },
-            body: JSON.stringify({
-              processName: proc,
-              durationSeconds: 60,
-              notes: 'Detected unapproved background or active process',
-            }),
-          });
-        } catch (_) {}
-      }
-    }
-
-    // Every 60 seconds, send heartbeat
+    // Every 60 seconds, send heartbeat with active application tracking
     if (sampleCount >= 6) {
       sampleCount = 0;
       const sendActive = accumulatedActive;
       const sendIdle = accumulatedIdle;
       accumulatedActive = 0;
       accumulatedIdle = 0;
+      const currentApp = getForegroundProcess();
 
       try {
         const res = await fetch(`${cfg.serverUrl}/api/desktop/heartbeat`, {
@@ -214,6 +175,7 @@ async function startAgent() {
           body: JSON.stringify({
             activeSeconds: sendActive,
             idleSeconds: sendIdle,
+            currentApp,
             lockState: 'UNLOCKED',
             lockDurationSeconds: 0,
             connectedBssid: bssid,
@@ -223,10 +185,9 @@ async function startAgent() {
 
         if (res.ok) {
           const data = await res.json();
-          lastApprovedCsv = data.policy?.approvedWorkProcesses || '';
           const activeMins = Math.round((data.today?.activeSeconds || 0) / 60);
           const statusIcon = data.inOffice ? '🟢 [IN OFFICE]' : '🟡 [REMOTE / OUTSIDE]';
-          console.log(`[${new Date().toLocaleTimeString()}] Heartbeat sent | ${statusIcon} Status: ${data.workstationStatus} | Today: ${activeMins}m active`);
+          console.log(`[${new Date().toLocaleTimeString()}] Heartbeat sent | ${statusIcon} Status: ${data.workstationStatus} | App: ${currentApp} | Today: ${activeMins}m active`);
         } else if (res.status === 401) {
           console.error('[Office Tracker Desktop] Token expired or revoked. Re-enroll required.');
           fs.unlinkSync(CONFIG_FILE);

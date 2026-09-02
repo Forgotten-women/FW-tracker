@@ -36,6 +36,7 @@ import type {
   WarningTrigger,
   WorkstationItem,
   ProcessAnomalyItem,
+  AppUsageItem,
 } from './types';
 
 
@@ -620,6 +621,9 @@ export const api = {
 
   fetchAnomalies: () =>
     request<{ status: string; anomalies: ProcessAnomalyItem[] }>('/api/admin/anomalies'),
+
+  fetchAppUsage: (date?: string) =>
+    request<{ status: string; dateKey: string; appUsage: AppUsageItem[] }>(`/api/admin/app-usage${date ? `?date=${encodeURIComponent(date)}` : ''}`),
 
   resolveAnomaly: (id: string) =>
     request<{ status: string }>(`/api/admin/anomalies/${encodeURIComponent(id)}/resolve`, {

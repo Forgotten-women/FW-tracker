@@ -604,4 +604,17 @@ export interface ProcessAnomalyItem {
   notes: string | null;
 }
 
+export interface AppUsageItem {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  deviceModel: string;
+  platform: string;
+  appName: string;
+  activeSeconds: number;
+  activeMinutes: number;
+  lastUsedAt: string;
+}
+
+
 
