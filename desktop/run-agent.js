@@ -10,7 +10,7 @@ const { execSync } = require('child_process');
 const os = require('os');
 const readline = require('readline');
 
-const CONFIG_FILE = path.join(os.homedir(), '.office_tracker_desktop.json');
+const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 function loadConfig() {
   try {
