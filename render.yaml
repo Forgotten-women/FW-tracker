@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: office-tracker-backend
+    env: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /api/app/version/latest
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_API_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SENSOR_SECRET_esp-main-01
+        sync: false
