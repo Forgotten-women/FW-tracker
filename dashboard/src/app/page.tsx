@@ -20,12 +20,13 @@ import DocumentVaultPanel from '@/components/DocumentVaultPanel';
 import { WarningBoard } from '@/components/WarningBoard';
 import { NotificationDrawer } from '@/components/NotificationDrawer';
 import { PayrollPanel } from '@/components/PayrollPanel';
+import { OtaPanel } from '@/components/OtaPanel';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, AttendanceCorrection, EnrollmentCode, NotificationItem } from '@/lib/types';
 
-type DashboardTab = 'overview' | 'attendance' | 'leave' | 'disciplinary' | 'documents' | 'workforce' | 'payroll';
+type DashboardTab = 'overview' | 'attendance' | 'leave' | 'disciplinary' | 'documents' | 'workforce' | 'payroll' | 'ota';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -237,6 +238,15 @@ export default function DashboardPage() {
         </svg>
       ),
     },
+    {
+      id: 'ota',
+      label: 'App Releases & OTA',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+        </svg>
+      ),
+    },
   ];
 
   return (
@@ -404,6 +414,13 @@ export default function DashboardPage() {
             {activeTab === 'payroll' && (
               <div className="flex flex-col gap-6">
                 <PayrollPanel />
+              </div>
+            )}
+
+            {/* 8. APP RELEASES & OTA TAB */}
+            {activeTab === 'ota' && (
+              <div className="flex flex-col gap-6">
+                <OtaPanel />
               </div>
             )}
           </>

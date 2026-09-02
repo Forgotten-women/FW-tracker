@@ -17,6 +17,8 @@ import type {
   HrAlerts,
   KycChecklistResponse,
   LeaverCalculation,
+  AppReleaseItem,
+  OtaConfig,
   LeaveRequestItem,
   LeaveTypeItem,
   NotificationItem,
@@ -564,5 +566,52 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ key, value }),
     }),
+
+  // -------------------------------------------------------------------------
+  // App Releases & OTA Manager
+  // -------------------------------------------------------------------------
+
+  getReleases: () =>
+    request<{ status: string; releases: AppReleaseItem[]; config: OtaConfig }>('/api/admin/releases'),
+
+  createRelease: (data: {
+    versionName: string;
+    versionCode: number;
+    platform?: string;
+    fileName?: string;
+    fileSize?: number;
+    downloadUrl: string;
+    releaseNotes?: string;
+    mandatory?: boolean;
+  }) =>
+    request<{ status: string; release: AppReleaseItem }>('/api/admin/releases', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateRelease: (
+    id: string,
+    data: { active?: boolean; mandatory?: boolean; releaseNotes?: string }
+  ) =>
+    request<{ status: string; release: AppReleaseItem }>(
+      `/api/admin/releases/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    ),
+
+  deleteRelease: (id: string) =>
+    request<{ status: string; success: boolean }>(
+      `/api/admin/releases/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    ),
+
+  updateOtaConfig: (data: Partial<OtaConfig>) =>
+    request<{ status: string; message: string }>('/api/admin/releases/config', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
+
 

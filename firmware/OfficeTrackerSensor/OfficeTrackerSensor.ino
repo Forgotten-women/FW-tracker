@@ -35,6 +35,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <time.h>
 #include <bearssl/bearssl_hmac.h>
 
@@ -440,15 +441,31 @@ static bool uploadReport() {
   buildPayload(epochSeconds);
   signPayload(timestampMs, payload);
 
-  char url[128];
-  snprintf(url, sizeof(url), "http://%s:%d/api/attendance/heartbeat", BACKEND_HOST, BACKEND_PORT);
+  #ifndef USE_HTTPS
+  #define USE_HTTPS false
+  #endif
+
+  const bool isHttps = (BACKEND_PORT == 443) || (USE_HTTPS == true);
+
+  char url[160];
+  if (isHttps && BACKEND_PORT == 443) {
+    snprintf(url, sizeof(url), "https://%s/api/attendance/heartbeat", BACKEND_HOST);
+  } else {
+    snprintf(url, sizeof(url), "%s://%s:%d/api/attendance/heartbeat", isHttps ? "https" : "http", BACKEND_HOST, BACKEND_PORT);
+  }
 
   for (uint8_t attempt = 1; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
-    WiFiClient client;
+    WiFiClient plainClient;
+    WiFiClientSecure secureClient;
+    if (isHttps) {
+      secureClient.setInsecure(); // SSL handshake without local CA bundle
+    }
+
     HTTPClient http;
     http.setTimeout(8000);
 
-    if (!http.begin(client, url)) {
+    const bool begun = isHttps ? http.begin(secureClient, url) : http.begin(plainClient, url);
+    if (!begun) {
       Serial.println(F("[upload] http.begin failed"));
       return false;
     }

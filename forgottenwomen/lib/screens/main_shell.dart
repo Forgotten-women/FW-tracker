@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
-
 import '../services/api_client.dart';
 import '../services/notification_service.dart';
+import '../services/ota_service.dart';
+import '../widgets/update_dialog.dart';
 import '../theme.dart';
 import 'documents_screen.dart';
 import 'home_screen.dart';
@@ -20,11 +20,24 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _index = 0;
   final _api = ApiClient();
+  final _otaService = OtaService();
 
   @override
   void initState() {
     super.initState();
     NotificationService().onNotificationTapped = _handleNotificationTap;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkOtaUpdate();
+    });
+  }
+
+  Future<void> _checkOtaUpdate() async {
+    try {
+      final info = await _otaService.checkForUpdate();
+      if (mounted && info != null && info.updateAvailable) {
+        UpdateDialog.show(context, info);
+      }
+    } catch (_) {}
   }
 
   void _handleNotificationTap(String? payload) {

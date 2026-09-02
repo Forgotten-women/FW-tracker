@@ -98,6 +98,8 @@ app.use('/api/hr', require('./routes/hr'));                    // advanced HR al
 app.use('/api/people', require('./routes/people'));            // master record & org structure
 app.use('/api/documents', require('./routes/documents'));       // document vault
 app.use('/api/notifications', require('./routes/notifications')); // notifications
+app.use('/api/app', require('./routes/ota'));                   // OTA app version & releases
+app.use('/api', require('./routes/ota'));                       // admin OTA releases
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin
 app.use('/api/admin', require('./routes/admin'));              // admin
 

@@ -5,6 +5,7 @@ import '../services/device_probe.dart';
 import '../services/offline_queue.dart';
 import '../services/presence_service.dart';
 import '../services/token_store.dart';
+import '../widgets/update_dialog.dart';
 import '../theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -20,13 +21,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _api = ApiClient();
   final _probe = DeviceProbe();
   final _queue = OfflineQueue();
+  final _otaService = OtaService();
   final _serverController = TextEditingController();
 
   String _model = '';
   String _deviceId = '';
+  String _appVersion = 'v1.0.0+1';
   NetworkFacts _network = const NetworkFacts();
   int _pending = 0;
   String? _reachable;
+  bool _checkingUpdate = false;
+  String? _updateStatus;
 
   @override
   void initState() {
@@ -47,6 +52,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final deviceId = await _store.readDeviceId();
     final network = await _probe.network();
     final pending = await _queue.length;
+    final pkgInfo = await _otaService.getPackageInfo();
+
     if (!mounted) return;
     setState(() {
       _serverController.text = url;
@@ -54,7 +61,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _deviceId = deviceId ?? '--';
       _network = network;
       _pending = pending;
+      _appVersion = 'v${pkgInfo.version} (${pkgInfo.buildNumber})';
     });
+  }
+
+  Future<void> _checkUpdatesManual() async {
+    setState(() {
+      _checkingUpdate = true;
+      _updateStatus = null;
+    });
+
+    try {
+      final info = await _otaService.checkForUpdate();
+      if (!mounted) return;
+
+      setState(() => _checkingUpdate = false);
+
+      if (info != null && info.updateAvailable) {
+        UpdateDialog.show(context, info);
+      } else {
+        setState(() => _updateStatus = 'You are on the latest version ($_appVersion).');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Your app is up to date ($_appVersion)'),
+            backgroundColor: AppColors.teal,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _checkingUpdate = false;
+          _updateStatus = 'Could not check for updates.';
+        });
+      }
+    }
   }
 
   Future<void> _testConnection() async {
@@ -158,6 +200,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'verification that you are at the office is weaker.',
           ),
           _InfoTile(label: 'Readings waiting to upload', value: '$_pending'),
+          const SizedBox(height: 20),
+          const _Header('App Version & Updates'),
+          _InfoTile(label: 'Installed Version', value: _appVersion),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _checkingUpdate ? null : _checkUpdatesManual,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.teal,
+                side: const BorderSide(color: AppColors.teal, width: 1.2),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: _checkingUpdate
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.teal),
+                    )
+                  : const Icon(Icons.system_update_alt_rounded, size: 16),
+              label: Text(_checkingUpdate ? 'Checking for updates…' : 'Check for Updates'),
+            ),
+          ),
+          if (_updateStatus != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _updateStatus!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+            ),
+          ],
           const SizedBox(height: 20),
           const _Header('Your data'),
           Container(

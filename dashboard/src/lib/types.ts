@@ -544,3 +544,29 @@ export interface LeaverCalculation {
   };
   estimatedFinalPay?: number | null;
 }
+
+export interface AppReleaseItem {
+  id: string;
+  versionName: string;
+  versionCode: number;
+  platform: string;
+  fileName: string | null;
+  fileSize: number;
+  downloadUrl: string;
+  releaseNotes: string;
+  mandatory: boolean;
+  downloadCount: number;
+  active: boolean;
+  publishedAt: string;
+  publishedAtMs: number;
+  createdBy: string;
+}
+
+export interface OtaConfig {
+  minSupportedVersionCode: number;
+  iosTestflightUrl: string;
+  iosEnterpriseManifestUrl: string;
+  githubRepoOwner: string;
+  githubRepoName: string;
+}
+

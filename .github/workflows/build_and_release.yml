@@ -1,0 +1,77 @@
+name: Build & Release Office Tracker Mobile App
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers ONLY when pushing tags like v1.0.1, v1.0.2, etc.
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Android APK & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🛎️ Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ☕ Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 🚀 Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Install Flutter Dependencies
+        run: flutter pub get
+        working-directory: forgottenwomen
+
+      - name: 🧪 Run Automated Tests
+        run: flutter test
+        working-directory: forgottenwomen
+
+      - name: 🔨 Build Release APK
+        run: flutter build apk --release --split-per-abi=false
+        working-directory: forgottenwomen
+
+      - name: 📝 Determine Tag & Version
+        id: vars
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "refs/heads/main" ]; then
+            TAG_NAME="v1.0.0-manual"
+          fi
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "APK generated at forgottenwomen/build/app/outputs/flutter-apk/app-release.apk"
+
+      - name: 📦 Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: office-tracker-${{ steps.vars.outputs.tag }}.apk
+          path: forgottenwomen/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: 🚀 Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: Office Tracker ${{ steps.vars.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            forgottenwomen/build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
