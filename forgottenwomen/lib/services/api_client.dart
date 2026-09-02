@@ -339,6 +339,24 @@ class ApiClient {
             .toList();
       });
 
+  Future<Map<String, dynamic>> requestDocumentUpdate({
+    required String documentTypeId,
+    required String documentName,
+    required String reason,
+  }) =>
+      _guard(() async {
+        final res = await _http.post(
+          await _uri('/api/documents/mine/request-update'),
+          headers: await _authHeaders(),
+          body: jsonEncode({
+            'documentTypeId': documentTypeId,
+            'documentName': documentName,
+            'reason': reason,
+          }),
+        ).timeout(timeout);
+        return _decode(res);
+      });
+
   Future<Map<String, dynamic>> uploadDocument({
     required String documentTypeId,
     required String title,

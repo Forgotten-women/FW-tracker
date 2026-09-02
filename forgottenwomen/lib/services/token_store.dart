@@ -21,7 +21,10 @@ class TokenStore {
   static const _kEmployeeRole = 'employee_role';
   static const _kEmployeeId = 'employee_id';
 
-  static const defaultServerUrl = 'http://192.168.18.68:5000';
+  static const defaultServerUrl = String.fromEnvironment(
+    'BACKEND_URL',
+    defaultValue: 'https://backend-ten-lyart-57.vercel.app',
+  );
 
   Future<String?> readToken() async {
     try {

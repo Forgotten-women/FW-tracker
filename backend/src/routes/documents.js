@@ -237,6 +237,37 @@ router.post('/mine/upload', requireDevice, upload.single('file'), async (req, re
   }
 });
 
+router.post('/mine/request-update', requireDevice, (req, res) => {
+  const { documentTypeId, documentName, reason } = req.body || {};
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ status: 'ERROR', message: 'A reason or description for the update is required.' });
+  }
+  const employee = db.prepare('SELECT name, role FROM employees WHERE id = ?').get(req.auth.employeeId);
+  const employeeName = employee ? employee.name : 'An employee';
+
+  try {
+    const notif = require('../domain/notifications');
+    notif.send({
+      type: 'DOCUMENT_UPDATE_REQUEST',
+      title: 'Document Update Requested',
+      body: `${employeeName} requested an update for ${documentName || 'a personnel document'}: "${reason}"`,
+      targetRole: 'hr',
+      metadata: {
+        employeeId: req.auth.employeeId,
+        employeeName,
+        documentTypeId,
+        documentName,
+        reason,
+      },
+    });
+  } catch (_) {}
+
+  res.status(201).json({
+    status: 'SUCCESS',
+    message: 'Your document update request has been submitted to HR for review and processing.',
+  });
+});
+
 router.get('/mine', requireDevice, (req, res) => {
   const permitted = new Set(['document.read', 'self.document.read']);
   res.json({ status: 'SUCCESS', documents: docs.listFor(req.auth.employeeId, permitted) });

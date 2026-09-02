@@ -78,12 +78,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
-  void _openUploadSheet({String? initialTypeId, String? initialName}) {
+  void _openRequestUpdateSheet({String? initialTypeId, String? initialName}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _UploadDocumentSheet(
+      builder: (ctx) => _RequestDocumentUpdateSheet(
         api: widget.api,
         initialTypeId: initialTypeId,
         initialName: initialName,
@@ -92,7 +92,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           _loadData();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Document uploaded successfully! Submitted for HR verification.'),
+              content: Text('Document update request submitted to HR!'),
               backgroundColor: Color(0xFF10B981),
             ),
           );
@@ -171,11 +171,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openUploadSheet(),
+        onPressed: () => _openRequestUpdateSheet(),
         backgroundColor: const Color(0xFF4F46E5),
-        icon: const Icon(Icons.upload_file, color: Colors.white),
+        icon: const Icon(Icons.edit_note_outlined, color: Colors.white),
         label: const Text(
-          'Upload Document',
+          'Request Doc Update',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
@@ -513,17 +513,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
-                onPressed: () => _openUploadSheet(
+                onPressed: () => _openRequestUpdateSheet(
                   initialTypeId: item.typeId,
                   initialName: item.name,
                 ),
-                icon: Icon(
-                  item.isRejected ? Icons.replay : Icons.upload_file,
+                icon: const Icon(
+                  Icons.edit_note,
                   size: 16,
-                  color: const Color(0xFF818CF8),
+                  color: Color(0xFF818CF8),
                 ),
                 label: Text(
-                  item.isRejected ? 'Re-upload Document' : 'Upload ${item.name}',
+                  item.isRejected ? 'Request Correction' : 'Request ${item.name} Update',
                   style: const TextStyle(color: Color(0xFF818CF8), fontSize: 12, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -581,13 +581,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 }
 
-class _UploadDocumentSheet extends StatefulWidget {
+class _RequestDocumentUpdateSheet extends StatefulWidget {
   final ApiClient api;
   final String? initialTypeId;
   final String? initialName;
   final VoidCallback onSuccess;
 
-  const _UploadDocumentSheet({
+  const _RequestDocumentUpdateSheet({
     required this.api,
     this.initialTypeId,
     this.initialName,
@@ -595,17 +595,14 @@ class _UploadDocumentSheet extends StatefulWidget {
   });
 
   @override
-  State<_UploadDocumentSheet> createState() => _UploadDocumentSheetState();
+  State<_RequestDocumentUpdateSheet> createState() => _RequestDocumentUpdateSheetState();
 }
 
-class _UploadDocumentSheetState extends State<_UploadDocumentSheet> {
+class _RequestDocumentUpdateSheetState extends State<_RequestDocumentUpdateSheet> {
   late String _selectedTypeId;
-  late TextEditingController _titleController;
-  late TextEditingController _expiryController;
-  bool _uploading = false;
+  late TextEditingController _reasonController;
+  bool _submitting = false;
   String? _error;
-  List<int>? _pickedFileBytes;
-  String? _pickedFileName;
 
   final List<Map<String, String>> _categories = [
     {'id': 'cv_resume', 'name': 'CV / Resume'},
@@ -623,80 +620,45 @@ class _UploadDocumentSheetState extends State<_UploadDocumentSheet> {
   @override
   void initState() {
     super.initState();
-    _selectedTypeId = widget.initialTypeId ?? 'cv_resume';
-    _titleController = TextEditingController(
-      text: widget.initialName != null ? '${widget.initialName} - Submission' : '',
+    _selectedTypeId = widget.initialTypeId ?? 'nic_card';
+    _reasonController = TextEditingController(
+      text: widget.initialName != null ? 'Please update/verify my ${widget.initialName}.' : '',
     );
-    _expiryController = TextEditingController();
   }
 
   @override
   void dispose() {
-    _titleController.dispose();
-    _expiryController.dispose();
+    _reasonController.dispose();
     super.dispose();
   }
 
-  Future<void> _pickFile() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg', 'docx', 'doc'],
-        withData: true,
-      );
-      if (result != null && result.files.isNotEmpty) {
-        final f = result.files.first;
-        List<int>? bytes = f.bytes;
-        if (bytes == null && f.path != null) {
-          bytes = await File(f.path!).readAsBytes();
-        }
-        if (bytes != null) {
-          setState(() {
-            _pickedFileBytes = bytes;
-            _pickedFileName = f.name;
-            if (_titleController.text.isEmpty) {
-              _titleController.text = f.name;
-            }
-            _error = null;
-          });
-        }
-      }
-    } catch (e) {
-      setState(() => _error = 'Could not select file: $e');
-    }
-  }
-
-  Future<void> _submitUpload() async {
-    if (_pickedFileBytes == null) {
+  Future<void> _submitRequest() async {
+    if (_reasonController.text.trim().isEmpty) {
       setState(() {
-        _error = 'Please select a document file (PDF, PNG, JPG) from your device.';
+        _error = 'Please provide details or a reason for the document update request.';
       });
       return;
     }
 
-    final title = _titleController.text.trim().isEmpty
-        ? _categories.firstWhere((c) => c['id'] == _selectedTypeId)['name']!
-        : _titleController.text.trim();
+    final categoryName = _categories.firstWhere((c) => c['id'] == _selectedTypeId)['name']!;
 
     setState(() {
-      _uploading = true;
+      _submitting = true;
       _error = null;
     });
 
     try {
-      await widget.api.uploadDocument(
+      await widget.api.requestDocumentUpdate(
         documentTypeId: _selectedTypeId,
-        title: title,
-        fileBytes: _pickedFileBytes!,
-        filename: _pickedFileName ?? 'document.pdf',
-        expiryDate: _expiryController.text.trim().isNotEmpty ? _expiryController.text.trim() : null,
+        documentName: categoryName,
+        reason: _reasonController.text.trim(),
       );
 
       widget.onSuccess();
     } catch (e) {
       setState(() {
         _error = e.toString();
-        _uploading = false;
+        _submitting = false;
       });
     }
   }
@@ -722,13 +684,19 @@ class _UploadDocumentSheetState extends State<_UploadDocumentSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Upload Personnel Document',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                const Row(
+                  children: [
+                    Icon(Icons.edit_note, color: Color(0xFF818CF8), size: 22),
+                    SizedBox(width: 8),
+                    Text(
+                      'Request Document Update',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white54),
@@ -736,9 +704,31 @@ class _UploadDocumentSheetState extends State<_UploadDocumentSheet> {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.shield_outlined, color: Color(0xFF10B981), size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Official KYC and personnel documents are securely uploaded and verified by HR. Submitting this request alerts HR to update or replace your verified file.',
+                      style: TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 16),
             const Text(
-              'Document Category',
+              'Document Type',
               style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
@@ -764,9 +754,6 @@ class _UploadDocumentSheetState extends State<_UploadDocumentSheet> {
                     if (val != null) {
                       setState(() {
                         _selectedTypeId = val;
-                        if (_titleController.text.isEmpty) {
-                          _titleController.text = _categories.firstWhere((c) => c['id'] == val)['name']!;
-                        }
                       });
                     }
                   },
@@ -775,94 +762,24 @@ class _UploadDocumentSheetState extends State<_UploadDocumentSheet> {
             ),
             const SizedBox(height: 14),
             const Text(
-              'Document Title / Notes',
+              'Reason / Notes for HR',
               style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             TextField(
-              controller: _titleController,
+              controller: _reasonController,
+              maxLines: 3,
               style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'e.g. Electricity Bill - July 2026',
+                hintText: 'e.g. My CNIC was renewed. I have provided the hardcopy / scanned copy to the HR office.',
                 hintStyle: const TextStyle(color: Colors.white30),
                 filled: true,
                 fillColor: const Color(0xFF0F172A),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.all(12),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: Colors.white12),
                 ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Expiry Date (if applicable)',
-              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            TextField(
-              controller: _expiryController,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: InputDecoration(
-                hintText: 'YYYY-MM-DD (e.g. 2028-12-31 for CNIC)',
-                hintStyle: const TextStyle(color: Colors.white30),
-                filled: true,
-                fillColor: const Color(0xFF0F172A),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Colors.white12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Select Document File',
-              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _pickedFileBytes != null ? const Color(0xFF10B981) : Colors.white12,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _pickedFileBytes != null ? Icons.check_circle : Icons.attach_file,
-                    color: _pickedFileBytes != null ? const Color(0xFF10B981) : const Color(0xFF818CF8),
-                    size: 20,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _pickedFileName ?? 'No file selected (PDF, PNG, JPG)',
-                      style: TextStyle(
-                        color: _pickedFileBytes != null ? Colors.white : Colors.white54,
-                        fontSize: 12,
-                        fontWeight: _pickedFileBytes != null ? FontWeight.bold : FontWeight.normal,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _pickFile,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4F46E5),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                    ),
-                    child: Text(
-                      _pickedFileBytes != null ? 'Change' : 'Browse File',
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
               ),
             ),
             if (_error != null) ...[
@@ -874,19 +791,19 @@ class _UploadDocumentSheetState extends State<_UploadDocumentSheet> {
               width: double.infinity,
               height: 44,
               child: ElevatedButton(
-                onPressed: _uploading ? null : _submitUpload,
+                onPressed: _submitting ? null : _submitRequest,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF4F46E5),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
-                child: _uploading
+                child: _submitting
                     ? const SizedBox(
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                       )
                     : const Text(
-                        'Submit Document to Cloud Vault',
+                        'Submit Request to HR',
                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                       ),
               ),

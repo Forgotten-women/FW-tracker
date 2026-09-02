@@ -60,15 +60,100 @@ function getConnectedBssid() {
   return null;
 }
 
-function getForegroundProcess() {
+function parseActiveApplication(procName, title) {
+  const p = (procName || '').toLowerCase().replace(/\.exe$/, '');
+  const t = (title || '').trim();
+
+  // 1. Browsers: Parse specific website / web application from window title
+  const isBrowser = ['chrome', 'msedge', 'edge', 'firefox', 'brave', 'opera', 'safari'].includes(p);
+  if (isBrowser && t) {
+    const lower = t.toLowerCase();
+    const b = p === 'chrome' ? 'Chrome' : p.includes('edge') ? 'Edge' : p === 'firefox' ? 'Firefox' : 'Browser';
+
+    if (lower.includes('youtube')) return `YouTube (${b})`;
+    if (lower.includes('figma')) return `Figma (${b})`;
+    if (lower.includes('github')) return `GitHub (${b})`;
+    if (lower.includes('gitlab')) return `GitLab (${b})`;
+    if (lower.includes('jira') || lower.includes('atlassian')) return `Jira (${b})`;
+    if (lower.includes('chatgpt') || lower.includes('openai')) return `ChatGPT (${b})`;
+    if (lower.includes('claude')) return `Claude AI (${b})`;
+    if (lower.includes('google meet') || lower.includes('meet.google')) return `Google Meet (${b})`;
+    if (lower.includes('google docs')) return `Google Docs (${b})`;
+    if (lower.includes('google sheets')) return `Google Sheets (${b})`;
+    if (lower.includes('google slides')) return `Google Slides (${b})`;
+    if (lower.includes('google drive')) return `Google Drive (${b})`;
+    if (lower.includes('notion')) return `Notion (${b})`;
+    if (lower.includes('canva')) return `Canva (${b})`;
+    if (lower.includes('stack overflow')) return `Stack Overflow (${b})`;
+    if (lower.includes('linkedin')) return `LinkedIn (${b})`;
+    if (lower.includes('whatsapp')) return `WhatsApp Web (${b})`;
+    if (lower.includes('netflix')) return `Netflix (${b})`;
+    if (lower.includes('reddit')) return `Reddit (${b})`;
+    if (lower.includes('twitter') || lower.includes('x.com')) return `X / Twitter (${b})`;
+    if (lower.includes('facebook')) return `Facebook (${b})`;
+    if (lower.includes('instagram')) return `Instagram (${b})`;
+
+    // General web site name
+    const parts = t.split(' - ');
+    if (parts.length >= 2) {
+      const site = parts[parts.length - 2].trim();
+      if (site && site.length < 28 && !site.toLowerCase().includes('google') && !site.toLowerCase().includes('microsoft')) {
+        return `${site} (${b})`;
+      }
+    }
+    return `Web Browsing (${b})`;
+  }
+
+  // 2. Desktop Application Names
+  const APP_NAMES = {
+    'antigravity ide': 'Antigravity IDE',
+    'code': 'VS Code',
+    'cursor': 'Cursor Editor',
+    'webstorm64': 'WebStorm',
+    'idea64': 'IntelliJ IDEA',
+    'pycharm64': 'PyCharm',
+    'slack': 'Slack',
+    'teams': 'Microsoft Teams',
+    'ms-teams': 'Microsoft Teams',
+    'zoom': 'Zoom Meetings',
+    'excel': 'Microsoft Excel',
+    'winword': 'Microsoft Word',
+    'powerpnt': 'Microsoft PowerPoint',
+    'outlook': 'Microsoft Outlook',
+    'onenote': 'OneNote',
+    'notepad': 'Notepad',
+    'notepad++': 'Notepad++',
+    'spotify': 'Spotify',
+    'discord': 'Discord',
+    'postman': 'Postman',
+    'dbeaver': 'DBeaver',
+    'terminal': 'Windows Terminal',
+    'powershell': 'PowerShell',
+    'cmd': 'Command Prompt',
+    'explorer': 'File Explorer',
+  };
+
+  if (APP_NAMES[p]) return APP_NAMES[p];
+  if (p && p !== 'unknown') return `${p.charAt(0).toUpperCase() + p.slice(1)}`;
+  return 'Desktop Active';
+}
+
+function getActiveWindowInfo() {
   if (process.platform === 'win32') {
     try {
-      const cmd = `powershell -NoProfile -Command "(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName"`;
-      const out = execSync(cmd, { timeout: 2500 }).toString().trim();
-      return out ? `${out.toLowerCase()}.exe` : 'unknown.exe';
-    } catch (_) {}
+      const scriptPath = path.join(__dirname, 'get-window.ps1');
+      const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000 }).toString().trim();
+      const parsed = JSON.parse(out);
+      return parseActiveApplication(parsed.process, parsed.title);
+    } catch (_) {
+      try {
+        const cmd = `powershell -NoProfile -Command "(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName"`;
+        const out = execSync(cmd, { timeout: 2500 }).toString().trim();
+        return parseActiveApplication(out, '');
+      } catch (_) {}
+    }
   }
-  return 'unknown.exe';
+  return 'Desktop Active';
 }
 
 async function promptEnrollment() {
@@ -163,7 +248,7 @@ async function startAgent() {
       const sendIdle = accumulatedIdle;
       accumulatedActive = 0;
       accumulatedIdle = 0;
-      const currentApp = getForegroundProcess();
+      const currentApp = getActiveWindowInfo();
 
       try {
         const res = await fetch(`${cfg.serverUrl}/api/desktop/heartbeat`, {

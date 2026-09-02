@@ -187,32 +187,6 @@ class _EnrollScreenState extends State<EnrollScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _serverController,
-                        keyboardType: TextInputType.url,
-                        autocorrect: false,
-                        style: const TextStyle(color: AppColors.textLight, fontSize: 14),
-                        decoration: InputDecoration(
-                          labelText: 'Server address',
-                          labelStyle: const TextStyle(color: AppColors.textMuted),
-                          prefixIcon: const Icon(Icons.dns_outlined, color: AppColors.textMuted),
-                          filled: true,
-                          fillColor: AppColors.bgDark,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -326,22 +300,23 @@ class _ConsentNotice extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          CheckboxListTile(
-            value: value,
-            onChanged: onChanged,
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            activeColor: AppColors.teal,
-            checkColor: Colors.white,
-            side: const BorderSide(color: AppColors.textMuted, width: 1.5),
-            title: const Text(
-              'I understand and agree',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textLight,
+          Material(
+            color: Colors.transparent,
+            child: CheckboxListTile(
+              value: value,
+              onChanged: onChanged,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              activeColor: AppColors.teal,
+              title: const Text(
+                'I understand and agree to pair this device',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textLight,
+                ),
               ),
+              controlAffinity: ListTileControlAffinity.leading,
             ),
           ),
         ],
