@@ -3,7 +3,10 @@ const path = require('path');
 const { Pool } = require('pg');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://postgres.xywqabfcqbrheaqfbyib:h1H1rjrIrPmLDZpq@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres';
+const { databaseUrl, confirmTarget } = require('./_connection');
+
+const connectionString = databaseUrl();
+confirmTarget(connectionString);
 
 const pool = new Pool({
   connectionString,

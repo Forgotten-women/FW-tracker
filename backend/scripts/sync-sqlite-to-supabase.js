@@ -6,8 +6,11 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const DB_FILE = path.join(__dirname, '..', 'data', 'office.db');
 const db = new Database(DB_FILE);
 
-const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres.xywqabfcqbrheaqfbyib:h1H1rjrIrPmLDZpq@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres';
-const client = new Client({ connectionString: databaseUrl });
+const { databaseUrl, confirmTarget } = require('./_connection');
+
+const url = databaseUrl();
+confirmTarget(url);
+const client = new Client({ connectionString: url });
 
 async function sync() {
   await client.connect();

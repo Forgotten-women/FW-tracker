@@ -49,39 +49,61 @@ function getIdleSeconds() {
   return 0;
 }
 
+// Matches the MAC on the BSSID line of `netsh wlan show interfaces`, whatever
+// the label around it. Windows 10 prints "BSSID : <mac>"; Windows 11 prints
+// "AP BSSID : <mac>". Matching on the label meant Windows 11 reported no access
+// point at all, which the server reads as "not on office Wi-Fi" - so every
+// laptop on Windows 11 was silently recorded as remote.
+const MAC_ON_BSSID_LINE = /bssid[^:]*:\s*((?:[0-9a-f]{2}:){5}[0-9a-f]{2})/i;
+
 function getConnectedBssid() {
   if (process.platform === 'win32') {
     try {
       const out = execSync('netsh wlan show interfaces', { timeout: 2500 }).toString();
       for (const line of out.split('\n')) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('BSSID')) {
-          const parts = trimmed.split(':');
-          if (parts.length >= 2) {
-            return parts.slice(1).join(':').trim().toLowerCase();
-          }
-        }
+        const m = MAC_ON_BSSID_LINE.exec(line.trim());
+        if (m) return m[1].toLowerCase();
       }
     } catch (_) {}
   }
   return null;
 }
 
-/** Returns the first private-range IPv4 address on any active network interface. */
+// Virtual adapters installed by WSL, Hyper-V, Docker and the VM tools. They
+// hold private addresses of their own, so taking "the first private address"
+// picked one of these (172.17.x / 172.25.x on a developer machine) instead of
+// the Wi-Fi address - again reported as off-network.
+const VIRTUAL_ADAPTER = /vethernet|virtual|vmware|virtualbox|hyper-?v|wsl|docker|loopback|bluetooth|tailscale|zerotier|tap-|tun-/i;
+
+function isPrivateIpv4(address) {
+  const parts = address.split('.');
+  if (parts[0] === '10') return true;
+  if (parts[0] === '172' && Number(parts[1]) >= 16 && Number(parts[1]) <= 31) return true;
+  return parts[0] === '192' && parts[1] === '168';
+}
+
+/**
+ * The private IPv4 address of a REAL network adapter.
+ *
+ * The server compares this against the configured office subnets, so picking
+ * the wrong adapter is not cosmetic - it decides whether the day counts as
+ * office attendance.
+ */
 function getLocalIp() {
   try {
     const ifaces = os.networkInterfaces();
+    const candidates = [];
     for (const name of Object.keys(ifaces)) {
-      for (const iface of ifaces[name]) {
-        if (iface.family === 'IPv4' && !iface.internal) {
-          const parts = iface.address.split('.');
-          // 10.x, 172.16-31.x, 192.168.x
-          if (parts[0] === '10') return iface.address;
-          if (parts[0] === '172' && Number(parts[1]) >= 16 && Number(parts[1]) <= 31) return iface.address;
-          if (parts[0] === '192' && parts[1] === '168') return iface.address;
-        }
+      for (const iface of ifaces[name] || []) {
+        if (iface.family !== 'IPv4' || iface.internal) continue;
+        if (!isPrivateIpv4(iface.address)) continue;
+        candidates.push({ name, address: iface.address, virtual: VIRTUAL_ADAPTER.test(name) });
       }
     }
+    // Physical adapters first; a virtual one is only a last resort, so a machine
+    // with no real connection still reports something rather than null.
+    const physical = candidates.find(c => !c.virtual);
+    return (physical || candidates[0] || {}).address || null;
   } catch (_) {}
   return null;
 }

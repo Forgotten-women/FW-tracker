@@ -5,6 +5,42 @@
 
 use std::process::Command;
 
+/// True if `w` is exactly `xx:xx:xx:xx:xx:xx`.
+fn is_mac(w: &[u8]) -> bool {
+    w.len() == 17
+        && w.iter().enumerate().all(|(i, c)| {
+            if (i + 1) % 3 == 0 {
+                *c == b':'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
+}
+
+/// The MAC address on a line that mentions BSSID, whatever the label reads.
+///
+/// Reading the value by its label is what broke: the wording differs between
+/// Windows versions ("BSSID" vs "AP BSSID") and between locales. The MAC's own
+/// shape does not, so that is what is matched.
+fn extract_mac(line: &str) -> Option<String> {
+    let lower = line.to_lowercase();
+    if !lower.contains("bssid") {
+        return None;
+    }
+    let bytes = lower.as_bytes();
+    if bytes.len() < 17 {
+        return None;
+    }
+    for start in 0..=(bytes.len() - 17) {
+        let window = &bytes[start..start + 17];
+        if is_mac(window) {
+            // Every byte is an ASCII hex digit or ':', so this is valid UTF-8.
+            return String::from_utf8(window.to_vec()).ok();
+        }
+    }
+    None
+}
+
 pub fn get_connected_bssid() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
@@ -16,14 +52,13 @@ pub fn get_connected_bssid() -> Option<String> {
 
         let text = String::from_utf8_lossy(&output.stdout);
         for line in text.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("BSSID") {
-                if let Some(pos) = trimmed.find(':') {
-                    let bssid = trimmed[pos + 1..].trim().to_lowercase();
-                    if !bssid.is_empty() {
-                        return Some(bssid);
-                    }
-                }
+            // Windows 10 labels this line "BSSID", Windows 11 labels it
+            // "AP BSSID". Matching on the label meant every Windows 11 laptop
+            // reported no access point, which the server reads as "not on
+            // office Wi-Fi" - so the day was silently recorded as remote.
+            // Match the MAC itself instead of the wording around it.
+            if let Some(mac) = extract_mac(line) {
+                return Some(mac);
             }
         }
         None
@@ -38,12 +73,8 @@ pub fn get_connected_bssid() -> Option<String> {
 
         let text = String::from_utf8_lossy(&output.stdout);
         for line in text.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("BSSID:") {
-                let bssid = trimmed.trim_start_matches("BSSID:").trim().to_lowercase();
-                if !bssid.is_empty() {
-                    return Some(bssid);
-                }
+            if let Some(mac) = extract_mac(line) {
+                return Some(mac);
             }
         }
         None

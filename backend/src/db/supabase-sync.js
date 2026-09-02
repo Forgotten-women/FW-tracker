@@ -9,10 +9,30 @@ const { Pool } = require('pg');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
-const databaseUrl = process.env.DATABASE_URL || 'postgresql://postgres.xywqabfcqbrheaqfbyib:h1H1rjrIrPmLDZpq@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres';
+// The connection string comes from the environment and nowhere else.
+//
+// It used to have the live production URL - password included - as an inline
+// fallback, which meant three things at once: the credential was in the source
+// tree, any checkout could write to the real HR database, and `npm test` read
+// and wrote production data. A test run creating employees and valid device
+// tokens in production is not a hypothetical: it is what was happening.
+//
+// With no fallback, an unconfigured environment gets no database rather than
+// silently getting the real one.
+const databaseUrl = (process.env.DATABASE_URL || '').trim();
+
+// A test run must never reach a real database by accident.
+//
+// NODE_TEST_CONTEXT is set by the Node test runner itself, so this holds even
+// for a test file that forgets to set NODE_ENV - which is exactly how the leak
+// happened: six of the suites never set it, and those were the ones reading and
+// writing production. Tests that genuinely need Postgres opt in by setting
+// TEST_DATABASE_URL to a throwaway database.
+const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.NODE_TEST_CONTEXT);
 
 let pool = null;
 function getPool() {
+  if (isTest && !process.env.TEST_DATABASE_URL) return null;
   if (!pool && databaseUrl) {
     try {
       pool = new Pool({

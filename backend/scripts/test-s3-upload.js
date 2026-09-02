@@ -1,17 +1,21 @@
 const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 
+const { storageCredentials } = require('./_connection');
+
+const creds = storageCredentials();
+
 const s3 = new S3Client({
   forcePathStyle: true,
-  region: 'ap-northeast-1', // or auto
-  endpoint: 'https://xywqabfcqbrheaqfbyib.storage.supabase.co/storage/v1/s3',
+  region: creds.region,
+  endpoint: creds.endpoint,
   credentials: {
-    accessKeyId: '7f90c89fb4678a0ebc391d976bd87eef',
-    secretAccessKey: 'c02400243c3d5639bcecf1000ba159e3275948edefaf5a97e988253b8e7ccb48',
+    accessKeyId: creds.accessKeyId,
+    secretAccessKey: creds.secretAccessKey,
   },
 });
 
 async function main() {
-  const bucket = 'employee-documents';
+  const bucket = creds.bucket;
   const testKey = `test-health-check-${Date.now()}.txt`;
   const content = 'Office Tracker S3 verification dummy test content';
 

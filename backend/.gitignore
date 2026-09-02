@@ -1,1 +1,9 @@
 .vercel
+!   scripts/bootstrap-supabase.js
+!scripts/migrate.js
+!scripts/generate-keys.js
+!scripts/generate-mfa.js
+
+
+# Ignore local SQLite state (will be rehydrated from Supabase)
+src/db/*.db
