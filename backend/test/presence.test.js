@@ -9,28 +9,28 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Point the DB at a throwaway file before anything requires src/db.
-const TMP = path.join(os.tmpdir(), `office-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('presence');
+
 
 const { db } = require('../src/db');
 const P = require('../src/domain/presence');
 const T = require('../src/util/time');
 
+test.before(prepareDatabase);
+
 const MIN = 60 * 1000;
 
 async function makeEmployee(id, name = 'Test Person') {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, name, 'Engineering', Date.now(), Date.now());
   return id;
 }
 
 async function makeDevice(deviceId, employeeId) {
   await db.prepare(
-    'INSERT OR REPLACE INTO devices (id, employee_id, platform, model, enrolled_at) VALUES (?,?,?,?,?)'
+    'INSERT INTO devices (id, employee_id, platform, model, enrolled_at) VALUES (?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET employee_id = EXCLUDED.employee_id, platform = EXCLUDED.platform, model = EXCLUDED.model, enrolled_at = EXCLUDED.enrolled_at'
   ).run(deviceId, employeeId, 'android', 'TestPhone', Date.now());
   return deviceId;
 }
@@ -44,12 +44,7 @@ async function ping(employeeId, deviceId, atMs) {
   });
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(TMP + suffix); } catch {}
-  }
-});
+test.after(dropDatabase);
 
 test('no events yields NOT_CHECKED_IN', async () => {
   const emp = await makeEmployee('e_none');

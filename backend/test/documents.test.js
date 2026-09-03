@@ -6,19 +6,19 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-docs-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('documents');
+
 
 const { db } = require('../src/db');
 const docs = require('../src/domain/documents');
 const T = require('../src/util/time');
 
+test.before(prepareDatabase);
+
 async function makeEmployee(id) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, 'Test ' + id, 'Engineering', T.now(), T.now());
   return id;
 }
@@ -31,16 +31,7 @@ function fakeFile(name, contents) {
 const HR = new Set(['document.read', 'document.write', 'employee.identity.read', 'employee.medical.read']);
 const EMPLOYEE = new Set(['document.read', 'self.document.read']);
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-  // Clean up any files written to the store during the test.
-  try {
-    for (const f of fs.readdirSync(docs.STORE)) {
-      if (f.startsWith('file_')) fs.unlinkSync(path.join(docs.STORE, f));
-    }
-  } catch {}
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Upload and storage

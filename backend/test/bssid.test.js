@@ -13,6 +13,8 @@ const assert = require('node:assert');
 
 const { parseWindows } = require('../scripts/discover-bssids');
 
+test.before(prepareDatabase);
+
 // Trimmed to the entries that matter, verbatim in shape.
 const NETSH_OUTPUT = `
 Interface name : Wi-Fi
@@ -141,3 +143,5 @@ test('empty or malformed input yields nothing rather than throwing', () => {
   assert.deepEqual(parseWindows(''), []);
   assert.deepEqual(parseWindows('no networks here\njust noise\n'), []);
 });
+
+test.after(dropDatabase);

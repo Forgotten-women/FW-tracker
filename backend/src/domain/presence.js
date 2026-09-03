@@ -51,7 +51,9 @@ const insertEvent = db.prepare(`
 `);
 
 const touchDevice = db.prepare(
-  'UPDATE devices SET last_seen_at = MAX(COALESCE(last_seen_at, 0), ?) WHERE id = ?'
+  // GREATEST, not MAX: in SQLite MAX() doubles as a two-argument scalar
+  // function, but in Postgres it is an aggregate only.
+  'UPDATE devices SET last_seen_at = GREATEST(COALESCE(last_seen_at, 0), ?::bigint) WHERE id = ?'
 );
 
 const upsertUnknown = db.prepare(`

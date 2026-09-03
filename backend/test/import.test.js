@@ -9,20 +9,21 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-import-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('import');
+
 
 const { db } = require('../src/db');
 const I = require('../src/domain/import');
 const A = require('../src/domain/attendance');
 const T = require('../src/util/time');
 
+test.before(prepareDatabase);
+
 async function makeEmployee(id, name, number = null) {
   await db.prepare(`
-    INSERT OR REPLACE INTO employees (id, name, role, active, employee_number, created_at, updated_at)
-    VALUES (?,?,?,1,?,?,?)
+    INSERT INTO employees (id, name, role, active, employee_number, created_at, updated_at)
+    VALUES (?,?,?,1,?,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, employee_number = EXCLUDED.employee_number, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at
   `).run(id, name, 'Engineering', number, T.now(), T.now());
   return id;
 }
@@ -30,10 +31,7 @@ async function makeEmployee(id, name, number = null) {
 makeEmployee('emp_aa', 'Abdullah Shahid', 'FW001');
 makeEmployee('emp_bb', 'Fatima Khan', 'FW002');
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Parsing

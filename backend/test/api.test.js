@@ -10,10 +10,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-api-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-admin-key-0123456789';
-process.env.OFFICE_CONFIG_FILE = require('path').join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('api');
+
 process.env.SENSOR_SECRET_esp_test_01 = 'sensor-shared-secret';
 // The tests need to simulate requests arriving from an office IP. In production
 // this stays off so X-Forwarded-For cannot be used to fake a location.
@@ -29,6 +28,7 @@ const HOME_IP = { 'X-Forwarded-For': '203.0.113.77' };
 let base;
 let server;
 
+test.before(prepareDatabase);
 test.before(async () => {
   await new Promise(resolve => {
     server = app.listen(0, '127.0.0.1', resolve);
@@ -36,11 +36,7 @@ test.before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
 });
 
-test.after(async () => {
-  await new Promise(r => server.close(r));
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 const req = (method, url, { headers = {}, body } = {}) =>
   fetch(base + url, {

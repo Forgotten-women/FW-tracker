@@ -11,16 +11,16 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-bind-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = require('path').join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('bindings');
+
 
 const { db, MAC_SALT } = require('../src/db');
 const P = require('../src/domain/presence');
 const bindings = require('../src/domain/bindings');
 const T = require('../src/util/time');
+
+test.before(prepareDatabase);
 
 const MIN = 60 * 1000;
 const OFFICE_IP = '192.168.18.59';
@@ -28,13 +28,13 @@ const PHONE_MAC = 'aa:bb:cc:11:22:33';
 
 async function makeEmployee(id, name = 'Test Person') {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, name, 'Engineering', T.now(), T.now());
   return id;
 }
 async function makeDevice(deviceId, employeeId) {
   await db.prepare(
-    'INSERT OR REPLACE INTO devices (id, employee_id, platform, model, enrolled_at) VALUES (?,?,?,?,?)'
+    'INSERT INTO devices (id, employee_id, platform, model, enrolled_at) VALUES (?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET employee_id = EXCLUDED.employee_id, platform = EXCLUDED.platform, model = EXCLUDED.model, enrolled_at = EXCLUDED.enrolled_at'
   ).run(deviceId, employeeId, 'android', 'TestPhone', T.now());
   return deviceId;
 }
@@ -54,10 +54,7 @@ async function appPing(employeeId, deviceId, atMs) {
   });
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Binding

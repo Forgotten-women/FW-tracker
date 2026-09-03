@@ -11,35 +11,31 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-leave-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('leave');
+
 
 const { db } = require('../src/db');
 const L = require('../src/domain/leave');
 const T = require('../src/util/time');
 
+test.before(prepareDatabase);
+
 async function makeEmployee(id, startDate = null) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, 'Test ' + id, 'Engineering', T.now(), T.now());
 
   if (startDate) {
     await db.prepare(`
-      INSERT OR REPLACE INTO employment_records
-        (id, employee_id, job_title, employment_type, start_date, effective_from, created_at)
-      VALUES (?,?,?,?,?,?,?)
+      INSERT INTO employment_records (id, employee_id, job_title, employment_type, start_date, effective_from, created_at)
+      VALUES (?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET employee_id = EXCLUDED.employee_id, job_title = EXCLUDED.job_title, employment_type = EXCLUDED.employment_type, start_date = EXCLUDED.start_date, effective_from = EXCLUDED.effective_from, created_at = EXCLUDED.created_at
     `).run('er_' + id, id, 'Engineer', 'Full-time', startDate, startDate, T.now());
   }
   return id;
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // The anniversary holiday year
@@ -215,12 +211,12 @@ test('weekends inside a leave request are not counted', async () => {
 test('a paid office closure inside a request is not deducted', async () => {
   const emp = await makeEmployee('emp_closure', '2025-01-01');
   await db.prepare(
-    'INSERT OR REPLACE INTO office_locations (id,name,time_zone,active,created_at) VALUES (?,?,?,1,?)'
+    'INSERT INTO office_locations (id,name,time_zone,active,created_at) VALUES (?,?,?,1,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, time_zone = EXCLUDED.time_zone, active = EXCLUDED.active, created_at = EXCLUDED.created_at'
   ).run('off_pk', 'Pakistan Office', 'Asia/Karachi', T.now());
   await db.prepare('UPDATE employees SET office_id = ? WHERE id = ?').run('off_pk', emp);
   await db.prepare(`
-    INSERT OR REPLACE INTO calendar_days (id, office_id, date, day_type, name, is_paid, created_at)
-    VALUES (?,?,?,?,?,1,?)
+    INSERT INTO calendar_days (id, office_id, date, day_type, name, is_paid, created_at)
+    VALUES (?,?,?,?,?,1,?) ON CONFLICT (id) DO UPDATE SET office_id = EXCLUDED.office_id, date = EXCLUDED.date, day_type = EXCLUDED.day_type, name = EXCLUDED.name, is_paid = EXCLUDED.is_paid, created_at = EXCLUDED.created_at
   `).run('cal_eid2', 'off_pk', '2026-08-27', 'PUBLIC_HOLIDAY', 'Eid holiday', T.now());
 
   const c = await L.countLeaveDays(emp, '2026-08-27', '2026-08-28');

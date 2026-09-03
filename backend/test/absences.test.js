@@ -6,27 +6,24 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-absence-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('absences');
+
 
 const { db } = require('../src/db');
 const W = require('../src/domain/warnings');
 const T = require('../src/util/time');
 
+test.before(prepareDatabase);
+
 async function createTestEmployee(id, name) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, name, 'Engineering', T.now(), T.now());
   return id;
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 test('scanDailyAbsences flags scheduled employee with no attendance and no leave', async () => {
   const empId = await createTestEmployee('emp_noshow_1', 'No Show Worker');

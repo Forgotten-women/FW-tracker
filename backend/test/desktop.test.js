@@ -4,11 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-desktop-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-admin-key-0123456789';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
-process.env.TRUST_PROXY = 'true';
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('desktop');
+
 
 const { app } = require('../src/server');
 const { db } = require('../src/db');
@@ -18,6 +16,7 @@ const ADMIN = { 'X-Admin-Key': process.env.ADMIN_API_KEY };
 let base;
 let server;
 
+test.before(prepareDatabase);
 test.before(async () => {
   await new Promise(resolve => {
     server = app.listen(0, '127.0.0.1', resolve);
@@ -25,11 +24,7 @@ test.before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
 });
 
-test.after(async () => {
-  await new Promise(r => server.close(r));
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 const req = (method, url, { headers = {}, body } = {}) =>
   fetch(base + url, {

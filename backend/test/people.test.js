@@ -6,11 +6,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-people-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('people');
+
 
 const { db } = require('../src/db');
 const people = require('../src/domain/people');
@@ -19,15 +17,12 @@ const T = require('../src/util/time');
 
 async function makeEmployee(id, name = 'Test Person') {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, name, 'Engineering', T.now(), T.now());
   return id;
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Employment records (spec 4.2, 31)
@@ -197,6 +192,8 @@ test('a manager assignment is scoped and cannot be self-referential', async () =
 
   await people.assignManager({ managerEmployeeId: mgr, employeeId: rpt, actor: 'user:hr' });
   const rbac = require('../src/domain/rbac');
+
+test.before(prepareDatabase);
   const managerUser = { roles: ['manager'], employeeId: mgr };
   assert.equal(await rbac.canAccessEmployee(managerUser, rpt), true, 'now manages the report');
 

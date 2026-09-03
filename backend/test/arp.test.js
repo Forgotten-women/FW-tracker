@@ -10,11 +10,12 @@ const assert = require('node:assert');
 const os = require('os');
 const path = require('path');
 
-process.env.DB_FILE = path.join(os.tmpdir(), `office-arp-test-${process.pid}.db`);
 process.env.ADMIN_API_KEY = 'test';
 process.env.OFFICE_CONFIG_FILE = require('path').join(__dirname, 'fixtures', 'office.test.json');
 
 const { parseArpOutput } = require('../src/sensors/arp');
+
+test.before(prepareDatabase);
 
 const WINDOWS_OUTPUT = `
 Interface: 192.168.18.68 --- 0x11
@@ -66,3 +67,5 @@ test('empty or malformed input yields nothing rather than throwing', () => {
   assert.deepEqual(parseArpOutput(''), []);
   assert.deepEqual(parseArpOutput('garbage\nno addresses here\n'), []);
 });
+
+test.after(dropDatabase);

@@ -10,11 +10,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-att-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = require('path').join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('attendance');
+
 
 const { db } = require('../src/db');
 const A = require('../src/domain/attendance');
@@ -31,7 +29,7 @@ const at = (hhmm) => T.wallClockToEpoch(DAY, hhmm);
 
 async function makeEmployee(id) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, 'Test ' + id, 'Engineering', T.now(), T.now());
   return id;
 }
@@ -48,10 +46,7 @@ async function present(employeeId, fromHHMM, toHHMM, stepMin = 5) {
   await P.recordEvent({ employeeId, source: 'APP', srcIp: OFFICE_IP, observedAt: to });
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Schedule
@@ -356,6 +351,8 @@ test('an unconfigured monitoring period refuses to evaluate', async () => {
     assert.match(status.message, /cannot be evaluated/i);
   } finally {
     require('../src/config').config.latenessMonitoringPeriod = original;
+
+test.before(prepareDatabase);
   }
 });
 
@@ -366,12 +363,12 @@ test('an unconfigured monitoring period refuses to evaluate', async () => {
 test('a paid office closure produces no deficit', async () => {
   const emp = await makeEmployee('emp_holiday');
   await db.prepare(
-    'INSERT OR REPLACE INTO office_locations (id, name, time_zone, active, created_at) VALUES (?,?,?,1,?)'
+    'INSERT INTO office_locations (id, name, time_zone, active, created_at) VALUES (?,?,?,1,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, time_zone = EXCLUDED.time_zone, active = EXCLUDED.active, created_at = EXCLUDED.created_at'
   ).run('off_pk', 'Pakistan Office', 'Asia/Karachi', T.now());
   await db.prepare('UPDATE employees SET office_id = ? WHERE id = ?').run('off_pk', emp);
   await db.prepare(`
-    INSERT OR REPLACE INTO calendar_days (id, office_id, date, day_type, name, is_paid, created_at)
-    VALUES (?,?,?,?,?,1,?)
+    INSERT INTO calendar_days (id, office_id, date, day_type, name, is_paid, created_at)
+    VALUES (?,?,?,?,?,1,?) ON CONFLICT (id) DO UPDATE SET office_id = EXCLUDED.office_id, date = EXCLUDED.date, day_type = EXCLUDED.day_type, name = EXCLUDED.name, is_paid = EXCLUDED.is_paid, created_at = EXCLUDED.created_at
   `).run('cal_eid', 'off_pk', DAY, 'PUBLIC_HOLIDAY', 'Eid holiday', T.now());
 
   const d = await A.deriveDay(emp, DAY, at('19:30'));

@@ -4,34 +4,30 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-statements-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('payroll_statements');
+
 
 const { db } = require('../src/db');
 const PR = require('../src/domain/payroll');
 const T = require('../src/util/time');
 
+test.before(prepareDatabase);
+
 async function makeEmployee(id, startDate = null) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, 'Statement Worker ' + id, 'Engineering', T.now(), T.now());
   if (startDate) {
     await db.prepare(`
-      INSERT OR REPLACE INTO employment_records
-        (id, employee_id, job_title, employment_type, start_date, effective_from, created_at)
-      VALUES (?,?,?,?,?,?,?)
+      INSERT INTO employment_records (id, employee_id, job_title, employment_type, start_date, effective_from, created_at)
+      VALUES (?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET employee_id = EXCLUDED.employee_id, job_title = EXCLUDED.job_title, employment_type = EXCLUDED.employment_type, start_date = EXCLUDED.start_date, effective_from = EXCLUDED.effective_from, created_at = EXCLUDED.created_at
     `).run('er_' + id, id, 'Engineer', 'Full-time', startDate, startDate, T.now());
   }
   return id;
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 test('Employee Payroll Statements Domain & Policy Gating', async (t) => {
   const empId = await makeEmployee('emp_stmt_1', '2026-07-01');
@@ -71,7 +67,7 @@ test('Employee Payroll Statements Domain & Policy Gating', async (t) => {
   });
 
   await t.test('1. Statements are locked when show_salary_to_employees is 0', async () => {
-    await db.prepare("INSERT OR REPLACE INTO org_settings (key, value, updated_at) VALUES ('show_salary_to_employees', '0', ?)")
+    await db.prepare("INSERT INTO org_settings (key, value, updated_at) VALUES ('show_salary_to_employees', '0', ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at")
       .run(T.now());
 
     const res = await PR.employeeStatements(empId);
@@ -81,7 +77,7 @@ test('Employee Payroll Statements Domain & Policy Gating', async (t) => {
   });
 
   await t.test('2. Statements return full period details when show_salary_to_employees is 1', async () => {
-    await db.prepare("INSERT OR REPLACE INTO org_settings (key, value, updated_at) VALUES ('show_salary_to_employees', '1', ?)")
+    await db.prepare("INSERT INTO org_settings (key, value, updated_at) VALUES ('show_salary_to_employees', '1', ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at")
       .run(T.now());
 
     const res = await PR.employeeStatements(empId);

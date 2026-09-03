@@ -4,19 +4,16 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-ota-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('ota');
+
 
 const { db } = require('../src/db');
 const OTA = require('../src/domain/ota');
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.before(prepareDatabase);
+
+test.after(dropDatabase);
 
 test('Over-The-Air (OTA) Updates Domain Logic', async (t) => {
   await t.test('1. No releases returns updateAvailable = false', async () => {

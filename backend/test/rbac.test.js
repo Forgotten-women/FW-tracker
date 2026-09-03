@@ -10,10 +10,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-rbac-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-admin-key';
-process.env.NODE_ENV = 'test';
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('rbac');
+
 
 const { db } = require('../src/db');
 const rbac = require('../src/domain/rbac');
@@ -23,14 +22,14 @@ const PASSWORD = 'a-long-enough-passphrase';
 
 async function makeEmployee(id, name) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, name, 'Staff', T.now(), T.now());
   return id;
 }
 
 async function assign(managerEmployeeId, employeeId) {
   await db.prepare(
-    'INSERT OR REPLACE INTO manager_assignments (manager_employee_id, employee_id, assigned_at) VALUES (?,?,?)'
+    'INSERT INTO manager_assignments (manager_employee_id, employee_id, assigned_at) VALUES (?,?,?) ON CONFLICT (manager_employee_id, employee_id) DO UPDATE SET assigned_at = EXCLUDED.assigned_at'
   ).run(managerEmployeeId, employeeId, T.now());
 }
 
@@ -60,10 +59,7 @@ const asManager = async () => await rbac.describeUser(managerUser.id);
 const asHr = async () => await rbac.describeUser(hrUser.id);
 const asAdmin = async () => await rbac.describeUser(adminUser.id);
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Employee isolation
@@ -137,9 +133,8 @@ test('an explicit grant gives one manager one sensitive permission', async () =>
 
 test('an expired grant stops applying', async () => {
   await db.prepare(`
-    INSERT OR REPLACE INTO user_permission_grants
-      (user_id, permission_id, granted_at, granted_by, expires_at, reason)
-    VALUES (?,?,?,?,?,?)
+    INSERT INTO user_permission_grants (user_id, permission_id, granted_at, granted_by, expires_at, reason)
+    VALUES (?,?,?,?,?,?) ON CONFLICT (user_id, permission_id) DO UPDATE SET granted_at = EXCLUDED.granted_at, granted_by = EXCLUDED.granted_by, expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason
   `).run(managerUser.id, 'employee.salary.read', T.now() - 1000, 'hr', T.now() - 1, 'Expired');
 
   assert.equal(await (await asManager()).permissions.has('employee.salary.read'), false);
@@ -304,6 +299,8 @@ test('confirmed policy is recorded, unconfirmed policy stays undecided', async (
   // What follows a final written warning is still NOT specified, so the
   // escalation sequence must stop rather than invent an outcome.
   const { config } = require('../src/config');
+
+test.before(prepareDatabase);
   assert.deepEqual(config.warningEscalationSequence,
     ['INFORMAL_NOTICE', 'FIRST_WRITTEN', 'FINAL_WRITTEN']);
 

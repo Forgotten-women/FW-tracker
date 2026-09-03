@@ -10,11 +10,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-warn-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('warnings');
+
 
 const { db } = require('../src/db');
 const W = require('../src/domain/warnings');
@@ -27,7 +25,7 @@ const OFFICE_IP = '192.168.18.59';
 
 async function makeEmployee(id) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, 'Test ' + id, 'Engineering', T.now(), T.now());
   return id;
 }
@@ -45,10 +43,7 @@ async function lateDay(employeeId, dateKey, arrival = '11:30') {
 const LATE_DAYS = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04'];
 const REVIEW_DATE = '2026-09-10';
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Triggers are referrals, not warnings (spec 9.3)
@@ -437,6 +432,8 @@ test('the trigger audit entry states plainly that it is not a warning', async ()
 
 test('with no confirmed monitoring period the engine refuses to evaluate', async () => {
   const { config } = require('../src/config');
+
+test.before(prepareDatabase);
   const original = config.latenessMonitoringPeriod;
   config.latenessMonitoringPeriod = 'UNSET';
   try {

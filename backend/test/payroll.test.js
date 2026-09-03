@@ -10,11 +10,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-pay-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('payroll');
+
 
 const { db } = require('../src/db');
 const PR = require('../src/domain/payroll');
@@ -23,22 +21,18 @@ const T = require('../src/util/time');
 
 async function makeEmployee(id, startDate = null) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, 'Test ' + id, 'Engineering', T.now(), T.now());
   if (startDate) {
     await db.prepare(`
-      INSERT OR REPLACE INTO employment_records
-        (id, employee_id, job_title, employment_type, start_date, effective_from, created_at)
-      VALUES (?,?,?,?,?,?,?)
+      INSERT INTO employment_records (id, employee_id, job_title, employment_type, start_date, effective_from, created_at)
+      VALUES (?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET employee_id = EXCLUDED.employee_id, job_title = EXCLUDED.job_title, employment_type = EXCLUDED.employment_type, start_date = EXCLUDED.start_date, effective_from = EXCLUDED.effective_from, created_at = EXCLUDED.created_at
     `).run('er_' + id, id, 'Engineer', 'Full-time', startDate, startDate, T.now());
   }
   return id;
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // The rate chain (spec 17)
@@ -380,6 +374,8 @@ test('the whole payroll lifecycle is audited', async () => {
 
 test('the paid break keeps a full day at 480 minutes', () => {
   const { config } = require('../src/config');
+
+test.before(prepareDatabase);
   assert.equal(config.payroll.breakIsPaid, true);
   // 11:00-19:00 is 8 hours INCLUDING the 30 minute break, so a full day is 480
   // minutes. An unpaid break would make it 450 and change every deficit figure.

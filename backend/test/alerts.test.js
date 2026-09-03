@@ -6,11 +6,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TMP = path.join(os.tmpdir(), `office-alerts-test-${process.pid}.db`);
-process.env.DB_FILE = TMP;
-process.env.ADMIN_API_KEY = 'test-key';
-process.env.NODE_ENV = 'test';
-process.env.OFFICE_CONFIG_FILE = path.join(__dirname, 'fixtures', 'office.test.json');
+const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+useTestDatabase('alerts');
+
 
 const { db } = require('../src/db');
 const AL = require('../src/domain/alerts');
@@ -24,26 +22,22 @@ function inDays(n) {
 
 async function makeEmployee(id) {
   await db.prepare(
-    'INSERT OR REPLACE INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?)'
+    'INSERT INTO employees (id, name, role, active, created_at, updated_at) VALUES (?,?,?,1,?,?) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, active = EXCLUDED.active, created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at'
   ).run(id, 'Test ' + id, 'Engineering', T.now(), T.now());
   return id;
 }
 
 async function employment(id, employeeId, fields = {}) {
   await db.prepare(`
-    INSERT OR REPLACE INTO employment_records
-      (id, employee_id, job_title, employment_type, start_date, effective_from,
+    INSERT INTO employment_records (id, employee_id, job_title, employment_type, start_date, effective_from,
        contract_end_date, probation_review_date, probation_outcome, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET employee_id = EXCLUDED.employee_id, job_title = EXCLUDED.job_title, employment_type = EXCLUDED.employment_type, start_date = EXCLUDED.start_date, effective_from = EXCLUDED.effective_from, contract_end_date = EXCLUDED.contract_end_date, probation_review_date = EXCLUDED.probation_review_date, probation_outcome = EXCLUDED.probation_outcome, created_at = EXCLUDED.created_at
   `).run(id, employeeId, 'Engineer', 'Full-time', '2025-01-01', '2025-01-01',
          fields.contractEnd || null, fields.probationReview || null,
          fields.probationOutcome || null, T.now());
 }
 
-test.after(() => {
-  try { db.close(); } catch {}
-  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(TMP + s); } catch {} }
-});
+test.after(dropDatabase);
 
 // ---------------------------------------------------------------------------
 // Contract expiry (spec 20.2: "Contract expires in 30 days")
@@ -188,6 +182,8 @@ test('with no HR users, notifying reports it rather than throwing', async () => 
   // A fresh throwaway db so there are genuinely no HR users.
   const tmp2 = path.join(os.tmpdir(), `office-alerts-nohr-${process.pid}.db`);
   const D = require('better-sqlite3')(tmp2);
+
+test.before(prepareDatabase);
   try {
     // Not wired to the app db; just assert the guard shape on the real one by
     // deactivating HR users first.
