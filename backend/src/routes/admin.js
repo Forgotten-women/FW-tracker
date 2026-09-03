@@ -351,6 +351,14 @@ router.get('/workstations', async (req, res) => {
     breaksByEmp.set(br.employee_id, (breaksByEmp.get(br.employee_id) || 0) + mins);
   }
 
+  // Fetch verified in-office presence session stats for today
+  const attRows = await db.prepare(`
+    SELECT employee_id, total_minutes, first_in_at, last_active_at
+    FROM attendance_days
+    WHERE date_key = ?
+  `).all(dateKey);
+  const attByEmp = new Map(attRows.map(a => [a.employee_id, a]));
+
   res.json({
     status: 'SUCCESS',
     dateKey,
@@ -358,6 +366,8 @@ router.get('/workstations', async (req, res) => {
       const mobileBreakMins = breaksByEmp.get(r.employee_id) || 0;
       const wsBreakMins = Math.round((r.break_seconds || 0) / 60);
       const totalBreakMins = Math.max(wsBreakMins, mobileBreakMins);
+      const att = attByEmp.get(r.employee_id);
+      const presenceMins = att ? Math.round(att.total_minutes || 0) : 0;
 
       return {
         id: r.id,
@@ -372,6 +382,7 @@ router.get('/workstations', async (req, res) => {
         activeMinutes: Math.round(r.active_seconds / 60),
         idleMinutes: Math.round(r.idle_seconds / 60),
         breakMinutes: totalBreakMins,
+        presenceMinutes: presenceMins,
         inOffice: !!r.in_office,
         lockState: r.lock_state,
         connectedBssid: r.connected_bssid,
@@ -422,6 +433,13 @@ router.get('/app-usage', async (req, res) => {
     ORDER BY au.active_seconds DESC
   `).all(dateKey);
 
+  const wsRows = await db.prepare(`
+    SELECT employee_id, active_seconds
+    FROM workstation_sessions
+    WHERE session_date = ?
+  `).all(dateKey);
+  const wsByEmp = new Map(wsRows.map(w => [w.employee_id, w.active_seconds]));
+
   res.json({
     status: 'SUCCESS',
     dateKey,
@@ -434,6 +452,7 @@ router.get('/app-usage', async (req, res) => {
       appName: r.app_name,
       activeSeconds: r.active_seconds,
       activeMinutes: Math.round(r.active_seconds / 60),
+      workstationActiveSeconds: wsByEmp.get(r.employee_id) || 0,
       lastUsedAt: T.displayTime(r.last_used_at),
     })),
   });

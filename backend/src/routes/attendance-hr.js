@@ -64,6 +64,15 @@ router.post('/break/start', requireDevice, async (req, res) => {
   }
 
   await A.recomputeDay(req.auth.employeeId, T.dateKey(nowMs), nowMs);
+
+  try {
+    await db.prepare(`
+      UPDATE workstation_sessions
+      SET status = 'ON_BREAK', updated_at = ?
+      WHERE employee_id = ? AND session_date = ?
+    `).run(nowMs, req.auth.employeeId, T.dateKey(nowMs));
+  } catch (_) {}
+
   res.status(201).json({
     status: 'SUCCESS',
     breakId: result.breakId,
@@ -86,6 +95,15 @@ router.post('/break/end', requireDevice, async (req, res) => {
   }
 
   await A.recomputeDay(req.auth.employeeId, T.dateKey(nowMs), nowMs);
+
+  try {
+    await db.prepare(`
+      UPDATE workstation_sessions
+      SET status = 'ACTIVE', updated_at = ?
+      WHERE employee_id = ? AND session_date = ?
+    `).run(nowMs, req.auth.employeeId, T.dateKey(nowMs));
+  } catch (_) {}
+
   res.json({
     status: 'SUCCESS',
     actualMinutes: result.actualMinutes,

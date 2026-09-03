@@ -83,6 +83,7 @@ export function WorkstationsPanel() {
       platform: string;
       deviceModel: string;
       lastActive: string;
+      workstationActiveSeconds: number;
     }>();
 
     for (const app of appUsage) {
@@ -97,8 +98,12 @@ export function WorkstationsPanel() {
           platform: app.platform,
           deviceModel: app.deviceModel,
           lastActive: app.lastUsedAt,
+          workstationActiveSeconds: app.workstationActiveSeconds || 0,
         };
         map.set(key, group);
+      }
+      if (app.workstationActiveSeconds && !group.workstationActiveSeconds) {
+        group.workstationActiveSeconds = app.workstationActiveSeconds;
       }
       group.totalSeconds += (app.activeSeconds || 0);
       group.apps.push(app);
@@ -284,8 +289,17 @@ export function WorkstationsPanel() {
                           <Badge tone="muted">Offline</Badge>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 font-mono font-semibold text-emerald-400">
-                        {Math.floor(ws.activeMinutes / 60)}h {ws.activeMinutes % 60}m
+                      <td className="py-3.5 px-4">
+                        <div className="font-mono font-semibold text-emerald-400">
+                          {Math.floor(ws.activeMinutes / 60)}h {ws.activeMinutes % 60}m
+                        </div>
+                        {ws.presenceMinutes != null && ws.presenceMinutes > 0 ? (
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            of {Math.floor(ws.presenceMinutes / 60)}h {ws.presenceMinutes % 60}m presence ({Math.min(100, Math.round((ws.activeMinutes / ws.presenceMinutes) * 100))}% active)
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-500 mt-0.5">Active typing/mousing</div>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-400">
                         Break: {ws.breakMinutes}m | Idle: {ws.idleMinutes}m
@@ -427,9 +441,15 @@ export function WorkstationsPanel() {
                           <div className="font-mono font-bold text-emerald-400 text-base">
                             {formattedTotal}
                           </div>
-                          <div className="text-[10px] text-slate-500 font-mono">
-                            {group.totalSeconds.toLocaleString()}s total today
-                          </div>
+                          {(group as any).workstationActiveSeconds > 0 ? (
+                            <div className="text-[10px] text-teal-400 font-medium">
+                              Workstation active: {Math.floor((group as any).workstationActiveSeconds / 3600)}h {Math.floor(((group as any).workstationActiveSeconds % 3600) / 60)}m
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              {group.totalSeconds.toLocaleString()}s total today
+                            </div>
+                          )}
                         </div>
 
                         <div className="hidden lg:block text-right text-xs text-slate-400">

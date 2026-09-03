@@ -171,21 +171,23 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     console.error('[desktop/heartbeat] session update error:', err);
   }
 
-  // 6. Record Application Usage (Per-Second Breakdown or Single Active App)
-  const appBreakdown = req.body?.appBreakdown;
+  // 6. Record Application Usage (Scoped to in-office active work; auto-paused on break/away/idle)
   const entries = [];
-  if (appBreakdown && typeof appBreakdown === 'object') {
-    for (const [name, secs] of Object.entries(appBreakdown)) {
-      const trimmed = String(name || '').trim();
-      const s = parseInt(secs, 10) || 0;
-      if (trimmed && trimmed !== 'unknown.exe' && s > 0) {
-        entries.push({ name: trimmed, seconds: s });
+  if (inOffice && status === 'ACTIVE') {
+    const appBreakdown = req.body?.appBreakdown;
+    if (appBreakdown && typeof appBreakdown === 'object') {
+      for (const [name, secs] of Object.entries(appBreakdown)) {
+        const trimmed = String(name || '').trim();
+        const s = parseInt(secs, 10) || 0;
+        if (trimmed && trimmed !== 'unknown.exe' && s > 0) {
+          entries.push({ name: trimmed, seconds: s });
+        }
       }
-    }
-  } else {
-    const singleApp = String(req.body?.currentApp || '').trim();
-    if (singleApp && singleApp !== 'unknown.exe' && status === 'ACTIVE') {
-      entries.push({ name: singleApp, seconds: parseInt(activeSeconds, 10) || 60 });
+    } else {
+      const singleApp = String(req.body?.currentApp || '').trim();
+      if (singleApp && singleApp !== 'unknown.exe') {
+        entries.push({ name: singleApp, seconds: effectiveActive || 60 });
+      }
     }
   }
 
@@ -243,6 +245,14 @@ router.post('/break', requireDevice, async (req, res) => {
   const newStatus = onBreak ? 'ON_BREAK' : 'ACTIVE';
 
   try {
+    const A = require('../domain/attendance');
+    if (onBreak) {
+      await A.startBreak(employeeId, nowMs);
+    } else {
+      await A.endBreak(employeeId, nowMs);
+    }
+    await A.recomputeDay(employeeId, dateKey, nowMs);
+
     await db.prepare(`
       UPDATE workstation_sessions
       SET status = ?, updated_at = ?
@@ -251,7 +261,9 @@ router.post('/break', requireDevice, async (req, res) => {
 
     await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
       .run(nowMs, onBreak ? 'MANUAL_BREAK_STARTED' : 'MANUAL_BREAK_ENDED', employeeId, employeeName, reason || (onBreak ? 'Employee paused work session' : 'Employee resumed work session'));
-  } catch (_) {}
+  } catch (err) {
+    console.warn('[desktop/break] break state sync note:', err.message);
+  }
 
   res.json({ status: 'SUCCESS', workstationStatus: newStatus });
 });

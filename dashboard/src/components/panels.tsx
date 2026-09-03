@@ -628,8 +628,15 @@ export function AttendanceTable({
                       </td>
                       <td className="px-3 py-3.5">
                         <strong className="text-emerald-400 text-sm font-bold block">{a.timeWorkedFormatted}</strong>
+                        {((a.breakMinutes ?? 0) > 0 || (a.activeBreakMinutes ?? 0) > 0) ? (
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            Net: <span className="text-teal-300 font-semibold">{Math.floor(Math.max(0, (a.totalMinutes || 0) - (a.breakMinutes || a.activeBreakMinutes || 0)) / 60)}h {Math.max(0, (a.totalMinutes || 0) - (a.breakMinutes || a.activeBreakMinutes || 0)) % 60}m</span>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-500 mt-0.5">Full presence</div>
+                        )}
                         {a.adjustmentMinutes !== 0 && (
-                          <span className="text-[10px] text-amber-400 font-semibold">
+                          <span className="text-[10px] text-amber-400 font-semibold block mt-0.5">
                             incl. {a.adjustmentMinutes}m adj.
                           </span>
                         )}

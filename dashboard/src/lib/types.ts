@@ -585,6 +585,7 @@ export interface WorkstationItem {
   activeMinutes: number;
   idleMinutes: number;
   breakMinutes: number;
+  presenceMinutes?: number;
   inOffice: boolean;
   lockState: string;
   connectedBssid: string | null;
@@ -615,6 +616,7 @@ export interface AppUsageItem {
   appName: string;
   activeSeconds: number;
   activeMinutes: number;
+  workstationActiveSeconds?: number;
   lastUsedAt: string;
 }
 
