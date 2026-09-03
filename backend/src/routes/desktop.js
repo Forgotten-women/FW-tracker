@@ -97,7 +97,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   }
 
   // 5. Upsert workstation session for today
-  const sessionId = `ws_${employeeId}_${dateKey}`;
+  const sessionId = `ws_${deviceId}_${dateKey}_${crypto.randomUUID().slice(0, 8)}`;
   const numActive = Math.max(0, parseInt(activeSeconds, 10) || 0);
   const numIdle = Math.max(0, parseInt(idleSeconds, 10) || 0);
   const batchTotal = (numActive + numIdle) > 0 ? (numActive + numIdle) : 60;
