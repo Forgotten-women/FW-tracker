@@ -28,18 +28,32 @@ class TokenStore {
 
   Future<String?> readToken() async {
     try {
-      return await _secure.read(key: _kToken);
+      final val = await _secure.read(key: _kToken);
+      if (val != null && val.isNotEmpty) return val;
     } catch (e) {
-      log('TokenStore readToken error: $e');
+      log('TokenStore readToken secure error: $e');
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_kToken);
+    } catch (e) {
+      log('TokenStore readToken prefs error: $e');
       return null;
     }
   }
 
   Future<String?> readDeviceId() async {
     try {
-      return await _secure.read(key: _kDeviceId);
+      final val = await _secure.read(key: _kDeviceId);
+      if (val != null && val.isNotEmpty) return val;
     } catch (e) {
-      log('TokenStore readDeviceId error: $e');
+      log('TokenStore readDeviceId secure error: $e');
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_kDeviceId);
+    } catch (e) {
+      log('TokenStore readDeviceId prefs error: $e');
       return null;
     }
   }
@@ -60,6 +74,8 @@ class TokenStore {
 
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kToken, token);
+      await prefs.setString(_kDeviceId, deviceId);
       await prefs.setString(_kEmployeeId, employeeId);
       await prefs.setString(_kEmployeeName, employeeName);
       await prefs.setString(_kEmployeeRole, employeeRole);
@@ -76,6 +92,8 @@ class TokenStore {
 
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kToken);
+      await prefs.remove(_kDeviceId);
       await prefs.remove(_kEmployeeId);
       await prefs.remove(_kEmployeeName);
       await prefs.remove(_kEmployeeRole);
@@ -130,6 +148,8 @@ class TokenStore {
       await _secure.delete(key: _kToken);
       await _secure.delete(key: _kDeviceId);
       final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kToken);
+      await prefs.remove(_kDeviceId);
       await prefs.remove(_kEmployeeId);
       await prefs.remove(_kEmployeeName);
       await prefs.remove(_kEmployeeRole);

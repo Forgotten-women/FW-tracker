@@ -6,9 +6,38 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
+const crypto = require('crypto');
 const os = require('os');
 const readline = require('readline');
+
+let localDb = null;
+try {
+  let Database;
+  try {
+    Database = require('better-sqlite3');
+  } catch (_) {
+    Database = require(path.join(__dirname, '..', 'backend', 'node_modules', 'better-sqlite3'));
+  }
+  if (Database) {
+    localDb = new Database(path.join(__dirname, 'agent_offline.db'));
+    localDb.pragma('journal_mode = WAL');
+    localDb.exec(`
+      CREATE TABLE IF NOT EXISTS local_events (
+        event_id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        synced_at INTEGER,
+        retry_count INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_events_synced ON local_events (synced_at);
+    `);
+    console.log('[Office Tracker Desktop] SQLite local storage active (WAL mode enabled).');
+  }
+} catch (e) {
+  console.warn('[Office Tracker Desktop] Local SQLite storage fallback notice:', e.message);
+}
 
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 
@@ -270,69 +299,156 @@ async function startAgent() {
 
   let accumulatedActive = 0;
   let accumulatedIdle = 0;
-  let lockDuration = 0;
   let isManualBreak = false;
-  let sampleCount = 0;
-  let lastApprovedCsv = '';
+  let appBreakdown = {};
+  let secondsElapsed = 0;
+  let currentApp = 'Desktop Active';
+  let isSyncing = false;
 
-  console.log('[Office Tracker Desktop] Active work monitoring running (Heartbeat every 60s)...');
+  console.log('[Office Tracker Desktop] High-Precision 1-Second Monitoring Active (Heartbeat sync every 60s)...');
 
-  setInterval(async () => {
-    sampleCount++;
-    const idleSecs = getIdleSeconds();
-    const bssid = getConnectedBssid();
-    const localIp = getLocalIp();
-    const isIdle = idleSecs >= 300; // 5 min idle threshold
+  async function syncLocalQueue() {
+    if (isSyncing) return;
+    isSyncing = true;
+    try {
+      let events = [];
+      if (localDb) {
+        events = localDb.prepare('SELECT * FROM local_events WHERE synced_at IS NULL ORDER BY created_at ASC LIMIT 10').all();
+      }
 
+      for (const ev of events) {
+        try {
+          const payload = JSON.parse(ev.payload);
+          const res = await fetch(`${cfg.serverUrl}/api/desktop/heartbeat`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${cfg.token}`,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (localDb) {
+              localDb.prepare('UPDATE local_events SET synced_at = ? WHERE event_id = ?').run(Date.now(), ev.event_id);
+            }
+            const activeMins = Math.round((data.today?.activeSeconds || 0) / 60);
+            const statusIcon = data.inOffice ? '🟢 [IN OFFICE]' : '🟡 [REMOTE / OUTSIDE]';
+            console.log(`[${new Date().toLocaleTimeString()}] Heartbeat synced (${ev.event_id.slice(0, 8)}) | ${statusIcon} Status: ${data.workstationStatus} | App: ${payload.currentApp} | Today: ${activeMins}m active`);
+          } else if (res.status === 401) {
+            console.error('[Office Tracker Desktop] Token expired or revoked. Re-enroll required.');
+            try { fs.unlinkSync(CONFIG_FILE); } catch (_) {}
+            process.exit(1);
+          } else {
+            if (localDb) {
+              localDb.prepare('UPDATE local_events SET retry_count = retry_count + 1 WHERE event_id = ?').run(ev.event_id);
+            }
+          }
+        } catch (err) {
+          if (localDb) {
+            localDb.prepare('UPDATE local_events SET retry_count = retry_count + 1 WHERE event_id = ?').run(ev.event_id);
+          }
+          console.warn(`[${new Date().toLocaleTimeString()}] Sync paused for ${ev.event_id.slice(0, 8)}: ${err.message}`);
+          break; // Stop batch on connection drop
+        }
+      }
+
+      // Cleanup synced events older than 24 hours
+      if (localDb) {
+        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+        localDb.prepare('DELETE FROM local_events WHERE synced_at IS NOT NULL AND synced_at < ?').run(oneDayAgo);
+      }
+    } finally {
+      isSyncing = false;
+    }
+  }
+
+  function onSecondSample(idleSecs, procName, title) {
+    secondsElapsed++;
+    const isIdle = idleSecs >= 300;
     if (isManualBreak || isIdle) {
-      accumulatedIdle += 10;
+      accumulatedIdle++;
     } else {
-      accumulatedActive += 10;
+      accumulatedActive++;
+      const app = parseActiveApplication(procName, title);
+      currentApp = app;
+      appBreakdown[app] = (appBreakdown[app] || 0) + 1;
     }
 
-    // Every 60 seconds, send heartbeat with active application tracking
-    if (sampleCount >= 6) {
-      sampleCount = 0;
+    if (secondsElapsed >= 60) {
+      secondsElapsed = 0;
       const sendActive = accumulatedActive;
       const sendIdle = accumulatedIdle;
+      const sendBreakdown = { ...appBreakdown };
       accumulatedActive = 0;
       accumulatedIdle = 0;
-      const currentApp = getActiveWindowInfo();
+      appBreakdown = {};
 
-      try {
-        const res = await fetch(`${cfg.serverUrl}/api/desktop/heartbeat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${cfg.token}`,
-          },
-          body: JSON.stringify({
-            activeSeconds: sendActive,
-            idleSeconds: sendIdle,
-            currentApp,
-            lockState: 'UNLOCKED',
-            lockDurationSeconds: 0,
-            connectedBssid: bssid,
-            localIp,
-            isManualBreak,
-          }),
-        });
+      const bssid = getConnectedBssid();
+      const localIp = getLocalIp();
+      const eventId = 'evt_' + crypto.randomUUID();
+      const payload = {
+        eventId,
+        activeSeconds: sendActive,
+        idleSeconds: sendIdle,
+        currentApp,
+        appBreakdown: sendBreakdown,
+        lockState: 'UNLOCKED',
+        lockDurationSeconds: 0,
+        connectedBssid: bssid,
+        localIp,
+        isManualBreak,
+      };
 
-        if (res.ok) {
-          const data = await res.json();
-          const activeMins = Math.round((data.today?.activeSeconds || 0) / 60);
-          const statusIcon = data.inOffice ? '🟢 [IN OFFICE]' : '🟡 [REMOTE / OUTSIDE]';
-          console.log(`[${new Date().toLocaleTimeString()}] Heartbeat sent | ${statusIcon} Status: ${data.workstationStatus} | App: ${currentApp} | Today: ${activeMins}m active`);
-        } else if (res.status === 401) {
-          console.error('[Office Tracker Desktop] Token expired or revoked. Re-enroll required.');
-          fs.unlinkSync(CONFIG_FILE);
-          process.exit(1);
-        }
-      } catch (err) {
-        console.warn(`[${new Date().toLocaleTimeString()}] Heartbeat upload failed (will retry): ${err.message}`);
+      if (localDb) {
+        localDb.prepare(`
+          INSERT INTO local_events (event_id, event_type, payload, created_at)
+          VALUES (?, 'HEARTBEAT', ?, ?)
+        `).run(eventId, JSON.stringify(payload), Date.now());
       }
+
+      void syncLocalQueue();
     }
-  }, 10000);
+  }
+
+  if (process.platform === 'win32') {
+    const streamScript = path.join(__dirname, 'stream-monitor.ps1');
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', streamScript]);
+
+    let buffer = '';
+    child.stdout.on('data', chunk => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const sample = JSON.parse(trimmed);
+          onSecondSample(sample.idle || 0, sample.process || '', sample.title || '');
+        } catch (_) {}
+      }
+    });
+
+    child.stderr.on('data', () => {});
+
+    child.on('exit', () => {
+      console.warn('[Office Tracker Desktop] Stream monitor exited, restarting in 3s...');
+      setTimeout(startAgent, 3000);
+    });
+  } else {
+    setInterval(() => {
+      const idleSecs = getIdleSeconds();
+      const app = getActiveWindowInfo();
+      onSecondSample(idleSecs, app, '');
+    }, 1000);
+  }
+
+  // Periodic flush for offline/queued events
+  setInterval(() => {
+    void syncLocalQueue();
+  }, 20000);
 }
 
 startAgent();

@@ -5,6 +5,36 @@ import { api } from '../lib/api';
 import type { WorkstationItem, AppUsageItem } from '../lib/types';
 import { Badge } from './primitives';
 
+function formatAppDuration(seconds: number) {
+  if (!seconds || seconds <= 0) return '0s';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}m ${s > 0 ? `${s}s` : ''}`.trim();
+  if (m > 0) return `${m}m ${s > 0 ? `${s}s` : ''}`.trim();
+  return `${s}s`;
+}
+
+function getAppCategory(appName: string) {
+  const lower = (appName || '').toLowerCase();
+  if (lower.includes('code') || lower.includes('antigravity') || lower.includes('ide') || lower.includes('studio') || lower.includes('terminal') || lower.includes('git') || lower.includes('dbeaver') || lower.includes('postman')) {
+    return { label: 'Development', icon: '⚡', badgeClass: 'text-sky-400 bg-sky-500/10 border-sky-500/20' };
+  }
+  if (lower.includes('chrome') || lower.includes('edge') || lower.includes('firefox') || lower.includes('browser') || lower.includes('safari') || lower.includes('brave')) {
+    return { label: 'Web / Cloud', icon: '🌐', badgeClass: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
+  }
+  if (lower.includes('teams') || lower.includes('slack') || lower.includes('zoom') || lower.includes('meet') || lower.includes('outlook') || lower.includes('discord')) {
+    return { label: 'Communication', icon: '💬', badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+  }
+  if (lower.includes('excel') || lower.includes('word') || lower.includes('docs') || lower.includes('sheets') || lower.includes('notion') || lower.includes('figma')) {
+    return { label: 'Productivity', icon: '📊', badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
+  }
+  if (lower.includes('youtube') || lower.includes('spotify') || lower.includes('netflix')) {
+    return { label: 'Media', icon: '🎬', badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
+  }
+  return { label: 'Application', icon: '💻', badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
+}
+
 export function WorkstationsPanel() {
   const [workstations, setWorkstations] = useState<WorkstationItem[]>([]);
   const [appUsage, setAppUsage] = useState<AppUsageItem[]>([]);
@@ -240,31 +270,59 @@ export function WorkstationsPanel() {
                     </td>
                   </tr>
                 ) : (
-                  filteredApps.map(app => (
-                    <tr key={app.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3.5 px-4 font-medium text-slate-100">
-                        {app.employeeName}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-mono font-semibold text-indigo-300 flex items-center gap-2">
-                          <span className="p-1 rounded bg-indigo-500/10 border border-indigo-500/20 text-xs">💻</span>
-                          {app.appName}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="font-mono font-bold text-emerald-400">
-                          {app.activeMinutes >= 60 ? `${Math.floor(app.activeMinutes / 60)}h ${app.activeMinutes % 60}m` : `${app.activeMinutes}m`}
-                        </span>
-                        <span className="text-xs text-slate-500 ml-2">({app.activeSeconds}s)</span>
-                      </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-400 capitalize">
-                        {app.platform} ({app.deviceModel})
-                      </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-400">
-                        {app.lastUsedAt}
-                      </td>
-                    </tr>
-                  ))
+                  filteredApps.map(app => {
+                    const cat = getAppCategory(app.appName);
+                    const formatted = formatAppDuration(app.activeSeconds);
+                    const maxSecs = Math.max(...filteredApps.map(a => a.activeSeconds), 1);
+                    const pct = Math.min(100, Math.round((app.activeSeconds / maxSecs) * 100));
+
+                    return (
+                      <tr key={app.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3.5 px-4 font-medium text-slate-100">
+                          {app.employeeName}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-2.5">
+                            <span className={`inline-flex items-center justify-center h-7 w-7 rounded-lg border text-sm ${cat.badgeClass}`}>
+                              {cat.icon}
+                            </span>
+                            <div>
+                              <div className="font-mono font-semibold text-white text-xs">
+                                {app.appName}
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-sans">
+                                {cat.label}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <span className="font-mono font-bold text-emerald-400 text-xs">
+                                {formatted}
+                              </span>
+                              <div className="text-[10px] text-slate-500 font-mono">
+                                {app.activeSeconds.toLocaleString()}s total
+                              </div>
+                            </div>
+                            <div className="w-20 bg-slate-800 rounded-full h-1.5 overflow-hidden hidden sm:block">
+                              <div
+                                className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-slate-400 capitalize">
+                          {app.platform} ({app.deviceModel || 'Desktop'})
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-slate-400">
+                          {app.lastUsedAt}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

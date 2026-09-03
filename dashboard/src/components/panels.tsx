@@ -738,6 +738,23 @@ export function TeamPanel({
     }
   };
 
+  const handleDelete = async (emp: AdminEmployee) => {
+    const ok = window.confirm(
+      `Are you sure you want to permanently delete "${emp.name}" from all places?\n\nThis will permanently delete all paired devices, attendance records, active workstation sessions, application usage history, salary records, and document files.`
+    );
+    if (!ok) return;
+
+    try {
+      setBusy(true);
+      await api.deleteEmployee(emp.id);
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to delete employee');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <Panel
@@ -859,6 +876,19 @@ export function TeamPanel({
                       }
                     >
                       Pair App
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={busy}
+                      onClick={() => void handleDelete(e)}
+                      icon={
+                        <svg className="h-3.5 w-3.5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      }
+                    >
+                      Delete
                     </Button>
                   </div>
                 </div>

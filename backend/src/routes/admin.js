@@ -132,6 +132,79 @@ router.patch('/employees/:id', async (req, res) => {
   res.json({ status: 'SUCCESS', employee: { id: req.params.id, name, role, active: !!active } });
 });
 
+router.delete('/employees/:id', async (req, res) => {
+  const employeeId = req.params.id;
+  const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+  if (!employee) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
+
+  const TABLES_WITH_EMPLOYEE_ID = [
+    'absence_records',
+    'attendance_corrections',
+    'attendance_daily_summary',
+    'attendance_days',
+    'attendance_deficit_ledger',
+    'attendance_events',
+    'break_records',
+    'device_mac_bindings',
+    'document_acknowledgements',
+    'emergency_contacts',
+    'employee_bank_details',
+    'employee_documents',
+    'employee_personal',
+    'employee_warning_standing',
+    'employment_records',
+    'employment_status_history',
+    'enrollment_codes',
+    'formal_warnings',
+    'leave_accrual_ledger',
+    'leave_entitlements',
+    'leave_overdraft_approvals',
+    'leave_requests',
+    'mac_binding_events',
+    'manager_assignments',
+    'movements',
+    'notifications',
+    'payroll_adjustments',
+    'performance_reviews',
+    'presence_events',
+    'process_anomalies',
+    'salary_history',
+    'users',
+    'warning_acknowledgements',
+    'warning_triggers',
+    'workstation_app_usage',
+    'workstation_sessions',
+  ];
+
+  await tx(async () => {
+    // 1. Delete device_tokens for all devices owned by this employee
+    await db.prepare('DELETE FROM device_tokens WHERE device_id IN (SELECT id FROM devices WHERE employee_id = ?)').run(employeeId);
+
+    // 2. Delete from all employee-referencing tables
+    for (const tbl of TABLES_WITH_EMPLOYEE_ID) {
+      try {
+        await db.prepare(`DELETE FROM ${tbl} WHERE employee_id = ?`).run(employeeId);
+      } catch (err) {
+        console.warn(`[admin/delete-employee] table ${tbl} delete non-fatal:`, err.message);
+      }
+    }
+
+    // 3. Delete devices
+    await db.prepare('DELETE FROM devices WHERE employee_id = ?').run(employeeId);
+
+    // 4. Finally delete the employee record itself
+    await db.prepare('DELETE FROM employees WHERE id = ?').run(employeeId);
+
+    await audit({
+      actor: 'admin', action: 'EMPLOYEE_DELETED', targetType: 'employee', targetId: employeeId,
+      before: { name: employee.name, role: employee.role },
+      after: null,
+    });
+  });
+
+  res.json({ status: 'SUCCESS', message: `Employee ${employee.name} permanently deleted from all records.` });
+});
+
 // --- enrolment codes -------------------------------------------------------
 
 // Hand the returned code to the employee. It is single-use and expires in 24h.

@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod client;
+mod db;
 mod tracker {
     pub mod idle;
     pub mod network;

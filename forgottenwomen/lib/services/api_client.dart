@@ -22,14 +22,13 @@ class ApiException implements Exception {
 
   ApiException(this.message, {this.statusCode, this.code});
 
-  /// True when this device's credential is no longer valid and the app must
-  /// return to enrolment rather than retrying forever.
+  /// True when this device's credential is confirmed permanently revoked by the server
+  /// and the app must return to enrolment.
+  /// Transient failures (timeouts, 500s, offline, or temporary reading delays)
+  /// must NEVER wipe user credentials.
   bool get needsReEnrollment =>
       code == 'REVOKED' ||
-      code == 'EXPIRED' ||
-      code == 'BAD_TOKEN' ||
-      code == 'DEVICE_REVOKED' ||
-      code == 'NO_TOKEN';
+      code == 'DEVICE_REVOKED';
 
   @override
   String toString() => message;

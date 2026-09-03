@@ -132,6 +132,12 @@ export const api = {
       { method: 'POST' },
     ),
 
+  deleteEmployee: (employeeId: string) =>
+    request<{ status: string; message: string }>(
+      `/api/admin/employees/${encodeURIComponent(employeeId)}`,
+      { method: 'DELETE' },
+    ),
+
   /**
    * EventSource cannot send headers, so the admin key is exchanged for a
    * single-use, short-lived ticket. That keeps the key out of the URL, the
