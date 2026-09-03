@@ -155,12 +155,16 @@ fn main() {
                             local_ip,
                             is_manual_break: is_break,
                         };
-                        accumulated_active = 0;
-                        accumulated_idle = 0;
-
-                        if let Ok(resp) = client::send_heartbeat(&cfg, payload).await {
-                            *state.latest_response.lock().unwrap() = Some(resp.clone());
-                            let _ = app_handle.emit_all("heartbeat-updated", resp);
+                        match client::send_heartbeat(&cfg, payload).await {
+                            Ok(resp) => {
+                                accumulated_active = 0;
+                                accumulated_idle = 0;
+                                *state.latest_response.lock().unwrap() = Some(resp.clone());
+                                let _ = app_handle.emit_all("heartbeat-updated", resp);
+                            }
+                            Err(e) => {
+                                eprintln!("[tracker] Heartbeat delivery failed (internet outage?): {e}. Preserving accumulated work time for automatic catch-up on reconnect.");
+                            }
                         }
                     }
                 }
