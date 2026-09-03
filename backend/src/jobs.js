@@ -12,6 +12,8 @@ const A = require('./domain/attendance');
 const W = require('./domain/warnings');
 const L = require('./domain/leave');
 const AL = require('./domain/alerts');
+const N = require('./domain/notifications');
+const schedule = require('./domain/schedule');
 const events = require('./events');
 const T = require('./util/time');
 
@@ -273,6 +275,106 @@ async function nightlyBackup(nowMs = T.now()) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Attendance Reminder Notifications (spec requirement: notify if auto-attendance fails)
+// ---------------------------------------------------------------------------
+//
+// Check-in reminder: fires at 11:10 AM (the moment grace expires) if no check-in
+// has been recorded yet for a scheduled working day.
+//
+// Check-out reminder: fires at 7:05 PM (5 mins after shift end) if no manual
+// clock-out event has been recorded.
+//
+// Both fire ONCE per employee per day. Tracking is done via a simple in-memory
+// Set keyed on "employeeId:dateKey" so server restart on the same day can
+// re-send, but a normal day never double-fires.
+
+const _sentCheckInReminder = new Set();   // "emp_id:date_key"
+const _sentCheckOutReminder = new Set();  // "emp_id:date_key"
+
+async function sendAttendanceReminders(nowMs = T.now()) {
+  const todayKey = T.dateKey(nowMs);
+
+  const employees = await db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
+
+  for (const emp of employees) {
+    try {
+      const s = await schedule.resolve(emp.id, todayKey);
+
+      // Skip weekends, public holidays, and non-working days for this employee.
+      if (!s.isWorkingDay) continue;
+
+      // -----------------------------------------------------------------------
+      // 1. Check-In Reminder — at grace expiry (11:10 AM)
+      // -----------------------------------------------------------------------
+      const checkInKey = `${emp.id}:${todayKey}:checkin`;
+      if (!_sentCheckInReminder.has(checkInKey) && nowMs >= s.latestOnTimeAt) {
+        // Derive today's attendance to check if any check-in exists.
+        const day = await A.deriveDay(emp.id, todayKey, nowMs);
+
+        if (!day.firstInAt) {
+          // No check-in recorded at all — send the reminder.
+          _sentCheckInReminder.add(checkInKey);
+          await N.notify({
+            employeeId: emp.id,
+            category: 'ATTENDANCE',
+            title: '⏰ Attendance Not Recorded',
+            body: 'Your check-in has not been detected yet today. If you have arrived, please ensure your phone is connected to the office Wi-Fi. If the sensor failed, open the app to confirm your attendance.',
+            severity: 'warning',
+            link: '/attendance',
+            nowMs,
+          });
+          console.log(`[jobs] check-in reminder sent → ${emp.name} (${emp.id}) for ${todayKey}`);
+        } else {
+          // Already checked in — mark as sent so we don't re-check every minute.
+          _sentCheckInReminder.add(checkInKey);
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // 2. Check-Out Reminder — at 7:05 PM (5 mins after scheduled end)
+      // -----------------------------------------------------------------------
+      const checkOutReminderAt = s.scheduledEndAt + 5 * 60 * 1000; // +5 mins
+      const checkOutKey = `${emp.id}:${todayKey}:checkout`;
+      if (!_sentCheckOutReminder.has(checkOutKey) && nowMs >= checkOutReminderAt) {
+        // Check if a CLOCK_OUT attendance event exists for today.
+        const clockOutEvent = await db.prepare(`
+          SELECT id FROM attendance_events
+          WHERE employee_id = ? AND date_key = ? AND event_type = 'CLOCK_OUT' AND voided_at IS NULL
+          LIMIT 1
+        `).get(emp.id, todayKey);
+
+        if (!clockOutEvent) {
+          // No manual clock-out — check if they were even present today before sending.
+          const day = await A.deriveDay(emp.id, todayKey, nowMs);
+          if (day.firstInAt) {
+            // Was present but has not clocked out — send the reminder.
+            _sentCheckOutReminder.add(checkOutKey);
+            await N.notify({
+              employeeId: emp.id,
+              category: 'ATTENDANCE',
+              title: '🔔 Clock-Out Reminder',
+              body: 'It is 7:05 PM and your clock-out has not been recorded. If you have finished your working day, please clock out from the app so your attendance is accurately logged.',
+              severity: 'info',
+              link: '/attendance',
+              nowMs,
+            });
+            console.log(`[jobs] clock-out reminder sent → ${emp.name} (${emp.id}) for ${todayKey}`);
+          } else {
+            // Not present today — skip silently.
+            _sentCheckOutReminder.add(checkOutKey);
+          }
+        } else {
+          // Already clocked out — mark as sent.
+          _sentCheckOutReminder.add(checkOutKey);
+        }
+      }
+    } catch (err) {
+      console.error(`[jobs] attendance reminder error for employee ${emp.id}:`, err.message);
+    }
+  }
+}
+
 let lastAbsenceScanKey = null;
 
 async function scanAbsences(nowMs = T.now()) {
@@ -306,6 +408,7 @@ async function start() {
       await detectTransitions(nowMs);
       await evaluateWarnings(nowMs);
       await scanAbsences(nowMs);
+      await sendAttendanceReminders(nowMs);
       await accrueLeave(nowMs);
       await notifyHrAlerts(nowMs);
       await retention(nowMs);
@@ -331,4 +434,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, nightlyBackup };
+module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, nightlyBackup, sendAttendanceReminders };
