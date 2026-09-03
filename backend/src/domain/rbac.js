@@ -178,7 +178,7 @@ async function accessibleEmployeeIds(user) {
 
 // --- authentication --------------------------------------------------------
 
-const selectUserByEmail = db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE');
+const selectUserByEmail = db.prepare('SELECT * FROM users WHERE lower(email) = lower(?)');
 const selectUserById = db.prepare('SELECT * FROM users WHERE id = ?');
 const logLogin = db.prepare(`
   INSERT INTO login_events (user_id, email_tried, at, outcome, ip, user_agent)

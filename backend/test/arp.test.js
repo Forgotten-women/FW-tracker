@@ -35,7 +35,7 @@ router.lan (192.168.18.1) at f8:1a:67:11:22:33 on en0 ifscope [ethernet]
 ? (192.168.18.59) at 66:7a:29:fb:69:ac on en0 ifscope [ethernet]
 `;
 
-test('parses Windows arp -a output', () => {
+test('parses Windows arp -a output', async () => {
   const found = parseArpOutput(WINDOWS_OUTPUT);
   const ips = found.map(d => d.ip);
 
@@ -45,7 +45,7 @@ test('parses Windows arp -a output', () => {
     'Windows dash-separated MACs must be normalised to colons');
 });
 
-test('excludes infrastructure, static entries, multicast and off-subnet hosts', () => {
+test('excludes infrastructure, static entries, multicast and off-subnet hosts', async () => {
   const ips = parseArpOutput(WINDOWS_OUTPUT).map(d => d.ip);
 
   assert.ok(!ips.includes('192.168.18.1'), 'the gateway is not a person');
@@ -55,7 +55,7 @@ test('excludes infrastructure, static entries, multicast and off-subnet hosts', 
   assert.ok(!ips.includes('10.20.30.40'), 'hosts outside the configured subnets are ignored');
 });
 
-test('parses Unix arp -a output, which the old regex could not', () => {
+test('parses Unix arp -a output, which the old regex could not', async () => {
   const found = parseArpOutput(UNIX_OUTPUT);
   const ips = found.map(d => d.ip);
   assert.ok(ips.includes('192.168.18.14'));
@@ -63,7 +63,7 @@ test('parses Unix arp -a output, which the old regex could not', () => {
   assert.ok(!ips.includes('192.168.18.1'), 'gateway still excluded');
 });
 
-test('empty or malformed input yields nothing rather than throwing', () => {
+test('empty or malformed input yields nothing rather than throwing', async () => {
   assert.deepEqual(parseArpOutput(''), []);
   assert.deepEqual(parseArpOutput('garbage\nno addresses here\n'), []);
 });

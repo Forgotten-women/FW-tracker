@@ -16,51 +16,51 @@ const pg = require('../src/db/pg/client');
 // Placeholder translation
 // ---------------------------------------------------------------------------
 
-test('named parameters become $n in order of first appearance', () => {
+test('named parameters become $n in order of first appearance', async () => {
   const r = pg.translate('SELECT * FROM t WHERE a = @alpha AND b = @beta');
   assert.equal(r.text, 'SELECT * FROM t WHERE a = $1 AND b = $2');
   assert.deepEqual(r.names, ['alpha', 'beta']);
 });
 
-test('a repeated named parameter reuses its number', () => {
+test('a repeated named parameter reuses its number', async () => {
   const r = pg.translate('SELECT * FROM t WHERE a = @x OR b = @x OR c = @y');
   assert.equal(r.text, 'SELECT * FROM t WHERE a = $1 OR b = $1 OR c = $2');
   assert.deepEqual(r.names, ['x', 'y']);
   assert.equal(r.count, 2);
 });
 
-test('positional markers are numbered left to right', () => {
+test('positional markers are numbered left to right', async () => {
   const r = pg.translate('INSERT INTO t (a,b,c) VALUES (?,?,?)');
   assert.equal(r.text, 'INSERT INTO t (a,b,c) VALUES ($1,$2,$3)');
   assert.equal(r.names, null);
 });
 
 // The reason this is a tokenizer and not a regex.
-test('markers inside string literals are left alone', () => {
+test('markers inside string literals are left alone', async () => {
   const r = pg.translate("SELECT * FROM t WHERE email = 'a@b.com' AND q = ? AND s = 'why?'");
   assert.equal(r.text, "SELECT * FROM t WHERE email = 'a@b.com' AND q = $1 AND s = 'why?'");
   assert.equal(r.count, 1);
 });
 
-test('an escaped quote inside a literal does not end the literal', () => {
+test('an escaped quote inside a literal does not end the literal', async () => {
   const r = pg.translate("SELECT * FROM t WHERE n = 'O''Brien? @x' AND id = ?");
   assert.equal(r.text, "SELECT * FROM t WHERE n = 'O''Brien? @x' AND id = $1");
   assert.equal(r.count, 1);
 });
 
-test('markers inside line comments are left alone', () => {
+test('markers inside line comments are left alone', async () => {
   const r = pg.translate('SELECT 1 -- is this @thing ok?\nWHERE id = @id');
   assert.equal(r.text, 'SELECT 1 -- is this @thing ok?\nWHERE id = $1');
   assert.deepEqual(r.names, ['id']);
 });
 
-test('markers inside block comments are left alone', () => {
+test('markers inside block comments are left alone', async () => {
   const r = pg.translate('SELECT /* @a and ? */ 1 WHERE id = ?');
   assert.equal(r.text, 'SELECT /* @a and ? */ 1 WHERE id = $1');
   assert.equal(r.count, 1);
 });
 
-test('quoted identifiers are left alone', () => {
+test('quoted identifiers are left alone', async () => {
   const r = pg.translate('SELECT "od?d@col" FROM t WHERE id = ?');
   assert.equal(r.text, 'SELECT "od?d@col" FROM t WHERE id = $1');
   assert.equal(r.count, 1);
@@ -70,13 +70,13 @@ test('quoted identifiers are left alone', () => {
 // Dialect
 // ---------------------------------------------------------------------------
 
-test('INSERT OR IGNORE becomes ON CONFLICT DO NOTHING', () => {
+test('INSERT OR IGNORE becomes ON CONFLICT DO NOTHING', async () => {
   const sql = pg.normaliseDialect('INSERT OR IGNORE INTO t (a) VALUES (?)');
   assert.match(sql, /^INSERT INTO t/);
   assert.match(sql, /ON CONFLICT DO NOTHING$/);
 });
 
-test('an INSERT OR IGNORE that already has ON CONFLICT is not double-suffixed', () => {
+test('an INSERT OR IGNORE that already has ON CONFLICT is not double-suffixed', async () => {
   const sql = pg.normaliseDialect(
     'INSERT OR IGNORE INTO t (a) VALUES (?) ON CONFLICT (a) DO NOTHING',
   );
@@ -84,7 +84,7 @@ test('an INSERT OR IGNORE that already has ON CONFLICT is not double-suffixed', 
 });
 
 // Guessing the conflict target on a payroll table could overwrite the wrong row.
-test('INSERT OR REPLACE is refused rather than guessed at', () => {
+test('INSERT OR REPLACE is refused rather than guessed at', async () => {
   assert.throws(
     () => pg.normaliseDialect('INSERT OR REPLACE INTO t (a) VALUES (?)'),
     /cannot be translated safely/,

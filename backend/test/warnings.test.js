@@ -13,6 +13,8 @@ const path = require('path');
 const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
 useTestDatabase('warnings');
 
+test.before(prepareDatabase);
+
 
 const { db } = require('../src/db');
 const W = require('../src/domain/warnings');
@@ -121,8 +123,8 @@ test('a decision requires a note, and confirming requires an explanation', async
   for (const d of LATE_DAYS) await lateDay(emp, d);
   const { triggerId } = await W.evaluateLateness(emp, REVIEW_DATE);
 
-  assert.throws(async () => await W.reviewTrigger({ triggerId, decision: 'WAIVED', actor: 'user:hr' }), /note/i);
-  assert.throws(
+  await assert.rejects(async () => await W.reviewTrigger({ triggerId, decision: 'WAIVED', actor: 'user:hr' }), /note/i);
+  await assert.rejects(
     async () => await W.reviewTrigger({ triggerId, decision: 'CONFIRMED', actor: 'user:hr', notes: 'ok' }),
     /explanation/i,
     'a formal warning must carry an explanation the employee will see',
@@ -135,7 +137,7 @@ test('a trigger cannot be reviewed twice', async () => {
   const { triggerId } = await W.evaluateLateness(emp, REVIEW_DATE);
 
   await W.reviewTrigger({ triggerId, decision: 'WAIVED', actor: 'user:hr', notes: 'First decision' });
-  assert.throws(
+  await assert.rejects(
     async () => await W.reviewTrigger({ triggerId, decision: 'CONFIRMED', actor: 'user:hr', notes: 'x', explanation: 'y' }),
     /already been reviewed/i,
   );
@@ -194,7 +196,7 @@ test('the engine refuses to escalate past the confirmed sequence', async () => {
   assert.equal(t4.triggered, true, 'HR is still told about it');
   assert.equal(t4.sequenceExhausted, true);
 
-  assert.throws(
+  await assert.rejects(
     async () => await W.reviewTrigger({
       triggerId: t4.triggerId, decision: 'CONFIRMED', actor: 'user:hr',
       notes: 'Seventh', explanation: 'A seventh late arrival.',
@@ -258,8 +260,8 @@ test('a withdrawn warning does not count toward escalation', async () => {
   assert.equal(await (await W.standingFor(emp)).nextLevel, 'INFORMAL_NOTICE');
 });
 
-test('withdrawing requires a reason', () => {
-  assert.throws(
+test('withdrawing requires a reason', async () => {
+  await assert.rejects(
     async () => await W.withdrawWarning({ warningId: 'nonexistent', actor: 'user:hr' }),
     /reason/i,
   );
@@ -397,8 +399,8 @@ test('absence consequences are chosen per case and only PROPOSED', async () => {
 test('reviewing an absence requires a note and a valid status', async () => {
   const emp = await makeEmployee('emp_absnote');
   const { id } = await W.recordSuspectedAbsence({ employeeId: emp, dateKey: '2026-09-17' });
-  assert.throws(async () => await W.reviewAbsence({ absenceId: id, status: 'CONFIRMED', actor: 'hr' }), /note/i);
-  assert.throws(
+  await assert.rejects(async () => await W.reviewAbsence({ absenceId: id, status: 'CONFIRMED', actor: 'hr' }), /note/i);
+  await assert.rejects(
     async () => await W.reviewAbsence({ absenceId: id, status: 'MAYBE', notes: 'x', actor: 'hr' }),
     /CONFIRMED or DISMISSED/,
   );
@@ -433,7 +435,7 @@ test('the trigger audit entry states plainly that it is not a warning', async ()
 test('with no confirmed monitoring period the engine refuses to evaluate', async () => {
   const { config } = require('../src/config');
 
-test.before(prepareDatabase);
+
   const original = config.latenessMonitoringPeriod;
   config.latenessMonitoringPeriod = 'UNSET';
   try {

@@ -20,8 +20,25 @@
 //     call sites do not have to thread a client parameter through every
 //     function.
 
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const { AsyncLocalStorage } = require('async_hooks');
+
+// BIGINT comes back as a STRING by default.
+//
+// node-postgres does that because a 64-bit integer can exceed what a JS number
+// represents exactly. But every timestamp in this schema is epoch milliseconds
+// in a BIGINT column, and the whole codebase treats those as numbers: it
+// subtracts them to measure sessions, compares them against grace periods, and
+// passes them to new Date(). A string breaks all of it - `new Date("17568...")`
+// is an Invalid Date, and `now - lastSeen` on strings is not arithmetic.
+//
+// Epoch milliseconds are about 1.7e12, and Number.MAX_SAFE_INTEGER is 9.0e15,
+// so there is no precision to lose for another 285,000 years. Row counts and
+// minute totals are far smaller still.
+//
+// 20 is the OID for int8 (BIGINT); 1700 is numeric, which is left as a string
+// because that IS used for money and must not go through a float.
+types.setTypeParser(20, value => (value === null ? null : Number(value)));
 
 // The connection the current transaction is running on, if any.
 const txContext = new AsyncLocalStorage();

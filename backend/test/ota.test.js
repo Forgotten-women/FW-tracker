@@ -72,7 +72,7 @@ test('Over-The-Air (OTA) Updates Domain Logic', async (t) => {
     assert.strictEqual(check.latestRelease.downloadUrl, 'https://testflight.apple.com/join/office123');
   });
 
-  await t.test('7. generateIosManifest produces valid Apple wireless plist XML', () => {
+  await t.test('7. generateIosManifest produces valid Apple wireless plist XML', async () => {
     const plist = OTA.generateIosManifest({
       bundleId: 'com.rethink.officetracker',
       versionName: '1.0.1',

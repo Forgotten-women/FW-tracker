@@ -65,7 +65,7 @@ test('re-uploading the same type adds a version, not a second document', async (
 
 test('a type requiring an expiry date is refused without one', async () => {
   const emp = await makeEmployee('emp_exp');
-  assert.throws(
+  await assert.rejects(
     async () => await docs.upload({ employeeId: emp, documentTypeId: 'passport_id', title: 'Passport', file: fakeFile('p.pdf', 'x'), actor: 'hr' }),
     /expiry/i,
   );

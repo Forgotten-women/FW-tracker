@@ -62,7 +62,9 @@ const upsertUnknown = db.prepare(`
   ON CONFLICT(mac_hash) DO UPDATE SET
     last_seen_at   = @at,
     last_source    = @source,
-    sighting_count = sighting_count + 1
+    -- Qualified: an unqualified column name in the DO UPDATE clause is
+    -- ambiguous between the existing row and the proposed one.
+    sighting_count = unknown_devices.sighting_count + 1
 `);
 
 /**

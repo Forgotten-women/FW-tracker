@@ -302,7 +302,7 @@ router.get('/employee/:employeeId',
     const balance = await L.balanceFor(req.params.employeeId);
     const ledger = await db.prepare(`
       SELECT * FROM leave_accrual_ledger WHERE employee_id = ?
-      ORDER BY rowid DESC LIMIT 200
+      ORDER BY created_at DESC, id DESC LIMIT 200
     `).all(req.params.employeeId);
 
     res.json({

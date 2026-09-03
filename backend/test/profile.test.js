@@ -27,7 +27,14 @@ test.before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
 });
 
-test.after(dropDatabase);
+test.after(async () => {
+  // closeAllConnections() first: fetch() keeps its sockets alive, and
+  // server.close() waits for every open connection, so on its own it never
+  // resolves and the file times out after every test has already passed.
+  server.closeAllConnections?.();
+  await new Promise(resolve => server.close(resolve));
+  await dropDatabase();
+});
 
 const req = (method, url, { headers = {}, body } = {}) =>
   fetch(base + url, {

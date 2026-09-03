@@ -37,7 +37,7 @@ test.after(dropDatabase);
 // Parsing
 // ---------------------------------------------------------------------------
 
-test('CSV parsing handles quotes, embedded commas and blank lines', () => {
+test('CSV parsing handles quotes, embedded commas and blank lines', async () => {
   const rows = I.parseCsv('a,b\n"one, two",three\n\n"say ""hi""",four\n');
   assert.deepEqual(rows, [
     ['a', 'b'],
@@ -46,7 +46,7 @@ test('CSV parsing handles quotes, embedded commas and blank lines', () => {
   ]);
 });
 
-test('column headers are matched flexibly', () => {
+test('column headers are matched flexibly', async () => {
   // A hand-made spreadsheet will not match a fixed header, and rejecting the
   // file over spacing would just send HR back to reformat it.
   const { mapping } = I.mapColumns(['Employee ID', 'clock_in', 'Clock-Out', 'DATE']);
@@ -56,7 +56,7 @@ test('column headers are matched flexibly', () => {
   assert.equal(mapping.date, 3);
 });
 
-test('times are accepted in 12 and 24 hour form', () => {
+test('times are accepted in 12 and 24 hour form', async () => {
   assert.equal(I.parseTime('11:00'), '11:00');
   assert.equal(I.parseTime('2:35 PM'), '14:35');
   assert.equal(I.parseTime('12:30 AM'), '00:30');

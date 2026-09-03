@@ -300,7 +300,7 @@ test('overlapping requests are refused', async () => {
   await L.accrue(emp, '2025-06-01');
   await L.submitRequest({ employeeId: emp, leaveTypeId: 'annual', startDate: '2025-06-09', endDate: '2025-06-11' });
 
-  assert.throws(
+  await assert.rejects(
     async () => await L.submitRequest({ employeeId: emp, leaveTypeId: 'annual', startDate: '2025-06-10', endDate: '2025-06-12' }),
     /overlaps/i,
   );
@@ -369,7 +369,7 @@ test('approving beyond the balance requires an explicit reason', async () => {
     startDate: '2025-03-10', endDate: '2025-03-14',   // 5 days
   });
 
-  assert.throws(
+  await assert.rejects(
     async () => await L.decideRequest({ requestId: r.id, decision: 'APPROVED', notes: 'Fine', actor: 'user:hr' }),
     /exceeds the accrued balance/i,
     'letting someone go into debt must be a deliberate act',
@@ -409,10 +409,10 @@ test('a decision requires a note, and cannot be made twice', async () => {
     employeeId: emp, leaveTypeId: 'annual', startDate: '2025-07-28', endDate: '2025-07-29',
   });
 
-  assert.throws(async () => await L.decideRequest({ requestId: r.id, decision: 'APPROVED', actor: 'user:hr' }), /note/i);
+  await assert.rejects(async () => await L.decideRequest({ requestId: r.id, decision: 'APPROVED', actor: 'user:hr' }), /note/i);
 
   await L.decideRequest({ requestId: r.id, decision: 'REJECTED', notes: 'No', actor: 'user:hr' });
-  assert.throws(
+  await assert.rejects(
     async () => await L.decideRequest({ requestId: r.id, decision: 'APPROVED', notes: 'Changed mind', actor: 'user:hr' }),
     /already been/i,
   );
@@ -426,7 +426,7 @@ test('an HR adjustment needs a reason and is attributed', async () => {
   const emp = await makeEmployee('emp_adj', '2025-01-01');
   await L.accrue(emp, '2025-04-01');
 
-  assert.throws(async () => await L.adjustBalance({ employeeId: emp, days: 2, actor: 'user:hr' }), /reason/i);
+  await assert.rejects(async () => await L.adjustBalance({ employeeId: emp, days: 2, actor: 'user:hr' }), /reason/i);
 
   // onDate matters: without it the adjustment lands in whichever holiday year
   // today falls in, which under an anniversary year is rarely the one meant.

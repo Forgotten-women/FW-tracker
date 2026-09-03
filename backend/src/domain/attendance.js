@@ -354,7 +354,7 @@ async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) 
 
 const selectLatestLedger = db.prepare(`
   SELECT * FROM attendance_deficit_ledger
-  WHERE employee_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1
+  WHERE employee_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
 `);
 
 const selectLedgerForDay = db.prepare(`

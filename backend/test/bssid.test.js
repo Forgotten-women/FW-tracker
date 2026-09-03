@@ -75,7 +75,7 @@ SSID 13 : Trans K 2.4G
 const parsed = parseWindows(NETSH_OUTPUT);
 const bySsid = (name) => parsed.find((n) => n.ssid === name);
 
-test('parses every SSID in the scan', () => {
+test('parses every SSID in the scan', async () => {
   assert.equal(parsed.length, 3);
   assert.deepEqual(
     parsed.map((n) => n.ssid),
@@ -83,7 +83,7 @@ test('parses every SSID in the scan', () => {
   );
 });
 
-test('captures both radios of a dual-band SSID', () => {
+test('captures both radios of a dual-band SSID', async () => {
   // The failure that matters: taking only BSSID 1 and missing BSSID 2 would
   // lock out the 13 people on the 2.4GHz radio.
   const trans = bySsid('Trans K 2.4G');
@@ -94,7 +94,7 @@ test('captures both radios of a dual-band SSID', () => {
   );
 });
 
-test('an SSID named "2.4G" can be on the 5GHz band', () => {
+test('an SSID named "2.4G" can be on the 5GHz band', async () => {
   // The actual surprise in this office: the SSID name does not indicate the
   // band, so config must be driven by the scan and not by the name.
   const trans = bySsid('Trans K 2.4G');
@@ -106,13 +106,13 @@ test('an SSID named "2.4G" can be on the 5GHz band', () => {
   assert.equal(twoFourGhz.channel, 11);
 });
 
-test('reads signal and connected station counts', () => {
+test('reads signal and connected station counts', async () => {
   const trans = bySsid('Trans K 2.4G');
   assert.equal(trans.radios[1].signal, 78);
   assert.equal(trans.radios[1].stations, 13);
 });
 
-test('band is normalised without the GHz suffix', () => {
+test('band is normalised without the GHz suffix', async () => {
   for (const n of parsed) {
     for (const r of n.radios) {
       assert.match(r.band, /^(2\.4|5|6)$/, `unexpected band: ${r.band}`);
@@ -120,7 +120,7 @@ test('band is normalised without the GHz suffix', () => {
   }
 });
 
-test('attributes each radio to the right SSID', () => {
+test('attributes each radio to the right SSID', async () => {
   // Radio blocks are indented under their SSID; a naive line scan would leak
   // one network's BSSIDs into the next.
   assert.equal(bySsid('Trans K 5G').radios.length, 1);
@@ -128,7 +128,7 @@ test('attributes each radio to the right SSID', () => {
   assert.equal(bySsid('Mustafa Developers').radios.length, 2);
 });
 
-test('the office access point is identifiable by shared BSSID prefix', () => {
+test('the office access point is identifiable by shared BSSID prefix', async () => {
   // ba:9f:cc:db:52:5x is one physical AP serving several SSIDs. That is how a
   // still-enabled factory SSID gets noticed.
   const officeRadios = parsed
@@ -139,7 +139,7 @@ test('the office access point is identifiable by shared BSSID prefix', () => {
   assert.equal(new Set(officeRadios.map((r) => r.ssid)).size, 2);
 });
 
-test('empty or malformed input yields nothing rather than throwing', () => {
+test('empty or malformed input yields nothing rather than throwing', async () => {
   assert.deepEqual(parseWindows(''), []);
   assert.deepEqual(parseWindows('no networks here\njust noise\n'), []);
 });

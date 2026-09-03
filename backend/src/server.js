@@ -8,6 +8,7 @@ const events = require('./events');
 const jobs = require('./jobs');
 const arpSensor = require('./sensors/arp');
 const { requireAdmin, consumeSseTicket } = require('./middleware/auth');
+const { wrapRouter } = require('./util/async-routes');
 
 const app = express();
 
@@ -132,6 +133,12 @@ app.use('/api/app', require('./routes/ota'));                   // OTA app versi
 app.use('/api', require('./routes/ota'));                       // admin OTA releases
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin
 app.use('/api/admin', require('./routes/admin'));              // admin
+
+// Express 4 ignores the promise an async handler returns, so a rejection
+// leaves the request hanging with no response rather than producing a 500.
+// Every handler is async now, so that has to be corrected once, here,
+// after the routes are mounted. See util/async-routes.js.
+wrapRouter(app._router || app.router);
 
 // Unknown API routes return JSON, never the SPA shell - otherwise the phone
 // app's jsonDecode throws a parse error instead of seeing a clean failure.

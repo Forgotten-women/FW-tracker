@@ -10,8 +10,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
+const { useTestDatabase, prepareDatabase, dropDatabase, tableInfo } = require('./helpers/pg');
 useTestDatabase('rbac');
+
+test.before(prepareDatabase);
 
 
 const { db } = require('../src/db');
@@ -180,7 +182,7 @@ test('passwords are salted, and never recoverable from storage', async () => {
   assert.notEqual(row.password_hash, other.password_hash);
 });
 
-test('the password policy rejects weak choices', () => {
+test('the password policy rejects weak choices', async () => {
   assert.ok(rbac.passwordProblems('short').length > 0);
   assert.ok(rbac.passwordProblems('1234567890123').length > 0, 'digits only');
   assert.ok(rbac.passwordProblems('myforgottenwomenpass').length > 0, 'contains the org name');
@@ -194,7 +196,7 @@ test('sign-in issues a working session, and the wrong password does not', async 
   assert.equal(resolved.id, hrUser.id);
   assert.equal(resolved.roles.includes('hr'), true);
 
-  assert.throws(
+  await assert.rejects(
     async () => await rbac.login({ email: 'hr@test.org', password: 'wrong-password-entirely' }),
     /incorrect/i,
   );
@@ -219,7 +221,7 @@ test('repeated failures lock the account', async () => {
     try { await rbac.login({ email, password: 'definitely-wrong-here' }); } catch {}
   }
   // Even the CORRECT password is refused once locked.
-  assert.throws(async () => await rbac.login({ email, password: PASSWORD }), /locked/i);
+  await assert.rejects(async () => await rbac.login({ email, password: PASSWORD }), /locked/i);
 });
 
 test('signing out invalidates the token immediately', async () => {
@@ -300,7 +302,7 @@ test('confirmed policy is recorded, unconfirmed policy stays undecided', async (
   // escalation sequence must stop rather than invent an outcome.
   const { config } = require('../src/config');
 
-test.before(prepareDatabase);
+
   assert.deepEqual(config.warningEscalationSequence,
     ['INFORMAL_NOTICE', 'FIRST_WRITTEN', 'FINAL_WRITTEN']);
 
@@ -314,12 +316,12 @@ test.before(prepareDatabase);
 // Spec 10.2 warns that the wording supplied would apply two consequences to one
 // absence. They must stay independently switchable.
 test('unauthorised-absence consequences are three separate switches', async () => {
-  const cols = (await db.prepare('PRAGMA table_info(absence_records)').all()).map(c => c.name);
+  const cols = (await tableInfo('absence_records')).map(c => c.name);
   for (const c of ['deduct_annual_leave', 'treat_as_unpaid', 'create_warning_trigger']) {
     assert.ok(cols.includes(c), `${c} must be independently controllable`);
   }
   // Null, not 0 or 1: nothing is assumed until a human decides.
-  const info = await db.prepare('PRAGMA table_info(absence_records)').all();
+  const info = await tableInfo('absence_records');
   for (const c of ['deduct_annual_leave', 'treat_as_unpaid', 'create_warning_trigger']) {
     assert.equal(info.find(x => x.name === c).dflt_value, null,
       `${c} must have no default - the consequence is a decision, not a fallback`);
@@ -328,7 +330,7 @@ test('unauthorised-absence consequences are three separate switches', async () =
 
 // Spec 18/29: calculated is not the same as approved.
 test('payroll adjustments separate calculated from approved amounts', async () => {
-  const cols = (await db.prepare('PRAGMA table_info(payroll_adjustments)').all()).map(c => c.name);
+  const cols = (await tableInfo('payroll_adjustments')).map(c => c.name);
   for (const c of ['calculated_amount', 'approved_amount', 'approved_by', 'status']) {
     assert.ok(cols.includes(c), `payroll_adjustments needs ${c}`);
   }
@@ -336,7 +338,7 @@ test('payroll adjustments separate calculated from approved amounts', async () =
 
 // Spec 31: salary must not be a single overwriteable field.
 test('salary history is versioned with effective dates', async () => {
-  const cols = (await db.prepare('PRAGMA table_info(salary_history)').all()).map(c => c.name);
+  const cols = (await tableInfo('salary_history')).map(c => c.name);
   for (const c of ['effective_from', 'effective_to', 'amount', 'created_by']) {
     assert.ok(cols.includes(c), `salary_history needs ${c}`);
   }

@@ -13,6 +13,8 @@ const path = require('path');
 const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
 useTestDatabase('attendance');
 
+test.before(prepareDatabase);
+
 
 const { db } = require('../src/db');
 const A = require('../src/domain/attendance');
@@ -269,7 +271,7 @@ test('recomputing a day adjusts the balance rather than double-counting', async 
 
 test('an HR adjustment requires a reason', async () => {
   const emp = await makeEmployee('emp_noreason');
-  assert.throws(
+  await assert.rejects(
     async () => await A.adjustBalance({ employeeId: emp, dateKey: DAY, minutes: -60, actor: 'hr' }),
     /reason/i,
   );
@@ -279,7 +281,7 @@ test('an HR adjustment requires a reason', async () => {
 // Lateness occurrences (spec 9.1, 9.2)
 // ---------------------------------------------------------------------------
 
-test('the monitoring period is the calendar month, as confirmed', () => {
+test('the monitoring period is the calendar month, as confirmed', async () => {
   const w = A.monitoringPeriod('2026-08-26');
   assert.equal(w.period, 'CALENDAR_MONTH');
   assert.equal(w.from, '2026-08-01');
@@ -352,7 +354,7 @@ test('an unconfigured monitoring period refuses to evaluate', async () => {
   } finally {
     require('../src/config').config.latenessMonitoringPeriod = original;
 
-test.before(prepareDatabase);
+
   }
 });
 

@@ -9,6 +9,8 @@ const path = require('path');
 const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
 useTestDatabase('people');
 
+test.before(prepareDatabase);
+
 
 const { db } = require('../src/db');
 const people = require('../src/domain/people');
@@ -30,8 +32,8 @@ test.after(dropDatabase);
 
 test('setting an employment record requires a start date and a reason', async () => {
   const emp = await makeEmployee('emp_er');
-  assert.throws(async () => await people.setEmployment({ employeeId: emp, jobTitle: 'Eng', changeReason: 'x', actor: 'hr' }), /startDate/);
-  assert.throws(async () => await people.setEmployment({ employeeId: emp, jobTitle: 'Eng', startDate: '2025-01-01', actor: 'hr' }), /reason/i);
+  await assert.rejects(async () => await people.setEmployment({ employeeId: emp, jobTitle: 'Eng', changeReason: 'x', actor: 'hr' }), /startDate/);
+  await assert.rejects(async () => await people.setEmployment({ employeeId: emp, jobTitle: 'Eng', startDate: '2025-01-01', actor: 'hr' }), /reason/i);
 });
 
 test('the first employment record sets the start date that unblocks leave', async () => {
@@ -65,7 +67,7 @@ test('a change in terms is versioned, never overwritten', async () => {
 
 test('an invalid employment type is rejected', async () => {
   const emp = await makeEmployee('emp_type');
-  assert.throws(
+  await assert.rejects(
     async () => await people.setEmployment({ employeeId: emp, jobTitle: 'X', startDate: '2025-01-01', employmentType: 'Freelance-ish', changeReason: 'x', actor: 'hr' }),
     /employmentType/,
   );
@@ -77,7 +79,7 @@ test('an invalid employment type is rejected', async () => {
 
 test('a status change is recorded in history and requires a reason', async () => {
   const emp = await makeEmployee('emp_status');
-  assert.throws(async () => await people.setStatus({ employeeId: emp, status: 'Suspended', actor: 'hr' }), /reason/i);
+  await assert.rejects(async () => await people.setStatus({ employeeId: emp, status: 'Suspended', actor: 'hr' }), /reason/i);
 
   await people.setStatus({ employeeId: emp, status: 'Probation', reason: 'Standard 3-month probation', actor: 'user:hr' });
   const row = await db.prepare('SELECT * FROM employees WHERE id = ?').get(emp);
@@ -188,12 +190,12 @@ test('a manager assignment is scoped and cannot be self-referential', async () =
   const mgr = await makeEmployee('emp_mgr2', 'Manager');
   const rpt = await makeEmployee('emp_rpt2', 'Report');
 
-  assert.throws(async () => await people.assignManager({ managerEmployeeId: mgr, employeeId: mgr, actor: 'hr' }), /themselves/);
+  await assert.rejects(async () => await people.assignManager({ managerEmployeeId: mgr, employeeId: mgr, actor: 'hr' }), /themselves/);
 
   await people.assignManager({ managerEmployeeId: mgr, employeeId: rpt, actor: 'user:hr' });
   const rbac = require('../src/domain/rbac');
 
-test.before(prepareDatabase);
+
   const managerUser = { roles: ['manager'], employeeId: mgr };
   assert.equal(await rbac.canAccessEmployee(managerUser, rpt), true, 'now manages the report');
 

@@ -179,7 +179,7 @@ test('a heartbeat from outside the office does not count as attendance', async (
   assert.equal(d.totalMinutes, 0);
 });
 
-test('classifyLocation requires both office IP and office BSSID', () => {
+test('classifyLocation requires both office IP and office BSSID', async () => {
   // With no BSSIDs configured the check degrades to source-IP only, and
   // config.configWarnings() surfaces that at startup.
   assert.equal(P.classifyLocation({ srcIp: '192.168.18.5', bssid: null, source: 'APP' }), 'OFFICE');

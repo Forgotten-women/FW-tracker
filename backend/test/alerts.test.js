@@ -9,6 +9,8 @@ const path = require('path');
 const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
 useTestDatabase('alerts');
 
+test.before(prepareDatabase);
+
 
 const { db } = require('../src/db');
 const AL = require('../src/domain/alerts');
@@ -183,7 +185,7 @@ test('with no HR users, notifying reports it rather than throwing', async () => 
   const tmp2 = path.join(os.tmpdir(), `office-alerts-nohr-${process.pid}.db`);
   const D = require('better-sqlite3')(tmp2);
 
-test.before(prepareDatabase);
+
   try {
     // Not wired to the app db; just assert the guard shape on the real one by
     // deactivating HR users first.
@@ -224,13 +226,13 @@ test('a completed review no longer alerts', async () => {
 
 test('scheduling and completing a review are validated and audited', async () => {
   const emp = await makeEmployee('emp_review_val');
-  assert.throws(async () => await AL.scheduleReview({ employeeId: emp, dueDate: 'soon', actor: 'hr' }), /YYYY-MM-DD/);
-  assert.throws(async () => await AL.scheduleReview({ employeeId: 'ghost', dueDate: inDays(5), actor: 'hr' }), /No such employee/);
+  await assert.rejects(async () => await AL.scheduleReview({ employeeId: emp, dueDate: 'soon', actor: 'hr' }), /YYYY-MM-DD/);
+  await assert.rejects(async () => await AL.scheduleReview({ employeeId: 'ghost', dueDate: inDays(5), actor: 'hr' }), /No such employee/);
 
   const r = await AL.scheduleReview({ employeeId: emp, dueDate: inDays(5), actor: 'user:hr' });
-  assert.throws(async () => await AL.recordReviewOutcome({ reviewId: r.id, actor: 'hr' }), /outcome/i);
+  await assert.rejects(async () => await AL.recordReviewOutcome({ reviewId: r.id, actor: 'hr' }), /outcome/i);
   await AL.recordReviewOutcome({ reviewId: r.id, outcome: 'Done', actor: 'user:hr' });
-  assert.throws(
+  await assert.rejects(
     async () => await AL.recordReviewOutcome({ reviewId: r.id, outcome: 'Again', actor: 'hr' }),
     /already completed/i,
   );

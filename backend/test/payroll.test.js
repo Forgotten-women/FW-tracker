@@ -13,6 +13,8 @@ const path = require('path');
 const { useTestDatabase, prepareDatabase, dropDatabase } = require('./helpers/pg');
 useTestDatabase('payroll');
 
+test.before(prepareDatabase);
+
 
 const { db } = require('../src/db');
 const PR = require('../src/domain/payroll');
@@ -39,7 +41,7 @@ test.after(dropDatabase);
 // ---------------------------------------------------------------------------
 
 // The exact worked example printed in spec section 17.
-test('the spec 17 example: 2000 a month gives 24000, 461.54 and 92.31', () => {
+test('the spec 17 example: 2000 a month gives 24000, 461.54 and 92.31', async () => {
   const r = PR.rates(2000);
   assert.equal(r.monthly, 2000);
   assert.equal(r.annual, 24000, 'monthly x 12, as confirmed');
@@ -48,12 +50,12 @@ test('the spec 17 example: 2000 a month gives 24000, 461.54 and 92.31', () => {
   assert.equal(r.workingDaysPerYear, 260, 'the equivalent divisor the spec gives');
 });
 
-test('the equivalent formula agrees: annual / 260', () => {
+test('the equivalent formula agrees: annual / 260', async () => {
   const r = PR.rates(2000);
   assert.equal(PR.money(r.annual / 260), r.daily);
 });
 
-test('the rate chain scales', () => {
+test('the rate chain scales', async () => {
   assert.equal(PR.rates(1800).daily, 83.08);
   assert.equal(PR.rates(0).daily, 0);
 });
@@ -94,7 +96,7 @@ test('salary periods never overlap', async () => {
 
 test('a salary change requires a reason', async () => {
   const emp = await makeEmployee('emp_noreason', '2025-01-01');
-  assert.throws(
+  await assert.rejects(
     async () => await PR.setSalary({ employeeId: emp, amount: 2000, effectiveFrom: '2026-01-01', actor: 'user:hr' }),
     /reason/i,
   );
@@ -315,7 +317,7 @@ test('approving records the approved amount separately from the calculated one',
 
 test('an adjustment needs an explanation, and a decision needs a note', async () => {
   const period = await db.prepare("SELECT id FROM payroll_periods WHERE name = 'August 2026'").get();
-  assert.throws(
+  await assert.rejects(
     async () => await PR.proposeAdjustment({
       periodId: period.id, employeeId: 'emp_deficit',
       adjustmentType: 'OTHER', calculatedAmount: 10, actor: 'user:hr',
@@ -327,7 +329,7 @@ test('an adjustment needs an explanation, and a decision needs a note', async ()
     periodId: period.id, employeeId: 'emp_deficit', adjustmentType: 'OTHER',
     calculatedAmount: 10, explanation: 'Test', actor: 'user:hr',
   });
-  assert.throws(
+  await assert.rejects(
     async () => await PR.decideAdjustment({ adjustmentId: a.id, decision: 'APPROVED', actor: 'user:hr' }),
     /note/i,
   );
@@ -336,7 +338,7 @@ test('an adjustment needs an explanation, and a decision needs a note', async ()
 
 test('an adjustment cannot be decided twice', async () => {
   const adj = await db.prepare("SELECT * FROM payroll_adjustments WHERE status = 'REJECTED' LIMIT 1").get();
-  assert.throws(
+  await assert.rejects(
     async () => await PR.decideAdjustment({ adjustmentId: adj.id, decision: 'APPROVED', notes: 'x', actor: 'user:hr' }),
     /already/i,
   );
@@ -351,7 +353,7 @@ test('a period cannot close while adjustments await a decision', async () => {
     calculatedAmount: 25, explanation: 'Pending', actor: 'user:hr',
   });
 
-  assert.throws(
+  await assert.rejects(
     async () => await PR.closePeriod({ periodId: period.id, actor: 'user:hr' }),
     /awaiting a decision/i,
     'closing with undecided adjustments would finalise pay nobody agreed to',
@@ -372,10 +374,10 @@ test('the whole payroll lifecycle is audited', async () => {
 // The paid break (confirmed 2026-08-27)
 // ---------------------------------------------------------------------------
 
-test('the paid break keeps a full day at 480 minutes', () => {
+test('the paid break keeps a full day at 480 minutes', async () => {
   const { config } = require('../src/config');
 
-test.before(prepareDatabase);
+
   assert.equal(config.payroll.breakIsPaid, true);
   // 11:00-19:00 is 8 hours INCLUDING the 30 minute break, so a full day is 480
   // minutes. An unpaid break would make it 450 and change every deficit figure.

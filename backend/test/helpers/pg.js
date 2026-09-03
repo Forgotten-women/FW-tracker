@@ -16,7 +16,9 @@ const path = require('path');
 
 const DEFAULT_URL = 'postgresql://postgres:testpw@127.0.0.1:55432/office_tracker_test';
 
-const SCHEMA_SQL = path.join(__dirname, '..', '..', 'src', 'db', 'pg', 'schema.sql');
+const PG_DIR = path.join(__dirname, '..', '..', 'src', 'db', 'pg');
+const SCHEMA_SQL = path.join(PG_DIR, 'schema.sql');
+const SEED_SQL = path.join(PG_DIR, 'seed.sql');
 
 /**
  * Point this process at the test database, in its own schema.
@@ -62,6 +64,9 @@ async function prepareDatabase() {
     await admin.query(`CREATE SCHEMA ${schema}`);
     await admin.query(`SET search_path TO ${schema}, public`);
     await admin.query(fs.readFileSync(SCHEMA_SQL, 'utf8'));
+    // Roles, permissions, leave types and document types. Without these every
+    // insert that references them fails its foreign key.
+    await admin.query(fs.readFileSync(SEED_SQL, 'utf8'));
   } finally {
     await admin.end();
   }
@@ -76,4 +81,25 @@ async function dropDatabase() {
   await pg.close();
 }
 
-module.exports = { useTestDatabase, prepareDatabase, dropDatabase, DEFAULT_URL };
+/**
+ * The columns of a table, in the shape PRAGMA table_info() returned.
+ *
+ * A handful of tests assert on the schema itself - that an absence's three
+ * consequences are separate nullable columns, that payroll keeps calculated and
+ * approved amounts apart - and those assertions are worth keeping, so the
+ * lookup is ported rather than the tests dropped.
+ */
+async function tableInfo(table) {
+  const pg = require('../../src/db/pg/client');
+  return pg.prepare(`
+    SELECT column_name                                    AS name,
+           data_type                                      AS type,
+           CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull,
+           column_default                                 AS dflt_value
+    FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = ?
+    ORDER BY ordinal_position
+  `).all(table);
+}
+
+module.exports = { useTestDatabase, prepareDatabase, dropDatabase, tableInfo, DEFAULT_URL };

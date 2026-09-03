@@ -453,7 +453,7 @@ router.get('/employee/:employeeId/ledger',
   async (req, res) => {
     const rows = await db.prepare(`
       SELECT * FROM attendance_deficit_ledger
-      WHERE employee_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200
+      WHERE employee_id = ? ORDER BY created_at DESC, id DESC LIMIT 200
     `).all(req.params.employeeId);
 
     res.json({
