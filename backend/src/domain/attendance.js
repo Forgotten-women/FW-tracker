@@ -187,9 +187,9 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   // 10 minutes grace allowed: arrivals up to 11:10 are on time (0 late minutes, 0 deficit).
   // Arrivals from 11:11 onwards are late, and the deficit is measured beyond grace
   // (e.g., at 11:11, deficit is 1 min; at 11:12, deficit is 2 mins).
-  const isLateOccurrence = firstIn > s.latestOnTimeAt;
+  const isLateArrival = firstIn > s.latestOnTimeAt;
   const graceEndMs = s.scheduledStartAt + (s.graceMinutes * MIN);
-  const lateMinutes = isLateOccurrence
+  const lateMinutes = isLateArrival
     ? Math.max(1, Math.round((firstIn - graceEndMs) / MIN))
     : 0;
 
@@ -231,16 +231,33 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     if (!coveredByBreak) unauthorisedMissingMinutes += gapMinutes;
   }
 
+  // --- late arrival recovery by staying later ------------------------------
+  // Employees have the option to recover late-arrival time by staying later.
+  // Additional time worked past scheduledEndAt automatically offsets late arrival.
+  const overtimeMinutes = (lastSeen && lastSeen > s.scheduledEndAt)
+    ? Math.max(0, Math.round((lastSeen - s.scheduledEndAt) / MIN))
+    : 0;
+  const recoveredLateMinutes = Math.min(lateMinutes, overtimeMinutes);
+  const netLateMinutes = Math.max(0, lateMinutes - recoveredLateMinutes);
+  const isLateOccurrence = isLateArrival && netLateMinutes > 0;
+
   const approvedAdjustmentMinutes = (await selectApprovedAdjustment.get(employeeId, dateKey)).mins || 0;
 
-  // Spec 8.1, exactly.
+  // Spec 8.1, with late arrival recovery:
   const dailyDeficitMinutes = Math.max(0,
-    lateMinutes
+    netLateMinutes
     + excessBreakMinutes
     + earlyDepartureMinutes
     + unauthorisedMissingMinutes
     - Math.abs(approvedAdjustmentMinutes)
   );
+
+  let attendanceStatus = 'PRESENT';
+  if (isLateOccurrence) {
+    attendanceStatus = 'LATE';
+  } else if (isLateArrival && recoveredLateMinutes >= lateMinutes) {
+    attendanceStatus = 'RECOVERED';
+  }
 
   const needsReview = [];
   if (openBreak && !isToday) needsReview.push('Break was never ended');
@@ -250,13 +267,16 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   return {
     ...base,
     lateMinutes,
+    recoveredLateMinutes,
+    netLateMinutes,
+    overtimeMinutes,
     isLateOccurrence,
     excessBreakMinutes,
     earlyDepartureMinutes,
     unauthorisedMissingMinutes,
     approvedAdjustmentMinutes,
     dailyDeficitMinutes,
-    attendanceStatus: isLateOccurrence ? 'LATE' : 'PRESENT',
+    attendanceStatus,
     onBreak: !!openBreak,
     breakDueBackAt: openBreak ? openBreak.started_at + openBreak.permitted_minutes * MIN : null,
     needsReview,
@@ -318,7 +338,7 @@ async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) 
     last_clock_out: d.lastSeenAt,
     worked_minutes: d.workedMinutes,
     break_minutes: d.breaks.reduce((a, b) => a + (b.actualMinutes || 0), 0),
-    late_minutes: d.lateMinutes,
+    late_minutes: d.netLateMinutes,
     excess_break_minutes: d.excessBreakMinutes,
     early_departure_minutes: d.earlyDepartureMinutes,
     unauthorised_missing_minutes: d.unauthorisedMissingMinutes,
@@ -599,10 +619,12 @@ function present(d) {
     presenceSource: d.presenceSource ? d.presenceSource.label : null,
     sensorCarried: d.sensorCarried,
 
-    // The four components shown separately, so the employee dashboard can
+    // The components shown separately, so the employee dashboard can
     // explain WHY a deficit exists rather than showing one bare number.
     deficit: {
       lateMinutes: d.lateMinutes,
+      recoveredLateMinutes: d.recoveredLateMinutes || 0,
+      netLateMinutes: d.netLateMinutes || 0,
       excessBreakMinutes: d.excessBreakMinutes,
       earlyDepartureMinutes: d.earlyDepartureMinutes,
       unauthorisedMissingMinutes: d.unauthorisedMissingMinutes,
@@ -610,6 +632,8 @@ function present(d) {
       totalMinutes: d.dailyDeficitMinutes,
       formatted: T.formatMinutes(d.dailyDeficitMinutes),
     },
+    overtimeMinutes: d.overtimeMinutes || 0,
+    recoveredLateMinutes: d.recoveredLateMinutes || 0,
 
     isLateOccurrence: d.isLateOccurrence,
     onBreak: Boolean(d.onBreak),

@@ -428,3 +428,64 @@ test('the presented shape breaks the deficit into its four components', async ()
   assert.equal(view.scheduledStart, '11:00');
   assert.equal(view.status, 'LATE');
 });
+
+// ---------------------------------------------------------------------------
+// Late Arrival Recovery by Staying Later
+// ---------------------------------------------------------------------------
+
+test('arriving at 11:10 and staying until 7:10 PM covers the arrival with no shortage in total hours', async () => {
+  const emp = await makeEmployee('emp_rec_1110');
+  await present(emp, '11:10', '19:10');
+
+  const d = await A.deriveDay(emp, DAY, at('19:30'));
+  assert.equal(d.lateMinutes, 0, '11:10 is within 10m grace period');
+  assert.equal(d.recoveredLateMinutes, 0);
+  assert.equal(d.netLateMinutes, 0);
+  assert.equal(d.dailyDeficitMinutes, 0, 'no deficit');
+  assert.equal(d.isLateOccurrence, false, 'not late');
+  assert.equal(d.workedMinutes, 480, 'worked full 480 minutes (8 hours)');
+});
+
+test('arriving at 11:20 and staying until 7:20 PM fully recovers 10m lateness (0 deficit, status RECOVERED)', async () => {
+  const emp = await makeEmployee('emp_rec_1120_full');
+  await present(emp, '11:20', '19:20');
+
+  const d = await A.deriveDay(emp, DAY, at('19:40'));
+  assert.equal(d.lateMinutes, 10, '10 minutes beyond 10m grace');
+  assert.equal(d.overtimeMinutes, 20, '20 minutes worked past 19:00');
+  assert.equal(d.recoveredLateMinutes, 10, 'recovers the full 10 late minutes');
+  assert.equal(d.netLateMinutes, 0, '0 net late minutes remaining');
+  assert.equal(d.dailyDeficitMinutes, 0, '0 deficit after recovery');
+  assert.equal(d.isLateOccurrence, false, 'cleared late occurrence upon full recovery');
+  assert.equal(d.attendanceStatus, 'RECOVERED');
+  assert.equal(d.workedMinutes, 480, 'worked full 480 minutes (8 hours)');
+});
+
+test('arriving at 11:20 and staying until 7:05 PM partially recovers lateness (5m deficit remaining)', async () => {
+  const emp = await makeEmployee('emp_rec_1120_part');
+  await present(emp, '11:20', '19:05');
+
+  const d = await A.deriveDay(emp, DAY, at('19:30'));
+  assert.equal(d.lateMinutes, 10, '10 minutes beyond 10m grace');
+  assert.equal(d.overtimeMinutes, 5, '5 minutes past 19:00');
+  assert.equal(d.recoveredLateMinutes, 5, '5 minutes recovered');
+  assert.equal(d.netLateMinutes, 5, '5 minutes net deficit remaining');
+  assert.equal(d.dailyDeficitMinutes, 5, '5 deficit');
+  assert.equal(d.isLateOccurrence, true, 'still a late occurrence because net > 0');
+  assert.equal(d.attendanceStatus, 'LATE');
+});
+
+test('arriving at 11:20 and leaving at 7:00 PM has 0 recovery (10m deficit)', async () => {
+  const emp = await makeEmployee('emp_rec_1120_none');
+  await present(emp, '11:20', '19:00');
+
+  const d = await A.deriveDay(emp, DAY, at('19:30'));
+  assert.equal(d.lateMinutes, 10);
+  assert.equal(d.overtimeMinutes, 0);
+  assert.equal(d.recoveredLateMinutes, 0);
+  assert.equal(d.netLateMinutes, 10);
+  assert.equal(d.dailyDeficitMinutes, 10);
+  assert.equal(d.isLateOccurrence, true);
+  assert.equal(d.attendanceStatus, 'LATE');
+});
+
