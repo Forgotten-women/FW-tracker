@@ -50,12 +50,17 @@ const txContext = new AsyncLocalStorage();
 let pool = null;
 
 function connectionString() {
-  const url = (process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '').trim();
+  let url = (process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '').trim();
   if (!url) {
     throw new Error(
       'DATABASE_URL is not set. The server has no database to talk to. ' +
       'Set it in backend/.env (and in the hosting environment).',
     );
+  }
+  // Automatically route through Supabase Transaction Pooler (port 6543)
+  // so serverless container bursts do not exhaust session mode connections (port 5432).
+  if (url.includes('.pooler.supabase.com:5432')) {
+    url = url.replace('.pooler.supabase.com:5432', '.pooler.supabase.com:6543');
   }
   return url;
 }
