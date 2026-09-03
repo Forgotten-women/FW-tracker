@@ -111,7 +111,7 @@ fn main() {
                     let approved_csv = {
                         let resp = state.latest_response.lock().unwrap();
                         resp.as_ref()
-                            .map(|r| r.policy.approvedWorkProcesses.clone())
+                            .map(|r| r.policy.approved_work_processes.clone())
                             .unwrap_or_default()
                     };
                     if let Some((proc_name, dur)) = tracker::process::inspect_and_track_anomaly(&approved_csv) {
@@ -122,13 +122,13 @@ fn main() {
                     if sample_count >= 6 {
                         sample_count = 0;
                         let payload = HeartbeatPayload {
-                            activeSeconds: accumulated_active,
-                            idleSeconds: accumulated_idle,
-                            lockState,
-                            lockDurationSeconds: lock_duration,
-                            connectedBssid: bssid,
-                            currentWifiMac: None,
-                            isManualBreak: is_break,
+                            active_seconds: accumulated_active,
+                            idle_seconds: accumulated_idle,
+                            lock_state,
+                            lock_duration_seconds: lock_duration,
+                            connected_bssid: bssid,
+                            current_wifi_mac: None,
+                            is_manual_break: is_break,
                         };
                         accumulated_active = 0;
                         accumulated_idle = 0;

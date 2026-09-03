@@ -17,39 +17,43 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HeartbeatPayload {
-    pub activeSeconds: u64,
-    pub idleSeconds: u64,
-    pub lockState: String,
-    pub lockDurationSeconds: u64,
-    pub connectedBssid: Option<String>,
-    pub currentWifiMac: Option<String>,
-    pub isManualBreak: bool,
+    pub active_seconds: u64,
+    pub idle_seconds: u64,
+    pub lock_state: String,
+    pub lock_duration_seconds: u64,
+    pub connected_bssid: Option<String>,
+    pub current_wifi_mac: Option<String>,
+    pub is_manual_break: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HeartbeatResponse {
     pub status: String,
-    pub workstationStatus: String,
-    pub inOffice: bool,
-    pub locationVerdict: Option<String>,
+    pub workstation_status: String,
+    pub in_office: bool,
+    pub location_verdict: Option<String>,
     pub today: SessionStats,
     pub policy: PolicySettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionStats {
-    pub dateKey: String,
-    pub activeSeconds: u64,
-    pub idleSeconds: u64,
-    pub breakSeconds: u64,
+    pub date_key: String,
+    pub active_seconds: u64,
+    pub idle_seconds: u64,
+    pub break_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct PolicySettings {
-    pub idleThresholdMinutes: u32,
-    pub lockScreenGraceMinutes: u32,
-    pub approvedWorkProcesses: String,
+    pub idle_threshold_minutes: u32,
+    pub lock_screen_grace_minutes: u32,
+    pub approved_work_processes: String,
 }
 
 pub fn config_path() -> PathBuf {
