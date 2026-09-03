@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
 // Clean and normalize the backend API origin URL
-let rawOrigin = process.env.API_ORIGIN?.trim() || 'http://127.0.0.1:5000';
+let rawOrigin = process.env.API_ORIGIN?.trim() || (process.env.NODE_ENV === 'production' ? 'https://backend-ten-lyart-57.vercel.app' : 'http://127.0.0.1:5000');
 
 // Strip any trailing slashes or trailing /api
 rawOrigin = rawOrigin.replace(/\/+$/, '').replace(/\/api$/, '');
