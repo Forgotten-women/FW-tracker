@@ -519,16 +519,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildPersonalDetailsCard(EmployeeProfile p) {
     final pers = p;
+    final addressText = (pers.addressLine1 != null && pers.addressLine1!.trim().isNotEmpty)
+        ? '${pers.addressLine1}${pers.city != null && pers.city!.trim().isNotEmpty ? ', ${pers.city}' : ''}'
+        : '—';
+
     return _buildSectionContainer(
       title: 'Personal & Identification',
       icon: Icons.person_outline_rounded,
+      action: TextButton.icon(
+        onPressed: () => _showEditPersonalDetailsModal(p),
+        icon: const Icon(Icons.edit_rounded, size: 14, color: AppColors.primaryLight),
+        label: const Text(
+          'Edit',
+          style: TextStyle(fontSize: 12, color: AppColors.primaryLight, fontWeight: FontWeight.bold),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ),
       children: [
         _buildDetailRow('National ID / CNIC', pers.nationalId ?? '—'),
         _buildDetailRow('Mobile Phone', pers.mobilePhone ?? '—'),
         _buildDetailRow('Personal Email', pers.personalEmail ?? '—'),
         _buildDetailRow('Date of Birth', pers.dateOfBirth ?? '—'),
-        if (pers.addressLine1 != null)
-          _buildDetailRow('Address', '${pers.addressLine1}${pers.city != null ? ', ${pers.city}' : ''}'),
+        _buildDetailRow('Residential Address', addressText),
       ],
     );
   }
@@ -537,12 +553,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return _buildSectionContainer(
       title: 'Next of Kin & Emergency Contacts',
       icon: Icons.contact_phone_outlined,
+      action: TextButton.icon(
+        onPressed: () => _showAddOrEditEmergencyContactModal(),
+        icon: const Icon(Icons.add_rounded, size: 14, color: AppColors.teal),
+        label: const Text(
+          '+ Add',
+          style: TextStyle(fontSize: 12, color: AppColors.teal, fontWeight: FontWeight.bold),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ),
       children: contacts.isEmpty
           ? [
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  'No emergency contacts on file.',
+                  'No emergency contacts on file. Tap "+ Add" above to register next of kin.',
                   style: TextStyle(fontSize: 12, color: AppColors.textMuted, fontStyle: FontStyle.italic),
                 ),
               ),
@@ -599,12 +628,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${c.relationship} · ${c.phone}',
+                            '${c.relationship} · ${c.phone}${c.email != null && c.email!.isNotEmpty ? ' · ${c.email}' : ''}',
                             style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
                           ),
                         ],
                       ),
                     ),
+                    if (c.id != null) ...[
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.textMuted),
+                        tooltip: 'Edit Contact',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        onPressed: () => _showAddOrEditEmergencyContactModal(contact: c),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.danger),
+                        tooltip: 'Delete Contact',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        onPressed: () => _confirmDeleteEmergencyContact(c),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -650,6 +695,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildSectionContainer({
     required String title,
     required IconData icon,
+    Widget? action,
     required List<Widget> children,
   }) {
     return Container(
@@ -663,17 +709,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(icon, size: 18, color: AppColors.primaryLight),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textLight,
-                ),
+              Row(
+                children: [
+                  Icon(icon, size: 18, color: AppColors.primaryLight),
+                  const SizedBox(width: 8),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textLight,
+                    ),
+                  ),
+                ],
               ),
+              if (action != null) action,
             ],
           ),
           const SizedBox(height: 14),
@@ -682,6 +734,357 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ...children,
         ],
       ),
+    );
+  }
+
+  void _showEditPersonalDetailsModal(EmployeeProfile p) {
+    final cnicCtrl = TextEditingController(text: p.nationalId ?? '');
+    final phoneCtrl = TextEditingController(text: p.mobilePhone ?? '');
+    final emailCtrl = TextEditingController(text: p.personalEmail ?? '');
+    final dobCtrl = TextEditingController(text: p.dateOfBirth ?? '');
+    final addressCtrl = TextEditingController(text: p.addressLine1 ?? '');
+    final cityCtrl = TextEditingController(text: p.city ?? '');
+    bool saving = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.bgDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.border,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Edit Personal Details',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textLight,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    _buildTextField('National ID / CNIC', cnicCtrl, Icons.badge_outlined, hint: 'e.g. 42201-1234567-1'),
+                    const SizedBox(height: 12),
+                    _buildTextField('Mobile Phone', phoneCtrl, Icons.phone_outlined, hint: 'e.g. +92 300 1234567'),
+                    const SizedBox(height: 12),
+                    _buildTextField('Personal Email', emailCtrl, Icons.email_outlined, hint: 'e.g. name@example.com'),
+                    const SizedBox(height: 12),
+                    _buildTextField('Date of Birth', dobCtrl, Icons.calendar_today_outlined, hint: 'YYYY-MM-DD'),
+                    const SizedBox(height: 12),
+                    _buildTextField('Residential Address', addressCtrl, Icons.home_outlined, hint: 'Street address, building, floor'),
+                    const SizedBox(height: 12),
+                    _buildTextField('City', cityCtrl, Icons.location_city_outlined, hint: 'e.g. Karachi'),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryLight,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                setModalState(() => saving = true);
+                                try {
+                                  await _api.updateMyPersonalDetails(
+                                    nationalId: cnicCtrl.text.trim(),
+                                    mobilePhone: phoneCtrl.text.trim(),
+                                    personalEmail: emailCtrl.text.trim(),
+                                    dateOfBirth: dobCtrl.text.trim(),
+                                    addressLine1: addressCtrl.text.trim(),
+                                    city: cityCtrl.text.trim(),
+                                  );
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Personal details updated successfully.')),
+                                    );
+                                    Navigator.pop(ctx);
+                                    _loadProfile();
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    setModalState(() => saving = false);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Failed to update: $e'), backgroundColor: AppColors.danger),
+                                    );
+                                  }
+                                }
+                              },
+                        child: saving
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              )
+                            : const Text(
+                                'Save Personal Details',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showAddOrEditEmergencyContactModal({EmergencyContact? contact}) {
+    final isEditing = contact != null;
+    final nameCtrl = TextEditingController(text: isEditing ? contact.name : '');
+    final relCtrl = TextEditingController(text: isEditing ? contact.relationship : '');
+    final phoneCtrl = TextEditingController(text: isEditing ? contact.phone : '');
+    final emailCtrl = TextEditingController(text: isEditing ? (contact.email ?? '') : '');
+    bool isPrimary = isEditing ? contact.isPrimary : false;
+    bool saving = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.bgDark,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.border,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          isEditing ? 'Edit Emergency Contact' : 'Add Emergency Contact',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textLight,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    _buildTextField('Full Name *', nameCtrl, Icons.person_outline_rounded, hint: 'e.g. John Doe'),
+                    const SizedBox(height: 12),
+                    _buildTextField('Relationship *', relCtrl, Icons.family_restroom_rounded, hint: 'e.g. Spouse, Father, Sibling'),
+                    const SizedBox(height: 12),
+                    _buildTextField('Phone Number *', phoneCtrl, Icons.phone_outlined, hint: 'e.g. +92 300 0000000'),
+                    const SizedBox(height: 12),
+                    _buildTextField('Email Address (Optional)', emailCtrl, Icons.email_outlined, hint: 'e.g. contact@example.com'),
+                    const SizedBox(height: 12),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      activeThumbColor: AppColors.teal,
+                      title: const Text(
+                        'Set as Primary Emergency Contact',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textLight),
+                      ),
+                      value: isPrimary,
+                      onChanged: (val) => setModalState(() => isPrimary = val),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.teal,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                if (nameCtrl.text.trim().isEmpty || relCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Name, relationship, and phone are required.'), backgroundColor: AppColors.danger),
+                                  );
+                                  return;
+                                }
+                                setModalState(() => saving = true);
+                                try {
+                                  if (isEditing && contact.id != null) {
+                                    await _api.updateEmergencyContact(
+                                      contactId: contact.id!,
+                                      name: nameCtrl.text.trim(),
+                                      relationship: relCtrl.text.trim(),
+                                      phone: phoneCtrl.text.trim(),
+                                      email: emailCtrl.text.trim(),
+                                      isPrimary: isPrimary,
+                                    );
+                                  } else {
+                                    await _api.addEmergencyContact(
+                                      name: nameCtrl.text.trim(),
+                                      relationship: relCtrl.text.trim(),
+                                      phone: phoneCtrl.text.trim(),
+                                      email: emailCtrl.text.trim(),
+                                      isPrimary: isPrimary,
+                                    );
+                                  }
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(isEditing ? 'Emergency contact updated.' : 'Emergency contact added.')),
+                                    );
+                                    Navigator.pop(ctx);
+                                    _loadProfile();
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    setModalState(() => saving = false);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.danger),
+                                    );
+                                  }
+                                }
+                              },
+                        child: saving
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              )
+                            : Text(
+                                isEditing ? 'Save Changes' : 'Add Contact',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _confirmDeleteEmergencyContact(EmergencyContact c) {
+    if (c.id == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Contact', style: TextStyle(color: AppColors.textLight, fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to remove ${c.name} from emergency contacts?', style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await _api.deleteEmergencyContact(c.id!);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Emergency contact removed.')),
+                  );
+                  _loadProfile();
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to delete: $e'), backgroundColor: AppColors.danger),
+                  );
+                }
+              }
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextField(String label, TextEditingController ctrl, IconData icon, {String? hint}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: ctrl,
+          style: const TextStyle(color: AppColors.textLight, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: const TextStyle(color: AppColors.border, fontSize: 12),
+            prefixIcon: Icon(icon, color: AppColors.textMuted, size: 18),
+            filled: true,
+            fillColor: AppColors.surfaceDark,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.primaryLight)),
+          ),
+        ),
+      ],
     );
   }
 

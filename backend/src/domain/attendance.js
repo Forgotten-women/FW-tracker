@@ -185,10 +185,12 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   // --- late arrival (spec 8.1, 9.1) ----------------------------------------
   //
   // 10 minutes grace allowed: arrivals up to 11:10 are on time (0 late minutes, 0 deficit).
-  // Arrivals from 11:11 onwards are late and count late minutes.
+  // Arrivals from 11:11 onwards are late, and the deficit is measured beyond grace
+  // (e.g., at 11:11, deficit is 1 min; at 11:12, deficit is 2 mins).
   const isLateOccurrence = firstIn > s.latestOnTimeAt;
+  const graceEndMs = s.scheduledStartAt + (s.graceMinutes * MIN);
   const lateMinutes = isLateOccurrence
-    ? Math.max(0, Math.round((firstIn - s.scheduledStartAt) / MIN))
+    ? Math.max(1, Math.round((firstIn - graceEndMs) / MIN))
     : 0;
 
   // --- excess break (spec 12) ----------------------------------------------

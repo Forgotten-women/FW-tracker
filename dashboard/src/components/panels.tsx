@@ -766,6 +766,7 @@ export function TeamPanel({
   const [busy, setBusy] = useState(false);
   const [showSalaryModal, setShowSalaryModal] = useState(false);
   const [selectedEmpId, setSelectedEmpId] = useState<string | undefined>(undefined);
+  const [viewProfileEmp, setViewProfileEmp] = useState<AdminEmployee | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -822,16 +823,16 @@ export function TeamPanel({
           <Input
             value={role}
             onChange={(e) => setRole(e.target.value)}
-            placeholder="Designation / Department (e.g. Software Engineer)"
-            className="flex-1 min-w-[160px]"
+            placeholder="Role / Designation *"
+            className="flex-1 min-w-[140px]"
+            required
           />
-          <div className="flex gap-2 min-w-[200px] flex-1">
+          <div className="flex gap-2 flex-1 min-w-[160px]">
             <Input
               type="number"
-              step="0.01"
               value={baseSalary}
               onChange={(e) => setBaseSalary(e.target.value)}
-              placeholder="Base Monthly Salary (e.g. 100000)"
+              placeholder="Base Pay (optional)"
               className="flex-1"
             />
             <select
@@ -860,40 +861,54 @@ export function TeamPanel({
               return (
                 <div
                   key={e.id}
-                  className={`glass-panel rounded-2xl p-4 flex flex-col justify-between gap-3 transition-all hover:border-white/20 ${
-                    e.active ? '' : 'opacity-50'
-                  }`}
+                  className="flex flex-col justify-between gap-3 rounded-2xl border border-white/8 bg-slate-900/60 p-4 transition-all hover:border-white/15"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <h4 className="truncate font-bold text-sm text-white">{e.name}</h4>
-                      <p className="truncate text-xs text-slate-400">
-                        {e.role} · <span className="text-indigo-400 font-semibold">{e.deviceCount} paired device(s)</span>
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        {e.baseSalary ? (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[11px] font-mono font-bold text-emerald-400 border border-emerald-500/20">
-                            💰 {curSymbol}{e.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })} / mo
-                            {e.dailyRate && (
-                              <span className="text-[10px] font-normal text-emerald-300/70">
-                                ({curSymbol}{e.dailyRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}/d)
-                              </span>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-300 border border-amber-500/20">
-                            ⚠️ No Base Salary Set
-                          </span>
-                        )}
-                        {e.startDate && (
-                          <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400 border border-slate-700">
-                            Joined {e.startDate}
-                          </span>
-                        )}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/20">
+                        {e.name.charAt(0).toUpperCase()}
                       </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white text-sm">{e.name}</span>
+                          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 border border-emerald-500/20">
+                            {e.deviceCount} Device{e.deviceCount === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        <span className="text-xs text-slate-400">{e.role}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {e.baseSalary ? (
+                        <div className="font-mono text-xs font-bold text-emerald-400">
+                          {curSymbol}{Number(e.baseSalary).toLocaleString()}
+                          <span className="text-[10px] text-slate-500 font-normal block">/ month</span>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-500 italic block">No salary set</span>
+                      )}
+                      {e.startDate && (
+                        <span className="text-[10px] text-slate-400 block mt-0.5">
+                          Joined {e.startDate}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center justify-end gap-2 border-t border-white/5 pt-2.5">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setViewProfileEmp(e);
+                      }}
+                      icon={
+                        <svg className="h-3.5 w-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      }
+                    >
+                      View Details
+                    </Button>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -953,6 +968,13 @@ export function TeamPanel({
           onSuccess={() => {
             onRefresh?.();
           }}
+        />
+      )}
+
+      {viewProfileEmp && (
+        <EmployeeProfileModal
+          employee={viewProfileEmp}
+          onClose={() => setViewProfileEmp(null)}
         />
       )}
     </>
@@ -1318,5 +1340,235 @@ export function AttendanceCorrectionsPanel({
         </div>
       )}
     </Panel>
+  );
+}
+
+export function EmployeeProfileModal({
+  employee,
+  onClose,
+}: {
+  employee: AdminEmployee;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    api.getEmployeeProfile(employee.id)
+      .then((res) => {
+        if (active) {
+          setProfile(res.profile);
+          setLoading(false);
+        }
+      })
+      .catch((err: any) => {
+        if (active) {
+          setError(err?.message || 'Failed to load employee profile');
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [employee.id]);
+
+  const p = profile?.personal;
+  const contacts = profile?.emergencyContacts || [];
+  const schedule = profile?.schedule;
+  const salary = profile?.salary;
+
+  const address = p
+    ? [p.addressLine1, p.addressLine2, p.city, p.postcode, p.country]
+        .filter(Boolean)
+        .join(', ')
+    : '';
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 sm:p-6 backdrop-blur-md overflow-y-auto">
+      <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-900 p-6 sm:p-7 shadow-2xl my-8">
+        <div className="flex items-start justify-between border-b border-white/10 pb-5">
+          <div className="flex items-center gap-3.5">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-500/20 text-indigo-400 font-bold text-lg border border-indigo-500/30">
+              {employee.name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white">{employee.name}</h2>
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-extrabold text-emerald-400 border border-emerald-500/20">
+                  {employee.deviceCount} Device{employee.deviceCount === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                {employee.role || 'Team Member'} · ID: <span className="font-mono text-slate-300">{employee.id}</span>
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl p-2 text-slate-400 hover:bg-white/5 hover:text-white transition-colors"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="py-16 text-center text-sm text-slate-400">
+            <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+            Loading employee personal & HR profile…
+          </div>
+        ) : error ? (
+          <div className="my-6 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-xs text-rose-300">
+            {error}
+          </div>
+        ) : (
+          <div className="mt-5 space-y-5 max-h-[70vh] overflow-y-auto pr-1">
+            {/* Personal Details & Identification */}
+            <div className="rounded-2xl border border-white/8 bg-slate-950/60 p-4">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-400 mb-3">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                </svg>
+                Personal Details & Identification
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[11px]">National ID / CNIC</span>
+                  <span className="font-semibold text-white font-mono">{p?.nationalId || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Mobile Phone</span>
+                  <span className="font-semibold text-white">{p?.mobilePhone || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Personal Email</span>
+                  <span className="font-semibold text-white">{p?.personalEmail || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Date of Birth</span>
+                  <span className="font-semibold text-white">{p?.dateOfBirth || '—'}</span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-slate-400 block text-[11px]">Residential Address</span>
+                  <span className="font-semibold text-white">{address || '—'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Next of Kin & Emergency Contacts */}
+            <div className="rounded-2xl border border-white/8 bg-slate-950/60 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-400">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  Next of Kin & Emergency Contacts ({contacts.length})
+                </div>
+              </div>
+              {contacts.length === 0 ? (
+                <p className="text-xs text-slate-500 italic py-2">
+                  No emergency contacts registered by employee yet.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {contacts.map((c: any, idx: number) => (
+                    <div
+                      key={c.id || idx}
+                      className="flex items-center justify-between rounded-xl border border-white/5 bg-slate-900/80 p-3"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white text-xs">{c.name}</span>
+                          {c.isPrimary && (
+                            <span className="rounded bg-teal-500/20 px-1.5 py-0.5 text-[9px] font-bold text-teal-400 border border-teal-500/30">
+                              PRIMARY
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-400 block mt-0.5">
+                          {c.relationship} · {c.phone} {c.email ? `· ${c.email}` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Employment & Shift Schedule */}
+            {schedule && (
+              <div className="rounded-2xl border border-white/8 bg-slate-950/60 p-4">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-400 mb-3">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Work Schedule & Policy Windows
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Assigned Hours</span>
+                    <span className="font-semibold text-white">{schedule.startTime} – {schedule.endTime}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Grace Window</span>
+                    <span className="font-semibold text-white">{schedule.graceMinutes} min (to 11:10)</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Paid Break</span>
+                    <span className="font-semibold text-white">{schedule.breakMinutes} min</span>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <span className="text-slate-400 block text-[11px]">Scheduled Working Days</span>
+                    <span className="font-semibold text-white">{schedule.workDays}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Compensation */}
+            {salary && (
+              <div className="rounded-2xl border border-white/8 bg-slate-950/60 p-4">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400 mb-3">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  Compensation & Payroll Basis
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Base Monthly Pay</span>
+                    <span className="font-bold text-emerald-400 text-sm">
+                      {salary.currency === 'GBP' ? '£' : salary.currency === 'PKR' ? '₨' : '$'}
+                      {Number(salary.baseAmount || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Daily Rate</span>
+                    <span className="font-semibold text-white">
+                      {salary.currency === 'GBP' ? '£' : salary.currency === 'PKR' ? '₨' : '$'}
+                      {Number(salary.dailyRate || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Effective Since</span>
+                    <span className="font-semibold text-white">{salary.effectiveFrom || '—'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end">
+          <Button variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

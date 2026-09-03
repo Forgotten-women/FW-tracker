@@ -309,6 +309,26 @@ async function addEmergencyContact({ employeeId, name, relationship = null, phon
   return { id: cid };
 }
 
+async function updateEmergencyContact({ contactId, employeeId, name, relationship = null, phone = null, email = null, isPrimary = false, actor }) {
+  if (!name || !String(name).trim()) throw new Error('A contact name is required.');
+  if (isPrimary) {
+    await db.prepare('UPDATE emergency_contacts SET is_primary = 0 WHERE employee_id = ?').run(employeeId);
+  }
+  await db.prepare(`
+    UPDATE emergency_contacts
+    SET name = ?, relationship = ?, phone = ?, email = ?, is_primary = ?
+    WHERE id = ? AND employee_id = ?
+  `).run(String(name).trim(), relationship, phone, email, isPrimary ? 1 : 0, contactId, employeeId);
+  await audit({ actor, action: 'EMERGENCY_CONTACT_UPDATED', targetType: 'employee', targetId: employeeId });
+  return { id: contactId, updated: true };
+}
+
+async function deleteEmergencyContact({ contactId, employeeId, actor }) {
+  await db.prepare('DELETE FROM emergency_contacts WHERE id = ? AND employee_id = ?').run(contactId, employeeId);
+  await audit({ actor, action: 'EMERGENCY_CONTACT_DELETED', targetType: 'employee', targetId: employeeId });
+  return { deleted: true };
+}
+
 // ---------------------------------------------------------------------------
 // Consolidated profile (spec 37)
 // ---------------------------------------------------------------------------
@@ -411,7 +431,7 @@ async function myEmployeeProfile(employeeId) {
   const p = await db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
 
   const contacts = (await db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ? ORDER BY is_primary DESC, created_at ASC').all(employeeId))
-    .map(c => ({ name: c.name, relationship: c.relationship, phone: c.phone, email: c.email, isPrimary: !!c.is_primary }));
+    .map(c => ({ id: c.id, name: c.name, relationship: c.relationship, phone: c.phone, email: c.email, isPrimary: !!c.is_primary }));
 
   // Check HR salary visibility setting
   let showSalary = false;
@@ -507,5 +527,6 @@ module.exports = {
   assignManager, endManagerAssignment,
   setEmployment, currentEmployment, employmentHistory,
   setStatus, setPersonal, setBank, addEmergencyContact,
+  updateEmergencyContact, deleteEmergencyContact,
   profile, myEmployeeProfile, VALID_TYPES, VALID_STATUS,
 };

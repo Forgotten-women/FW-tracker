@@ -504,6 +504,7 @@ class SalaryInfo {
 }
 
 class EmergencyContact {
+  final String? id;
   final String name;
   final String relationship;
   final String phone;
@@ -511,6 +512,7 @@ class EmergencyContact {
   final bool isPrimary;
 
   const EmergencyContact({
+    this.id,
     required this.name,
     required this.relationship,
     required this.phone,
@@ -519,6 +521,7 @@ class EmergencyContact {
   });
 
   factory EmergencyContact.fromJson(Map<String, dynamic> json) => EmergencyContact(
+    id: json['id'] as String?,
     name: json['name'] as String? ?? '—',
     relationship: json['relationship'] as String? ?? '—',
     phone: json['phone'] as String? ?? '—',

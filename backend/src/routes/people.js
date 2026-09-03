@@ -39,6 +39,94 @@ router.get('/mine/profile', async (req, res, next) => {
   });
 });
 
+// Employee updates their personal details & identification & address
+const handleUpdatePersonal = async (req, res) => {
+  const employeeId = req.auth.employeeId;
+  const {
+    nationalId, mobilePhone, personalEmail, dateOfBirth,
+    addressLine1, addressLine2, city, postcode, country
+  } = req.body || {};
+
+  try {
+    await people.setPersonal({
+      employeeId,
+      fields: {
+        nationalId, mobilePhone, personalEmail, dateOfBirth,
+        addressLine1, addressLine2, city, postcode, country
+      },
+      actor: `Employee (${employeeId})`,
+    });
+    const updated = await people.myEmployeeProfile(employeeId);
+    res.json({ status: 'SUCCESS', message: 'Personal details updated successfully.', profile: updated });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+};
+
+router.post('/mine/personal', requireDevice, handleUpdatePersonal);
+router.put('/mine/personal', requireDevice, handleUpdatePersonal);
+
+// Employee adds emergency contact
+router.post('/mine/emergency-contacts', requireDevice, async (req, res) => {
+  const employeeId = req.auth.employeeId;
+  const { name, relationship, phone, email, isPrimary } = req.body || {};
+  try {
+    const contact = await people.addEmergencyContact({
+      employeeId,
+      name,
+      relationship,
+      phone,
+      email,
+      isPrimary: isPrimary === true || isPrimary === 1,
+      actor: `Employee (${employeeId})`,
+    });
+    const updated = await people.myEmployeeProfile(employeeId);
+    res.status(201).json({ status: 'SUCCESS', contact, profile: updated });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// Employee updates emergency contact
+router.put('/mine/emergency-contacts/:contactId', requireDevice, async (req, res) => {
+  const employeeId = req.auth.employeeId;
+  const contactId = req.params.contactId;
+  const { name, relationship, phone, email, isPrimary } = req.body || {};
+  try {
+    const contact = await people.updateEmergencyContact({
+      contactId,
+      employeeId,
+      name,
+      relationship,
+      phone,
+      email,
+      isPrimary: isPrimary === true || isPrimary === 1,
+      actor: `Employee (${employeeId})`,
+    });
+    const updated = await people.myEmployeeProfile(employeeId);
+    res.json({ status: 'SUCCESS', contact, profile: updated });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// Employee deletes emergency contact
+router.delete('/mine/emergency-contacts/:contactId', requireDevice, async (req, res) => {
+  const employeeId = req.auth.employeeId;
+  const contactId = req.params.contactId;
+  try {
+    await people.deleteEmergencyContact({
+      contactId,
+      employeeId,
+      actor: `Employee (${employeeId})`,
+    });
+    const updated = await people.myEmployeeProfile(employeeId);
+    res.json({ status: 'SUCCESS', profile: updated });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Consolidated profile (spec 37)
 // ---------------------------------------------------------------------------

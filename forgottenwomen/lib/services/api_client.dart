@@ -445,6 +445,99 @@ class ApiClient {
         return EmployeeProfile.fromJson(body['profile'] as Map<String, dynamic>);
       });
 
+  /// Updates this employee's personal details, identification, and residential address.
+  Future<void> updateMyPersonalDetails({
+    String? nationalId,
+    String? mobilePhone,
+    String? personalEmail,
+    String? dateOfBirth,
+    String? addressLine1,
+    String? addressLine2,
+    String? city,
+    String? postcode,
+  }) => _guard(() async {
+        final payload = <String, dynamic>{
+          if (nationalId != null) 'nationalId': nationalId,
+          if (mobilePhone != null) 'mobilePhone': mobilePhone,
+          if (personalEmail != null) 'personalEmail': personalEmail,
+          if (dateOfBirth != null) 'dateOfBirth': dateOfBirth,
+          if (addressLine1 != null) 'addressLine1': addressLine1,
+          if (addressLine2 != null) 'addressLine2': addressLine2,
+          if (city != null) 'city': city,
+          if (postcode != null) 'postcode': postcode,
+        };
+        final res = await _http
+            .post(
+              await _uri('/api/people/mine/personal'),
+              headers: await _authHeaders(),
+              body: jsonEncode(payload),
+            )
+            .timeout(timeout);
+        _decode(res);
+      });
+
+  /// Adds an emergency contact for this employee.
+  Future<void> addEmergencyContact({
+    required String name,
+    required String relationship,
+    required String phone,
+    String? email,
+    bool isPrimary = false,
+  }) => _guard(() async {
+        final payload = <String, dynamic>{
+          'name': name,
+          'relationship': relationship,
+          'phone': phone,
+          if (email != null && email.isNotEmpty) 'email': email,
+          'isPrimary': isPrimary,
+        };
+        final res = await _http
+            .post(
+              await _uri('/api/people/mine/emergency-contacts'),
+              headers: await _authHeaders(),
+              body: jsonEncode(payload),
+            )
+            .timeout(timeout);
+        _decode(res);
+      });
+
+  /// Updates an emergency contact for this employee.
+  Future<void> updateEmergencyContact({
+    required String contactId,
+    required String name,
+    required String relationship,
+    required String phone,
+    String? email,
+    bool isPrimary = false,
+  }) => _guard(() async {
+        final payload = <String, dynamic>{
+          'name': name,
+          'relationship': relationship,
+          'phone': phone,
+          if (email != null && email.isNotEmpty) 'email': email,
+          'isPrimary': isPrimary,
+        };
+        final res = await _http
+            .put(
+              await _uri('/api/people/mine/emergency-contacts/$contactId'),
+              headers: await _authHeaders(),
+              body: jsonEncode(payload),
+            )
+            .timeout(timeout);
+        _decode(res);
+      });
+
+  /// Deletes an emergency contact.
+  Future<void> deleteEmergencyContact(String contactId) => _guard(() async {
+        final res = await _http
+            .delete(
+              await _uri('/api/people/mine/emergency-contacts/$contactId'),
+              headers: await _authHeaders(),
+            )
+            .timeout(timeout);
+        _decode(res);
+      });
+
   /// Fetches this employee's monthly payroll statements across all periods.
   Future<EmployeePayrollStatement> fetchMyPayrollStatements() => _guard(() async {
         final res = await _http

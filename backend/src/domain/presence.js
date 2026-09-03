@@ -462,8 +462,9 @@ async function presentDay(d, employee) {
   if (d.firstInAt && s.isWorkingDay) {
     if (d.firstInAt > s.latestOnTimeAt) {
       isLate = true;
-      const computedLate = Math.max(0, Math.round((d.firstInAt - s.scheduledStartAt) / 60000));
-      lateMinutes = Math.max(lateMinutes, computedLate);
+      const graceEndMs = s.scheduledStartAt + (s.graceMinutes * 60000);
+      const computedLate = Math.max(1, Math.round((d.firstInAt - graceEndMs) / 60000));
+      lateMinutes = computedLate;
     }
   }
 

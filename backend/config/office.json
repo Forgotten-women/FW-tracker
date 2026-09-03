@@ -85,7 +85,7 @@
   "permittedBreakMinutes": 30,
   "dayEquivalentMinutes": 480,
   "latenessGraceMinutes": 10,
-  "_comment_grace": "CONFIRMED by Forgotten Women: 10 minute grace period. With an 11:00 start that means arrivals up to 11:10 (such as 11:01) are on time (0 late minutes, 0 deficit), and 11:11 onwards is late.",
+  "_comment_grace": "CONFIRMED by Forgotten Women: 10 minute grace period. With an 11:00 start that means arrivals up to 11:10 (such as 11:01 or 11:10) are on time (0 late minutes, 0 deficit). Arrivals from 11:11 onwards are late with deficit measured beyond grace (at 11:11, deficit is 1 min).",
   "latenessOccurrencesAllowed": 3,
   "latenessMonitoringPeriod": "CALENDAR_MONTH",
   "_comment_lateness": "CONFIRMED by Forgotten Women on 2026-08-27: 3 late occurrences are allowed per CALENDAR MONTH, and the 4th triggers HR warning review. The count resets on the 1st of each month.",
