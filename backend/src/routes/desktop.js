@@ -86,6 +86,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         observedAt: nowMs,
         note: `Desktop Agent (${status})`,
       });
+      await presence.recomputeDay(employeeId, dateKey, nowMs);
     } catch (_) {}
   }
 

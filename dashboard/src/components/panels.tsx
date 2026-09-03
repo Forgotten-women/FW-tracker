@@ -356,11 +356,30 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
                     </div>
                   </div>
 
-                  {/* Status Badge */}
-                  <Badge tone={meta.tone} dot size="sm">
-                    {meta.label}
-                  </Badge>
+                  {/* Status Badge & Late Flag */}
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {((e.lateMinutes ?? 0) > 0 || e.isLate) && (
+                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_8px_rgba(244,63,94,0.2)]">
+                        <span>⚠️</span> Late (+{e.lateMinutes}m)
+                      </span>
+                    )}
+                    <Badge tone={meta.tone} dot size="sm">
+                      {meta.label}
+                    </Badge>
+                  </div>
                 </div>
+
+                {/* Late Arrival Policy Warning Banner */}
+                {((e.lateMinutes ?? 0) > 0 || e.isLate) && (
+                  <div className="mt-3 flex items-center justify-between rounded-xl bg-rose-500/10 border border-rose-500/25 px-3 py-1.5 text-xs text-rose-300">
+                    <span className="font-semibold flex items-center gap-1.5">
+                      <span>⚠️</span> Late Arrival (Policy Flag)
+                    </span>
+                    <span className="font-mono font-bold text-rose-400">
+                      +{e.lateMinutes}m deficit
+                    </span>
+                  </div>
+                )}
 
                 {/* On Break Pill */}
                 {e.onBreak && (
@@ -378,7 +397,14 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
                 <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-xl bg-slate-900/60 p-2.5 text-center text-[11px] border border-white/5">
                   <div>
                     <span className="text-slate-400 block text-[10px]">First In</span>
-                    <span className="font-semibold text-slate-200">{e.firstCheckIn}</span>
+                    <span className={`font-semibold ${((e.lateMinutes ?? 0) > 0 || e.isLate) ? 'text-rose-400 font-bold' : 'text-slate-200'}`}>
+                      {e.firstCheckIn}
+                    </span>
+                    {((e.lateMinutes ?? 0) > 0 || e.isLate) && (
+                      <span className="text-[9px] text-rose-400 font-mono font-bold block">
+                        +{e.lateMinutes}m late
+                      </span>
+                    )}
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[10px]">Last Seen</span>
@@ -576,7 +602,16 @@ export function AttendanceTable({
                         <span className="font-bold text-white block">{a.employeeName}</span>
                         <span className="text-[11px] text-slate-400">{a.role}</span>
                       </td>
-                      <td className="px-3 py-3.5 font-mono text-slate-300">{a.firstCheckIn}</td>
+                      <td className="px-3 py-3.5 font-mono">
+                        <span className={((a.lateMinutes ?? 0) > 0 || (a as any).isLate) ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+                          {a.firstCheckIn}
+                        </span>
+                        {((a.lateMinutes ?? 0) > 0 || (a as any).isLate) && (
+                          <div className="text-[10px] text-rose-400 font-bold flex items-center gap-0.5">
+                            <span>⚠️</span> +{a.lateMinutes ?? 0}m late
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3 py-3.5 font-mono text-slate-300">{a.lastActiveTime}</td>
                       <td className="px-3 py-3.5 text-[11px] text-slate-400">
                         {a.sessions.length
@@ -614,17 +649,26 @@ export function AttendanceTable({
                       <td className="px-3 py-3.5">
                         {hasDeficit ? (
                           <span className="font-bold text-rose-400">{a.dailyDeficitMinutes}m</span>
+                        ) : ((a.lateMinutes ?? 0) > 0) ? (
+                          <span className="font-bold text-rose-400">{a.lateMinutes}m</span>
                         ) : (
                           <span className="text-slate-400">0m</span>
                         )}
-                        {(a.lateMinutes ?? 0) > 0 && (
-                          <div className="text-[10px] text-amber-400">late: {a.lateMinutes}m</div>
+                        {((a.lateMinutes ?? 0) > 0 || (a as any).isLate) && (
+                          <div className="text-[10px] text-rose-400 font-semibold">⚠️ Late arrival</div>
                         )}
                       </td>
                       <td className="px-4 py-3.5 text-right">
-                        <Badge tone={meta.tone} dot size="sm">
-                          {meta.label}
-                        </Badge>
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          {((a.lateMinutes ?? 0) > 0 || (a as any).isLate) && (
+                            <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                              LATE
+                            </span>
+                          )}
+                          <Badge tone={meta.tone} dot size="sm">
+                            {meta.label}
+                          </Badge>
+                        </div>
                       </td>
                     </tr>
                   );

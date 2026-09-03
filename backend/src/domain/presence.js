@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { db, tx, MAC_SALT } = require('../db');
 const { config } = require('../config');
 const bindings = require('./bindings');
+const schedule = require('./schedule');
 const T = require('../util/time');
 
 const ACTIVE_MS = config.activeThresholdMinutes * 60 * 1000;
@@ -409,6 +410,10 @@ async function recomputeDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
     status: d.status,
     derived_at: nowMs,
   });
+  try {
+    const A = require('./attendance');
+    await A.recomputeDay(employeeId, dayKey, nowMs);
+  } catch (_) {}
   return d;
 }
 
@@ -448,6 +453,24 @@ async function presentDay(d, employee) {
   const onBreak = Boolean(openBreak);
   const activeBreakMinutes = openBreak ? Math.max(0, Math.round((T.now() - openBreak.started_at) / 60000)) : 0;
 
+  // Resolve employee's schedule for live lateness derivation
+  const s = await schedule.resolve(d.employeeId, d.dateKey);
+  let lateMinutes = summary ? summary.late_minutes : 0;
+  let isLate = summary ? summary.late_minutes > 0 : false;
+
+  // Live derivation: if firstInAt is recorded and employee arrived after latestOnTimeAt
+  if (d.firstInAt && s.isWorkingDay) {
+    if (d.firstInAt > s.latestOnTimeAt) {
+      isLate = true;
+      const computedLate = Math.max(0, Math.round((d.firstInAt - s.scheduledStartAt) / 60000));
+      lateMinutes = Math.max(lateMinutes, computedLate);
+    }
+  }
+
+  const breakMinutes = summary ? summary.break_minutes : 0;
+  const excessBreakMinutes = summary ? summary.excess_break_minutes : 0;
+  const dailyDeficitMinutes = (summary ? summary.daily_deficit_minutes : 0) || (isLate ? lateMinutes : 0);
+
   return {
     employeeId: d.employeeId,
     employeeName: employee ? employee.name : 'Unknown',
@@ -457,10 +480,12 @@ async function presentDay(d, employee) {
     statusLabel: d.statusLabel,
     onBreak,
     activeBreakMinutes,
-    breakMinutes: summary ? summary.break_minutes : 0,
-    excessBreakMinutes: summary ? summary.excess_break_minutes : 0,
-    dailyDeficitMinutes: summary ? summary.daily_deficit_minutes : 0,
-    lateMinutes: summary ? summary.late_minutes : 0,
+    breakMinutes,
+    excessBreakMinutes,
+    dailyDeficitMinutes,
+    lateMinutes,
+    isLate,
+    scheduledStartTime: s.startTime,
     firstCheckIn: d.firstInAt ? T.displayTime(d.firstInAt) : '--',
     lastActiveTime: d.lastActiveAt ? T.displayTime(d.lastActiveAt) : '--',
     totalMinutes: d.totalMinutes,

@@ -30,6 +30,8 @@ export interface EmployeeDay {
   excessBreakMinutes?: number;
   dailyDeficitMinutes?: number;
   lateMinutes?: number;
+  isLate?: boolean;
+  scheduledStartTime?: string;
   firstCheckIn: string;
   lastActiveTime: string;
   totalMinutes: number;
