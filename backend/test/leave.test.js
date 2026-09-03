@@ -350,11 +350,11 @@ test('cancelling restores the balance without erasing the history', async () => 
 
   assert.equal(await (await L.balanceFor(emp, '2025-07-20')).availableDays, before);
 
-  // Ordered by rowid, which is insertion order. Ordering by `id` was
+  // Ordered by created_at, which is insertion order here. Ordering by `id` was
   // meaningless - those are random hex strings, so the sequence came out
   // differently on about one run in three.
   const entries = (await db.prepare(
-    'SELECT entry_type FROM leave_accrual_ledger WHERE leave_request_id = ? ORDER BY rowid'
+    'SELECT entry_type FROM leave_accrual_ledger WHERE leave_request_id = ? ORDER BY created_at, id'
   ).all(r.id)).map(e => e.entry_type);
   assert.deepEqual(entries, ['BOOKED', 'CANCELLED'], 'reversed, not deleted');
 });

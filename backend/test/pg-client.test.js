@@ -196,7 +196,7 @@ test('a nested transaction rolls back to its savepoint without losing the outer 
 
 test('an error names the statement it came from', async () => {
   await assert.rejects(
-    await pg.prepare('SELECT no_such_column FROM adapter_probe').all(),
+    pg.prepare('SELECT no_such_column FROM adapter_probe').all(),
     /in: SELECT no_such_column/,
   );
 });

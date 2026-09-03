@@ -228,7 +228,7 @@ async function setStatus({ employeeId, status, effectiveDate = null, reason, act
         UPDATE device_tokens SET revoked_at = ?
         WHERE device_id IN (SELECT id FROM devices WHERE employee_id = ?) AND revoked_at IS NULL
       `).run(nowMs, employeeId);
-      require('./bindings').revokeForEmployee(employeeId, 'Employee left');
+      await require('./bindings').revokeForEmployee(employeeId, 'Employee left');
     }
 
     await audit({
@@ -358,7 +358,7 @@ async function profile(employeeId, { permissions = new Set(), includeSensitive =
       : undefined,
 
     personal: has('employee.personal.read')
-      ? (async () => {
+      ? await (async () => {
           const p = await db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
           return p ? {
             dateOfBirth: p.date_of_birth, personalEmail: p.personal_email, mobilePhone: p.mobile_phone,
@@ -369,7 +369,7 @@ async function profile(employeeId, { permissions = new Set(), includeSensitive =
       : undefined,
 
     bank: has('employee.bank.read')
-      ? (async () => {
+      ? await (async () => {
           const b = await db.prepare('SELECT * FROM employee_bank_details WHERE employee_id = ?').get(employeeId);
           return b ? { accountName: b.account_name, accountNumber: b.account_number,
             sortCode: b.sort_code, iban: b.iban, bankName: b.bank_name } : null;

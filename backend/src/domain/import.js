@@ -337,7 +337,7 @@ async function commit(csvText, { actor, replaceExisting = false }) {
       if (r.breakStart && r.breakEnd) {
         const started = T.wallClockToEpoch(r.dateKey, r.breakStart);
         const ended = T.wallClockToEpoch(r.dateKey, r.breakEnd);
-        const permitted = require('./schedule').resolve(r.employeeId, r.dateKey).permittedBreakMinutes;
+        const permitted = (await require('./schedule').resolve(r.employeeId, r.dateKey)).permittedBreakMinutes;
         const actual = Math.max(0, Math.round((ended - started) / 60000));
         await insertBreak.run(
           'brk_' + crypto.randomBytes(8).toString('hex'),

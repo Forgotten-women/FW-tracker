@@ -28,8 +28,14 @@ async function makeEmployee(id, name, number = null) {
   return id;
 }
 
-makeEmployee('emp_aa', 'Abdullah Shahid', 'FW001');
-makeEmployee('emp_bb', 'Fatima Khan', 'FW002');
+// In a hook, not at module scope: these reach the database, so they are
+// asynchronous now, and at module scope they would run before the schema exists
+// and their rejections would be unhandled.
+test.before(async () => {
+  await prepareDatabase();
+  await makeEmployee('emp_aa', 'Abdullah Shahid', 'FW001');
+  await makeEmployee('emp_bb', 'Fatima Khan', 'FW002');
+});
 
 test.after(dropDatabase);
 
