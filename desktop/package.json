@@ -5,8 +5,9 @@
   "private": true,
   "scripts": {
     "start": "node run-agent.js",
-    "dev": "tauri dev",
-    "build": "tauri build",
+    "app": "node run-agent.js --gui",
+    "build": "node build.js",
+    "build:tauri": "npx -y @tauri-apps/cli build",
     "package:win": "npx -y @yao-pkg/pkg run-agent.js --targets node18-win-x64 --output office-tracker-agent.exe",
     "package:mac": "npx -y @yao-pkg/pkg run-agent.js --targets node18-macos-x64,node18-macos-arm64 --output office-tracker-agent-mac"
   },

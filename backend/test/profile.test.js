@@ -151,4 +151,32 @@ test('Self-Service Profile & Salary Visibility API', async (t) => {
     assert.strictEqual(body.status, 'SUCCESS');
     assert.strictEqual(body.profile.salary.enabled, false);
   });
+
+  await t.test('Admin can update employee start date via PATCH /api/admin/employees/:id/employment', async () => {
+    const patchRes = await req('PATCH', `/api/admin/employees/${empId}/employment`, {
+      headers: ADMIN,
+      body: {
+        startDate: '2024-02-01',
+        reason: 'Correction of initial join date',
+      },
+    });
+    assert.strictEqual(patchRes.status, 200);
+    const patchBody = await patchRes.json();
+    assert.strictEqual(patchBody.status, 'SUCCESS');
+    assert.strictEqual(patchBody.record.start_date, '2024-02-01');
+
+    // Verify employee profile reflects the updated start date
+    const profRes = await req('GET', '/api/people/mine/profile', { headers: AUTH });
+    assert.strictEqual(profRes.status, 200);
+    const profBody = await profRes.json();
+    assert.strictEqual(profBody.profile.employment.startDate, '2024-02-01');
+  });
+
+  await t.test('Non-admin cannot update employee start date', async () => {
+    const patchRes = await req('PATCH', `/api/admin/employees/${empId}/employment`, {
+      headers: AUTH,
+      body: { startDate: '2025-01-01' },
+    });
+    assert.strictEqual(patchRes.status, 401);
+  });
 });

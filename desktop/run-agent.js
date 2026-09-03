@@ -6,7 +6,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawn } = require('child_process');
+const http = require('http');
+const { execSync, spawn, exec } = require('child_process');
 const crypto = require('crypto');
 const os = require('os');
 const readline = require('readline');
@@ -268,7 +269,173 @@ function getActiveWindowInfo() {
   return 'Desktop Active';
 }
 
-async function promptEnrollment() {
+const MINI_APP_PORT = 48712;
+let miniAppServer = null;
+let currentEnrollResolve = null;
+let todayLiveStats = { activeSeconds: 0, breakSeconds: 0, idleSeconds: 0 };
+let currentWorkstationStatus = 'ACTIVE';
+let isManualBreak = false;
+let latestContinuousIdle = 0;
+
+function launchMiniAppWindow(port = MINI_APP_PORT) {
+  const url = `http://127.0.0.1:${port}`;
+  if (process.platform === 'win32') {
+    exec(`msedge --app="${url}" --window-size=380,640`, (err) => {
+      if (err) {
+        exec(`chrome --app="${url}" --window-size=380,640`, (err2) => {
+          if (err2) {
+            exec(`start "" "${url}"`);
+          }
+        });
+      }
+    });
+  } else if (process.platform === 'darwin') {
+    exec(`open -a "Google Chrome" --args --app="${url}"`, (err) => {
+      if (err) {
+        exec(`open "${url}"`);
+      }
+    });
+  } else {
+    exec(`xdg-open "${url}"`);
+  }
+}
+
+function startMiniAppServer(port = MINI_APP_PORT) {
+  if (miniAppServer) return miniAppServer;
+
+  miniAppServer = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      return res.end();
+    }
+
+    const parsedUrl = new URL(req.url, `http://127.0.0.1:${port}`);
+
+    // GET /api/status
+    if (parsedUrl.pathname === '/api/status' && req.method === 'GET') {
+      const cfgNow = loadConfig();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        enrolled: !!(cfgNow && cfgNow.token),
+        employeeName: cfgNow ? cfgNow.employeeName : null,
+        employeeRole: cfgNow ? cfgNow.employeeRole : null,
+        isManualBreak,
+        latest: {
+          workstationStatus: isManualBreak ? 'ON_BREAK' : currentWorkstationStatus,
+          inOffice: !!getConnectedBssid(),
+          today: todayLiveStats,
+        }
+      }));
+    }
+
+    // POST /api/enroll
+    if (parsedUrl.pathname === '/api/enroll' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', async () => {
+        try {
+          const { serverUrl, code } = JSON.parse(body || '{}');
+          if (!code || !String(code).trim()) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'ERROR', message: 'Enrollment code is required.' }));
+          }
+
+          const cleanUrl = (serverUrl || 'https://backend-ten-lyart-57.vercel.app').trim().replace(/\/+$/, '');
+          const enrollRes = await fetch(`${cleanUrl}/api/enroll`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code: code.trim().toUpperCase(),
+              platform: process.platform,
+              model: `${os.type()} ${os.release()}`,
+              label: `${os.hostname()} (Work Laptop)`,
+            }),
+          });
+
+          const data = await enrollRes.json();
+          if (enrollRes.status !== 201 || data.status !== 'SUCCESS') {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({
+              status: 'ERROR',
+              message: data.message || 'Invalid or expired enrollment code.',
+            }));
+          }
+
+          const newCfg = {
+            serverUrl: cleanUrl,
+            token: data.token,
+            deviceId: data.deviceId,
+            employeeName: data.employee.name,
+            employeeRole: data.employee.role,
+          };
+          saveConfig(newCfg);
+
+          if (currentEnrollResolve) {
+            currentEnrollResolve(newCfg);
+            currentEnrollResolve = null;
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            status: 'SUCCESS',
+            message: 'Device enrolled successfully.',
+            employeeName: newCfg.employeeName,
+            employeeRole: newCfg.employeeRole,
+          }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ status: 'ERROR', message: err.message }));
+        }
+      });
+      return;
+    }
+
+    // POST /api/break
+    if (parsedUrl.pathname === '/api/break' && req.method === 'POST') {
+      isManualBreak = !isManualBreak;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak }));
+    }
+
+    // Static Assets
+    const safePath = parsedUrl.pathname === '/' ? 'index.html' : parsedUrl.pathname.replace(/^\/+/, '');
+    const localFile = path.join(__dirname, 'src', safePath);
+    let contentType = 'text/html';
+    if (safePath.endsWith('.css')) contentType = 'text/css';
+    if (safePath.endsWith('.js')) contentType = 'application/javascript';
+    if (safePath.endsWith('.png')) contentType = 'image/png';
+    if (safePath.endsWith('.json')) contentType = 'application/json';
+
+    try {
+      if (fs.existsSync(localFile) && fs.statSync(localFile).isFile()) {
+        res.writeHead(200, { 'Content-Type': contentType });
+        return res.end(fs.readFileSync(localFile));
+      }
+    } catch (_) {}
+
+    // Fallback to index.html
+    const indexFallback = path.join(__dirname, 'src', 'index.html');
+    if (fs.existsSync(indexFallback)) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      return res.end(fs.readFileSync(indexFallback));
+    }
+
+    res.writeHead(404);
+    res.end('Not found');
+  });
+
+  miniAppServer.listen(port, '127.0.0.1', () => {
+    // listening
+  });
+
+  return miniAppServer;
+}
+
+async function promptEnrollmentCli() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) => new Promise(res => rl.question(q, res));
 
@@ -294,7 +461,7 @@ async function promptEnrollment() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        code: code.trim(),
+        code: code.trim().toUpperCase(),
         platform: process.platform,
         model: `${os.type()} ${os.release()}`,
         label: `${os.hostname()} (Work Laptop)`,
@@ -324,17 +491,33 @@ async function promptEnrollment() {
 }
 
 async function startAgent() {
+  startMiniAppServer(MINI_APP_PORT);
+
   let cfg = loadConfig();
   if (!cfg || !cfg.token) {
-    cfg = await promptEnrollment();
+    if (process.argv.includes('--cli')) {
+      cfg = await promptEnrollmentCli();
+    } else {
+      console.log('\n=============================================');
+      console.log('  Office Tracker - Desktop Workstation Agent');
+      console.log('=============================================');
+      console.log(`\n[Office Tracker] Not enrolled. Launching Registration Mini-App on your desktop...`);
+      launchMiniAppWindow(MINI_APP_PORT);
+      cfg = await new Promise((resolve) => {
+        currentEnrollResolve = resolve;
+      });
+      console.log(`\n✅ Device paired as: ${cfg.employeeName} (${cfg.employeeRole})`);
+    }
   } else {
     console.log(`\n[Office Tracker Desktop] Logged in as: ${cfg.employeeName} (${cfg.employeeRole})`);
     console.log(`[Office Tracker Desktop] Server: ${cfg.serverUrl}`);
+    if (process.argv.includes('--gui') || process.argv.includes('--app')) {
+      launchMiniAppWindow(MINI_APP_PORT);
+    }
   }
 
   let accumulatedActive = 0;
   let accumulatedIdle = 0;
-  let isManualBreak = false;
   let appBreakdown = {};
   let secondsElapsed = 0;
   let currentApp = 'Desktop Active';
@@ -365,6 +548,12 @@ async function startAgent() {
 
           if (res.ok) {
             const data = await res.json();
+            if (data.today) {
+              todayLiveStats = data.today;
+            }
+            if (data.workstationStatus) {
+              currentWorkstationStatus = data.workstationStatus;
+            }
             if (localDb) {
               localDb.prepare('UPDATE local_events SET synced_at = ? WHERE event_id = ?').run(Date.now(), ev.event_id);
             }

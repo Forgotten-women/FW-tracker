@@ -1357,6 +1357,11 @@ export function EmployeeProfileModal({
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [currentStartDate, setCurrentStartDate] = useState<string>('');
+  const [editingStartDate, setEditingStartDate] = useState(false);
+  const [newStartDate, setNewStartDate] = useState<string>('');
+  const [savingStartDate, setSavingStartDate] = useState(false);
+  const [startDateSuccess, setStartDateSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1365,6 +1370,9 @@ export function EmployeeProfileModal({
       .then((res) => {
         if (active) {
           setProfile(res.profile);
+          const start = res.profile?.employment?.startDate || employee.startDate || '';
+          setCurrentStartDate(start);
+          setNewStartDate(start);
           setLoading(false);
         }
       })
@@ -1499,6 +1507,96 @@ export function EmployeeProfileModal({
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Employment Status & Join Date */}
+            <div className="rounded-2xl border border-white/8 bg-slate-950/60 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  Employment & Join Date (HR Only)
+                </div>
+                {!editingStartDate && (
+                  <button
+                    onClick={() => {
+                      setNewStartDate(currentStartDate || '');
+                      setEditingStartDate(true);
+                      setStartDateSuccess(null);
+                    }}
+                    className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                  >
+                    Edit Join Date
+                  </button>
+                )}
+              </div>
+
+              {editingStartDate ? (
+                <div className="space-y-3 pt-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <input
+                      type="date"
+                      value={newStartDate}
+                      onChange={(e) => setNewStartDate(e.target.value)}
+                      className="rounded-xl border border-white/15 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
+                    />
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={savingStartDate || !newStartDate}
+                      onClick={async () => {
+                        setSavingStartDate(true);
+                        try {
+                          await api.updateStartDate(employee.id, newStartDate, 'Join date updated by HR');
+                          setCurrentStartDate(newStartDate);
+                          employee.startDate = newStartDate;
+                          setEditingStartDate(false);
+                          setStartDateSuccess('Join date updated successfully.');
+                        } catch (err: any) {
+                          alert(err?.message || 'Failed to update start date');
+                        } finally {
+                          setSavingStartDate(false);
+                        }
+                      }}
+                    >
+                      {savingStartDate ? 'Saving…' : 'Save'}
+                    </Button>
+                    <button
+                      onClick={() => setEditingStartDate(false)}
+                      className="text-xs text-slate-400 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    Updating the employee's official start date updates all initial employment records and audit logs.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Official Start Date</span>
+                    <span className="font-semibold text-white">
+                      {currentStartDate || employee.startDate || 'Not Set'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Designation</span>
+                    <span className="font-semibold text-white">{employee.role || 'Team Member'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Status</span>
+                    <span className="font-semibold text-emerald-400">Active Employee</span>
+                  </div>
+                </div>
+              )}
+
+              {startDateSuccess && (
+                <div className="mt-2 text-[11px] font-medium text-emerald-400">
+                  ✓ {startDateSuccess}
                 </div>
               )}
             </div>

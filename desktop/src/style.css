@@ -7,12 +7,14 @@
 }
 
 body {
-  background: transparent;
+  background: #090d16;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
+  margin: 0;
+  padding: 14px;
+  overflow-y: auto;
 }
 
 .widget-card {

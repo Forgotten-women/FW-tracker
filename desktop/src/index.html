@@ -22,11 +22,27 @@
 
     <!-- Enrollment View -->
     <div id="enroll-section" class="section">
-      <p class="desc">Enter your server URL and enrollment code provided by HR to link this laptop to your account.</p>
-      <input type="text" id="server-url-input" placeholder="Server URL (e.g. https://your-backend.vercel.app)" value="https://backend-ten-lyart-57.vercel.app" />
-      <input type="text" id="enroll-code-input" placeholder="Enrollment Code (e.g. ABCD-1234)" />
-      <button id="enroll-btn" class="primary-btn">Pair This Laptop</button>
-      <div id="enroll-error" class="error-msg"></div>
+      <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 12px; padding: 12px; text-align: center;">
+        <div style="font-size: 13px; font-weight: 700; color: #a5b4fc; margin-bottom: 4px;">Device Registration</div>
+        <p class="desc" style="font-size: 11px; margin: 0;">Enter the 8-character pairing code provided by HR to link this laptop.</p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">ENROLLMENT CODE</label>
+        <input type="text" id="enroll-code-input" placeholder="e.g. 7842-8921" autofocus style="text-align: center; font-size: 16px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;" />
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <label style="font-size: 11px; color: #64748b; font-weight: 500;">SERVER URL</label>
+        <input type="text" id="server-url-input" placeholder="Server URL" value="https://backend-ten-lyart-57.vercel.app" style="font-size: 11px; color: #94a3b8;" />
+      </div>
+
+      <button id="enroll-btn" class="primary-btn" style="margin-top: 4px;">Pair This Laptop</button>
+      <div id="enroll-error" class="error-msg" style="text-align: center; min-height: 20px;"></div>
+      
+      <p style="font-size: 10px; color: #64748b; text-align: center; margin-top: 4px;">
+        🔒 Privacy Safe: Only tracks active application names & idle time. Keystrokes and screen contents are never recorded.
+      </p>
     </div>
 
     <!-- Live Status View -->
