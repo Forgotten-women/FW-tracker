@@ -34,6 +34,16 @@ body {
   margin-bottom: 18px;
   padding-bottom: 12px;
   border-bottom: 1px solid #1e293b;
+  -webkit-app-region: drag;
+  cursor: grab;
+}
+
+.header:active {
+  cursor: grabbing;
+}
+
+button, input, select, textarea, a, .icon-btn, .action-btn, .primary-btn {
+  -webkit-app-region: no-drag;
 }
 
 .brand {

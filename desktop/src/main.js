@@ -57,12 +57,14 @@ const statusText = document.getElementById('status-text');
 const networkText = document.getElementById('network-text');
 
 let currentActiveSecs = 0;
+let lastSyncedServerSecs = -1;
 let timerInterval = null;
 
 function formatHMS(seconds) {
-  const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
-  const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
-  const s = (seconds % 60).toString().padStart(2, '0');
+  const total = Math.max(0, parseInt(seconds, 10) || 0);
+  const h = Math.floor(total / 3600).toString().padStart(2, '0');
+  const m = Math.floor((total % 3600) / 60).toString().padStart(2, '0');
+  const s = (total % 60).toString().padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
 
@@ -75,7 +77,18 @@ async function refreshStatus() {
       employeeBadge.textContent = `${data.employeeName || 'Staff'} (${data.employeeRole || 'Member'})`;
 
       if (data.latest && data.latest.today) {
-        currentActiveSecs = data.latest.today.activeSeconds || 0;
+        const serverActive = data.latest.today.activeSeconds || 0;
+        if (lastSyncedServerSecs === -1) {
+          currentActiveSecs = serverActive;
+          lastSyncedServerSecs = serverActive;
+        } else if (serverActive > lastSyncedServerSecs) {
+          currentActiveSecs = Math.max(currentActiveSecs, serverActive);
+          lastSyncedServerSecs = serverActive;
+        } else {
+          // Preserve local progression; never reset backwards between 60s heartbeats
+          currentActiveSecs = Math.max(currentActiveSecs, serverActive);
+        }
+
         statBreak.textContent = `${Math.round((data.latest.today.breakSeconds || 0) / 60)}m`;
         statIdle.textContent = `${Math.round((data.latest.today.idleSeconds || 0) / 60)}m`;
         
@@ -120,6 +133,19 @@ timerInterval = setInterval(() => {
     }
   }
 }, 1000);
+
+// Window Dragging Support for Frameless Window
+const headerEl = document.querySelector('.header');
+if (headerEl) {
+  headerEl.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) {
+      return;
+    }
+    if (isTauri && tauriWindow && typeof tauriWindow.startDragging === 'function') {
+      tauriWindow.startDragging();
+    }
+  });
+}
 
 if (enrollCodeInput) {
   // Auto uppercase formatting

@@ -25,6 +25,7 @@ pub struct HeartbeatPayload {
     pub lock_duration_seconds: u64,
     pub connected_bssid: Option<String>,
     pub current_wifi_mac: Option<String>,
+    pub local_ip: Option<String>,
     pub is_manual_break: bool,
 }
 

@@ -84,13 +84,36 @@ fn main() {
                 let mut sample_count = 0;
                 let mut accumulated_active = 0;
                 let mut accumulated_idle = 0;
+                let mut first_run = true;
 
                 loop {
+                    let state = app_handle.state::<AppState>();
+                    let cfg = state.config.lock().unwrap().clone();
+
+                    // On app launch, query initial status immediately without waiting 60s
+                    if !cfg.token.is_empty() && first_run {
+                        first_run = false;
+                        let bssid = tracker::network::get_connected_bssid();
+                        let local_ip = tracker::network::get_local_ip();
+                        let payload = HeartbeatPayload {
+                            active_seconds: 0,
+                            idle_seconds: 0,
+                            lock_state: "UNLOCKED".to_string(),
+                            lock_duration_seconds: 0,
+                            connected_bssid: bssid,
+                            current_wifi_mac: None,
+                            local_ip,
+                            is_manual_break: false,
+                        };
+                        if let Ok(resp) = client::send_heartbeat(&cfg, payload).await {
+                            *state.latest_response.lock().unwrap() = Some(resp.clone());
+                            let _ = app_handle.emit_all("heartbeat-updated", resp);
+                        }
+                    }
+
                     sleep(Duration::from_secs(10)).await;
                     sample_count += 1;
 
-                    let state = app_handle.state::<AppState>();
-                    let cfg = state.config.lock().unwrap().clone();
                     if cfg.token.is_empty() {
                         continue;
                     }
@@ -121,6 +144,7 @@ fn main() {
                     // Send heartbeat every 60 seconds (6 samples x 10s)
                     if sample_count >= 6 {
                         sample_count = 0;
+                        let local_ip = tracker::network::get_local_ip();
                         let payload = HeartbeatPayload {
                             active_seconds: accumulated_active,
                             idle_seconds: accumulated_idle,
@@ -128,6 +152,7 @@ fn main() {
                             lock_duration_seconds: lock_duration,
                             connected_bssid: bssid,
                             current_wifi_mac: None,
+                            local_ip,
                             is_manual_break: is_break,
                         };
                         accumulated_active = 0;

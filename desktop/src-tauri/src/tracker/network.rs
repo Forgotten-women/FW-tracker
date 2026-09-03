@@ -3,7 +3,14 @@
 // Windows: Queries netsh wlan show interfaces / wlanapi to extract the active BSSID.
 // macOS: Queries airport -I / CoreWLAN for the active BSSID.
 
+use std::net::UdpSocket;
 use std::process::Command;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// True if `w` is exactly `xx:xx:xx:xx:xx:xx`.
 fn is_mac(w: &[u8]) -> bool {
@@ -44,9 +51,10 @@ fn extract_mac(line: &str) -> Option<String> {
 pub fn get_connected_bssid() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
-        // Run netsh wlan show interfaces
+        // Run netsh wlan show interfaces silently without flashing console window
         let output = Command::new("netsh")
             .args(["wlan", "show", "interfaces"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .ok()?;
 
@@ -85,3 +93,17 @@ pub fn get_connected_bssid() -> Option<String> {
         None
     }
 }
+
+/// Resolves the primary local IPv4 address used for outbound network traffic.
+/// Queries the OS routing table without generating network packets.
+pub fn get_local_ip() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let local_addr = socket.local_addr().ok()?;
+    let ip = local_addr.ip();
+    if ip.is_loopback() {
+        return None;
+    }
+    Some(ip.to_string())
+}
+

@@ -103,6 +103,19 @@ function classifyLocation({ bssid, srcIp, localIp, source }) {
   if (!config.bssidEnforced) return ipOk ? 'OFFICE' : 'REMOTE';
 
   const bssidOk = config.isOfficeBssid(bssid);
+  if (bssidOk) {
+    // If the BSSID matches the office Wi-Fi, the workstation is physically in radio range of the office AP.
+    // If a private local IP was reported and it specifically belongs to an off-office home subnet, flag as contradictory (UNKNOWN).
+    // Otherwise (e.g. local IP matches office subnet, local IP was omitted in cloud request, or local IP is a virtual adapter), confirm as OFFICE.
+    if (localIp && !config.isOfficeIp(localIp) && !config.isOfficeIp(srcIp)) {
+      const isVirtualSubnet = /^(172\.(1[6-9]|2[0-9]|3[0-1])|10\.)/.test(String(localIp).trim());
+      if (!isVirtualSubnet) {
+        return 'UNKNOWN';
+      }
+    }
+    return 'OFFICE';
+  }
+
   if (ipOk && bssidOk) return 'OFFICE';
   if (!ipOk && !bssidOk) return 'REMOTE';
   // Exactly one check passed. An office BSSID reached from an off-network

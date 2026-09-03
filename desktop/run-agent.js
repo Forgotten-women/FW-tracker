@@ -70,7 +70,7 @@ function getIdleSeconds() {
   if (process.platform === 'win32') {
     try {
       const scriptPath = path.join(__dirname, 'get-idle.ps1');
-      const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000 }).toString().trim();
+      const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000, windowsHide: true }).toString().trim();
       return parseInt(out, 10) || 0;
     } catch (_) {
       return 0;
@@ -101,7 +101,7 @@ const MAC_ON_BSSID_LINE = /bssid[^:]*:\s*((?:[0-9a-f]{2}:){5}[0-9a-f]{2})/i;
 function getConnectedBssid() {
   if (process.platform === 'win32') {
     try {
-      const out = execSync('netsh wlan show interfaces', { timeout: 2500 }).toString();
+      const out = execSync('netsh wlan show interfaces', { timeout: 2500, windowsHide: true }).toString();
       for (const line of out.split('\n')) {
         const m = MAC_ON_BSSID_LINE.exec(line.trim());
         if (m) return m[1].toLowerCase();
@@ -241,13 +241,13 @@ function getActiveWindowInfo() {
   if (process.platform === 'win32') {
     try {
       const scriptPath = path.join(__dirname, 'get-window.ps1');
-      const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000 }).toString().trim();
+      const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000, windowsHide: true }).toString().trim();
       const parsed = JSON.parse(out);
       return parseActiveApplication(parsed.process, parsed.title);
     } catch (_) {
       try {
         const cmd = `powershell -NoProfile -Command "(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName"`;
-        const out = execSync(cmd, { timeout: 2500 }).toString().trim();
+        const out = execSync(cmd, { timeout: 2500, windowsHide: true }).toString().trim();
         return parseActiveApplication(out, '');
       } catch (_) {}
     }
@@ -645,7 +645,7 @@ async function startAgent() {
 
   if (process.platform === 'win32') {
     const streamScript = path.join(__dirname, 'stream-monitor.ps1');
-    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', streamScript]);
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', streamScript], { windowsHide: true });
 
     let buffer = '';
     child.stdout.on('data', chunk => {
