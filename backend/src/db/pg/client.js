@@ -74,6 +74,10 @@ function getPool() {
   // search_path` on the pool's connect event: the event handler cannot be
   // awaited, so a query could reach the server before the SET landed and end up
   // reading the wrong schema.
+  //
+  // `public` is deliberately NOT on the path. With it there, CREATE TABLE IF
+  // NOT EXISTS treats a table in public as already existing, so the suite's own
+  // copy is never created and every suite silently shares one set of tables.
   const schema = (process.env.PG_SCHEMA || '').trim();
   if (schema && !/^[a-z_][a-z0-9_]*$/i.test(schema)) {
     throw new Error(`PG_SCHEMA must be a plain identifier, got: ${schema}`);
@@ -88,7 +92,7 @@ function getPool() {
     connectionTimeoutMillis: 10_000,
     // Supabase requires TLS; a local test container does not offer it.
     ssl: local ? false : { rejectUnauthorized: false },
-    ...(schema ? { options: `-c search_path=${schema},public` } : {}),
+    ...(schema ? { options: `-c search_path=${schema}` } : {}),
   });
 
   pool.on('error', err => {

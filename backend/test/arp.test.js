@@ -15,7 +15,6 @@ process.env.OFFICE_CONFIG_FILE = require('path').join(__dirname, 'fixtures', 'of
 
 const { parseArpOutput } = require('../src/sensors/arp');
 
-test.before(prepareDatabase);
 
 const WINDOWS_OUTPUT = `
 Interface: 192.168.18.68 --- 0x11
@@ -68,4 +67,3 @@ test('empty or malformed input yields nothing rather than throwing', async () =>
   assert.deepEqual(parseArpOutput('garbage\nno addresses here\n'), []);
 });
 
-test.after(dropDatabase);

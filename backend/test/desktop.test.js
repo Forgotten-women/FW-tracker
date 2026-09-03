@@ -18,6 +18,7 @@ let server;
 
 test.before(prepareDatabase);
 test.before(async () => {
+  await prepareDatabase();
   await new Promise(resolve => {
     server = app.listen(0, '127.0.0.1', resolve);
   });

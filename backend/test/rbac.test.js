@@ -36,24 +36,42 @@ async function assign(managerEmployeeId, employeeId) {
 }
 
 // Three employees: a manager, one of their reports, and an unrelated person.
-const EMP_MANAGER = makeEmployee('emp_mgr', 'Manager Person');
-const EMP_REPORT = makeEmployee('emp_report', 'Reporting Person');
-const EMP_OTHER = makeEmployee('emp_other', 'Unrelated Person');
-assign(EMP_MANAGER, EMP_REPORT);
+//
+// Created in a before hook rather than at module scope: these calls reach the
+// database, so they are asynchronous now, and at module scope each constant
+// would have held a pending Promise instead of an id - every test then compared
+// against a Promise and the failures said nothing useful. There is also no
+// schema to write into until prepareDatabase has run.
+const EMP_MANAGER = 'emp_mgr';
+const EMP_REPORT = 'emp_report';
+const EMP_OTHER = 'emp_other';
 
-const employeeUser = rbac.createUser({
-  email: 'employee@test.org', displayName: 'Employee', password: PASSWORD,
-  roles: ['employee'], employeeId: EMP_REPORT,
-});
-const managerUser = rbac.createUser({
-  email: 'manager@test.org', displayName: 'Manager', password: PASSWORD,
-  roles: ['manager'], employeeId: EMP_MANAGER,
-});
-const hrUser = rbac.createUser({
-  email: 'hr@test.org', displayName: 'HR', password: PASSWORD, roles: ['hr'],
-});
-const adminUser = rbac.createUser({
-  email: 'admin@test.org', displayName: 'Admin', password: PASSWORD, roles: ['super_admin'],
+let employeeUser;
+let managerUser;
+let hrUser;
+let adminUser;
+
+test.before(async () => {
+  await prepareDatabase();
+  await makeEmployee(EMP_MANAGER, 'Manager Person');
+  await makeEmployee(EMP_REPORT, 'Reporting Person');
+  await makeEmployee(EMP_OTHER, 'Unrelated Person');
+  await assign(EMP_MANAGER, EMP_REPORT);
+
+  employeeUser = await rbac.createUser({
+    email: 'employee@test.org', displayName: 'Employee', password: PASSWORD,
+    roles: ['employee'], employeeId: EMP_REPORT,
+  });
+  managerUser = await rbac.createUser({
+    email: 'manager@test.org', displayName: 'Manager', password: PASSWORD,
+    roles: ['manager'], employeeId: EMP_MANAGER,
+  });
+  hrUser = await rbac.createUser({
+    email: 'hr@test.org', displayName: 'HR', password: PASSWORD, roles: ['hr'],
+  });
+  adminUser = await rbac.createUser({
+    email: 'admin@test.org', displayName: 'Admin', password: PASSWORD, roles: ['super_admin'],
+  });
 });
 
 const asEmployee = async () => await rbac.describeUser(employeeUser.id);

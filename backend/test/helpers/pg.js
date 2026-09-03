@@ -48,8 +48,24 @@ function useTestDatabase(suiteName) {
   return schema;
 }
 
+// Memoised, and awaited explicitly by the suites that have fixtures of their
+// own.
+//
+// Registration order of two separate top-level `before` hooks turned out not to
+// be the order they run in, so a suite's fixture hook could execute before the
+// schema existed - every insert then failed with "relation does not exist".
+// Memoising makes prepareDatabase safe to call from anywhere: the first caller
+// does the work, everyone else awaits the same promise, and the schema is never
+// dropped out from under fixtures that are already loaded.
+let preparing = null;
+
+function prepareDatabase() {
+  if (!preparing) preparing = createSchema();
+  return preparing;
+}
+
 /** Create the suite's schema and apply the full table definitions into it. */
-async function prepareDatabase() {
+async function createSchema() {
   const { Client } = require('pg');
   const schema = process.env.PG_SCHEMA;
 
@@ -62,7 +78,7 @@ async function prepareDatabase() {
   try {
     await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     await admin.query(`CREATE SCHEMA ${schema}`);
-    await admin.query(`SET search_path TO ${schema}, public`);
+    await admin.query(`SET search_path TO ${schema}`);
     await admin.query(fs.readFileSync(SCHEMA_SQL, 'utf8'));
     // Roles, permissions, leave types and document types. Without these every
     // insert that references them fails its foreign key.
@@ -74,6 +90,7 @@ async function prepareDatabase() {
 
 /** Drop the suite's schema and close the pool. */
 async function dropDatabase() {
+  preparing = null;
   const pg = require('../../src/db/pg/client');
   try {
     await pg.exec(`DROP SCHEMA IF EXISTS ${process.env.PG_SCHEMA} CASCADE`);
