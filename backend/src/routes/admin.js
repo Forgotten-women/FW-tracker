@@ -187,6 +187,22 @@ router.patch('/employees/:id/employment', async (req, res) => {
         after: { startDate: cleanStartDate, reason },
       });
     }
+
+    // Keep earliest salary record effective_from in sync with employment start date
+    const earliestSalary = await db.prepare(`
+      SELECT id, effective_from FROM salary_history
+      WHERE employee_id = ?
+      ORDER BY created_at ASC, effective_from ASC
+      LIMIT 1
+    `).get(employeeId);
+
+    if (earliestSalary) {
+      await db.prepare(`
+        UPDATE salary_history
+        SET effective_from = ?
+        WHERE id = ?
+      `).run(cleanStartDate, earliestSalary.id);
+    }
   });
 
   const updatedRecord = await db.prepare(`

@@ -454,7 +454,9 @@ async function myEmployeeProfile(employeeId) {
         monthly: s.monthly,
         daily: s.daily,
         annual: s.annual,
-        currency: s.currency || 'GBP',
+        baseAmount: s.monthly,
+        dailyRate: s.daily,
+        currency: s.currency || 'PKR',
         effectiveFrom: s.effectiveFrom,
       };
     } else {

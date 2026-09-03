@@ -1560,6 +1560,10 @@ export function EmployeeProfileModal({
                           await api.updateStartDate(employee.id, newStartDate, 'Join date updated by HR');
                           setCurrentStartDate(newStartDate);
                           employee.startDate = newStartDate;
+                          try {
+                            const ref = await api.getEmployeeProfile(employee.id);
+                            if (ref?.profile) setProfile(ref.profile);
+                          } catch {}
                           setEditingStartDate(false);
                           setStartDateSuccess('Join date updated successfully.');
                         } catch (err: any) {
@@ -1651,20 +1655,20 @@ export function EmployeeProfileModal({
                   <div>
                     <span className="text-slate-400 block text-[11px]">Base Monthly Pay</span>
                     <span className="font-bold text-emerald-400 text-sm">
-                      {salary.currency === 'GBP' ? '£' : salary.currency === 'PKR' ? '₨' : '$'}
-                      {Number(salary.baseAmount || 0).toLocaleString()}
+                      {salary.currency === 'GBP' ? '£' : salary.currency === 'PKR' ? '₨ ' : '$'}
+                      {Number(salary.monthly ?? salary.baseAmount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[11px]">Daily Rate</span>
                     <span className="font-semibold text-white">
-                      {salary.currency === 'GBP' ? '£' : salary.currency === 'PKR' ? '₨' : '$'}
-                      {Number(salary.dailyRate || 0).toLocaleString()}
+                      {salary.currency === 'GBP' ? '£' : salary.currency === 'PKR' ? '₨ ' : '$'}
+                      {Number(salary.daily ?? salary.dailyRate ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[11px]">Effective Since</span>
-                    <span className="font-semibold text-white">{salary.effectiveFrom || '—'}</span>
+                    <span className="font-semibold text-white">{salary.effectiveFrom || currentStartDate || employee.startDate || '—'}</span>
                   </div>
                 </div>
               </div>
