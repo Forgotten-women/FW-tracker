@@ -74,6 +74,18 @@ function getIdleSeconds() {
     } catch (_) {
       return 0;
     }
+  } else if (process.platform === 'darwin') {
+    try {
+      const scriptPath = path.join(__dirname, 'get-idle.sh');
+      if (fs.existsSync(scriptPath)) {
+        const out = execSync(`bash "${scriptPath}"`, { timeout: 2500 }).toString().trim();
+        return parseInt(out, 10) || 0;
+      }
+      const out = execSync("ioreg -c IOHIDSystem 2>/dev/null | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'", { timeout: 2500 }).toString().trim();
+      return parseInt(out, 10) || 0;
+    } catch (_) {
+      return 0;
+    }
   }
   return 0;
 }
@@ -89,6 +101,15 @@ function getConnectedBssid() {
   if (process.platform === 'win32') {
     try {
       const out = execSync('netsh wlan show interfaces', { timeout: 2500 }).toString();
+      for (const line of out.split('\n')) {
+        const m = MAC_ON_BSSID_LINE.exec(line.trim());
+        if (m) return m[1].toLowerCase();
+      }
+    } catch (_) {}
+  } else if (process.platform === 'darwin') {
+    try {
+      const airport = '/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport';
+      const out = execSync(`"${airport}" -I 2>/dev/null`, { timeout: 2500 }).toString();
       for (const line of out.split('\n')) {
         const m = MAC_ON_BSSID_LINE.exec(line.trim());
         if (m) return m[1].toLowerCase();
@@ -229,6 +250,20 @@ function getActiveWindowInfo() {
         return parseActiveApplication(out, '');
       } catch (_) {}
     }
+  } else if (process.platform === 'darwin') {
+    try {
+      const scriptPath = path.join(__dirname, 'get-window.sh');
+      if (fs.existsSync(scriptPath)) {
+        const out = execSync(`bash "${scriptPath}"`, { timeout: 3000 }).toString().trim();
+        const parsed = JSON.parse(out);
+        return parseActiveApplication(parsed.process, parsed.title);
+      }
+      const appleScript = 'tell application "System Events" to get name of first application process whose frontmost is true';
+      const proc = execSync(`osascript -e '${appleScript}' 2>/dev/null`, { timeout: 2000 }).toString().trim();
+      return parseActiveApplication(proc, '');
+    } catch (_) {
+      return 'Desktop Active';
+    }
   }
   return 'Desktop Active';
 }
@@ -364,10 +399,16 @@ async function startAgent() {
     }
   }
 
+  let latestContinuousIdle = 0;
+
   function onSecondSample(idleSecs, procName, title) {
     secondsElapsed++;
-    const isIdle = idleSecs >= 300;
-    if (isManualBreak || isIdle) {
+    latestContinuousIdle = Math.max(0, parseInt(idleSecs, 10) || 0);
+
+    // If there has been no physical input for at least 60 seconds (or manual break),
+    // this 1-second interval counts as idle rather than active typing/clicking
+    const isIdle = isManualBreak || latestContinuousIdle >= 60;
+    if (isIdle) {
       accumulatedIdle++;
     } else {
       accumulatedActive++;
@@ -392,6 +433,7 @@ async function startAgent() {
         eventId,
         activeSeconds: sendActive,
         idleSeconds: sendIdle,
+        currentIdleSeconds: latestContinuousIdle,
         currentApp,
         appBreakdown: sendBreakdown,
         lockState: 'UNLOCKED',

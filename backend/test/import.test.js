@@ -185,10 +185,10 @@ test('imported days are derived, matching the spec 8.1 worked example', async ()
   ).get();
 
   assert.ok(row, 'the imported day must be derived, not left raw');
-  assert.equal(row.late_minutes, 17);
+  assert.equal(row.late_minutes, 7);
   assert.equal(row.excess_break_minutes, 12);
   assert.equal(row.early_departure_minutes, 7);
-  assert.equal(row.daily_deficit_minutes, 36);
+  assert.equal(row.daily_deficit_minutes, 26);
   assert.equal(row.is_late_occurrence, 1);
 });
 

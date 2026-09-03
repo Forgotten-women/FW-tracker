@@ -62,7 +62,21 @@ pub fn get_foreground_process_name() -> Option<String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub fn get_foreground_process_name() -> Option<String> {
+    use std::process::Command;
+
+    let apple_script = r#"tell application "System Events" to get name of first application process whose frontmost is true"#;
+    if let Ok(output) = Command::new("osascript").args(["-e", apple_script]).output() {
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_lowercase();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn get_foreground_process_name() -> Option<String> {
     None
 }

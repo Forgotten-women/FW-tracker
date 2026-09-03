@@ -31,6 +31,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const {
     activeSeconds = 60,
     idleSeconds = 0,
+    currentIdleSeconds = 0,
     lockState = 'UNLOCKED', // 'LOCKED', 'UNLOCKED', 'SLEEPING'
     lockDurationSeconds = 0,
     connectedBssid = null,
@@ -57,9 +58,14 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const lockGraceMins = parseInt(await getOrgSetting('lock_screen_grace_minutes', '5'), 10) || 5;
   const approvedProcesses = await getOrgSetting('approved_work_processes', '');
 
+  // Check if employee has an active break in progress (e.g. from mobile app or HR)
+  const activeBreak = await db.prepare(
+    'SELECT * FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
+  ).get(employeeId);
+
   // 3. Determine current status
   let status = 'ACTIVE';
-  if (isManualBreak) {
+  if (isManualBreak || activeBreak) {
     status = 'ON_BREAK';
   } else if (lockState === 'LOCKED' || lockState === 'SLEEPING') {
     // If locked longer than the 5-minute grace period, switch to AWAY
@@ -68,7 +74,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     } else {
       status = 'ACTIVE'; // Count the first 5 minutes as active work
     }
-  } else if (idleSeconds >= (idleThresholdMins * 60)) {
+  } else if (currentIdleSeconds >= (idleThresholdMins * 60) || (idleSeconds >= 55 && activeSeconds <= 5)) {
     status = 'IDLE';
   }
 
@@ -92,9 +98,23 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
 
   // 5. Upsert workstation session for today
   const sessionId = `ws_${employeeId}_${dateKey}`;
-  const effectiveActive = (status === 'ACTIVE' && inOffice) ? Math.max(0, parseInt(activeSeconds, 10) || 0) : 0;
-  const effectiveIdle = (status === 'IDLE') ? Math.max(0, parseInt(idleSeconds, 10) || 0) : 0;
-  const effectiveBreak = (status === 'ON_BREAK' || status === 'AWAY') ? 60 : 0;
+  const numActive = Math.max(0, parseInt(activeSeconds, 10) || 0);
+  const numIdle = Math.max(0, parseInt(idleSeconds, 10) || 0);
+  const batchTotal = (numActive + numIdle) > 0 ? (numActive + numIdle) : 60;
+
+  let effectiveActive = 0;
+  let effectiveIdle = 0;
+  let effectiveBreak = 0;
+
+  if (status === 'ON_BREAK') {
+    effectiveBreak = batchTotal;
+  } else if (status === 'AWAY' || status === 'IDLE') {
+    effectiveIdle = batchTotal;
+  } else {
+    // ACTIVE
+    effectiveActive = inOffice ? numActive : 0;
+    effectiveIdle = numIdle;
+  }
 
   try {
     const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);

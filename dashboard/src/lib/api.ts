@@ -143,6 +143,15 @@ export const api = {
       `/api/people/mine/profile?employeeId=${encodeURIComponent(employeeId)}`,
     ),
 
+  updateStartDate: (employeeId: string, startDate: string, reason?: string) =>
+    request<{ status: string; message: string; record: any }>(
+      `/api/admin/employees/${encodeURIComponent(employeeId)}/employment`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ startDate, reason }),
+      },
+    ),
+
   /**
    * EventSource cannot send headers, so the admin key is exchanged for a
    * single-use, short-lived ticket. That keeps the key out of the URL, the

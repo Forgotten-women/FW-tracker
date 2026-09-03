@@ -24,8 +24,26 @@ pub fn get_idle_seconds() -> u64 {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 pub fn get_idle_seconds() -> u64 {
-    // macOS / Linux fallback implementation
+    use std::process::Command;
+
+    if let Ok(output) = Command::new("ioreg").args(["-c", "IOHIDSystem"]).output() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            if line.contains("HIDIdleTime") {
+                if let Some(val_str) = line.split('=').nth(1) {
+                    if let Ok(nanos) = val_str.trim().parse::<u64>() {
+                        return nanos / 1_000_000_000;
+                    }
+                }
+            }
+        }
+    }
+    0
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub fn get_idle_seconds() -> u64 {
     0
 }

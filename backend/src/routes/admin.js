@@ -132,6 +132,77 @@ router.patch('/employees/:id', async (req, res) => {
   res.json({ status: 'SUCCESS', employee: { id: req.params.id, name, role, active: !!active } });
 });
 
+router.patch('/employees/:id/employment', async (req, res) => {
+  const employeeId = req.params.id;
+  const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+  if (!employee) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
+
+  const { startDate, reason = 'Correcting join date' } = req.body || {};
+  if (!startDate || !String(startDate).trim()) {
+    return res.status(400).json({ status: 'ERROR', message: 'startDate is required (YYYY-MM-DD).' });
+  }
+
+  const cleanStartDate = String(startDate).trim();
+
+  // Find earliest (initial) employment_records row for this employee
+  const earliestRecord = await db.prepare(`
+    SELECT * FROM employment_records
+    WHERE employee_id = ?
+    ORDER BY created_at ASC, start_date ASC
+    LIMIT 1
+  `).get(employeeId);
+
+  const nowMs = T.now();
+
+  await tx(async () => {
+    if (earliestRecord) {
+      await db.prepare(`
+        UPDATE employment_records
+        SET start_date = ?, effective_from = ?, change_reason = ?
+        WHERE id = ?
+      `).run(cleanStartDate, cleanStartDate, reason, earliestRecord.id);
+
+      await audit({
+        actor: 'admin',
+        action: 'START_DATE_UPDATED',
+        targetType: 'employee',
+        targetId: employeeId,
+        before: { startDate: earliestRecord.start_date },
+        after: { startDate: cleanStartDate, reason },
+      });
+    } else {
+      const recId = 'er_' + crypto.randomBytes(6).toString('hex');
+      await db.prepare(`
+        INSERT INTO employment_records
+          (id, employee_id, job_title, employment_type, start_date, effective_from, created_at, created_by, change_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(recId, employeeId, employee.role || 'Team Member', 'Full-time', cleanStartDate, cleanStartDate, nowMs, 'admin', reason);
+
+      await audit({
+        actor: 'admin',
+        action: 'START_DATE_UPDATED',
+        targetType: 'employee',
+        targetId: employeeId,
+        before: null,
+        after: { startDate: cleanStartDate, reason },
+      });
+    }
+  });
+
+  const updatedRecord = await db.prepare(`
+    SELECT * FROM employment_records
+    WHERE employee_id = ?
+    ORDER BY created_at ASC, start_date ASC
+    LIMIT 1
+  `).get(employeeId);
+
+  res.json({
+    status: 'SUCCESS',
+    message: 'Start date updated successfully.',
+    record: updatedRecord,
+  });
+});
+
 router.delete('/employees/:id', async (req, res) => {
   const employeeId = req.params.id;
   const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
@@ -265,27 +336,48 @@ router.get('/workstations', async (req, res) => {
     ORDER BY ws.last_heartbeat_at DESC
   `).all(dateKey);
 
+  // Synchronize break records for today (from mobile check-ins / HR breaks)
+  const breakRows = await db.prepare(`
+    SELECT employee_id, started_at, ended_at, actual_minutes
+    FROM break_records
+    WHERE date_key = ?
+  `).all(dateKey);
+
+  const breaksByEmp = new Map();
+  for (const br of breakRows) {
+    const mins = br.ended_at
+      ? (br.actual_minutes != null ? br.actual_minutes : Math.round((br.ended_at - br.started_at) / 60000))
+      : Math.max(0, Math.round((nowMs - br.started_at) / 60000));
+    breaksByEmp.set(br.employee_id, (breaksByEmp.get(br.employee_id) || 0) + mins);
+  }
+
   res.json({
     status: 'SUCCESS',
     dateKey,
-    workstations: rows.map(r => ({
-      id: r.id,
-      employeeId: r.employee_id,
-      employeeName: r.employee_name,
-      employeeRole: r.employee_role,
-      deviceId: r.device_id,
-      platform: r.platform,
-      model: r.model,
-      label: r.label,
-      status: r.status,
-      activeMinutes: Math.round(r.active_seconds / 60),
-      idleMinutes: Math.round(r.idle_seconds / 60),
-      breakMinutes: Math.round(r.break_seconds / 60),
-      inOffice: !!r.in_office,
-      lockState: r.lock_state,
-      connectedBssid: r.connected_bssid,
-      lastHeartbeat: T.displayTime(r.last_heartbeat_at),
-    })),
+    workstations: rows.map(r => {
+      const mobileBreakMins = breaksByEmp.get(r.employee_id) || 0;
+      const wsBreakMins = Math.round((r.break_seconds || 0) / 60);
+      const totalBreakMins = Math.max(wsBreakMins, mobileBreakMins);
+
+      return {
+        id: r.id,
+        employeeId: r.employee_id,
+        employeeName: r.employee_name,
+        employeeRole: r.employee_role,
+        deviceId: r.device_id,
+        platform: r.platform,
+        model: r.model,
+        label: r.label,
+        status: r.status,
+        activeMinutes: Math.round(r.active_seconds / 60),
+        idleMinutes: Math.round(r.idle_seconds / 60),
+        breakMinutes: totalBreakMins,
+        inOffice: !!r.in_office,
+        lockState: r.lock_state,
+        connectedBssid: r.connected_bssid,
+        lastHeartbeat: T.displayTime(r.last_heartbeat_at),
+      };
+    }),
   });
 });
 

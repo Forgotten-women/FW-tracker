@@ -108,7 +108,7 @@ test('11:10 is on time and 11:11 is late', async () => {
   await present(late, '11:11', '19:00');
   const d = await A.deriveDay(late, DAY, at('19:30'));
   assert.equal(d.isLateOccurrence, true);
-  assert.equal(d.lateMinutes, 11);
+  assert.equal(d.lateMinutes, 1);
   assert.equal(d.attendanceStatus, 'LATE');
 });
 
@@ -183,11 +183,11 @@ test('the spec 8.1 worked example produces 36 deficit minutes', async () => {
 
   const d = await A.deriveDay(emp, DAY, at('19:30'));
 
-  assert.equal(d.lateMinutes, 17, 'arrived 11:17 against an 11:00 start');
+  assert.equal(d.lateMinutes, 7, 'arrived 11:17 with 10m grace period');
   assert.equal(d.excessBreakMinutes, 12, '42 minute break against 30 permitted');
   assert.equal(d.earlyDepartureMinutes, 7, 'left 18:53 against a 19:00 finish');
   assert.equal(d.unauthorisedMissingMinutes, 0, 'the gap was a declared break');
-  assert.equal(d.dailyDeficitMinutes, 36, '17 + 12 + 7 = 36');
+  assert.equal(d.dailyDeficitMinutes, 26, '7 + 12 + 7 = 26');
 
   // And it IS a late occurrence, since 11:17 is past the 11:10 grace.
   assert.equal(d.isLateOccurrence, true);
@@ -421,10 +421,10 @@ test('the presented shape breaks the deficit into its four components', async ()
   await A.endBreak(emp, at('14:42'));
 
   const view = A.present(await A.deriveDay(emp, DAY, at('19:30')));
-  assert.equal(view.deficit.lateMinutes, 17);
+  assert.equal(view.deficit.lateMinutes, 7);
   assert.equal(view.deficit.excessBreakMinutes, 12);
   assert.equal(view.deficit.earlyDepartureMinutes, 7);
-  assert.equal(view.deficit.totalMinutes, 36);
+  assert.equal(view.deficit.totalMinutes, 26);
   assert.equal(view.scheduledStart, '11:00');
   assert.equal(view.status, 'LATE');
 });

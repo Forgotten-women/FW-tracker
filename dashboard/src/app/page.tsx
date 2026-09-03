@@ -408,7 +408,7 @@ export default function DashboardPage() {
                     <h3 className="text-base font-bold text-white">Staff Management & Onboarding</h3>
                     <p className="mt-2 text-xs leading-relaxed text-slate-400">
                       Generate 6-digit pairing codes to onboard staff devices onto the Office Tracker system.
-                      Once enrolled, their mobile presence will automatically synchronize via office beacons and Wi-Fi sniffer sensors.
+                      Once enrolled, their presence will automatically synchronize via mobile check-ins, workstation activity, and office network sensors.
                     </p>
                     <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/10 p-4">
                       <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300">

@@ -416,20 +416,24 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
                   </div>
                 </div>
 
-                {/* Sensor Posture */}
+                {/* Facilitator Posture */}
                 {e.presenceSource && (
                   <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-white/5">
                     <span className="flex items-center gap-1.5">
                       <span
                         className={`h-1.5 w-1.5 rounded-full ${
-                          e.sensorCarried ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-amber-400'
+                          e.sensorCarried ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-teal-400'
                         }`}
                       />
                       <span>via {e.presenceSource}</span>
                     </span>
-                    {!e.sensorCarried && (
-                      <span className="text-amber-400 font-medium text-[10px]">
-                        App active sync
+                    {e.sensorCarried ? (
+                      <span className="text-emerald-400 font-medium text-[10px]">
+                        Sensor Verified
+                      </span>
+                    ) : (
+                      <span className="text-teal-400 font-medium text-[10px]">
+                        App / Workstation
                       </span>
                     )}
                   </div>
@@ -994,7 +998,7 @@ export function ActivityFeed({ movements }: { movements: Movement[] }) {
   return (
     <Panel
       title="Live Activity Stream"
-      subtitle="Sensor & beacon event log"
+      subtitle="Multi-source presence & event log"
       icon={
         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
