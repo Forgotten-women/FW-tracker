@@ -348,7 +348,7 @@ router.get('/workstations', async (req, res) => {
     FROM workstation_sessions ws
     JOIN employees e ON e.id = ws.employee_id
     JOIN devices d ON d.id = ws.device_id
-    WHERE ws.session_date = ?
+    WHERE ws.session_date = ? AND d.revoked_at IS NULL
     ORDER BY ws.last_heartbeat_at DESC
   `).all(dateKey);
 
@@ -385,6 +385,14 @@ router.get('/workstations', async (req, res) => {
       const att = attByEmp.get(r.employee_id);
       const presenceMins = att ? Math.round(att.total_minutes || 0) : 0;
 
+      const timeSinceHeartbeat = nowMs - (r.last_heartbeat_at || 0);
+      let effectiveStatus = r.status;
+      if (timeSinceHeartbeat > 10 * 60 * 1000) {
+        effectiveStatus = 'OFFLINE';
+      } else if (timeSinceHeartbeat > 2 * 60 * 1000 && effectiveStatus === 'ACTIVE') {
+        effectiveStatus = 'AWAY';
+      }
+
       return {
         id: r.id,
         employeeId: r.employee_id,
@@ -394,12 +402,12 @@ router.get('/workstations', async (req, res) => {
         platform: r.platform,
         model: r.model,
         label: r.label,
-        status: r.status,
+        status: effectiveStatus,
         activeMinutes: Math.round(r.active_seconds / 60),
         idleMinutes: Math.round(r.idle_seconds / 60),
         breakMinutes: totalBreakMins,
         presenceMinutes: presenceMins,
-        inOffice: !!r.in_office,
+        inOffice: timeSinceHeartbeat <= 10 * 60 * 1000 && !!r.in_office,
         lockState: r.lock_state,
         connectedBssid: r.connected_bssid,
         lastHeartbeat: T.displayTime(r.last_heartbeat_at),
