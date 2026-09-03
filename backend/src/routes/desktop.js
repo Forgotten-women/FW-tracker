@@ -150,23 +150,39 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     console.error('[desktop/heartbeat] session update error:', err);
   }
 
-  // 6. Record Application Usage
-  const appName = String(req.body?.currentApp || '').trim();
-  if (appName && appName !== 'unknown.exe' && status === 'ACTIVE') {
-    const appUsageId = `app_${deviceId}_${dateKey}_${crypto.createHash('md5').update(appName).digest('hex').slice(0, 8)}`;
+  // 6. Record Application Usage (Per-Second Breakdown or Single Active App)
+  const appBreakdown = req.body?.appBreakdown;
+  const entries = [];
+  if (appBreakdown && typeof appBreakdown === 'object') {
+    for (const [name, secs] of Object.entries(appBreakdown)) {
+      const trimmed = String(name || '').trim();
+      const s = parseInt(secs, 10) || 0;
+      if (trimmed && trimmed !== 'unknown.exe' && s > 0) {
+        entries.push({ name: trimmed, seconds: s });
+      }
+    }
+  } else {
+    const singleApp = String(req.body?.currentApp || '').trim();
+    if (singleApp && singleApp !== 'unknown.exe' && status === 'ACTIVE') {
+      entries.push({ name: singleApp, seconds: parseInt(activeSeconds, 10) || 60 });
+    }
+  }
+
+  for (const entry of entries) {
+    const appUsageId = `app_${deviceId}_${dateKey}_${crypto.createHash('md5').update(entry.name).digest('hex').slice(0, 8)}`;
     try {
-      const existingApp = await db.prepare('SELECT id, active_seconds FROM workstation_app_usage WHERE device_id = ? AND session_date = ? AND app_name = ?').get(deviceId, dateKey, appName);
+      const existingApp = await db.prepare('SELECT id, active_seconds FROM workstation_app_usage WHERE device_id = ? AND session_date = ? AND app_name = ?').get(deviceId, dateKey, entry.name);
       if (existingApp) {
         await db.prepare(`
           UPDATE workstation_app_usage
           SET active_seconds = active_seconds + ?, last_used_at = ?
           WHERE id = ?
-        `).run(parseInt(activeSeconds, 10) || 60, nowMs, existingApp.id);
+        `).run(entry.seconds, nowMs, existingApp.id);
       } else {
         await db.prepare(`
           INSERT INTO workstation_app_usage (id, employee_id, device_id, session_date, app_name, active_seconds, last_used_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(appUsageId, employeeId, deviceId, dateKey, appName, parseInt(activeSeconds, 10) || 60, nowMs);
+        `).run(appUsageId, employeeId, deviceId, dateKey, entry.name, entry.seconds, nowMs);
       }
     } catch (err) {
       console.error('[desktop/heartbeat] app_usage error:', err);

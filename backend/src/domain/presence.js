@@ -500,13 +500,18 @@ const selectActiveEmployees = db.prepare(`
 /** Live board for every active employee, all from the same derivation. */
 async function liveBoard(nowMs = T.now()) {
   const dayKey = T.dateKey(nowMs);
-  // Promise.all, not a bare .map: each row now needs a database read, and a
-  // .map over an async function yields promises rather than rows - the board
-  // would serialise as a list of empty objects.
-  return Promise.all((await selectActiveEmployees.all()).map(async emp => {
-    const d = await deriveDay(emp.id, dayKey, nowMs);
-    return await presentDay(d, emp);
-  }));
+  const activeEmployees = await selectActiveEmployees.all();
+  const results = [];
+  const chunkSize = 4;
+  for (let i = 0; i < activeEmployees.length; i += chunkSize) {
+    const chunk = activeEmployees.slice(i, i + chunkSize);
+    const chunkResults = await Promise.all(chunk.map(async emp => {
+      const d = await deriveDay(emp.id, dayKey, nowMs);
+      return await presentDay(d, emp);
+    }));
+    results.push(...chunkResults);
+  }
+  return results;
 }
 
 module.exports = {
