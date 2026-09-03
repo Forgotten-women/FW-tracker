@@ -1,0 +1,150 @@
+name: 🖥️ Build Desktop Installers (Windows + macOS)
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+on:
+  push:
+    tags:
+      - 'desktop-v*'          # e.g. git tag desktop-v1.0.1 && git push --tags
+  workflow_dispatch:           # Manual trigger from GitHub Actions tab
+    inputs:
+      release_tag:
+        description: 'Release tag (e.g. desktop-v1.0.0)'
+        required: false
+        default: 'desktop-v1.0.0-manual'
+
+permissions:
+  contents: write              # Needed to create GitHub Releases
+
+# ── Build matrix: one job per OS ─────────────────────────────────────────────
+jobs:
+  build-desktop:
+    name: Build ${{ matrix.platform == 'windows-latest' && 'Windows .msi' || 'macOS .dmg' }}
+    runs-on: ${{ matrix.platform }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - windows-latest    # → produces office-tracker-agent_1.0.0_x64_en-US.msi
+          - macos-latest      # → produces office-tracker-agent_1.0.0_x64.dmg
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: 🛎️ Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Install Node.js ───────────────────────────────────────────────────
+      - name: 🟢 Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # ── 3. Install Rust (stable) ─────────────────────────────────────────────
+      - name: 🦀 Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # ── 4. Cache Rust build artifacts ────────────────────────────────────────
+      - name: 🗂️ Cache Cargo registry + build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      # ── 5. macOS: install Xcode command-line tools (needed for code signing) ─
+      - name: 🍎 Install macOS dependencies
+        if: matrix.platform == 'macos-latest'
+        run: |
+          xcode-select --install 2>/dev/null || true
+          brew install create-dmg 2>/dev/null || true
+
+      # ── 6. Windows: install WebView2 (already present on Win11 runners) ──────
+      #   WebView2 is bundled into the .msi installer by default in Tauri v1,
+      #   so no extra step needed for typical Windows targets.
+
+      # ── 7. Install Node dependencies ─────────────────────────────────────────
+      - name: 📦 Install desktop npm packages
+        run: npm ci
+        working-directory: desktop
+
+      # ── 8. Build Tauri installer ──────────────────────────────────────────────
+      - name: 🔨 Build Tauri app (${{ matrix.platform }})
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code-signing (optional – leave empty to skip)
+          # For production, set these in GitHub → Settings → Secrets:
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          # TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          tauriScript: npx @tauri-apps/cli
+          includeDebug: false
+          includeRelease: true
+          includeUpdaterJson: false
+
+      # ── 9. Determine artifact paths ───────────────────────────────────────────
+      - name: 📍 Find built installer(s)
+        id: artifacts
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            MSI=$(find desktop/src-tauri/target/release/bundle/msi -name "*.msi" 2>/dev/null | head -1)
+            NSIS=$(find desktop/src-tauri/target/release/bundle/nsis -name "*.exe" 2>/dev/null | head -1)
+            echo "paths=$MSI $NSIS" >> $GITHUB_OUTPUT
+            echo "Found Windows: $MSI | $NSIS"
+          else
+            DMG=$(find desktop/src-tauri/target/release/bundle/dmg -name "*.dmg" 2>/dev/null | head -1)
+            APP=$(find desktop/src-tauri/target/release/bundle/macos -name "*.app.tar.gz" 2>/dev/null | head -1)
+            echo "paths=$DMG $APP" >> $GITHUB_OUTPUT
+            echo "Found macOS: $DMG | $APP"
+          fi
+
+      # ── 10. Upload to GitHub Release ──────────────────────────────────────────
+      - name: 🚀 Upload installers to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: 🖥️ Office Tracker Desktop ${{ github.event.inputs.release_tag || github.ref_name }}
+          body: |
+            ## Office Tracker Desktop Agent
+
+            ### 📥 Downloads
+            | Platform | Installer | Notes |
+            |----------|-----------|-------|
+            | **Windows 10/11** | `.msi` file below | Double-click to install. No Node.js needed. |
+            | **macOS 11+** | `.dmg` file below | Open → drag to Applications. No Node.js needed. |
+
+            ### 🔐 First-time setup
+            On first launch, a **beautiful registration window** opens automatically.
+            Enter the 8-character pairing code provided by HR to link your workstation.
+
+            ### ℹ️ What it does
+            - Tracks your active work time and in-office presence
+            - Syncs with the HR dashboard in real-time
+            - Detects idle time automatically
+            - Keystrokes are **never** recorded — privacy first
+
+            ---
+            *Built automatically by GitHub Actions from commit `${{ github.sha }}`*
+          generate_release_notes: false
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+          files: |
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

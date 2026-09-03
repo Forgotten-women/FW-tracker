@@ -7,7 +7,7 @@
     "withGlobalTauri": true
   },
   "package": {
-    "productName": "OfficeTracker",
+    "productName": "Office Tracker",
     "version": "1.0.0"
   },
   "tauri": {
