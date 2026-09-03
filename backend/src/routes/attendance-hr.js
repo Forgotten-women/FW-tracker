@@ -59,7 +59,7 @@ router.post('/break/start', requireDevice, async (req, res) => {
       status: 'ERROR', code: result.reason,
       message: result.reason === 'ALREADY_ON_BREAK'
         ? `A break is already running, started at ${T.displayTime(result.startedAt)}.`
-        : 'Could not start a break.',
+        : (result.message || 'Could not start a break.'),
     });
   }
 

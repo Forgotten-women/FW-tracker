@@ -153,6 +153,27 @@ class NotificationService {
     }
   }
 
+  /// Displays a local native break reminder notification (works completely offline without internet).
+  Future<void> showBreakNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    await showSystemNotification(
+      id: id,
+      title: title,
+      body: body,
+      category: 'BREAK',
+    );
+  }
+
+  /// Cancels an active or scheduled notification by ID.
+  Future<void> cancelNotification(int id) async {
+    try {
+      await _notificationsPlugin.cancel(id);
+    } catch (_) {}
+  }
+
   /// Polls /api/notifications/mine for the logged-in employee.
   /// For each new unread notification, fires a native status bar notification.
   Future<int> checkAndDispatchUnseenNotifications({

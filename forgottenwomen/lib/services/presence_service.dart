@@ -11,6 +11,7 @@ import 'device_probe.dart';
 import 'notification_service.dart';
 import 'offline_queue.dart';
 import 'token_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const heartbeatInterval = Duration(seconds: 30);
 
@@ -99,6 +100,38 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
       // Check for incoming HR notifications in background
       try {
         await NotificationService().checkAndDispatchUnseenNotifications(store: store);
+      } catch (_) {}
+
+      // Local, offline break monitoring (works 100% offline without internet or Wi-Fi)
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final breakStartMs = prefs.getInt('break_started_at_ms');
+        if (breakStartMs != null) {
+          final nowMs = DateTime.now().millisecondsSinceEpoch;
+          final elapsedSeconds = (nowMs - breakStartMs) ~/ 1000;
+          final alerted5m = prefs.getBool('break_5m_alerted') ?? false;
+          final alertedEnded = prefs.getBool('break_ended_alerted') ?? false;
+
+          // 25 minutes in (5 minutes remaining on 30-minute break)
+          if (elapsedSeconds >= 25 * 60 && !alerted5m) {
+            await prefs.setBool('break_5m_alerted', true);
+            await NotificationService().showBreakNotification(
+              id: 9901,
+              title: 'Break Reminder',
+              body: 'You have 5 minutes left on your break.',
+            );
+          }
+
+          // 30 minutes in (30-minute break completed)
+          if (elapsedSeconds >= 30 * 60 && !alertedEnded) {
+            await prefs.setBool('break_ended_alerted', true);
+            await NotificationService().showBreakNotification(
+              id: 9902,
+              title: 'Break Completed',
+              body: 'Your 30-minute break period has been completed. Please check back in to avoid deficit time.',
+            );
+          }
+        }
       } catch (_) {}
     } catch (_) {}
   });

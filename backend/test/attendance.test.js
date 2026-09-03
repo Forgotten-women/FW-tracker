@@ -166,6 +166,29 @@ test('ending a break that was never started is refused', async () => {
   assert.equal(r.reason, 'NOT_ON_BREAK');
 });
 
+test('only one break is permitted per working day', async () => {
+  const emp = await makeEmployee('emp_singlebreak');
+  const first = await A.startBreak(emp, at('13:00'));
+  assert.equal(first.ok, true);
+  await A.endBreak(emp, at('13:30'));
+
+  // Attempt to start a second break on the same working day
+  const second = await A.startBreak(emp, at('16:00'));
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, 'BREAK_ALREADY_USED');
+});
+
+test('ongoing excess break reflects immediately in daily deficit during an active break exceeding 30 minutes', async () => {
+  const emp = await makeEmployee('emp_ongoingbreak');
+  await present(emp, '11:00', '13:00');
+  await A.startBreak(emp, at('13:00'));
+
+  // At 13:40 (40 mins in, 10 mins excess), break is still open
+  const day40 = await A.deriveDay(emp, DAY, at('13:40'));
+  assert.equal(day40.excessBreakMinutes, 10, 'ongoing break exceeding 30 mins generates 10m excess');
+  assert.equal(day40.dailyDeficitMinutes, 10, 'ongoing break excess enters daily deficit immediately');
+});
+
 // ---------------------------------------------------------------------------
 // The full worked example from spec 8.1
 // ---------------------------------------------------------------------------

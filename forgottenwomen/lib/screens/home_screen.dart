@@ -13,6 +13,7 @@ import '../services/offline_queue.dart';
 import '../services/presence_service.dart';
 import '../services/token_store.dart';
 import '../theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
 
@@ -62,6 +63,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _foregroundTimer?.cancel();
     _breakTimer?.cancel();
+    _offlineBreak5mTimer?.cancel();
+    _offlineBreakEndedTimer?.cancel();
     _api.dispose();
     super.dispose();
   }
@@ -198,6 +201,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _startBreak() async {
     try {
       final res = await _api.startBreak();
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+
+      // Persist local offline break state for background service (works 100% without internet)
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('break_started_at_ms', nowMs);
+        await prefs.setBool('break_5m_alerted', false);
+        await prefs.setBool('break_ended_alerted', false);
+      } catch (_) {}
+
+      // Schedule offline foreground/in-app timers
+      _offlineBreak5mTimer?.cancel();
+      _offlineBreakEndedTimer?.cancel();
+
+      _offlineBreak5mTimer = Timer(const Duration(minutes: 25), () async {
+        try {
+          final p = await SharedPreferences.getInstance();
+          if (p.getInt('break_started_at_ms') != null && !(p.getBool('break_5m_alerted') ?? false)) {
+            await p.setBool('break_5m_alerted', true);
+            await NotificationService().showBreakNotification(
+              id: 9901,
+              title: 'Break Reminder',
+              body: 'You have 5 minutes left on your break.',
+            );
+          }
+        } catch (_) {}
+      });
+
+      _offlineBreakEndedTimer = Timer(const Duration(minutes: 30), () async {
+        try {
+          final p = await SharedPreferences.getInstance();
+          if (p.getInt('break_started_at_ms') != null && !(p.getBool('break_ended_alerted') ?? false)) {
+            await p.setBool('break_ended_alerted', true);
+            await NotificationService().showBreakNotification(
+              id: 9902,
+              title: 'Break Completed',
+              body: 'Your 30-minute break period has been completed. Please check back in to avoid deficit time.',
+            );
+          }
+        } catch (_) {}
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -219,6 +264,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _endBreak() async {
     try {
       final res = await _api.endBreak();
+
+      // Clear local offline break timers and state
+      _offlineBreak5mTimer?.cancel();
+      _offlineBreakEndedTimer?.cancel();
+      _offlineBreak5mTimer = null;
+      _offlineBreakEndedTimer = null;
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('break_started_at_ms');
+        await prefs.remove('break_5m_alerted');
+        await prefs.remove('break_ended_alerted');
+        await NotificationService().cancelNotification(9901);
+        await NotificationService().cancelNotification(9902);
+      } catch (_) {}
+
       if (mounted) {
         showDialog(
           context: context,
@@ -1047,54 +1108,97 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildActionHub(ActiveBreakInfo breakInfo, bool isPresent) {
-    final int minutes = _breakElapsedSeconds ~/ 60;
-    final int seconds = _breakElapsedSeconds % 60;
-    final elapsedText = '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    final bool breakAlreadyTaken =
+        (breakInfo.breakMinutesTaken > 0 || _attendance.breakMinutes > 0) &&
+        !breakInfo.onBreak;
 
-    return Row(
+    final int permittedSeconds = 30 * 60;
+    final int remainingSeconds = permittedSeconds - _breakElapsedSeconds;
+    final bool isOverdue = remainingSeconds < 0;
+
+    final String timerText;
+    if (!isOverdue) {
+      final int remMins = remainingSeconds ~/ 60;
+      final int remSecs = remainingSeconds % 60;
+      timerText = '${remMins}m ${remSecs.toString().padLeft(2, '0')}s left';
+    } else {
+      final int overdueSecs = -remainingSeconds;
+      final int overMins = overdueSecs ~/ 60;
+      final int overSecs = overdueSecs % 60;
+      timerText = 'Overdue by ${overMins}m ${overSecs.toString().padLeft(2, '0')}s';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Break Action Button
-        Expanded(
-          flex: 3,
-          child: breakInfo.onBreak
-              ? ElevatedButton.icon(
-                  onPressed: _endBreak,
-                  icon: const Icon(Icons.free_breakfast, color: Colors.black),
-                  label: Text('End Break ($elapsedText)', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.amber,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                )
-              : OutlinedButton.icon(
-                  onPressed: isPresent ? _startBreak : null,
-                  icon: const Icon(Icons.coffee_outlined, size: 18),
-                  label: const Text('Take Break', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        Row(
+          children: [
+            // Break Action Button
+            Expanded(
+              flex: 3,
+              child: breakInfo.onBreak
+                  ? ElevatedButton.icon(
+                      onPressed: _endBreak,
+                      icon: Icon(isOverdue ? Icons.warning_amber_rounded : Icons.timer, color: Colors.black),
+                      label: Text('End Break ($timerText)',
+                          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isOverdue ? AppColors.danger : AppColors.amber,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    )
+                  : breakAlreadyTaken
+                      ? OutlinedButton.icon(
+                          onPressed: null,
+                          icon: const Icon(Icons.check_circle_outline, size: 18, color: AppColors.textMuted),
+                          label: Text('Break Taken (${breakInfo.breakMinutesTaken}m used)',
+                              style: const TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.bold, fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppColors.border),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        )
+                      : OutlinedButton.icon(
+                          onPressed: isPresent ? _startBreak : null,
+                          icon: const Icon(Icons.coffee_outlined, size: 18),
+                          label: const Text('Start Break (30m)',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.teal,
+                            side: BorderSide(color: isPresent ? AppColors.teal.withOpacity(0.5) : AppColors.border),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+            ),
+            const SizedBox(width: 10),
+
+            // Clock Out Button
+            if (isPresent)
+              Expanded(
+                flex: 2,
+                child: OutlinedButton.icon(
+                  onPressed: _clockOut,
+                  icon: const Icon(Icons.logout, size: 16),
+                  label: const Text('Clock Out', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.teal,
-                    side: BorderSide(color: isPresent ? AppColors.teal.withOpacity(0.5) : AppColors.border),
+                    foregroundColor: AppColors.danger,
+                    side: BorderSide(color: AppColors.danger.withOpacity(0.5)),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
-        ),
-        const SizedBox(width: 10),
-
-        // Clock Out Button
-        if (isPresent)
-          Expanded(
-            flex: 2,
-            child: OutlinedButton.icon(
-              onPressed: _clockOut,
-              icon: const Icon(Icons.logout, size: 16),
-              label: const Text('Clock Out', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.danger,
-                side: BorderSide(color: AppColors.danger.withOpacity(0.5)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
+          ],
+        ),
+        if (breakAlreadyTaken)
+          const Padding(
+            padding: EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              'Daily 30m break completed. Only 1 break allowed per day.',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontStyle: FontStyle.italic),
             ),
           ),
       ],

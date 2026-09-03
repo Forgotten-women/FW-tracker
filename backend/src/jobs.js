@@ -375,6 +375,60 @@ async function sendAttendanceReminders(nowMs = T.now()) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Break Reminder Notifications
+// ---------------------------------------------------------------------------
+// 1. 5 minutes before break ends: "You have 5 minutes left on your break."
+// 2. Once 30-minute break is completed: "Your 30-minute break period has been completed."
+
+const _sentBreak5mReminder = new Set();
+const _sentBreakEndedReminder = new Set();
+
+async function sendBreakReminders(nowMs = T.now()) {
+  try {
+    const activeBreaks = await db.prepare(`
+      SELECT b.*, e.name AS employee_name
+      FROM break_records b
+      JOIN employees e ON e.id = b.employee_id
+      WHERE b.ended_at IS NULL
+    `).all();
+
+    for (const br of activeBreaks) {
+      const elapsedMins = (nowMs - br.started_at) / 60000;
+      const key5m = `${br.id}:5m`;
+      const keyEnded = `${br.id}:ended`;
+
+      // 5 minutes remaining reminder (at minute 25 of 30)
+      if (elapsedMins >= 25 && elapsedMins < 30 && !_sentBreak5mReminder.has(key5m)) {
+        _sentBreak5mReminder.add(key5m);
+        await N.notify({
+          employeeId: br.employee_id,
+          category: 'BREAK',
+          title: 'Break Reminder',
+          message: 'You have 5 minutes left on your break.',
+          nowMs,
+        });
+        console.log(`[jobs] 5m break reminder sent → ${br.employee_name} (${br.employee_id})`);
+      }
+
+      // Break ended reminder (at minute 30)
+      if (elapsedMins >= 30 && !_sentBreakEndedReminder.has(keyEnded)) {
+        _sentBreakEndedReminder.add(keyEnded);
+        await N.notify({
+          employeeId: br.employee_id,
+          category: 'BREAK',
+          title: 'Break Completed',
+          message: 'Your 30-minute break period has been completed. Please return to work to avoid deficit time.',
+          nowMs,
+        });
+        console.log(`[jobs] break completed reminder sent → ${br.employee_name} (${br.employee_id})`);
+      }
+    }
+  } catch (err) {
+    console.error('[jobs] sendBreakReminders error:', err.message);
+  }
+}
+
 let lastAbsenceScanKey = null;
 
 async function scanAbsences(nowMs = T.now()) {
@@ -409,6 +463,7 @@ async function start() {
       await evaluateWarnings(nowMs);
       await scanAbsences(nowMs);
       await sendAttendanceReminders(nowMs);
+      await sendBreakReminders(nowMs);
       await accrueLeave(nowMs);
       await notifyHrAlerts(nowMs);
       await retention(nowMs);

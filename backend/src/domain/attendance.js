@@ -52,6 +52,18 @@ async function startBreak(employeeId, atMs = T.now()) {
     return { ok: false, reason: 'ALREADY_ON_BREAK', startedAt: open.started_at };
   }
   const dateKey = T.dateKey(atMs);
+
+  // Spec: Each employee is entitled to one 30-minute break per working day.
+  // Once taken or started, they cannot retake, restart, or reset the break.
+  const existingBreaks = await selectBreaks.all(employeeId, dateKey);
+  if (existingBreaks.length > 0) {
+    return {
+      ok: false,
+      reason: 'BREAK_ALREADY_USED',
+      message: 'You have already used your permitted 30-minute break for today. Only one break is permitted per working day.',
+    };
+  }
+
   const s = await schedule.resolve(employeeId, dateKey);
   const id = 'brk_' + crypto.randomBytes(8).toString('hex');
 
@@ -194,8 +206,13 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     : 0;
 
   // --- excess break (spec 12) ----------------------------------------------
-  const excessBreakMinutes = breaks.reduce((a, b) => a + (b.excess_minutes || 0), 0);
+  let excessBreakMinutes = breaks.reduce((a, b) => a + (b.excess_minutes || 0), 0);
   const openBreak = breaks.find(b => b.ended_at === null);
+  if (openBreak) {
+    const ongoingMinutes = Math.max(0, Math.round((nowMs - openBreak.started_at) / MIN));
+    const ongoingExcess = Math.max(0, ongoingMinutes - openBreak.permitted_minutes);
+    excessBreakMinutes += ongoingExcess;
+  }
 
   // --- early departure ------------------------------------------------------
   // Only meaningful once the scheduled end has passed; someone still at their
