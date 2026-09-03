@@ -7,13 +7,13 @@ const crypto = require('crypto');
 const { db, tx, audit } = require('../db');
 const T = require('../util/time');
 
-function getOrgSetting(key, fallback = '') {
-  const row = db.prepare('SELECT value FROM org_settings WHERE key = ?').get(key);
+async function getOrgSetting(key, fallback = '') {
+  const row = await db.prepare('SELECT value FROM org_settings WHERE key = ?').get(key);
   return row ? row.value : fallback;
 }
 
-function setOrgSetting(key, value, actor = 'admin') {
-  db.prepare(`
+async function setOrgSetting(key, value, actor = 'admin') {
+  await db.prepare(`
     INSERT INTO org_settings (key, value, updated_at, updated_by)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by
@@ -23,11 +23,11 @@ function setOrgSetting(key, value, actor = 'admin') {
 /**
  * Resolves the latest active release and checks if an update is required or available.
  */
-function getLatestRelease({ platform = 'android', currentVersionCode = 0 } = {}) {
+async function getLatestRelease({ platform = 'android', currentVersionCode = 0 } = {}) {
   const normPlatform = String(platform || 'android').toLowerCase();
   
   // Find highest version_code release for this platform or universal
-  let release = db.prepare(`
+  let release = await db.prepare(`
     SELECT * FROM app_releases
     WHERE active = 1 AND (platform = ? OR platform = 'universal')
     ORDER BY version_code DESC
@@ -36,7 +36,7 @@ function getLatestRelease({ platform = 'android', currentVersionCode = 0 } = {})
 
   if (!release && normPlatform === 'ios') {
     // Fallback to latest general release to supply version name and notes for iOS
-    release = db.prepare(`
+    release = await db.prepare(`
       SELECT * FROM app_releases
       WHERE active = 1
       ORDER BY version_code DESC
@@ -44,10 +44,10 @@ function getLatestRelease({ platform = 'android', currentVersionCode = 0 } = {})
     `).get();
   }
 
-  const minVersionStr = getOrgSetting('min_supported_version_code', '1');
+  const minVersionStr = await getOrgSetting('min_supported_version_code', '1');
   const minVersionCode = parseInt(minVersionStr, 10) || 1;
-  const iosTestflightUrl = getOrgSetting('ios_testflight_url', '');
-  const iosManifestUrl = getOrgSetting('ios_enterprise_manifest_url', '');
+  const iosTestflightUrl = await getOrgSetting('ios_testflight_url', '');
+  const iosManifestUrl = await getOrgSetting('ios_enterprise_manifest_url', '');
 
   const clientVersion = parseInt(currentVersionCode, 10) || 0;
 
@@ -106,7 +106,7 @@ function getLatestRelease({ platform = 'android', currentVersionCode = 0 } = {})
 /**
  * Registers or updates an app release.
  */
-function recordRelease({
+async function recordRelease({
   id,
   versionName,
   versionCode,
@@ -146,8 +146,8 @@ function recordRelease({
     created_by: actor,
   };
 
-  const run = tx(() => {
-    db.prepare(`
+  await tx(async () => {
+    await db.prepare(`
       INSERT INTO app_releases
         (id, version_name, version_code, platform, file_name, file_size, download_url, release_notes, mandatory, active, published_at, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
@@ -175,7 +175,7 @@ function recordRelease({
       record.created_by
     );
 
-    audit({
+    await audit({
       actor,
       action: 'APP_RELEASE_RECORDED',
       targetType: 'app_release',
@@ -183,7 +183,7 @@ function recordRelease({
       after: record,
     });
   });
-  run();
+  
 
   return record;
 }
@@ -191,8 +191,8 @@ function recordRelease({
 /**
  * Lists all registered releases.
  */
-function listReleases() {
-  const rows = db.prepare('SELECT * FROM app_releases ORDER BY version_code DESC, published_at DESC').all();
+async function listReleases() {
+  const rows = await db.prepare('SELECT * FROM app_releases ORDER BY version_code DESC, published_at DESC').all();
   return rows.map((r) => ({
     id: r.id,
     versionName: r.version_name,
@@ -214,18 +214,18 @@ function listReleases() {
 /**
  * Updates release active status or mandatory flag.
  */
-function updateRelease(id, { active, mandatory, releaseNotes, actor = 'admin' } = {}) {
-  const before = db.prepare('SELECT * FROM app_releases WHERE id = ?').get(id);
+async function updateRelease(id, { active, mandatory, releaseNotes, actor = 'admin' } = {}) {
+  const before = await db.prepare('SELECT * FROM app_releases WHERE id = ?').get(id);
   if (!before) throw new Error('Release not found.');
 
   const nextActive = active !== undefined ? (active ? 1 : 0) : before.active;
   const nextMandatory = mandatory !== undefined ? (mandatory ? 1 : 0) : before.mandatory;
   const nextNotes = releaseNotes !== undefined ? String(releaseNotes) : before.release_notes;
 
-  const run = tx(() => {
-    db.prepare('UPDATE app_releases SET active = ?, mandatory = ?, release_notes = ? WHERE id = ?')
+  await tx(async () => {
+    await db.prepare('UPDATE app_releases SET active = ?, mandatory = ?, release_notes = ? WHERE id = ?')
       .run(nextActive, nextMandatory, nextNotes, id);
-    audit({
+    await audit({
       actor,
       action: 'APP_RELEASE_UPDATED',
       targetType: 'app_release',
@@ -234,7 +234,7 @@ function updateRelease(id, { active, mandatory, releaseNotes, actor = 'admin' } 
       after: { id, active: !!nextActive, mandatory: !!nextMandatory, releaseNotes: nextNotes },
     });
   });
-  run();
+  
 
   return { id, active: !!nextActive, mandatory: !!nextMandatory, releaseNotes: nextNotes };
 }
@@ -242,13 +242,13 @@ function updateRelease(id, { active, mandatory, releaseNotes, actor = 'admin' } 
 /**
  * Deletes a release record.
  */
-function deleteRelease(id, actor = 'admin') {
-  const before = db.prepare('SELECT * FROM app_releases WHERE id = ?').get(id);
+async function deleteRelease(id, actor = 'admin') {
+  const before = await db.prepare('SELECT * FROM app_releases WHERE id = ?').get(id);
   if (!before) throw new Error('Release not found.');
 
-  const run = tx(() => {
-    db.prepare('DELETE FROM app_releases WHERE id = ?').run(id);
-    audit({
+  await tx(async () => {
+    await db.prepare('DELETE FROM app_releases WHERE id = ?').run(id);
+    await audit({
       actor,
       action: 'APP_RELEASE_DELETED',
       targetType: 'app_release',
@@ -256,7 +256,7 @@ function deleteRelease(id, actor = 'admin') {
       before,
     });
   });
-  run();
+  
 
   return { success: true, id };
 }
@@ -264,9 +264,9 @@ function deleteRelease(id, actor = 'admin') {
 /**
  * Increments download count for metrics.
  */
-function incrementDownload(id) {
+async function incrementDownload(id) {
   if (!id) return;
-  db.prepare('UPDATE app_releases SET download_count = download_count + 1 WHERE id = ?').run(id);
+  await db.prepare('UPDATE app_releases SET download_count = download_count + 1 WHERE id = ?').run(id);
 }
 
 /**

@@ -40,9 +40,9 @@ const selectActiveByEmployee = db.prepare(`
  * This is a LOOKUP of an identity already proved, never a guess. An unbound MAC
  * returns null and stays unattributed.
  */
-function employeeForMac(macHash, nowMs = T.now()) {
+async function employeeForMac(macHash, nowMs = T.now()) {
   if (!macHash) return null;
-  const row = selectActiveByMac.get(macHash, nowMs);
+  const row = await selectActiveByMac.get(macHash, nowMs);
   return row ? { employeeId: row.employee_id, deviceId: row.device_id, confidence: row.confidence } : null;
 }
 
@@ -71,10 +71,10 @@ const selectRecentMacForIp = db.prepare(`
  *
  * Returns a short description of what happened, for the ping response.
  */
-function bindFromAuthenticatedPing({ employeeId, deviceId, srcIp, nowMs = T.now() }) {
+async function bindFromAuthenticatedPing({ employeeId, deviceId, srcIp, nowMs = T.now() }) {
   if (!employeeId || !srcIp) return { bound: false, reason: 'NO_IP' };
 
-  const candidates = selectRecentMacForIp.all(srcIp, nowMs - CORRELATION_WINDOW_MS);
+  const candidates = await selectRecentMacForIp.all(srcIp, nowMs - CORRELATION_WINDOW_MS);
 
   if (candidates.length === 0) {
     // Normal on a quiet network: nothing has spoken to the server recently
@@ -85,103 +85,103 @@ function bindFromAuthenticatedPing({ employeeId, deviceId, srcIp, nowMs = T.now(
     // Two MACs claiming one IP inside the window means a recycled lease or a
     // conflict. Binding either one could attribute presence to the wrong
     // person, so bind neither.
-    logBindingEvent.run(null, employeeId, null, nowMs, 'CONFLICT',
+    await logBindingEvent.run(null, employeeId, null, nowMs, 'CONFLICT',
       `${candidates.length} MACs seen on ${srcIp} within the correlation window`);
     return { bound: false, reason: 'AMBIGUOUS_IP' };
   }
 
   const macHash = candidates[0].mac_hash;
-  const existing = selectActiveByMac.get(macHash, nowMs);
+  const existing = await selectActiveByMac.get(macHash, nowMs);
 
   // Already bound to this employee: just extend it.
   if (existing && existing.employee_id === employeeId) {
-    db.prepare(`
+    await db.prepare(`
       UPDATE device_mac_bindings
       SET last_confirmed_at = ?, expires_at = ?, bound_ip = ?, device_id = COALESCE(device_id, ?)
       WHERE id = ?
     `).run(nowMs, nowMs + BINDING_TTL_MS, srcIp, deviceId, existing.id);
-    logBindingEvent.run(existing.id, employeeId, macHash, nowMs, 'CONFIRMED', null);
+    await logBindingEvent.run(existing.id, employeeId, macHash, nowMs, 'CONFIRMED', null);
     return { bound: true, reason: 'CONFIRMED', bindingId: existing.id };
   }
 
   const bindingId = 'bind_' + crypto.randomBytes(8).toString('hex');
 
-  tx(() => {
+  await tx(async () => {
     // The same MAC now proving a different employee means the phone changed
     // hands, or a lease was recycled. The newly proved identity wins, because
     // it is the one with live authentication behind it.
     if (existing) {
-      db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
+      await db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
         .run(nowMs, 'Superseded by a newer authenticated proof', existing.id);
-      logBindingEvent.run(existing.id, existing.employee_id, macHash, nowMs, 'REBOUND',
+      await logBindingEvent.run(existing.id, existing.employee_id, macHash, nowMs, 'REBOUND',
         `Reassigned to ${employeeId}`);
     }
 
     // One device, one MAC. An older binding for this employee is stale once
     // their phone rotates its address.
-    for (const old of selectActiveByEmployee.all(employeeId, nowMs)) {
+    for (const old of await selectActiveByEmployee.all(employeeId, nowMs)) {
       if (old.mac_hash === macHash) continue;
       if (deviceId && old.device_id && old.device_id !== deviceId) continue;
-      db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
+      await db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
         .run(nowMs, 'Device address rotated', old.id);
-      logBindingEvent.run(old.id, employeeId, old.mac_hash, nowMs, 'REVOKED', 'Address rotated');
+      await logBindingEvent.run(old.id, employeeId, old.mac_hash, nowMs, 'REVOKED', 'Address rotated');
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO device_mac_bindings
         (id, employee_id, device_id, mac_hash, bound_at, last_confirmed_at,
          expires_at, bound_via, bound_ip, confidence)
       VALUES (?,?,?,?,?,?,?,'IP_CORRELATION',?,0.7)
     `).run(bindingId, employeeId, deviceId, macHash, nowMs, nowMs, nowMs + BINDING_TTL_MS, srcIp);
 
-    logBindingEvent.run(bindingId, employeeId, macHash, nowMs, 'BOUND',
+    await logBindingEvent.run(bindingId, employeeId, macHash, nowMs, 'BOUND',
       `Correlated with ${srcIp} from an authenticated heartbeat`);
-  })();
+  });
 
   return { bound: true, reason: 'BOUND', bindingId };
 }
 
 /** Revokes every binding for an employee, e.g. when a device is unpaired. */
-function revokeForEmployee(employeeId, reason = 'Revoked') {
+async function revokeForEmployee(employeeId, reason = 'Revoked') {
   const nowMs = T.now();
-  const rows = selectActiveByEmployee.all(employeeId, nowMs);
+  const rows = await selectActiveByEmployee.all(employeeId, nowMs);
   for (const r of rows) {
-    db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
+    await db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
       .run(nowMs, reason, r.id);
-    logBindingEvent.run(r.id, employeeId, r.mac_hash, nowMs, 'REVOKED', reason);
+    await logBindingEvent.run(r.id, employeeId, r.mac_hash, nowMs, 'REVOKED', reason);
   }
   return rows.length;
 }
 
-function revokeForDevice(deviceId, reason = 'Device revoked') {
+async function revokeForDevice(deviceId, reason = 'Device revoked') {
   const nowMs = T.now();
-  const rows = db.prepare(
+  const rows = await db.prepare(
     'SELECT * FROM device_mac_bindings WHERE device_id = ? AND revoked_at IS NULL'
   ).all(deviceId);
   for (const r of rows) {
-    db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
+    await db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
       .run(nowMs, reason, r.id);
-    logBindingEvent.run(r.id, r.employee_id, r.mac_hash, nowMs, 'REVOKED', reason);
+    await logBindingEvent.run(r.id, r.employee_id, r.mac_hash, nowMs, 'REVOKED', reason);
   }
   return rows.length;
 }
 
 /** Ages out expired bindings. Called by the maintenance tick. */
-function expireStale(nowMs = T.now()) {
-  const rows = db.prepare(
+async function expireStale(nowMs = T.now()) {
+  const rows = await db.prepare(
     'SELECT * FROM device_mac_bindings WHERE revoked_at IS NULL AND expires_at <= ?'
   ).all(nowMs);
   for (const r of rows) {
-    db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
+    await db.prepare('UPDATE device_mac_bindings SET revoked_at = ?, revoked_reason = ? WHERE id = ?')
       .run(nowMs, 'Expired without reconfirmation', r.id);
-    logBindingEvent.run(r.id, r.employee_id, r.mac_hash, nowMs, 'EXPIRED', null);
+    await logBindingEvent.run(r.id, r.employee_id, r.mac_hash, nowMs, 'EXPIRED', null);
   }
   return rows.length;
 }
 
 /** For the dashboard: how presence is currently being carried per employee. */
-function statusForEmployee(employeeId, nowMs = T.now()) {
-  const rows = selectActiveByEmployee.all(employeeId, nowMs);
+async function statusForEmployee(employeeId, nowMs = T.now()) {
+  const rows = await selectActiveByEmployee.all(employeeId, nowMs);
   if (rows.length === 0) return { bound: false };
   const b = rows[0];
   return {
@@ -193,18 +193,18 @@ function statusForEmployee(employeeId, nowMs = T.now()) {
   };
 }
 
-function bindDirectMac({ employeeId, deviceId = null, mac, nowMs = T.now() }) {
+async function bindDirectMac({ employeeId, deviceId = null, mac, nowMs = T.now() }) {
   const cleanMac = T.normalizeMac(mac);
   if (!cleanMac) return { bound: false, reason: 'INVALID_MAC' };
   const macHash = T.hashMac(cleanMac, MAC_SALT);
-  const existing = selectActiveByMac.get(macHash, nowMs);
+  const existing = await selectActiveByMac.get(macHash, nowMs);
   if (existing && existing.employee_id === employeeId) {
-    db.prepare("UPDATE device_mac_bindings SET last_confirmed_at = ?, expires_at = ? WHERE id = ?")
+    await db.prepare("UPDATE device_mac_bindings SET last_confirmed_at = ?, expires_at = ? WHERE id = ?")
       .run(nowMs, nowMs + BINDING_TTL_MS, existing.id);
     return { bound: true, bindingId: existing.id, macHash };
   }
   const bindingId = 'bind_' + crypto.randomBytes(8).toString('hex');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO device_mac_bindings
       (id, employee_id, device_id, mac_hash, bound_at, last_confirmed_at,
        expires_at, bound_via, bound_ip, confidence)

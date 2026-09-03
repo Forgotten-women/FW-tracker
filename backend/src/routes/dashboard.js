@@ -14,10 +14,10 @@ const T = require('../util/time');
 
 router.use(requireAdmin);
 
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   const nowMs = T.now();
   const todayKey = T.dateKey(nowMs);
-  const board = P.liveBoard(nowMs);
+  const board = await P.liveBoard(nowMs);
 
   const inOffice = board.filter(e => e.status === 'IN_OFFICE');
   const grace = board.filter(e => e.status === 'GRACE_PERIOD');
@@ -38,17 +38,17 @@ router.get('/summary', (req, res) => {
   const dayAgo = nowMs - 24 * 60 * 60 * 1000;
   const minSightings = config.unknownDeviceMinSightings;
 
-  const unknownCount = db.prepare(
+  const unknownCount = (await db.prepare(
     'SELECT COUNT(*) c FROM unknown_devices WHERE last_seen_at > ? AND sighting_count >= ?'
-  ).get(dayAgo, minSightings).c;
+  ).get(dayAgo, minSightings)).c;
 
   // Kept visible so a return of the flood is obvious rather than silently
   // filtered away.
-  const unknownTransient = db.prepare(
+  const unknownTransient = (await db.prepare(
     'SELECT COUNT(*) c FROM unknown_devices WHERE last_seen_at > ? AND sighting_count < ?'
-  ).get(dayAgo, minSightings).c;
+  ).get(dayAgo, minSightings)).c;
 
-  const movements = db.prepare('SELECT * FROM movements ORDER BY at DESC LIMIT 20').all();
+  const movements = await db.prepare('SELECT * FROM movements ORDER BY at DESC LIMIT 20').all();
 
   // Days where a session hit the cap, usually a phone left in the office
   // overnight. Surfaced rather than silently truncated, so HR can correct it.
@@ -101,14 +101,14 @@ router.get('/summary', (req, res) => {
 });
 
 // GET /api/dashboard/history?from=YYYY-MM-DD&to=YYYY-MM-DD
-router.get('/history', (req, res) => {
+router.get('/history', async (req, res) => {
   const from = String(req.query.from || T.dateKey());
   const to = String(req.query.to || T.dateKey());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     return res.status(400).json({ status: 'ERROR', message: 'from and to must be YYYY-MM-DD.' });
   }
 
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT a.*, e.name, e.role FROM attendance_days a
     JOIN employees e ON e.id = a.employee_id
     WHERE a.date_key >= ? AND a.date_key <= ?

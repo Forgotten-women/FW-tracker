@@ -27,43 +27,43 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Departments and offices
 // ---------------------------------------------------------------------------
 
-function createOffice({ name, timeZone, country = null, address = null, actor }) {
+async function createOffice({ name, timeZone, country = null, address = null, actor }) {
   if (!name || !timeZone) throw new Error('An office needs a name and a time zone.');
   const oid = id('off');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO office_locations (id, name, time_zone, country, address, active, created_at)
     VALUES (?,?,?,?,?,1,?)
   `).run(oid, String(name).trim(), timeZone, country, address, T.now());
-  audit({ actor, action: 'OFFICE_CREATED', targetType: 'office', targetId: oid, after: { name, timeZone } });
+  await audit({ actor, action: 'OFFICE_CREATED', targetType: 'office', targetId: oid, after: { name, timeZone } });
   return { id: oid, name, timeZone };
 }
 
-function listOffices() {
-  return db.prepare('SELECT * FROM office_locations ORDER BY name').all().map(o => ({
+async function listOffices() {
+  return (await db.prepare('SELECT * FROM office_locations ORDER BY name').all()).map(o => ({
     id: o.id, name: o.name, timeZone: o.time_zone, country: o.country,
     address: o.address, active: !!o.active,
   }));
 }
 
-function createDepartment({ name, parentId = null, headEmployeeId = null, actor }) {
+async function createDepartment({ name, parentId = null, headEmployeeId = null, actor }) {
   if (!name) throw new Error('A department needs a name.');
   const did = id('dept');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO departments (id, name, parent_id, head_employee_id, active, created_at)
     VALUES (?,?,?,?,1,?)
   `).run(did, String(name).trim(), parentId, headEmployeeId, T.now());
-  audit({ actor, action: 'DEPARTMENT_CREATED', targetType: 'department', targetId: did, after: { name } });
+  await audit({ actor, action: 'DEPARTMENT_CREATED', targetType: 'department', targetId: did, after: { name } });
   return { id: did, name };
 }
 
-function listDepartments() {
-  return db.prepare(`
+async function listDepartments() {
+  return (await db.prepare(`
     SELECT d.*, e.name AS head_name,
       (SELECT COUNT(*) FROM employees x WHERE x.department_id = d.id AND x.active = 1) AS member_count
     FROM departments d
     LEFT JOIN employees e ON e.id = d.head_employee_id
     ORDER BY d.name
-  `).all().map(d => ({
+  `).all()).map(d => ({
     id: d.id, name: d.name, parentId: d.parent_id,
     headEmployeeId: d.head_employee_id, headName: d.head_name,
     memberCount: d.member_count, active: !!d.active,
@@ -74,25 +74,25 @@ function listDepartments() {
 // Manager assignments (spec 3.2)
 // ---------------------------------------------------------------------------
 
-function assignManager({ managerEmployeeId, employeeId, actor }) {
+async function assignManager({ managerEmployeeId, employeeId, actor }) {
   if (managerEmployeeId === employeeId) throw new Error('An employee cannot manage themselves.');
   for (const x of [managerEmployeeId, employeeId]) {
-    if (!db.prepare('SELECT 1 FROM employees WHERE id = ?').get(x)) throw new Error(`No such employee: ${x}`);
+    if (!await db.prepare('SELECT 1 FROM employees WHERE id = ?').get(x)) throw new Error(`No such employee: ${x}`);
   }
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO manager_assignments (manager_employee_id, employee_id, assigned_at, assigned_by)
     VALUES (?,?,?,?)
     ON CONFLICT(manager_employee_id, employee_id) DO UPDATE SET ended_at = NULL, assigned_at = excluded.assigned_at
   `).run(managerEmployeeId, employeeId, T.now(), actor);
-  audit({ actor, action: 'MANAGER_ASSIGNED', targetType: 'employee', targetId: employeeId,
+  await audit({ actor, action: 'MANAGER_ASSIGNED', targetType: 'employee', targetId: employeeId,
           after: { managerEmployeeId } });
   return { assigned: true };
 }
 
-function endManagerAssignment({ managerEmployeeId, employeeId, actor }) {
-  db.prepare('UPDATE manager_assignments SET ended_at = ? WHERE manager_employee_id = ? AND employee_id = ? AND ended_at IS NULL')
+async function endManagerAssignment({ managerEmployeeId, employeeId, actor }) {
+  await db.prepare('UPDATE manager_assignments SET ended_at = ? WHERE manager_employee_id = ? AND employee_id = ? AND ended_at IS NULL')
     .run(T.now(), managerEmployeeId, employeeId);
-  audit({ actor, action: 'MANAGER_UNASSIGNED', targetType: 'employee', targetId: employeeId, after: { managerEmployeeId } });
+  await audit({ actor, action: 'MANAGER_UNASSIGNED', targetType: 'employee', targetId: employeeId, after: { managerEmployeeId } });
   return { ended: true };
 }
 
@@ -110,14 +110,14 @@ const VALID_TYPES = ['Full-time', 'Part-time', 'Temporary', 'Contractor', 'Volun
  * later change (promotion, contract renewal, department move) closes the
  * current record and opens a new one, preserving history.
  */
-function setEmployment({
+async function setEmployment({
   employeeId, jobTitle, departmentId = null, managerEmployeeId = null, officeId = null,
   employmentType = 'Full-time', workingPatternId = null,
   startDate, probationStartDate = null, probationReviewDate = null,
   contractStartDate = null, contractEndDate = null, noticePeriodDays = null,
   holidayEntitlementDays = 20, effectiveFrom = null, changeReason, actor,
 }) {
-  if (!db.prepare('SELECT 1 FROM employees WHERE id = ?').get(employeeId)) throw new Error('No such employee.');
+  if (!await db.prepare('SELECT 1 FROM employees WHERE id = ?').get(employeeId)) throw new Error('No such employee.');
   if (!jobTitle || !String(jobTitle).trim()) throw new Error('A job title is required.');
   if (!DATE_RE.test(String(startDate || ''))) throw new Error('startDate must be YYYY-MM-DD.');
   if (employmentType && !VALID_TYPES.includes(employmentType)) {
@@ -134,7 +134,7 @@ function setEmployment({
   const eid = id('er');
   const nowMs = T.now();
   const from = effectiveFrom || startDate;
-  const previous = db.prepare(
+  const previous = await db.prepare(
     'SELECT * FROM employment_records WHERE employee_id = ? AND effective_to IS NULL'
   ).get(employeeId);
 
@@ -142,12 +142,12 @@ function setEmployment({
     throw new Error('A reason is required, so a change to employment terms is always explainable.');
   }
 
-  tx(() => {
+  await tx(async () => {
     if (previous) {
       const dayBefore = T.dateKey(T.startOfDay(from) - 1);
-      db.prepare('UPDATE employment_records SET effective_to = ? WHERE id = ?').run(dayBefore, previous.id);
+      await db.prepare('UPDATE employment_records SET effective_to = ? WHERE id = ?').run(dayBefore, previous.id);
     }
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO employment_records
         (id, employee_id, job_title, department_id, manager_employee_id, office_id,
          employment_type, working_pattern_id, start_date, probation_start_date,
@@ -161,37 +161,37 @@ function setEmployment({
 
     // Denormalised onto the employee for fast filtering; the record is the
     // source of truth.
-    db.prepare('UPDATE employees SET department_id = ?, office_id = ?, updated_at = ? WHERE id = ?')
+    await db.prepare('UPDATE employees SET department_id = ?, office_id = ?, updated_at = ? WHERE id = ?')
       .run(departmentId, officeId, nowMs, employeeId);
 
     if (managerEmployeeId) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO manager_assignments (manager_employee_id, employee_id, assigned_at, assigned_by)
         VALUES (?,?,?,?)
         ON CONFLICT(manager_employee_id, employee_id) DO UPDATE SET ended_at = NULL
       `).run(managerEmployeeId, employeeId, nowMs, actor);
     }
 
-    audit({
+    await audit({
       actor, action: previous ? 'EMPLOYMENT_UPDATED' : 'EMPLOYMENT_CREATED',
       targetType: 'employee', targetId: employeeId,
       before: previous ? { jobTitle: previous.job_title, startDate: previous.start_date } : null,
       after: { jobTitle, startDate, contractEndDate, probationReviewDate },
       note: String(changeReason).trim(),
     });
-  })();
+  });
 
   return { id: eid, employeeId, startDate };
 }
 
-function currentEmployment(employeeId) {
-  return db.prepare(
+async function currentEmployment(employeeId) {
+  return await db.prepare(
     'SELECT * FROM employment_records WHERE employee_id = ? AND effective_to IS NULL ORDER BY effective_from DESC LIMIT 1'
   ).get(employeeId);
 }
 
-function employmentHistory(employeeId) {
-  return db.prepare(
+async function employmentHistory(employeeId) {
+  return await db.prepare(
     'SELECT * FROM employment_records WHERE employee_id = ? ORDER BY effective_from DESC'
   ).all(employeeId);
 }
@@ -203,39 +203,39 @@ function employmentHistory(employeeId) {
 const VALID_STATUS = ['Pre-start', 'Active', 'Probation', 'Probation extended',
   'Notice period', 'Suspended', 'Long-term leave', 'Left employment'];
 
-function setStatus({ employeeId, status, effectiveDate = null, reason, actor }) {
+async function setStatus({ employeeId, status, effectiveDate = null, reason, actor }) {
   if (!VALID_STATUS.includes(status)) throw new Error(`status must be one of ${VALID_STATUS.join(', ')}.`);
-  const emp = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+  const emp = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
   if (!emp) throw new Error('No such employee.');
   if (!reason || !String(reason).trim()) throw new Error('A reason is required.');
 
   const nowMs = T.now();
   const effDate = effectiveDate || T.dateKey(nowMs);
 
-  tx(() => {
-    db.prepare(`
+  await tx(async () => {
+    await db.prepare(`
       INSERT INTO employment_status_history (employee_id, from_status, to_status, effective_date, reason, changed_at, changed_by)
       VALUES (?,?,?,?,?,?,?)
     `).run(employeeId, emp.employment_status, status, effDate, String(reason).trim(), nowMs, actor);
-    db.prepare('UPDATE employees SET employment_status = ?, updated_at = ? WHERE id = ?')
+    await db.prepare('UPDATE employees SET employment_status = ?, updated_at = ? WHERE id = ?')
       .run(status, nowMs, employeeId);
 
     // A leaver loses access at once. Spec 27.
     if (status === 'Left employment') {
-      db.prepare('UPDATE employees SET active = 0 WHERE id = ?').run(employeeId);
-      db.prepare('UPDATE devices SET revoked_at = ? WHERE employee_id = ? AND revoked_at IS NULL').run(nowMs, employeeId);
-      db.prepare(`
+      await db.prepare('UPDATE employees SET active = 0 WHERE id = ?').run(employeeId);
+      await db.prepare('UPDATE devices SET revoked_at = ? WHERE employee_id = ? AND revoked_at IS NULL').run(nowMs, employeeId);
+      await db.prepare(`
         UPDATE device_tokens SET revoked_at = ?
         WHERE device_id IN (SELECT id FROM devices WHERE employee_id = ?) AND revoked_at IS NULL
       `).run(nowMs, employeeId);
       require('./bindings').revokeForEmployee(employeeId, 'Employee left');
     }
 
-    audit({
+    await audit({
       actor, action: 'STATUS_CHANGED', targetType: 'employee', targetId: employeeId,
       before: { status: emp.employment_status }, after: { status }, note: String(reason).trim(),
     });
-  })();
+  });
 
   return { status, effectiveDate: effDate };
 }
@@ -244,7 +244,7 @@ function setStatus({ employeeId, status, effectiveDate = null, reason, actor }) 
 // Sensitive detail groups (each behind its own permission at the route)
 // ---------------------------------------------------------------------------
 
-function setPersonal({ employeeId, fields, actor }) {
+async function setPersonal({ employeeId, fields, actor }) {
   const cols = ['date_of_birth', 'personal_email', 'mobile_phone', 'address_line1',
     'address_line2', 'city', 'postcode', 'country', 'national_id'];
   const map = {
@@ -252,12 +252,12 @@ function setPersonal({ employeeId, fields, actor }) {
     addressLine1: 'address_line1', addressLine2: 'address_line2', city: 'city',
     postcode: 'postcode', country: 'country', nationalId: 'national_id',
   };
-  const existing = db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId) || {};
+  const existing = await db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId) || {};
   const values = {};
   for (const [k, col] of Object.entries(map)) {
     values[col] = fields[k] !== undefined ? fields[k] : (existing[col] ?? null);
   }
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO employee_personal
       (employee_id, ${cols.join(', ')}, updated_at, updated_by)
     VALUES (@employee_id, ${cols.map(c => '@' + c).join(', ')}, @updated_at, @updated_by)
@@ -266,21 +266,21 @@ function setPersonal({ employeeId, fields, actor }) {
       updated_at = excluded.updated_at, updated_by = excluded.updated_by
   `).run({ employee_id: employeeId, ...values, updated_at: T.now(), updated_by: actor });
 
-  audit({ actor, action: 'PERSONAL_UPDATED', targetType: 'employee', targetId: employeeId,
+  await audit({ actor, action: 'PERSONAL_UPDATED', targetType: 'employee', targetId: employeeId,
           note: 'Personal details changed' });
   return { updated: true };
 }
 
-function setBank({ employeeId, fields, actor }) {
+async function setBank({ employeeId, fields, actor }) {
   const map = { accountName: 'account_name', accountNumber: 'account_number', sortCode: 'sort_code',
     iban: 'iban', bankName: 'bank_name' };
   const cols = Object.values(map);
-  const existing = db.prepare('SELECT * FROM employee_bank_details WHERE employee_id = ?').get(employeeId) || {};
+  const existing = await db.prepare('SELECT * FROM employee_bank_details WHERE employee_id = ?').get(employeeId) || {};
   const values = {};
   for (const [k, col] of Object.entries(map)) {
     values[col] = fields[k] !== undefined ? fields[k] : (existing[col] ?? null);
   }
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO employee_bank_details
       (employee_id, ${cols.join(', ')}, updated_at, updated_by)
     VALUES (@employee_id, ${cols.map(c => '@' + c).join(', ')}, @updated_at, @updated_by)
@@ -290,22 +290,22 @@ function setBank({ employeeId, fields, actor }) {
   `).run({ employee_id: employeeId, ...values, updated_at: T.now(), updated_by: actor });
 
   // The change is audited; the values themselves are never written to the log.
-  audit({ actor, action: 'BANK_UPDATED', targetType: 'employee', targetId: employeeId,
+  await audit({ actor, action: 'BANK_UPDATED', targetType: 'employee', targetId: employeeId,
           note: 'Bank details changed' });
   return { updated: true };
 }
 
-function addEmergencyContact({ employeeId, name, relationship = null, phone = null, email = null, isPrimary = false, actor }) {
+async function addEmergencyContact({ employeeId, name, relationship = null, phone = null, email = null, isPrimary = false, actor }) {
   if (!name || !String(name).trim()) throw new Error('A contact name is required.');
   const cid = id('ec');
   if (isPrimary) {
-    db.prepare('UPDATE emergency_contacts SET is_primary = 0 WHERE employee_id = ?').run(employeeId);
+    await db.prepare('UPDATE emergency_contacts SET is_primary = 0 WHERE employee_id = ?').run(employeeId);
   }
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO emergency_contacts (id, employee_id, name, relationship, phone, email, is_primary, created_at)
     VALUES (?,?,?,?,?,?,?,?)
   `).run(cid, employeeId, String(name).trim(), relationship, phone, email, isPrimary ? 1 : 0, T.now());
-  audit({ actor, action: 'EMERGENCY_CONTACT_ADDED', targetType: 'employee', targetId: employeeId });
+  await audit({ actor, action: 'EMERGENCY_CONTACT_ADDED', targetType: 'employee', targetId: employeeId });
   return { id: cid };
 }
 
@@ -319,12 +319,12 @@ function addEmergencyContact({ employeeId, name, relationship = null, phone = nu
  * group is gated on its own permission, so a manager viewing a report gets
  * employment and attendance but not bank, medical or salary.
  */
-function profile(employeeId, { permissions = new Set(), includeSensitive = true } = {}) {
-  const emp = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+async function profile(employeeId, { permissions = new Set(), includeSensitive = true } = {}) {
+  const emp = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
   if (!emp) return null;
 
   const has = (p) => includeSensitive && permissions.has(p);
-  const er = currentEmployment(employeeId);
+  const er = await currentEmployment(employeeId);
 
   const out = {
     id: emp.id,
@@ -353,13 +353,13 @@ function profile(employeeId, { permissions = new Set(), includeSensitive = true 
     } : null,
 
     emergencyContacts: has('employee.nextofkin.read')
-      ? db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ?').all(employeeId)
+      ? (await db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ?').all(employeeId))
           .map(c => ({ name: c.name, relationship: c.relationship, phone: c.phone, email: c.email, isPrimary: !!c.is_primary }))
       : undefined,
 
     personal: has('employee.personal.read')
-      ? (() => {
-          const p = db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
+      ? (async () => {
+          const p = await db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
           return p ? {
             dateOfBirth: p.date_of_birth, personalEmail: p.personal_email, mobilePhone: p.mobile_phone,
             addressLine1: p.address_line1, addressLine2: p.address_line2, city: p.city,
@@ -369,8 +369,8 @@ function profile(employeeId, { permissions = new Set(), includeSensitive = true 
       : undefined,
 
     bank: has('employee.bank.read')
-      ? (() => {
-          const b = db.prepare('SELECT * FROM employee_bank_details WHERE employee_id = ?').get(employeeId);
+      ? (async () => {
+          const b = await db.prepare('SELECT * FROM employee_bank_details WHERE employee_id = ?').get(employeeId);
           return b ? { accountName: b.account_name, accountNumber: b.account_number,
             sortCode: b.sort_code, iban: b.iban, bankName: b.bank_name } : null;
         })()
@@ -395,28 +395,28 @@ function profile(employeeId, { permissions = new Set(), includeSensitive = true 
  * Returns personal details, employment terms, working schedule, emergency contacts,
  * KYC document checklist stats, and salary (ONLY if enabled by HR policy in org_settings).
  */
-function myEmployeeProfile(employeeId) {
-  const emp = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+async function myEmployeeProfile(employeeId) {
+  const emp = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
   if (!emp) return null;
 
-  const er = currentEmployment(employeeId);
-  const dept = emp.department_id ? db.prepare('SELECT name FROM departments WHERE id = ?').get(emp.department_id) : null;
-  const office = (er && er.office_id) ? db.prepare('SELECT name, time_zone FROM office_locations WHERE id = ?').get(er.office_id) : null;
+  const er = await currentEmployment(employeeId);
+  const dept = emp.department_id ? await db.prepare('SELECT name FROM departments WHERE id = ?').get(emp.department_id) : null;
+  const office = (er && er.office_id) ? await db.prepare('SELECT name, time_zone FROM office_locations WHERE id = ?').get(er.office_id) : null;
 
   const wpId = (er && er.working_pattern_id) || null;
   const wp = wpId
-    ? db.prepare('SELECT * FROM working_patterns WHERE id = ?').get(wpId)
-    : (db.prepare('SELECT * FROM working_patterns WHERE is_default = 1').get() ||
-       db.prepare('SELECT * FROM working_patterns ORDER BY created_at ASC LIMIT 1').get());
-  const p = db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
+    ? await db.prepare('SELECT * FROM working_patterns WHERE id = ?').get(wpId)
+    : (await db.prepare('SELECT * FROM working_patterns WHERE is_default = 1').get() ||
+       await db.prepare('SELECT * FROM working_patterns ORDER BY created_at ASC LIMIT 1').get());
+  const p = await db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
 
-  const contacts = db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ? ORDER BY is_primary DESC, created_at ASC').all(employeeId)
+  const contacts = (await db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ? ORDER BY is_primary DESC, created_at ASC').all(employeeId))
     .map(c => ({ name: c.name, relationship: c.relationship, phone: c.phone, email: c.email, isPrimary: !!c.is_primary }));
 
   // Check HR salary visibility setting
   let showSalary = false;
   try {
-    const row = db.prepare("SELECT value FROM org_settings WHERE key = 'show_salary_to_employees'").get();
+    const row = await db.prepare("SELECT value FROM org_settings WHERE key = 'show_salary_to_employees'").get();
     if (row && (row.value === '1' || row.value === 'true')) {
       showSalary = true;
     }
@@ -427,7 +427,7 @@ function myEmployeeProfile(employeeId) {
   let salary = null;
   if (showSalary) {
     const PR = require('./payroll');
-    const s = PR.salaryAt(employeeId, T.dateKey());
+    const s = await PR.salaryAt(employeeId, T.dateKey());
     if (s && !s.blocked) {
       salary = {
         enabled: true,
@@ -452,7 +452,7 @@ function myEmployeeProfile(employeeId) {
     };
   }
 
-  const kycDocs = db.prepare('SELECT verification_status, document_type_id FROM employee_documents WHERE employee_id = ? AND archived_at IS NULL').all(employeeId);
+  const kycDocs = await db.prepare('SELECT verification_status, document_type_id FROM employee_documents WHERE employee_id = ? AND archived_at IS NULL').all(employeeId);
   const kycVerified = kycDocs.filter(d => d.verification_status === 'VERIFIED').length;
 
   return {

@@ -57,7 +57,7 @@ test('Self-Service Profile & Salary Visibility API', async (t) => {
   const empId = empBody.employee.id;
 
   // Set employment details
-  people.setEmployment({
+  await people.setEmployment({
     employeeId: empId,
     jobTitle: 'QA Lead',
     employmentType: 'Full-time',
@@ -67,7 +67,7 @@ test('Self-Service Profile & Salary Visibility API', async (t) => {
   });
 
   // Assign a salary
-  payroll.setSalary({
+  await payroll.setSalary({
     employeeId: empId,
     amount: 120000,
     effectiveFrom: '2026-01-01',

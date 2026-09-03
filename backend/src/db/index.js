@@ -1,121 +1,90 @@
-// Database handle and durability settings.
+// Database handle and shared helpers.
 //
-// Replaces the module-level mutable `db` object that store.js exported live and
-// that every route mutated directly, with no transaction boundary, no schema,
-// and three concurrent writers (the ARP interval, the checkDepartures interval,
-// and HTTP handlers) racing on the same object.
+// Backed by PostgreSQL. This replaces the previous better-sqlite3 setup, which
+// on a serverless host wrote to a per-container file in os.tmpdir(): every
+// instance had its own database, only 9 of 71 tables were ever copied back, and
+// identical requests seconds apart returned different data. Attendance, leave,
+// warnings, payroll, documents and the audit log had nowhere durable to live at
+// all.
+//
+// The exported shape is deliberately unchanged - `db.prepare(sql)` returning
+// something with .get()/.all()/.run(), plus tx() and audit() - so call sites
+// read the same as before. What changed is that every one of them is now
+// asynchronous and must be awaited. See src/db/pg/client.js.
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
 
+const pg = require('./pg/client');
+
+// Documents still land on a local filesystem when no object store is
+// configured, so a writable directory is still needed. On a serverless host it
+// is per-container and therefore temporary, which is why storage.js prefers S3.
 const isServerless = Boolean(
-  process.env.VERCEL || 
-  process.env.AWS_LAMBDA_FUNCTION_NAME || 
-  process.env.LAMBDA_TASK_ROOT || 
-  process.env.NOW_REGION
+  process.env.VERCEL
+  || process.env.AWS_LAMBDA_FUNCTION_NAME
+  || process.env.LAMBDA_TASK_ROOT
+  || process.env.NOW_REGION,
 );
 
-// On Vercel / Serverless, /var/task is read-only so write to os.tmpdir()
-const DATA_DIR = isServerless 
+const DATA_DIR = isServerless
   ? path.join(os.tmpdir(), 'office_tracker_data')
   : (process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data'));
 
-if (!fs.existsSync(DATA_DIR)) {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch (_) {
-    // Fallback if permission error
-  }
-}
-
-const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'office.db');
-const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
-
-const SCHEMA_VERSION = '1';
-
-let db;
 try {
-  db = new Database(DB_FILE);
-} catch (err) {
-  try {
-    const tmpFallback = path.join(os.tmpdir(), 'office.db');
-    db = new Database(tmpFallback);
-  } catch (_) {
-    db = new Database(':memory:');
-  }
-}
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch { /* best effort; storage.js reports if it cannot write */ }
 
-// WAL: readers never block the writer, and a crash mid-write rolls back to the
-// last commit instead of leaving a truncated file.
-db.pragma('journal_mode = WAL');
-// FULL: fsync on every commit. Slower than NORMAL, but NORMAL can lose the most
-// recent transactions on power loss - unacceptable for a payroll record, and
-// the write volume here is trivial.
-db.pragma('synchronous = FULL');
-db.pragma('foreign_keys = ON');
-db.pragma('busy_timeout = 5000');
+// ---------------------------------------------------------------------------
+// Handle
+// ---------------------------------------------------------------------------
 
-let embedded = null;
-try {
-  embedded = require('./embedded-migrations');
-} catch (_) {}
+const db = {
+  prepare: sql => pg.prepare(sql),
+  exec: sql => pg.exec(sql),
+  // Kept so the better-sqlite3 spelling still resolves; both go through tx().
+  transaction: fn => pg.tx(fn),
+};
 
-const initialSql = fs.existsSync(SCHEMA_FILE) 
-  ? fs.readFileSync(SCHEMA_FILE, 'utf-8')
-  : (embedded?.schemaSql || '');
+const tx = pg.tx;
 
-if (initialSql) {
-  db.exec(initialSql);
-}
+// ---------------------------------------------------------------------------
+// MAC pseudonymisation salt
+// ---------------------------------------------------------------------------
 
-// Incremental schema changes on top of the baseline. Runs on every start, and
-// is a no-op once everything has been applied.
-require('./migrate').migrate(db, { verbose: process.env.NODE_ENV !== 'test' });
+// Read from the environment rather than from the database.
+//
+// It used to be generated once and stored in the `meta` table, which worked
+// when there was a single long-lived process and one database file. It does not
+// survive the move: every serverless instance would have to fetch it before it
+// could hash anything, on a hot path, and a fresh instance that failed to fetch
+// would invent a new one - silently making that instance's hashes incomparable
+// with everyone else's, which quietly breaks device bindings.
+//
+// The existing salt has been carried into MAC_SALT so hashes already recorded
+// stay valid.
+const MAC_SALT = (process.env.MAC_SALT || '').trim()
+  || crypto.randomBytes(32).toString('hex');
 
-// --- meta ------------------------------------------------------------------
+const MAC_SALT_IS_EPHEMERAL = !(process.env.MAC_SALT || '').trim();
 
-const getMetaStmt = db.prepare('SELECT value FROM meta WHERE key = ?');
-const setMetaStmt = db.prepare(
-  'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-);
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
 
-function getMeta(key, fallback = null) {
-  const row = getMetaStmt.get(key);
-  return row ? row.value : fallback;
-}
-
-function setMeta(key, value) {
-  setMetaStmt.run(key, String(value));
-}
-
-setMeta('schema_version', SCHEMA_VERSION);
-
-// Per-install salt for pseudonymising the MACs of non-employee devices.
-// Generated once and kept in the database, so hashes stay stable across
-// restarts but are not comparable against any other install.
-if (!getMeta('mac_salt')) {
-  setMeta('mac_salt', crypto.randomBytes(32).toString('hex'));
-}
-const MAC_SALT = getMeta('mac_salt');
-
-// --- helpers ---------------------------------------------------------------
-
-/** Run fn inside a transaction. Rolls back entirely if fn throws. */
-function tx(fn) {
-  return db.transaction(fn);
-}
-
-/** Append an audit entry. Every admin mutation must call this. */
-const insertAudit = db.prepare(`
+const insertAudit = pg.prepare(`
   INSERT INTO audit_log (at, actor, action, target_type, target_id, before_json, after_json, note)
   VALUES (@at, @actor, @action, @target_type, @target_id, @before_json, @after_json, @note)
 `);
 
-function audit({ actor, action, targetType = null, targetId = null, before = null, after = null, note = null }) {
-  insertAudit.run({
+/** Append an audit entry. Every admin mutation must call this. */
+async function audit({
+  actor, action, targetType = null, targetId = null,
+  before = null, after = null, note = null,
+}) {
+  await insertAudit.run({
     at: Date.now(),
     actor: String(actor || 'unknown'),
     action: String(action),
@@ -127,24 +96,57 @@ function audit({ actor, action, targetType = null, targetId = null, before = nul
   });
 }
 
+// ---------------------------------------------------------------------------
+// Meta
+// ---------------------------------------------------------------------------
+
+const getMetaStmt = pg.prepare('SELECT value FROM meta WHERE key = ?');
+const setMetaStmt = pg.prepare(
+  'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
+);
+
+async function getMeta(key, fallback = null) {
+  const row = await getMetaStmt.get(key);
+  return row ? row.value : fallback;
+}
+
+async function setMeta(key, value) {
+  await setMetaStmt.run(key, String(value));
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
 /**
- * Consistent online backup. Safe to call while the server is serving.
- * Returns a promise resolving to the backup path.
+ * Backups are the database provider's job now.
+ *
+ * The old nightly job called SQLite's online .backup() into a local directory.
+ * There is no equivalent worth reimplementing here: on a serverless host the
+ * destination would be a container-local temp directory that disappears, which
+ * is a backup in name only. Supabase takes scheduled backups at the project
+ * level (Settings > Database > Backups), and that is where this belongs.
  */
-async function backup(dir = path.join(DATA_DIR, 'backups')) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dest = path.join(dir, `office-${stamp}.db`);
-  await db.backup(dest);
-  return dest;
+async function backup() {
+  throw new Error(
+    'In-process backups were removed with SQLite. Database backups are configured '
+    + 'on the Supabase project (Settings > Database > Backups), not here.',
+  );
 }
 
-/** Close cleanly so WAL is checkpointed into the main file. */
-function close() {
-  try {
-    db.pragma('wal_checkpoint(TRUNCATE)');
-  } catch { /* best effort */ }
-  db.close();
+async function close() {
+  await pg.close();
 }
 
-module.exports = { db, tx, audit, getMeta, setMeta, backup, close, MAC_SALT, DB_FILE, DATA_DIR };
+/** True once the schema has been applied. Used by health checks and setup. */
+async function isInitialised() {
+  const row = await pg.prepare(
+    "SELECT to_regclass('public.employees') AS t",
+  ).get();
+  return Boolean(row && row.t);
+}
+
+module.exports = {
+  db, tx, audit, getMeta, setMeta, backup, close, isInitialised,
+  MAC_SALT, MAC_SALT_IS_EPHEMERAL, DATA_DIR,
+};

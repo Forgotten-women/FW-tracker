@@ -5,7 +5,6 @@ const router = express.Router();
 
 const { db, tx, audit } = require('../db');
 const { newToken, sha256 } = require('../middleware/auth');
-const { pushDeviceAndToken, pushEnrollmentCode } = require('../db/supabase-sync');
 const T = require('../util/time');
 const crypto = require('crypto');
 
@@ -54,7 +53,7 @@ router.post('/', async (req, res) => {
   const rawClean = code.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   const hyphenated = rawClean.length === 8 ? `${rawClean.slice(0, 4)}-${rawClean.slice(4)}` : rawClean;
 
-  const row = selectCode.get(sha256(hyphenated)) || selectCode.get(sha256(rawClean));
+  const row = await selectCode.get(sha256(hyphenated)) || await selectCode.get(sha256(rawClean));
   const nowMs = T.now();
 
   const reject = () => res.status(401).json({
@@ -72,7 +71,7 @@ router.post('/', async (req, res) => {
 
   if (row.used_at) {
     // Check if the previous enrollment was for the complementary device type (1 mobile + 1 desktop per code)
-    const prevDevice = row.used_by_device ? db.prepare('SELECT platform, device_type FROM devices WHERE id = ?').get(row.used_by_device) : null;
+    const prevDevice = row.used_by_device ? await db.prepare('SELECT platform, device_type FROM devices WHERE id = ?').get(row.used_by_device) : null;
     if (prevDevice) {
       const prevPlat = String(prevDevice.platform || '').toLowerCase();
       const prevIsDesktop = prevPlat.includes('win') || prevPlat.includes('mac') || prevPlat.includes('darwin') || prevPlat.includes('linux') || prevDevice.device_type === 'desktop';
@@ -87,14 +86,14 @@ router.post('/', async (req, res) => {
     }
   }
 
-  const employee = selectEmployee.get(row.employee_id);
+  const employee = await selectEmployee.get(row.employee_id);
   if (!employee || !employee.active) return reject();
 
   const deviceId = 'dev_' + crypto.randomBytes(8).toString('hex');
   const { token, hash } = newToken();
 
-  const run = tx(() => {
-    insertDevice.run({
+  await tx(async () => {
+    await insertDevice.run({
       id: deviceId,
       employee_id: employee.id,
       platform: String(platform || 'unknown').slice(0, 20),
@@ -102,9 +101,9 @@ router.post('/', async (req, res) => {
       label: String(label || (isDesktop ? 'Work Laptop' : 'Mobile Phone')).slice(0, 80),
       enrolled_at: nowMs,
     });
-    insertToken.run(hash, deviceId, nowMs, nowMs + TOKEN_TTL_MS);
-    markCodeUsed.run(nowMs, deviceId, row.code_hash);
-    audit({
+    await insertToken.run(hash, deviceId, nowMs, nowMs + TOKEN_TTL_MS);
+    await markCodeUsed.run(nowMs, deviceId, row.code_hash);
+    await audit({
       actor: `employee:${employee.id}`,
       action: 'DEVICE_ENROLLED',
       targetType: 'device',
@@ -112,36 +111,14 @@ router.post('/', async (req, res) => {
       after: { employeeId: employee.id, platform, model },
       note: `Enrolled from ${ip}`,
     });
-    db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+    await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
       .run(nowMs, 'DEVICE_ENROLLED', employee.id, employee.name, `${model || 'Device'} paired`);
   });
-  run();
+  
 
-  // AWAITED, not fire-and-forget.
-  //
-  // These writes used to be started and abandoned, with the 201 sent
-  // immediately afterwards. On a serverless host the instance freezes the
-  // moment the response goes out, so the writes were routinely killed in
-  // flight: the token existed only in that instance's local database. The
-  // phone's very next request reached a different instance, got BAD_TOKEN, and
-  // the app treated that as "not enrolled" and returned to the pairing screen.
-  //
-  // The token must be durable BEFORE we hand it to the device, otherwise we are
-  // issuing a credential we have not actually saved.
-  try {
-    await pushDeviceAndToken(
-      { id: deviceId, employee_id: employee.id, platform: String(platform || 'unknown'), model: String(model || ''), label: String(label || ''), enrolled_at: nowMs },
-      { token_hash: hash, device_id: deviceId, issued_at: nowMs, expires_at: nowMs + TOKEN_TTL_MS }
-    );
-    await pushEnrollmentCode({ code_hash: row.code_hash, employee_id: employee.id, created_at: row.created_at, expires_at: row.expires_at, used_at: nowMs, used_by_device: deviceId });
-  } catch (err) {
-    console.error('[enroll] could not persist the device token:', err.message);
-    return res.status(503).json({
-      status: 'ERROR', code: 'ENROLMENT_NOT_SAVED',
-      message: 'Could not save this device. Please try enrolling again.',
-    });
-  }
-
+  // The transaction above wrote to the shared database, so by the time this
+  // responds the token is durable and every other instance can already see it.
+  // There is nothing left to push anywhere.
   res.status(201).json({
     status: 'SUCCESS',
     token,

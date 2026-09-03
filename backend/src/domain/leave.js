@@ -52,8 +52,8 @@ function daysBetween(a, b) {
  * Returns { blocked: true } when no start date is recorded. Guessing one would
  * silently decide how much leave somebody has.
  */
-function holidayYearFor(employeeId, onDate = T.dateKey()) {
-  const row = selectStartDate.get(employeeId);
+async function holidayYearFor(employeeId, onDate = T.dateKey()) {
+  const row = await selectStartDate.get(employeeId);
   if (!row || !row.start_date) {
     return {
       blocked: true,
@@ -131,18 +131,18 @@ const insertLedger = db.prepare(`
  * that starts from zero. So when a year has been fully served, it is topped up
  * to the full entitlement before the new one begins.
  */
-function finaliseYear(employeeId, yearsOfService, startDate, { actor = 'system' } = {}) {
+async function finaliseYear(employeeId, yearsOfService, startDate, { actor = 'system' } = {}) {
   if (yearsOfService < 0) return { finalised: false };
 
   const yearStart = addMonths(startDate, yearsOfService * 12);
   const yearEnd = addMonths(startDate, (yearsOfService + 1) * 12);
   const leaveYear = `${yearStart}/${yearsOfService}`;
 
-  const already = selectAccrued.get(employeeId, leaveYear).days;
+  const already = (await selectAccrued.get(employeeId, leaveYear)).days;
   const delta = ENTITLEMENT - already;
   if (delta < 0.005) return { finalised: false, upToDate: true };
 
-  insertLedger.run({
+  await insertLedger.run({
     id: 'lal_' + crypto.randomBytes(8).toString('hex'),
     employee_id: employeeId,
     leave_year: leaveYear,
@@ -161,16 +161,16 @@ function finaliseYear(employeeId, yearsOfService, startDate, { actor = 'system' 
   return { finalised: true, leaveYear, addedDays: delta };
 }
 
-function accrue(employeeId, onDate = T.dateKey(), { actor = 'system' } = {}) {
-  const year = holidayYearFor(employeeId, onDate);
+async function accrue(employeeId, onDate = T.dateKey(), { actor = 'system' } = {}) {
+  const year = await holidayYearFor(employeeId, onDate);
   if (year.blocked) return { accrued: false, ...year };
 
   // Close off any fully-served year before crediting the current one.
   if (year.yearsOfService > 0) {
-    finaliseYear(employeeId, year.yearsOfService - 1, year.startDate, { actor });
+    await finaliseYear(employeeId, year.yearsOfService - 1, year.startDate, { actor });
   }
 
-  const already = selectAccrued.get(employeeId, year.leaveYear).days;
+  const already = (await selectAccrued.get(employeeId, year.leaveYear)).days;
   const target = (ENTITLEMENT * year.monthsCompleted) / 12;
   const delta = target - already;
 
@@ -180,8 +180,8 @@ function accrue(employeeId, onDate = T.dateKey(), { actor = 'system' } = {}) {
     return { accrued: false, upToDate: true, leaveYear: year.leaveYear, accruedDays: already };
   }
 
-  const balance = balanceRaw(employeeId, year);
-  insertLedger.run({
+  const balance = await balanceRaw(employeeId, year);
+  await insertLedger.run({
     id: 'lal_' + crypto.randomBytes(8).toString('hex'),
     employee_id: employeeId,
     leave_year: year.leaveYear,
@@ -203,11 +203,11 @@ function accrue(employeeId, onDate = T.dateKey(), { actor = 'system' } = {}) {
 }
 
 /** Runs accrual for every active employee. Called daily by the maintenance tick. */
-function accrueAll(onDate = T.dateKey()) {
-  const employees = db.prepare('SELECT id FROM employees WHERE active = 1').all();
+async function accrueAll(onDate = T.dateKey()) {
+  const employees = await db.prepare('SELECT id FROM employees WHERE active = 1').all();
   const results = { accrued: 0, upToDate: 0, blocked: [] };
   for (const e of employees) {
-    const r = accrue(e.id, onDate);
+    const r = await accrue(e.id, onDate);
     if (r.accrued) results.accrued++;
     else if (r.upToDate) results.upToDate++;
     else results.blocked.push({ employeeId: e.id, reason: r.reason });
@@ -222,7 +222,7 @@ function accrueAll(onDate = T.dateKey()) {
  * rather than by resetting a number, so an employee can always see what was
  * lost and when.
  */
-function closeHolidayYear(employeeId, leaveYear, unusedDays, onDate, { actor = 'system' } = {}) {
+async function closeHolidayYear(employeeId, leaveYear, unusedDays, onDate, { actor = 'system' } = {}) {
   if (unusedDays <= 0.005) return { forfeited: 0 };
   if (config.leave.carryOverDays > 0) {
     const carried = Math.min(unusedDays, config.leave.carryOverDays);
@@ -231,7 +231,7 @@ function closeHolidayYear(employeeId, leaveYear, unusedDays, onDate, { actor = '
     return { carried, forfeited: unusedDays - carried };
   }
 
-  insertLedger.run({
+  await insertLedger.run({
     id: 'lal_' + crypto.randomBytes(8).toString('hex'),
     employee_id: employeeId,
     leave_year: leaveYear,
@@ -245,7 +245,7 @@ function closeHolidayYear(employeeId, leaveYear, unusedDays, onDate, { actor = '
     created_by: actor,
   });
 
-  audit({
+  await audit({
     actor, action: 'LEAVE_FORFEITED',
     targetType: 'employee', targetId: employeeId,
     after: { leaveYear, forfeitedDays: unusedDays },
@@ -281,9 +281,9 @@ const selectYearRequests = db.prepare(`
     AND r.id != COALESCE(?, '')
 `);
 
-function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequestId = null) {
+async function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequestId = null) {
   const totals = {};
-  for (const row of selectLedgerTotals.all(employeeId, year.leaveYear)) {
+  for (const row of await selectLedgerTotals.all(employeeId, year.leaveYear)) {
     totals[row.entry_type] = row.days;
   }
   // BOOKED and CANCELLED ledger entries are the audit trail of approvals; the
@@ -293,7 +293,7 @@ function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequestId = n
 
   let taken = 0;
   let booked = 0;
-  for (const r of selectYearRequests.all(employeeId, year.yearStart, year.yearEnd, excludeRequestId)) {
+  for (const r of await selectYearRequests.all(employeeId, year.yearStart, year.yearEnd, excludeRequestId)) {
     // Already used versus still to come. Both reduce what is available; the
     // split only exists because spec 14 asks the dashboard to show them apart.
     if (r.status === 'APPROVED' && r.end_date < onDate) taken += r.total_days;
@@ -314,11 +314,11 @@ function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequestId = n
  * Full precision is kept internally and rounded only for display, so twelve
  * monthly accruals sum to exactly 20.00 rather than 19.99.
  */
-function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestId = null) {
-  const year = holidayYearFor(employeeId, onDate);
+async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestId = null) {
+  const year = await holidayYearFor(employeeId, onDate);
   if (year.blocked) return { blocked: true, ...year };
 
-  const raw = balanceRaw(employeeId, year, onDate, excludeRequestId);
+  const raw = await balanceRaw(employeeId, year, onDate, excludeRequestId);
   const round2 = (n) => Math.round(n * 100) / 100;
 
   return {
@@ -351,14 +351,14 @@ function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestId = null) {
  * Rest days and paid office closures are skipped. Spec 16 is explicit that an
  * employee must not lose annual leave for a day the office is shut.
  */
-function countLeaveDays(employeeId, startDate, endDate, dayPortion = 'FULL_DAY') {
+async function countLeaveDays(employeeId, startDate, endDate, dayPortion = 'FULL_DAY') {
   const days = [];
   const skipped = [];
   let cursor = startDate;
   let guard = 0;
 
   while (cursor <= endDate && guard++ < 400) {
-    const s = schedule.resolve(employeeId, cursor);
+    const s = await schedule.resolve(employeeId, cursor);
     if (s.isWorkingDay) days.push(cursor);
     else skipped.push({ date: cursor, reason: s.nonWorkingReason });
     cursor = T.dateKey(T.endOfDay(cursor));
@@ -384,19 +384,19 @@ const selectLeaveType = db.prepare('SELECT * FROM leave_types WHERE id = ? AND a
  * The figures spec 15 says to show BEFORE submitting, so nobody discovers a
  * shortfall only after the request is in.
  */
-function previewRequest({
+async function previewRequest({
   employeeId, leaveTypeId, startDate, endDate, dayPortion = 'FULL_DAY',
   // Set when re-previewing a request that has already been submitted, so it is
   // not counted against its own balance.
   excludeRequestId = null,
 }) {
-  const type = selectLeaveType.get(leaveTypeId);
+  const type = await selectLeaveType.get(leaveTypeId);
   if (!type) return { ok: false, error: 'Unknown leave type.' };
   if (!startDate || !endDate || endDate < startDate) {
     return { ok: false, error: 'The end date must be on or after the start date.' };
   }
 
-  const count = countLeaveDays(employeeId, startDate, endDate, dayPortion);
+  const count = await countLeaveDays(employeeId, startDate, endDate, dayPortion);
   if (count.totalDays === 0) {
     return {
       ok: false,
@@ -405,7 +405,7 @@ function previewRequest({
     };
   }
 
-  const balance = balanceFor(employeeId, startDate, excludeRequestId);
+  const balance = await balanceFor(employeeId, startDate, excludeRequestId);
   if (balance.blocked) return { ok: false, error: balance.message, blocked: true };
 
   // Only types that reduce entitlement touch the balance. Sick and maternity
@@ -436,15 +436,15 @@ function previewRequest({
   };
 }
 
-function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion = 'FULL_DAY', reason = null, evidenceDocumentId = null }) {
-  const preview = previewRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion });
+async function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion = 'FULL_DAY', reason = null, evidenceDocumentId = null }) {
+  const preview = await previewRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion });
   if (!preview.ok) throw new Error(preview.error);
 
   if (preview.leaveType.requiresEvidence && !evidenceDocumentId && !reason) {
     throw new Error(`${preview.leaveType.name} needs supporting evidence or an explanation.`);
   }
 
-  const overlapping = db.prepare(`
+  const overlapping = await db.prepare(`
     SELECT id, start_date, end_date FROM leave_requests
     WHERE employee_id = ? AND cancelled_at IS NULL
       AND status IN ('PENDING_MANAGER','PENDING_HR','APPROVED')
@@ -457,8 +457,8 @@ function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion
   const id = 'lr_' + crypto.randomBytes(8).toString('hex');
   const nowMs = T.now();
 
-  tx(() => {
-    db.prepare(`
+  await tx(async () => {
+    await db.prepare(`
       INSERT INTO leave_requests
         (id, employee_id, leave_type_id, start_date, end_date, day_portion,
          total_days, reason, evidence_document_id, status, submitted_at, created_at)
@@ -468,12 +468,12 @@ function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion
 
     // Confirmed route: HR only, so there is exactly one step and a request is
     // never stuck waiting on a manager who is not set up as a user.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO leave_approvals (id, request_id, step, approver_role, created_at)
       VALUES (?,?,1,'hr',?)
     `).run('la_' + crypto.randomBytes(8).toString('hex'), id, nowMs);
 
-    audit({
+    await audit({
       actor: `employee:${employeeId}`, action: 'LEAVE_REQUESTED',
       targetType: 'leave_request', targetId: id,
       after: {
@@ -481,12 +481,12 @@ function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion
         exceedsBalance: preview.exceedsBalance,
       },
     });
-  })();
+  });
 
   try {
-    const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+    const emp = await db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
     const empName = emp?.name || employeeId;
-    N.notify({
+    await N.notify({
       category: 'LEAVE',
       title: `Leave Request: ${empName}`,
       body: `${preview.requestedDays} day(s) requested for ${startDate} to ${endDate} (${preview.leaveType.name}).`,
@@ -499,20 +499,20 @@ function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion
   return { id, ...preview, status: 'PENDING_HR' };
 }
 
-function decideRequest({ requestId, decision, notes, actor, overdraftReason = null, nowMs = T.now() }) {
+async function decideRequest({ requestId, decision, notes, actor, overdraftReason = null, nowMs = T.now() }) {
   if (!['APPROVED', 'REJECTED', 'INFO_REQUESTED'].includes(decision)) {
     throw new Error('decision must be APPROVED, REJECTED or INFO_REQUESTED.');
   }
   if (!notes || !String(notes).trim()) throw new Error('A note explaining the decision is required.');
 
-  const req = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(requestId);
+  const req = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(requestId);
   if (!req) throw new Error('No such leave request.');
   if (req.status === 'APPROVED' || req.status === 'REJECTED') {
     throw new Error(`This request has already been ${req.status.toLowerCase()}.`);
   }
   if (req.cancelled_at) throw new Error('This request was cancelled.');
 
-  const preview = previewRequest({
+  const preview = await previewRequest({
     employeeId: req.employee_id, leaveTypeId: req.leave_type_id,
     startDate: req.start_date, endDate: req.end_date, dayPortion: req.day_portion,
     excludeRequestId: requestId,
@@ -529,8 +529,8 @@ function decideRequest({ requestId, decision, notes, actor, overdraftReason = nu
     }
   }
 
-  tx(() => {
-    db.prepare(`
+  await tx(async () => {
+    await db.prepare(`
       UPDATE leave_requests SET status = ?, decided_at = ? WHERE id = ?
     `).run(decision === 'INFO_REQUESTED' ? 'PENDING_HR' : decision, nowMs, requestId);
 
@@ -539,21 +539,21 @@ function decideRequest({ requestId, decision, notes, actor, overdraftReason = nu
     // genuinely resolves - the audit log records the actor either way.
     const actorUserId = String(actor || '').replace(/^user:/, '');
     const resolvedUser = actorUserId
-      ? db.prepare('SELECT id FROM users WHERE id = ?').get(actorUserId)
+      ? await db.prepare('SELECT id FROM users WHERE id = ?').get(actorUserId)
       : null;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE leave_approvals SET decision = ?, decided_at = ?, notes = ?, approver_user_id = ?
       WHERE request_id = ? AND step = 1
     `).run(decision, nowMs, String(notes).trim(), resolvedUser ? resolvedUser.id : null, requestId);
 
     if (decision === 'APPROVED') {
-      const year = holidayYearFor(req.employee_id, req.start_date);
-      const type = selectLeaveType.get(req.leave_type_id);
+      const year = await holidayYearFor(req.employee_id, req.start_date);
+      const type = await selectLeaveType.get(req.leave_type_id);
 
       if (!year.blocked && type.reduces_entitlement) {
-        const balance = balanceRaw(req.employee_id, year);
-        insertLedger.run({
+        const balance = await balanceRaw(req.employee_id, year);
+        await insertLedger.run({
           id: 'lal_' + crypto.randomBytes(8).toString('hex'),
           employee_id: req.employee_id,
           leave_year: year.leaveYear,
@@ -569,7 +569,7 @@ function decideRequest({ requestId, decision, notes, actor, overdraftReason = nu
       }
 
       if (preview.ok && preview.requiresOverdraftApproval) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO leave_overdraft_approvals
             (id, request_id, employee_id, shortfall_days, approved_by, approved_at, reason)
           VALUES (?,?,?,?,?,?,?)
@@ -578,20 +578,20 @@ function decideRequest({ requestId, decision, notes, actor, overdraftReason = nu
       }
     }
 
-    audit({
+    await audit({
       actor, action: 'LEAVE_DECIDED',
       targetType: 'leave_request', targetId: requestId,
       before: { status: req.status },
       after: { status: decision, overdraftApproved: !!overdraftReason },
       note: String(notes).trim(),
     });
-  })();
+  });
 
   try {
-    const type = selectLeaveType.get(req.leave_type_id);
+    const type = await selectLeaveType.get(req.leave_type_id);
     const typeName = type?.name || 'Leave';
     if (decision === 'APPROVED') {
-      N.notify({
+      await N.notify({
         employeeId: req.employee_id,
         category: 'LEAVE',
         title: 'Leave Request Approved',
@@ -601,7 +601,7 @@ function decideRequest({ requestId, decision, notes, actor, overdraftReason = nu
         nowMs,
       });
     } else if (decision === 'REJECTED') {
-      N.notify({
+      await N.notify({
         employeeId: req.employee_id,
         category: 'LEAVE',
         title: 'Leave Request Rejected',
@@ -616,23 +616,23 @@ function decideRequest({ requestId, decision, notes, actor, overdraftReason = nu
   return { decision, requestId };
 }
 
-function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() }) {
-  const req = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(requestId);
+async function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() }) {
+  const req = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(requestId);
   if (!req) throw new Error('No such leave request.');
   if (req.cancelled_at) return { alreadyCancelled: true };
 
-  tx(() => {
-    db.prepare("UPDATE leave_requests SET status = 'CANCELLED', cancelled_at = ? WHERE id = ?")
+  await tx(async () => {
+    await db.prepare("UPDATE leave_requests SET status = 'CANCELLED', cancelled_at = ? WHERE id = ?")
       .run(nowMs, requestId);
 
     // Spec 34: cancelled leave restores the balance. Posted as a reversal
     // rather than by deleting the booking, so the history stays intact.
     if (req.status === 'APPROVED') {
-      const year = holidayYearFor(req.employee_id, req.start_date);
-      const type = selectLeaveType.get(req.leave_type_id);
+      const year = await holidayYearFor(req.employee_id, req.start_date);
+      const type = await selectLeaveType.get(req.leave_type_id);
       if (!year.blocked && type.reduces_entitlement) {
-        const balance = balanceRaw(req.employee_id, year);
-        insertLedger.run({
+        const balance = await balanceRaw(req.employee_id, year);
+        await insertLedger.run({
           id: 'lal_' + crypto.randomBytes(8).toString('hex'),
           employee_id: req.employee_id,
           leave_year: year.leaveYear,
@@ -648,17 +648,17 @@ function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() }) {
       }
     }
 
-    audit({
+    await audit({
       actor, action: 'LEAVE_CANCELLED',
       targetType: 'leave_request', targetId: requestId,
       before: { status: req.status }, note: reason,
     });
-  })();
+  });
 
   try {
-    const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(req.employee_id);
+    const emp = await db.prepare('SELECT name FROM employees WHERE id = ?').get(req.employee_id);
     const empName = emp?.name || req.employee_id;
-    N.notify({
+    await N.notify({
       category: 'LEAVE',
       title: `Leave Request Cancelled: ${empName}`,
       body: `${empName} cancelled leave request for ${req.start_date} to ${req.end_date}.`,
@@ -672,13 +672,13 @@ function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() }) {
 }
 
 /** An explicit HR adjustment to someone's entitlement. Always attributed. */
-function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateKey() }) {
+async function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateKey() }) {
   if (!reason || !String(reason).trim()) throw new Error('An adjustment needs a reason.');
-  const year = holidayYearFor(employeeId, onDate);
+  const year = await holidayYearFor(employeeId, onDate);
   if (year.blocked) throw new Error(year.message);
 
-  const balance = balanceRaw(employeeId, year);
-  insertLedger.run({
+  const balance = await balanceRaw(employeeId, year);
+  await insertLedger.run({
     id: 'lal_' + crypto.randomBytes(8).toString('hex'),
     employee_id: employeeId,
     leave_year: year.leaveYear,
@@ -692,13 +692,13 @@ function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateKey() }
     created_by: actor,
   });
 
-  audit({
+  await audit({
     actor, action: 'LEAVE_ADJUSTED',
     targetType: 'employee', targetId: employeeId,
     after: { days }, note: String(reason).trim(),
   });
 
-  return balanceFor(employeeId, onDate);
+  return await balanceFor(employeeId, onDate);
 }
 
 module.exports = {

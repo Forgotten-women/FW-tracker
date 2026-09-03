@@ -64,7 +64,7 @@ const selectDismissals = db.prepare('SELECT alert_key, dismissed_value FROM aler
  * alert is about (the date), so a dismissal is only honoured while that value
  * is unchanged - moving a contract end date brings its alert back.
  */
-function currentAlerts(today = T.dateKey()) {
+async function currentAlerts(today = T.dateKey()) {
   const alerts = [];
 
   const push = (a) => {
@@ -73,7 +73,7 @@ function currentAlerts(today = T.dateKey()) {
     alerts.push(a);
   };
 
-  for (const er of selectCurrentEmployment.all()) {
+  for (const er of await selectCurrentEmployment.all()) {
     if (er.contract_end_date) {
       const d = daysUntil(er.contract_end_date, today);
       if (d <= A.contractExpiryDays) {
@@ -109,7 +109,7 @@ function currentAlerts(today = T.dateKey()) {
     }
   }
 
-  for (const doc of selectExpiringDocuments.all()) {
+  for (const doc of await selectExpiringDocuments.all()) {
     const d = daysUntil(doc.expiry_date, today);
     if (d <= A.documentExpiryDays) {
       push({
@@ -126,7 +126,7 @@ function currentAlerts(today = T.dateKey()) {
     }
   }
 
-  for (const r of selectDueReviews.all()) {
+  for (const r of await selectDueReviews.all()) {
     const d = daysUntil(r.due_date, today);
     if (d <= A.performanceReviewDays) {
       push({
@@ -143,7 +143,7 @@ function currentAlerts(today = T.dateKey()) {
   }
 
   // Apply dismissals, but only while the value is unchanged.
-  const dismissed = new Map(selectDismissals.all().map(x => [x.alert_key, x.dismissed_value]));
+  const dismissed = new Map((await selectDismissals.all()).map(x => [x.alert_key, x.dismissed_value]));
   const live = alerts.filter(a => dismissed.get(a.key) !== a.value);
 
   // Most urgent first: overdue, then soonest.
@@ -167,9 +167,9 @@ function summarise(alerts) {
 // Dismissal
 // ---------------------------------------------------------------------------
 
-function dismissAlert({ alertKey, value, actor, note = null }) {
+async function dismissAlert({ alertKey, value, actor, note = null }) {
   if (!alertKey || !value) throw new Error('An alert key and its current value are required.');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO alert_dismissals (alert_key, dismissed_value, dismissed_by, dismissed_at, note)
     VALUES (?,?,?,?,?)
     ON CONFLICT(alert_key) DO UPDATE SET
@@ -179,7 +179,7 @@ function dismissAlert({ alertKey, value, actor, note = null }) {
       note = excluded.note
   `).run(alertKey, String(value), actor, T.now(), note);
 
-  audit({
+  await audit({
     actor, action: 'HR_ALERT_DISMISSED',
     targetType: 'alert', targetId: alertKey,
     after: { value }, note,
@@ -211,9 +211,9 @@ const recordSent = db.prepare(`
  * date changes. Without that the daily scan would re-notify the same expiring
  * contract every morning for a month.
  */
-function notifyHr(today = T.dateKey(), nowMs = T.now()) {
-  const alerts = currentAlerts(today);
-  const hrUsers = selectHrUsers.all().map(u => u.id);
+async function notifyHr(today = T.dateKey(), nowMs = T.now()) {
+  const alerts = await currentAlerts(today);
+  const hrUsers = (await selectHrUsers.all()).map(u => u.id);
   if (hrUsers.length === 0) return { notified: 0, reason: 'no HR users to notify' };
 
   const insertNotification = db.prepare(`
@@ -222,13 +222,13 @@ function notifyHr(today = T.dateKey(), nowMs = T.now()) {
   `);
 
   let notified = 0;
-  const run = tx(() => {
+  await tx(async () => {
     for (const a of alerts) {
-      const already = selectSent.get(a.key);
+      const already = await selectSent.get(a.key);
       if (already && already.sent_value === a.value) continue;
 
       for (const userId of hrUsers) {
-        insertNotification.run(
+        await insertNotification.run(
           'ntf_' + crypto.randomBytes(8).toString('hex'),
           userId, 'HR_ALERT', a.title,
           `${a.employeeName}: ${a.detail}`,
@@ -236,11 +236,11 @@ function notifyHr(today = T.dateKey(), nowMs = T.now()) {
           null, nowMs,
         );
       }
-      recordSent.run(a.key, a.value, nowMs);
+      await recordSent.run(a.key, a.value, nowMs);
       notified++;
     }
   });
-  run();
+  
 
   return { notified };
 }
@@ -249,24 +249,24 @@ function notifyHr(today = T.dateKey(), nowMs = T.now()) {
 // Performance reviews (ad-hoc, confirmed 2026-08-27)
 // ---------------------------------------------------------------------------
 
-function scheduleReview({ employeeId, reviewType = 'GENERAL', dueDate, reviewerUserId = null, notes = null, actor }) {
+async function scheduleReview({ employeeId, reviewType = 'GENERAL', dueDate, reviewerUserId = null, notes = null, actor }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dueDate || ''))) {
     throw new Error('dueDate must be YYYY-MM-DD.');
   }
-  if (!db.prepare('SELECT 1 FROM employees WHERE id = ?').get(employeeId)) {
+  if (!await db.prepare('SELECT 1 FROM employees WHERE id = ?').get(employeeId)) {
     throw new Error('No such employee.');
   }
   const valid = ['GENERAL', 'PROBATION', 'ANNUAL', 'PIP'];
   if (!valid.includes(reviewType)) throw new Error(`reviewType must be one of ${valid.join(', ')}.`);
 
   const id = 'rev_' + crypto.randomBytes(8).toString('hex');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO performance_reviews
       (id, employee_id, review_type, due_date, status, reviewer_user_id, notes, created_at, created_by)
     VALUES (?,?,?,?, 'SCHEDULED', ?,?,?,?)
   `).run(id, employeeId, reviewType, dueDate, reviewerUserId, notes, T.now(), actor);
 
-  audit({
+  await audit({
     actor, action: 'REVIEW_SCHEDULED',
     targetType: 'employee', targetId: employeeId,
     after: { reviewId: id, reviewType, dueDate },
@@ -274,20 +274,20 @@ function scheduleReview({ employeeId, reviewType = 'GENERAL', dueDate, reviewerU
   return { id, dueDate, status: 'SCHEDULED' };
 }
 
-function recordReviewOutcome({ reviewId, outcome, notes, documentId = null, actor }) {
-  const review = db.prepare('SELECT * FROM performance_reviews WHERE id = ?').get(reviewId);
+async function recordReviewOutcome({ reviewId, outcome, notes, documentId = null, actor }) {
+  const review = await db.prepare('SELECT * FROM performance_reviews WHERE id = ?').get(reviewId);
   if (!review) throw new Error('No such review.');
   if (review.status === 'COMPLETED') throw new Error('This review is already completed.');
   if (!outcome || !String(outcome).trim()) throw new Error('An outcome is required.');
 
   const nowMs = T.now();
-  db.prepare(`
+  await db.prepare(`
     UPDATE performance_reviews
     SET status = 'COMPLETED', outcome = ?, notes = ?, document_id = ?, completed_at = ?
     WHERE id = ?
   `).run(String(outcome).trim(), notes || null, documentId, nowMs, reviewId);
 
-  audit({
+  await audit({
     actor, action: 'REVIEW_COMPLETED',
     targetType: 'employee', targetId: review.employee_id,
     after: { reviewId, outcome }, note: notes,
@@ -295,10 +295,10 @@ function recordReviewOutcome({ reviewId, outcome, notes, documentId = null, acto
   return { reviewId, status: 'COMPLETED' };
 }
 
-function reviewsFor(employeeId) {
-  return db.prepare(
+async function reviewsFor(employeeId) {
+  return (await db.prepare(
     'SELECT * FROM performance_reviews WHERE employee_id = ? ORDER BY due_date DESC'
-  ).all(employeeId).map(r => ({
+  ).all(employeeId)).map(r => ({
     id: r.id,
     type: r.review_type,
     dueDate: r.due_date,

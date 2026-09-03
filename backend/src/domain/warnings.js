@@ -45,9 +45,9 @@ const selectIssuedWarnings = db.prepare(`
  * WITHDRAWN warnings are excluded: a withdrawn warning is one HR decided should
  * not have been issued, so it must not push the next one up a level.
  */
-function standingFor(employeeId) {
+async function standingFor(employeeId) {
   const sequence = config.warningEscalationSequence;
-  const issued = selectIssuedWarnings.all(employeeId);
+  const issued = await selectIssuedWarnings.all(employeeId);
 
   const nextIndex = issued.length;
   const exhausted = nextIndex >= sequence.length;
@@ -84,9 +84,9 @@ const upsertStanding = db.prepare(`
     updated_at      = excluded.updated_at
 `);
 
-function refreshStanding(employeeId) {
-  const s = standingFor(employeeId);
-  upsertStanding.run(
+async function refreshStanding(employeeId) {
+  const s = await standingFor(employeeId);
+  await upsertStanding.run(
     employeeId, s.warningsIssued, s.highestLevel, s.lastIssuedAt,
     s.nextLevel, s.sequenceExhausted ? 1 : 0, T.now(),
   );
@@ -118,8 +118,8 @@ const insertTrigger = db.prepare(`
  * period, so re-running after every recompute cannot raise the same referral
  * twice. Returns the trigger if one was created, otherwise null.
  */
-function evaluateLateness(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
-  const status = A.latenessStatus(employeeId, dateKey);
+async function evaluateLateness(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
+  const status = await A.latenessStatus(employeeId, dateKey);
 
   // Spec 9.6: with no confirmed reset period the engine refuses to evaluate
   // rather than guessing which arrivals fall inside the window.
@@ -127,7 +127,7 @@ function evaluateLateness(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   if (!status.thresholdReached) return { evaluated: true, triggered: false, status };
 
   const periodKey = `${status.periodFrom}..${status.periodTo}`;
-  const existing = selectTriggerForOccurrence.get(
+  const existing = await selectTriggerForOccurrence.get(
     employeeId, 'wr_lateness', status.count, periodKey,
   );
   if (existing) return { evaluated: true, triggered: false, alreadyRaised: true, status };
@@ -138,10 +138,10 @@ function evaluateLateness(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     return { evaluated: true, triggered: false, status };
   }
 
-  const standing = standingFor(employeeId);
+  const standing = await standingFor(employeeId);
   const id = 'wt_' + crypto.randomBytes(8).toString('hex');
 
-  insertTrigger.run({
+  await insertTrigger.run({
     id,
     employee_id: employeeId,
     rule_id: 'wr_lateness',
@@ -153,7 +153,7 @@ function evaluateLateness(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     related_dates: periodKey,
   });
 
-  audit({
+  await audit({
     actor: 'system', action: 'WARNING_TRIGGER_RAISED',
     targetType: 'employee', targetId: employeeId,
     after: {
@@ -173,11 +173,11 @@ function evaluateLateness(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
 }
 
 /** Evaluates every active employee. Called by the maintenance tick. */
-function evaluateAll(dateKey = T.dateKey(), nowMs = T.now()) {
-  const employees = db.prepare('SELECT id FROM employees WHERE active = 1').all();
+async function evaluateAll(dateKey = T.dateKey(), nowMs = T.now()) {
+  const employees = await db.prepare('SELECT id FROM employees WHERE active = 1').all();
   const raised = [];
   for (const e of employees) {
-    const r = evaluateLateness(e.id, dateKey, nowMs);
+    const r = await evaluateLateness(e.id, dateKey, nowMs);
     if (r.triggered) raised.push({ employeeId: e.id, triggerId: r.triggerId });
   }
   return raised;
@@ -197,7 +197,7 @@ const DECISIONS = ['CONFIRMED', 'WAIVED', 'CORRECTED', 'SUPERSEDED'];
  * 9.3 exists for, where the underlying attendance turns out to be wrong or
  * authorised.
  */
-function reviewTrigger({ triggerId, decision, notes, actor, explanation, nowMs = T.now() }) {
+async function reviewTrigger({ triggerId, decision, notes, actor, explanation, nowMs = T.now() }) {
   if (!DECISIONS.includes(decision)) {
     throw new Error(`decision must be one of ${DECISIONS.join(', ')}`);
   }
@@ -205,7 +205,7 @@ function reviewTrigger({ triggerId, decision, notes, actor, explanation, nowMs =
     throw new Error('A note explaining the decision is required.');
   }
 
-  const trigger = db.prepare('SELECT * FROM warning_triggers WHERE id = ?').get(triggerId);
+  const trigger = await db.prepare('SELECT * FROM warning_triggers WHERE id = ?').get(triggerId);
   if (!trigger) throw new Error('No such trigger.');
   if (trigger.status !== 'PENDING_REVIEW') {
     throw new Error(`This trigger has already been reviewed (${trigger.status}).`);
@@ -213,9 +213,9 @@ function reviewTrigger({ triggerId, decision, notes, actor, explanation, nowMs =
 
   let warning = null;
 
-  tx(() => {
+  await tx(async () => {
     if (decision === 'CONFIRMED') {
-      const standing = standingFor(trigger.employee_id);
+      const standing = await standingFor(trigger.employee_id);
 
       if (standing.sequenceExhausted) {
         // Refusing rather than inventing a level. What follows a final written
@@ -231,7 +231,7 @@ function reviewTrigger({ triggerId, decision, notes, actor, explanation, nowMs =
         throw new Error('A formal warning needs an explanation the employee will see.');
       }
 
-      warning = issueFormalWarning({
+      warning = await issueFormalWarning({
         employeeId: trigger.employee_id,
         triggerId: trigger.id,
         level: standing.nextLevel,
@@ -244,22 +244,22 @@ function reviewTrigger({ triggerId, decision, notes, actor, explanation, nowMs =
       });
     }
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE warning_triggers
       SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?, formal_warning_id = ?
       WHERE id = ?
     `).run(decision, actor, nowMs, String(notes).trim(), warning ? warning.id : null, trigger.id);
 
-    audit({
+    await audit({
       actor, action: 'WARNING_TRIGGER_REVIEWED',
       targetType: 'trigger', targetId: trigger.id,
       before: { status: trigger.status },
       after: { status: decision, formalWarningId: warning ? warning.id : null },
       note: String(notes).trim(),
     });
-  })();
+  });
 
-  refreshStanding(trigger.employee_id);
+  await refreshStanding(trigger.employee_id);
   return { decision, warning };
 }
 
@@ -279,7 +279,7 @@ function addMonths(dateKey, months) {
   return `${ty}-${String(tm).padStart(2, '0')}-${String(td).padStart(2, '0')}`;
 }
 
-function issueFormalWarning({
+async function issueFormalWarning({
   employeeId, triggerId = null, level, warningType, triggeringRule = null,
   relatedIncidents = null, explanation, actor, nowMs = T.now(),
 }) {
@@ -289,7 +289,7 @@ function issueFormalWarning({
     ? addMonths(issuedDate, config.warningExpiryMonths)
     : null;
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO formal_warnings
       (id, employee_id, trigger_id, warning_type, warning_level, triggering_rule,
        related_incidents, explanation, issued_at, issued_by, review_date, expiry_date, status)
@@ -298,12 +298,12 @@ function issueFormalWarning({
          relatedIncidents, explanation, nowMs, actor, expiryDate, expiryDate);
 
   // Spec 9.4 and 19.5: the employee must be able to acknowledge receipt.
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO warning_acknowledgements (id, warning_id, employee_id, requested_at)
     VALUES (?,?,?,?)
   `).run('wa_' + crypto.randomBytes(8).toString('hex'), id, employeeId, nowMs);
 
-  notify({
+  await notify({
     employeeId,
     category: 'WARNING',
     title: `A ${levelLabel(level)} has been issued`,
@@ -312,7 +312,7 @@ function issueFormalWarning({
     nowMs,
   });
 
-  audit({
+  await audit({
     actor, action: 'FORMAL_WARNING_ISSUED',
     targetType: 'employee', targetId: employeeId,
     after: { warningId: id, level, warningType, expiryDate },
@@ -322,39 +322,39 @@ function issueFormalWarning({
   return { id, level, expiryDate, issuedAt: nowMs };
 }
 
-function withdrawWarning({ warningId, reason, actor, nowMs = T.now() }) {
+async function withdrawWarning({ warningId, reason, actor, nowMs = T.now() }) {
   if (!reason || !String(reason).trim()) throw new Error('A reason is required to withdraw a warning.');
-  const w = db.prepare('SELECT * FROM formal_warnings WHERE id = ?').get(warningId);
+  const w = await db.prepare('SELECT * FROM formal_warnings WHERE id = ?').get(warningId);
   if (!w) throw new Error('No such warning.');
 
-  tx(() => {
-    db.prepare("UPDATE formal_warnings SET status = 'WITHDRAWN', outcome = ? WHERE id = ?")
+  await tx(async () => {
+    await db.prepare("UPDATE formal_warnings SET status = 'WITHDRAWN', outcome = ? WHERE id = ?")
       .run(String(reason).trim(), warningId);
-    audit({
+    await audit({
       actor, action: 'FORMAL_WARNING_WITHDRAWN',
       targetType: 'warning', targetId: warningId,
       before: { status: w.status }, after: { status: 'WITHDRAWN' },
       note: String(reason).trim(),
     });
-  })();
+  });
 
   // A withdrawn warning stops counting toward escalation, so the next one is
   // proposed at the level it would have been.
-  refreshStanding(w.employee_id);
+  await refreshStanding(w.employee_id);
   return { withdrawn: true };
 }
 
-function acknowledgeWarning({ warningId, employeeId, comments = null, nowMs = T.now() }) {
-  const row = db.prepare(
+async function acknowledgeWarning({ warningId, employeeId, comments = null, nowMs = T.now() }) {
+  const row = await db.prepare(
     'SELECT * FROM warning_acknowledgements WHERE warning_id = ? AND employee_id = ?'
   ).get(warningId, employeeId);
   if (!row) throw new Error('No acknowledgement is outstanding for this warning.');
   if (row.acknowledged_at) return { alreadyAcknowledged: true, at: row.acknowledged_at };
 
-  db.prepare('UPDATE warning_acknowledgements SET acknowledged_at = ?, comments = ? WHERE id = ?')
+  await db.prepare('UPDATE warning_acknowledgements SET acknowledged_at = ?, comments = ? WHERE id = ?')
     .run(nowMs, comments, row.id);
 
-  audit({
+  await audit({
     actor: `employee:${employeeId}`, action: 'WARNING_ACKNOWLEDGED',
     targetType: 'warning', targetId: warningId,
     // Acknowledging receipt is not agreeing with it, and the record should not
@@ -371,15 +371,15 @@ function acknowledgeWarning({ warningId, employeeId, comments = null, nowMs = T.
  * They remain in the record and continue to count toward escalation - expiry
  * changes what is live, not what happened.
  */
-function expireWarnings(nowMs = T.now()) {
+async function expireWarnings(nowMs = T.now()) {
   const today = T.dateKey(nowMs);
-  const due = db.prepare(
+  const due = await db.prepare(
     "SELECT * FROM formal_warnings WHERE status = 'ACTIVE' AND expiry_date IS NOT NULL AND expiry_date < ?"
   ).all(today);
 
   for (const w of due) {
-    db.prepare("UPDATE formal_warnings SET status = 'EXPIRED' WHERE id = ?").run(w.id);
-    audit({
+    await db.prepare("UPDATE formal_warnings SET status = 'EXPIRED' WHERE id = ?").run(w.id);
+    await audit({
       actor: 'system', action: 'FORMAL_WARNING_EXPIRED',
       targetType: 'warning', targetId: w.id,
       note: 'No longer active. Still counts toward escalation history.',
@@ -400,8 +400,8 @@ function expireWarnings(nowMs = T.now()) {
  * case by case. This is what prevents one absence silently costing both a day
  * of annual leave and a day of pay.
  */
-function recordSuspectedAbsence({ employeeId, dateKey, nowMs = T.now() }) {
-  const existing = db.prepare(
+async function recordSuspectedAbsence({ employeeId, dateKey, nowMs = T.now() }) {
+  const existing = await db.prepare(
     'SELECT * FROM absence_records WHERE employee_id = ? AND date_key = ?'
   ).get(employeeId, dateKey);
   if (existing) return { alreadyRecorded: true, id: existing.id };
@@ -413,7 +413,7 @@ function recordSuspectedAbsence({ employeeId, dateKey, nowMs = T.now() }) {
   // decision that nobody made.
   const tri = (v) => (v === null || v === undefined ? null : (v ? 1 : 0));
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO absence_records
       (id, employee_id, date_key, absence_type, detected_at, status,
        deduct_annual_leave, treat_as_unpaid, create_warning_trigger)
@@ -425,7 +425,7 @@ function recordSuspectedAbsence({ employeeId, dateKey, nowMs = T.now() }) {
     tri(config.unauthorisedAbsence.createWarningTrigger),
   );
 
-  audit({
+  await audit({
     actor: 'system', action: 'ABSENCE_SUSPECTED',
     targetType: 'employee', targetId: employeeId,
     after: { date: dateKey },
@@ -436,7 +436,7 @@ function recordSuspectedAbsence({ employeeId, dateKey, nowMs = T.now() }) {
 }
 
 /** A person decides the outcome of a suspected absence. */
-function reviewAbsence({
+async function reviewAbsence({
   absenceId, status, deductAnnualLeave = null, treatAsUnpaid = null,
   createWarningTrigger = null, notes, actor, nowMs = T.now(),
 }) {
@@ -445,11 +445,11 @@ function reviewAbsence({
   }
   if (!notes || !String(notes).trim()) throw new Error('A note explaining the decision is required.');
 
-  const record = db.prepare('SELECT * FROM absence_records WHERE id = ?').get(absenceId);
+  const record = await db.prepare('SELECT * FROM absence_records WHERE id = ?').get(absenceId);
   if (!record) throw new Error('No such absence record.');
 
-  tx(() => {
-    db.prepare(`
+  await tx(async () => {
+    await db.prepare(`
       UPDATE absence_records
       SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?,
           deduct_annual_leave = ?, treat_as_unpaid = ?, create_warning_trigger = ?
@@ -460,18 +460,18 @@ function reviewAbsence({
            createWarningTrigger === null ? null : (createWarningTrigger ? 1 : 0),
            absenceId);
 
-    audit({
+    await audit({
       actor, action: 'ABSENCE_REVIEWED',
       targetType: 'absence', targetId: absenceId,
       before: { status: record.status },
       after: { status, deductAnnualLeave, treatAsUnpaid, createWarningTrigger },
       note: String(notes).trim(),
     });
-  })();
+  });
 
   try {
     const statusLabel = status === 'CONFIRMED' ? 'Confirmed' : 'Dismissed';
-    N.notify({
+    await N.notify({
       employeeId: record.employee_id,
       category: 'ABSENCE',
       title: `Absence Review: ${statusLabel}`,
@@ -496,13 +496,13 @@ function reviewAbsence({
  * Scans all active employees for a given date.
  * Flags scheduled staff who did not attend and have no approved leave.
  */
-function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan = false) {
-  const employees = db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
+async function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan = false) {
+  const employees = await db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
   const detected = [];
   const isToday = dateKey === T.dateKey(nowMs);
 
   for (const emp of employees) {
-    const sched = schedule.resolve(emp.id, dateKey);
+    const sched = await schedule.resolve(emp.id, dateKey);
     // If not a scheduled working day for this employee, skip
     if (!sched.isWorkingDay) continue;
 
@@ -512,7 +512,7 @@ function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan 
     }
 
     // Check if employee has attendance / presence recorded for this date
-    const attSummary = db.prepare(`
+    const attSummary = await db.prepare(`
       SELECT first_clock_in, worked_minutes FROM attendance_daily_summary
       WHERE employee_id = ? AND date_key = ?
     `).get(emp.id, dateKey);
@@ -524,7 +524,7 @@ function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan 
     // Also check raw presence events in case summary derivation has not run yet
     const startMs = T.startOfDay(dateKey);
     const endMs = T.endOfDay(dateKey);
-    const rawEvents = db.prepare(`
+    const rawEvents = await db.prepare(`
       SELECT COUNT(*) c FROM presence_events
       WHERE employee_id = ? AND observed_at >= ? AND observed_at <= ?
     `).get(emp.id, startMs, endMs);
@@ -534,7 +534,7 @@ function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan 
     }
 
     // Check if employee has an approved leave request covering this date
-    const approvedLeave = db.prepare(`
+    const approvedLeave = await db.prepare(`
       SELECT id, leave_type_id FROM leave_requests
       WHERE employee_id = ? AND status = 'APPROVED' AND start_date <= ? AND end_date >= ?
     `).get(emp.id, dateKey, dateKey);
@@ -542,7 +542,7 @@ function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan 
     if (approvedLeave) continue;
 
     // Check if employee already has an absence record for this date
-    const existingAbsence = db.prepare(`
+    const existingAbsence = await db.prepare(`
       SELECT id, absence_type FROM absence_records
       WHERE employee_id = ? AND date_key = ?
     `).get(emp.id, dateKey);
@@ -550,11 +550,11 @@ function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan 
     if (existingAbsence) continue;
 
     // Employee is scheduled, has no attendance, and has no approved leave.
-    const res = recordSuspectedAbsence({ employeeId: emp.id, dateKey, nowMs });
+    const res = await recordSuspectedAbsence({ employeeId: emp.id, dateKey, nowMs });
     if (res && res.recorded) {
       detected.push({ employeeId: emp.id, employeeName: emp.name, dateKey, absenceId: res.id });
       try {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO hr_alerts (id, alert_type, title, description, employee_id, severity, created_at)
           VALUES (?, 'UNAUTHORISED_ABSENCE', ?, ?, ?, 'HIGH', ?)
         `).run(
@@ -572,7 +572,7 @@ function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan 
 
   if (detected.length > 0 && isManualScan) {
     try {
-      N.notify({
+      await N.notify({
         category: 'ABSENCE',
         title: `Suspected Absence: ${detected.length} flagged`,
         body: `Absence scanner flagged ${detected.length} employee(s) for ${dateKey} awaiting HR review.`,
@@ -589,36 +589,36 @@ function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManualScan 
 /**
  * Self-reporting of sickness / unplanned absence from the mobile app (Spec 2.2).
  */
-function selfReportAbsence({ employeeId, dateKey, absenceType = 'SICK', reason = '', evidenceDocumentId = null, nowMs = T.now() }) {
+async function selfReportAbsence({ employeeId, dateKey, absenceType = 'SICK', reason = '', evidenceDocumentId = null, nowMs = T.now() }) {
   if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     throw new Error('dateKey must be formatted as YYYY-MM-DD.');
   }
 
-  const existing = db.prepare(
+  const existing = await db.prepare(
     'SELECT * FROM absence_records WHERE employee_id = ? AND date_key = ?'
   ).get(employeeId, dateKey);
 
-  const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+  const emp = await db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
   const employeeName = emp?.name || employeeId;
 
   let absenceId;
   if (existing) {
     absenceId = existing.id;
-    db.prepare(`
+    await db.prepare(`
       UPDATE absence_records
       SET absence_type = ?, reason = ?, evidence_document_id = ?, status = 'PENDING_REVIEW', detected_at = ?
       WHERE id = ?
     `).run(absenceType, reason, evidenceDocumentId, nowMs, existing.id);
   } else {
     absenceId = 'abs_' + crypto.randomBytes(8).toString('hex');
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO absence_records
         (id, employee_id, date_key, absence_type, reason, evidence_document_id, detected_at, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW')
     `).run(absenceId, employeeId, dateKey, absenceType, reason, evidenceDocumentId, nowMs);
   }
 
-  notify({
+  await notify({
     category: 'ABSENCE',
     title: `Sickness / Absence Report: ${employeeName}`,
     body: `${absenceType} reported for ${dateKey}: ${reason || 'No details provided'}`,
@@ -626,7 +626,7 @@ function selfReportAbsence({ employeeId, dateKey, absenceType = 'SICK', reason =
     nowMs,
   });
 
-  audit({
+  await audit({
     actor: `employee:${employeeId}`,
     action: 'ABSENCE_SELF_REPORTED',
     targetType: 'employee',
@@ -641,7 +641,7 @@ function selfReportAbsence({ employeeId, dateKey, absenceType = 'SICK', reason =
 /**
  * Returns absence records for HR review or employee history.
  */
-function listAbsences({ status = 'ALL', from = null, to = null, employeeId = null } = {}) {
+async function listAbsences({ status = 'ALL', from = null, to = null, employeeId = null } = {}) {
   let query = `
     SELECT a.*, e.name as employee_name, e.role as employee_role, d.title as document_title
     FROM absence_records a
@@ -670,7 +670,7 @@ function listAbsences({ status = 'ALL', from = null, to = null, employeeId = nul
 
   query += ' ORDER BY a.date_key DESC, a.detected_at DESC';
 
-  const rows = db.prepare(query).all(...params);
+  const rows = await db.prepare(query).all(...params);
   return rows.map(r => ({
     id: r.id,
     employeeId: r.employee_id,
@@ -697,8 +697,8 @@ function listAbsences({ status = 'ALL', from = null, to = null, employeeId = nul
 // Notifications (spec 22)
 // ---------------------------------------------------------------------------
 
-function notify(opts) {
-  const payload = N.notify(opts);
+async function notify(opts) {
+  const payload = await N.notify(opts);
   return payload.id;
 }
 
@@ -722,20 +722,20 @@ function levelLabel(level) {
  * the spec is explicit that colour must supplement text and never be the only
  * indicator.
  */
-function employeeWarningView(employeeId, dateKey = T.dateKey()) {
-  const lateness = A.latenessStatus(employeeId, dateKey);
-  const standing = standingFor(employeeId);
+async function employeeWarningView(employeeId, dateKey = T.dateKey()) {
+  const lateness = await A.latenessStatus(employeeId, dateKey);
+  const standing = await standingFor(employeeId);
 
-  const warnings = db.prepare(
+  const warnings = await db.prepare(
     'SELECT * FROM formal_warnings WHERE employee_id = ? ORDER BY issued_at DESC'
   ).all(employeeId);
 
   const acks = new Map(
-    db.prepare('SELECT * FROM warning_acknowledgements WHERE employee_id = ?').all(employeeId)
+    (await db.prepare('SELECT * FROM warning_acknowledgements WHERE employee_id = ?').all(employeeId))
       .map(a => [a.warning_id, a]),
   );
 
-  const pendingTriggers = db.prepare(
+  const pendingTriggers = await db.prepare(
     "SELECT * FROM warning_triggers WHERE employee_id = ? AND status = 'PENDING_REVIEW'"
   ).all(employeeId);
 

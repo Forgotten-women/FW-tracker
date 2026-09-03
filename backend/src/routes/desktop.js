@@ -14,9 +14,9 @@ const presence = require('../domain/presence');
 const T = require('../util/time');
 const { config } = require('../config');
 
-function getOrgSetting(key, defaultValue) {
+async function getOrgSetting(key, defaultValue) {
   try {
-    const row = db.prepare('SELECT value FROM org_settings WHERE key = ?').get(key);
+    const row = await db.prepare('SELECT value FROM org_settings WHERE key = ?').get(key);
     return row ? row.value : defaultValue;
   } catch (_) {
     return defaultValue;
@@ -26,7 +26,7 @@ function getOrgSetting(key, defaultValue) {
 // ---------------------------------------------------------------------------
 // POST /api/desktop/heartbeat
 // ---------------------------------------------------------------------------
-router.post('/heartbeat', requireDevice, (req, res) => {
+router.post('/heartbeat', requireDevice, async (req, res) => {
   const { employeeId, employeeName, deviceId } = req.auth;
   const {
     activeSeconds = 60,
@@ -53,9 +53,9 @@ router.post('/heartbeat', requireDevice, (req, res) => {
   const inOffice = locationVerdict === 'OFFICE';
 
   // 2. Settings
-  const idleThresholdMins = parseInt(getOrgSetting('idle_threshold_minutes', '5'), 10) || 5;
-  const lockGraceMins = parseInt(getOrgSetting('lock_screen_grace_minutes', '5'), 10) || 5;
-  const approvedProcesses = getOrgSetting('approved_work_processes', '');
+  const idleThresholdMins = parseInt(await getOrgSetting('idle_threshold_minutes', '5'), 10) || 5;
+  const lockGraceMins = parseInt(await getOrgSetting('lock_screen_grace_minutes', '5'), 10) || 5;
+  const approvedProcesses = await getOrgSetting('approved_work_processes', '');
 
   // 3. Determine current status
   let status = 'ACTIVE';
@@ -75,7 +75,7 @@ router.post('/heartbeat', requireDevice, (req, res) => {
   // 4. Record presence event in central presence log if in office and active
   if (inOffice && (status === 'ACTIVE' || status === 'IDLE')) {
     try {
-      presence.recordEvent({
+      await presence.recordEvent({
         employeeId,
         deviceId,
         source: 'APP',
@@ -96,9 +96,9 @@ router.post('/heartbeat', requireDevice, (req, res) => {
   const effectiveBreak = (status === 'ON_BREAK' || status === 'AWAY') ? 60 : 0;
 
   try {
-    const existing = db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
+    const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
     if (existing) {
-      db.prepare(`
+      await db.prepare(`
         UPDATE workstation_sessions
         SET status = ?,
             active_seconds = active_seconds + ?,
@@ -123,7 +123,7 @@ router.post('/heartbeat', requireDevice, (req, res) => {
         existing.id
       );
     } else {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO workstation_sessions (
           id, device_id, employee_id, status, session_date,
           active_seconds, idle_seconds, break_seconds, lock_state,
@@ -155,15 +155,15 @@ router.post('/heartbeat', requireDevice, (req, res) => {
   if (appName && appName !== 'unknown.exe' && status === 'ACTIVE') {
     const appUsageId = `app_${deviceId}_${dateKey}_${crypto.createHash('md5').update(appName).digest('hex').slice(0, 8)}`;
     try {
-      const existingApp = db.prepare('SELECT id, active_seconds FROM workstation_app_usage WHERE device_id = ? AND session_date = ? AND app_name = ?').get(deviceId, dateKey, appName);
+      const existingApp = await db.prepare('SELECT id, active_seconds FROM workstation_app_usage WHERE device_id = ? AND session_date = ? AND app_name = ?').get(deviceId, dateKey, appName);
       if (existingApp) {
-        db.prepare(`
+        await db.prepare(`
           UPDATE workstation_app_usage
           SET active_seconds = active_seconds + ?, last_used_at = ?
           WHERE id = ?
         `).run(parseInt(activeSeconds, 10) || 60, nowMs, existingApp.id);
       } else {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO workstation_app_usage (id, employee_id, device_id, session_date, app_name, active_seconds, last_used_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(appUsageId, employeeId, deviceId, dateKey, appName, parseInt(activeSeconds, 10) || 60, nowMs);
@@ -174,7 +174,7 @@ router.post('/heartbeat', requireDevice, (req, res) => {
   }
 
   // 7. Fetch updated daily summary
-  const sessionRow = db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
+  const sessionRow = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
 
   res.json({
     status: 'SUCCESS',
@@ -198,7 +198,7 @@ router.post('/heartbeat', requireDevice, (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /api/desktop/break
 // ---------------------------------------------------------------------------
-router.post('/break', requireDevice, (req, res) => {
+router.post('/break', requireDevice, async (req, res) => {
   const { employeeId, employeeName, deviceId } = req.auth;
   const { onBreak = true, reason = '' } = req.body || {};
   const nowMs = T.now();
@@ -206,13 +206,13 @@ router.post('/break', requireDevice, (req, res) => {
   const newStatus = onBreak ? 'ON_BREAK' : 'ACTIVE';
 
   try {
-    db.prepare(`
+    await db.prepare(`
       UPDATE workstation_sessions
       SET status = ?, updated_at = ?
       WHERE device_id = ? AND session_date = ?
     `).run(newStatus, nowMs, deviceId, dateKey);
 
-    db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+    await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
       .run(nowMs, onBreak ? 'MANUAL_BREAK_STARTED' : 'MANUAL_BREAK_ENDED', employeeId, employeeName, reason || (onBreak ? 'Employee paused work session' : 'Employee resumed work session'));
   } catch (_) {}
 
@@ -222,7 +222,7 @@ router.post('/break', requireDevice, (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /api/desktop/anomaly
 // ---------------------------------------------------------------------------
-router.post('/anomaly', requireDevice, (req, res) => {
+router.post('/anomaly', requireDevice, async (req, res) => {
   const { employeeId, employeeName, deviceId } = req.auth;
   const { processName, windowTitle, durationSeconds = 0, notes = '' } = req.body || {};
 
@@ -234,7 +234,7 @@ router.post('/anomaly', requireDevice, (req, res) => {
   const anomalyId = 'anom_' + crypto.randomBytes(8).toString('hex');
 
   try {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO process_anomalies (
         id, employee_id, device_id, process_name, window_title, duration_seconds, detected_at, notes
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -249,7 +249,7 @@ router.post('/anomaly', requireDevice, (req, res) => {
       notes ? String(notes).slice(0, 300) : null
     );
 
-    db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+    await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
       .run(nowMs, 'UNAPPROVED_PROCESS_ALERT', employeeId, employeeName, `Unapproved process "${processName}" active for ${Math.round(durationSeconds / 60)}m`);
   } catch (err) {
     console.error('[desktop/anomaly] insert error:', err);
@@ -261,15 +261,15 @@ router.post('/anomaly', requireDevice, (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /api/desktop/status
 // ---------------------------------------------------------------------------
-router.get('/status', requireDevice, (req, res) => {
+router.get('/status', requireDevice, async (req, res) => {
   const { employeeId, employeeName, employeeRole, deviceId } = req.auth;
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
 
-  const sessionRow = db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
-  const idleThresholdMins = parseInt(getOrgSetting('idle_threshold_minutes', '5'), 10) || 5;
-  const lockGraceMins = parseInt(getOrgSetting('lock_screen_grace_minutes', '5'), 10) || 5;
-  const approvedProcesses = getOrgSetting('approved_work_processes', '');
+  const sessionRow = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
+  const idleThresholdMins = parseInt(await getOrgSetting('idle_threshold_minutes', '5'), 10) || 5;
+  const lockGraceMins = parseInt(await getOrgSetting('lock_screen_grace_minutes', '5'), 10) || 5;
+  const approvedProcesses = await getOrgSetting('approved_work_processes', '');
 
   res.json({
     status: 'SUCCESS',

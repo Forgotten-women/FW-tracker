@@ -22,14 +22,14 @@ const T = require('../util/time');
 // ---------------------------------------------------------------------------
 
 // GET /api/attendance/today - everything the employee home screen needs.
-router.get('/today', requireDevice, (req, res) => {
+router.get('/today', requireDevice, async (req, res) => {
   const { employeeId, employeeName } = req.auth;
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
 
-  const day = A.deriveDay(employeeId, dateKey, nowMs);
-  const lateness = A.latenessStatus(employeeId, dateKey);
-  const balance = A.balanceFor(employeeId);
+  const day = await A.deriveDay(employeeId, dateKey, nowMs);
+  const lateness = await A.latenessStatus(employeeId, dateKey);
+  const balance = await A.balanceFor(employeeId);
 
   res.json({
     status: 'SUCCESS',
@@ -50,9 +50,9 @@ router.get('/today', requireDevice, (req, res) => {
 });
 
 // POST /api/attendance/break/start
-router.post('/break/start', requireDevice, (req, res) => {
+router.post('/break/start', requireDevice, async (req, res) => {
   const nowMs = T.now();
-  const result = A.startBreak(req.auth.employeeId, nowMs);
+  const result = await A.startBreak(req.auth.employeeId, nowMs);
 
   if (!result.ok) {
     return res.status(409).json({
@@ -63,7 +63,7 @@ router.post('/break/start', requireDevice, (req, res) => {
     });
   }
 
-  A.recomputeDay(req.auth.employeeId, T.dateKey(nowMs), nowMs);
+  await A.recomputeDay(req.auth.employeeId, T.dateKey(nowMs), nowMs);
   res.status(201).json({
     status: 'SUCCESS',
     breakId: result.breakId,
@@ -75,9 +75,9 @@ router.post('/break/start', requireDevice, (req, res) => {
 });
 
 // POST /api/attendance/break/end
-router.post('/break/end', requireDevice, (req, res) => {
+router.post('/break/end', requireDevice, async (req, res) => {
   const nowMs = T.now();
-  const result = A.endBreak(req.auth.employeeId, nowMs);
+  const result = await A.endBreak(req.auth.employeeId, nowMs);
 
   if (!result.ok) {
     return res.status(409).json({
@@ -85,7 +85,7 @@ router.post('/break/end', requireDevice, (req, res) => {
     });
   }
 
-  A.recomputeDay(req.auth.employeeId, T.dateKey(nowMs), nowMs);
+  await A.recomputeDay(req.auth.employeeId, T.dateKey(nowMs), nowMs);
   res.json({
     status: 'SUCCESS',
     actualMinutes: result.actualMinutes,
@@ -100,29 +100,29 @@ router.post('/break/end', requireDevice, (req, res) => {
 
 // POST /api/attendance/clock-out - the manual fallback spec 23.6 requires,
 // because a missed automatic event must not become a payroll event.
-router.post('/clock-out', requireDevice, (req, res) => {
+router.post('/clock-out', requireDevice, async (req, res) => {
   const { employeeId } = req.auth;
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
 
-  const open = db.prepare(
+  const open = await db.prepare(
     'SELECT * FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
   ).get(employeeId);
-  if (open) A.endBreak(employeeId, nowMs);
+  if (open) await A.endBreak(employeeId, nowMs);
 
   const id = 'ae_' + crypto.randomBytes(8).toString('hex');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO attendance_events
       (id, employee_id, date_key, occurred_at, event_type, source, device_id, created_at, created_by)
     VALUES (?,?,?,?, 'CLOCK_OUT', 'MOBILE_APP', ?, ?, ?)
   `).run(id, employeeId, dateKey, nowMs, req.auth.deviceId, nowMs, `employee:${employeeId}`);
 
-  const day = A.recomputeDay(employeeId, dateKey, nowMs);
+  const day = await A.recomputeDay(employeeId, dateKey, nowMs);
   res.json({ status: 'SUCCESS', clockedOutAt: T.displayTime(nowMs), today: A.present(day) });
 });
 
 // POST /api/attendance/corrections - spec 11.
-router.post('/corrections', requireDevice, (req, res) => {
+router.post('/corrections', requireDevice, async (req, res) => {
   const { employeeId } = req.auth;
   const { dateKey, requestedChange, reason } = req.body || {};
 
@@ -134,7 +134,7 @@ router.post('/corrections', requireDevice, (req, res) => {
   }
 
   const id = 'corr_' + crypto.randomBytes(8).toString('hex');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO attendance_corrections
       (id, employee_id, date_key, requested_by, requested_at, requested_change, reason, status)
     VALUES (?,?,?,?,?,?,?, 'PENDING')
@@ -142,9 +142,9 @@ router.post('/corrections', requireDevice, (req, res) => {
          JSON.stringify(requestedChange || {}), String(reason).trim());
 
   try {
-    const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+    const emp = await db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
     const empName = emp?.name || employeeId;
-    N.notify({
+    await N.notify({
       category: 'CORRECTION',
       title: `Attendance Dispute: ${empName}`,
       body: `Correction submitted for ${dateKey}: ${String(reason).trim()}`,
@@ -159,8 +159,8 @@ router.post('/corrections', requireDevice, (req, res) => {
   });
 });
 
-router.get('/corrections/mine', requireDevice, (req, res) => {
-  const rows = db.prepare(
+router.get('/corrections/mine', requireDevice, async (req, res) => {
+  const rows = await db.prepare(
     'SELECT * FROM attendance_corrections WHERE employee_id = ? ORDER BY requested_at DESC LIMIT 50'
   ).all(req.auth.employeeId);
 
@@ -182,24 +182,24 @@ router.get('/corrections/mine', requireDevice, (req, res) => {
 // GET /api/attendance/employee/:employeeId/day/:dateKey
 router.get('/employee/:employeeId/day/:dateKey',
   requireUser, requirePermission('attendance.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     const { employeeId, dateKey } = req.params;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
       return res.status(400).json({ status: 'ERROR', message: 'dateKey must be YYYY-MM-DD.' });
     }
-    const day = A.deriveDay(employeeId, dateKey);
+    const day = await A.deriveDay(employeeId, dateKey);
     res.json({
       status: 'SUCCESS',
       day: A.present(day),
-      lateness: A.latenessStatus(employeeId, dateKey),
-      deficitBalance: A.balanceFor(employeeId),
+      lateness: await A.latenessStatus(employeeId, dateKey),
+      deficitBalance: await A.balanceFor(employeeId),
     });
   });
 
 // GET /api/attendance/employee/:employeeId/summary?from=&to=
 router.get('/employee/:employeeId/summary',
   requireUser, requirePermission('attendance.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     const { employeeId } = req.params;
     const from = String(req.query.from || T.dateKey());
     const to = String(req.query.to || T.dateKey());
@@ -207,7 +207,7 @@ router.get('/employee/:employeeId/summary',
       return res.status(400).json({ status: 'ERROR', message: 'from and to must be YYYY-MM-DD.' });
     }
 
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT * FROM attendance_daily_summary
       WHERE employee_id = ? AND date_key >= ? AND date_key <= ?
       ORDER BY date_key DESC
@@ -242,15 +242,21 @@ router.get('/employee/:employeeId/summary',
   });
 
 // GET /api/attendance/deficits - who is approaching a whole-day equivalent.
-router.get('/deficits', requireUser, requirePermission('attendance.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
-  const rows = db.prepare(`
-    SELECT l.employee_id, l.balance_after, l.whole_days_after, l.carry_forward_after, e.name
+router.get('/deficits', requireUser, requirePermission('attendance.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+  // The most recent ledger entry per employee.
+  //
+  // This keyed off SQLite's implicit rowid, which does not exist here - the
+  // table's primary key is a random hex id, so "the highest id" never meant
+  // "the latest entry" anyway. Ordering by created_at states the intent, with
+  // the id as a stable tiebreak for entries written in the same millisecond.
+  const rows = (await db.prepare(`
+    SELECT DISTINCT ON (l.employee_id)
+           l.employee_id, l.balance_after, l.whole_days_after, l.carry_forward_after, e.name
     FROM attendance_deficit_ledger l
     JOIN employees e ON e.id = l.employee_id
-    WHERE l.rowid IN (SELECT MAX(rowid) FROM attendance_deficit_ledger GROUP BY employee_id)
-    ORDER BY l.balance_after DESC
-  `).all().filter(r => visible.has(r.employee_id));
+    ORDER BY l.employee_id, l.created_at DESC, l.id DESC
+  `).all()).filter(r => visible.has(r.employee_id));
 
   res.json({
     status: 'SUCCESS',
@@ -268,16 +274,16 @@ router.get('/deficits', requireUser, requirePermission('attendance.read'), (req,
 });
 
 // GET /api/attendance/lateness - the warning-risk board, spec 21.
-router.get('/lateness', requireUser, requirePermission('attendance.read'), (req, res) => {
+router.get('/lateness', requireUser, requirePermission('attendance.read'), async (req, res) => {
   const dateKey = String(req.query.date || T.dateKey());
-  const visible = rbac.accessibleEmployeeIds(req.auth);
-  const rows = db.prepare('SELECT id, name FROM employees WHERE active = 1').all()
+  const visible = await rbac.accessibleEmployeeIds(req.auth);
+  const rows = (await db.prepare('SELECT id, name FROM employees WHERE active = 1').all())
     .filter(e => visible.includes(e.id));
 
-  const employees = rows.map(e => {
-    const status = A.latenessStatus(e.id, dateKey);
+  const employees = await Promise.all(rows.map(async e => {
+    const status = await A.latenessStatus(e.id, dateKey);
     return { employeeId: e.id, employeeName: e.name, ...status };
-  });
+  }));
 
   // Spec 21 asks for green/amber/red, with colour supplementing text and never
   // being the only indicator - so the level is returned as a word.
@@ -300,16 +306,16 @@ router.get('/lateness', requireUser, requirePermission('attendance.read'), (req,
 
 router.get('/corrections',
   requireUserOrAdminKey('attendance.correction.review'),
-  (req, res) => {
-    const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+  async (req, res) => {
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
     const statusQuery = String(req.query.status || 'PENDING');
     const rows = (statusQuery === 'ALL'
-      ? db.prepare(`
+      ? await db.prepare(`
           SELECT c.*, e.name, e.role FROM attendance_corrections c
           JOIN employees e ON e.id = c.employee_id
           ORDER BY c.requested_at DESC
         `).all()
-      : db.prepare(`
+      : await db.prepare(`
           SELECT c.*, e.name, e.role FROM attendance_corrections c
           JOIN employees e ON e.id = c.employee_id
           WHERE c.status = ? ORDER BY c.requested_at ASC
@@ -335,7 +341,7 @@ router.get('/corrections',
     });
   });
 
-const handleCorrectionDecision = (req, res) => {
+const handleCorrectionDecision = async (req, res) => {
   const { decision, notes, adjustmentMinutes } = req.body || {};
   const valid = ['APPROVED', 'REJECTED', 'AMENDED', 'INFO_REQUESTED'];
   if (!valid.includes(decision)) {
@@ -345,17 +351,17 @@ const handleCorrectionDecision = (req, res) => {
     return res.status(400).json({ status: 'ERROR', message: 'A note explaining the decision is required.' });
   }
 
-  const corr = db.prepare('SELECT * FROM attendance_corrections WHERE id = ?').get(req.params.id);
+  const corr = await db.prepare('SELECT * FROM attendance_corrections WHERE id = ?').get(req.params.id);
   if (!corr) return res.status(404).json({ status: 'ERROR', message: 'No such correction.' });
-  if (!rbac.canAccessEmployee(req.auth, corr.employee_id)) {
+  if (!await rbac.canAccessEmployee(req.auth, corr.employee_id)) {
     return res.status(404).json({ status: 'ERROR', message: 'No such correction.' });
   }
 
   const nowMs = T.now();
   const actor = req.auth.kind === 'user' ? `user:${req.auth.id}` : (req.auth.actor || 'admin');
 
-  tx(() => {
-    db.prepare(`
+  await tx(async () => {
+    await db.prepare(`
       UPDATE attendance_corrections
       SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?, applied_change = ?
       WHERE id = ?
@@ -365,7 +371,7 @@ const handleCorrectionDecision = (req, res) => {
     // An approved or amended correction posts an adjustment. The original record is
     // never edited - spec 11 requires it to remain in the audit history.
     if ((decision === 'APPROVED' || decision === 'AMENDED') && Number.isFinite(Number(adjustmentMinutes))) {
-      A.adjustBalance({
+      await A.adjustBalance({
         employeeId: corr.employee_id,
         dateKey: corr.date_key,
         minutes: -Math.abs(Number(adjustmentMinutes)),
@@ -374,21 +380,21 @@ const handleCorrectionDecision = (req, res) => {
       });
     }
 
-    audit({
+    await audit({
       actor, action: 'ATTENDANCE_CORRECTION_REVIEWED',
       targetType: 'correction', targetId: corr.id,
       before: { status: corr.status },
       after: { status: decision, adjustmentMinutes: adjustmentMinutes ?? null },
       note: String(notes).trim(),
     });
-  })();
+  });
 
   // Recompute so the day reflects the decision immediately.
-  const day = A.recomputeDay(corr.employee_id, corr.date_key, nowMs);
+  const day = await A.recomputeDay(corr.employee_id, corr.date_key, nowMs);
 
   try {
     const decisionLabel = decision === 'APPROVED' ? 'Approved' : (decision === 'AMENDED' ? 'Amended' : 'Rejected');
-    N.notify({
+    await N.notify({
       employeeId: corr.employee_id,
       category: 'CORRECTION',
       title: `Attendance Dispute ${decisionLabel}`,
@@ -413,7 +419,7 @@ router.post('/corrections/:id/decide',
 // POST /api/attendance/employee/:employeeId/adjust - direct HR adjustment.
 router.post('/employee/:employeeId/adjust',
   requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     const { minutes, reason, dateKey } = req.body || {};
     if (!Number.isFinite(Number(minutes))) {
       return res.status(400).json({ status: 'ERROR', message: 'minutes must be a number.' });
@@ -423,7 +429,7 @@ router.post('/employee/:employeeId/adjust',
     }
 
     const actor = `user:${req.auth.id}`;
-    const entry = A.adjustBalance({
+    const entry = await A.adjustBalance({
       employeeId: req.params.employeeId,
       dateKey: dateKey || T.dateKey(),
       minutes: Number(minutes),
@@ -431,28 +437,28 @@ router.post('/employee/:employeeId/adjust',
       actor,
     });
 
-    audit({
+    await audit({
       actor, action: 'DEFICIT_ADJUSTED',
       targetType: 'employee', targetId: req.params.employeeId,
       after: { minutes: Number(minutes), balanceAfter: entry.balance_after },
       note: String(reason).trim(),
     });
 
-    res.json({ status: 'SUCCESS', balance: A.balanceFor(req.params.employeeId) });
+    res.json({ status: 'SUCCESS', balance: await A.balanceFor(req.params.employeeId) });
   });
 
 // GET /api/attendance/employee/:employeeId/ledger
 router.get('/employee/:employeeId/ledger',
   requireUser, requirePermission('attendance.read'), requireEmployeeAccess(),
-  (req, res) => {
-    const rows = db.prepare(`
+  async (req, res) => {
+    const rows = await db.prepare(`
       SELECT * FROM attendance_deficit_ledger
       WHERE employee_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200
     `).all(req.params.employeeId);
 
     res.json({
       status: 'SUCCESS',
-      balance: A.balanceFor(req.params.employeeId),
+      balance: await A.balanceFor(req.params.employeeId),
       entries: rows.map(r => ({
         date: r.date_key,
         type: r.entry_type,
@@ -475,13 +481,13 @@ router.get('/employee/:employeeId/ledger',
 // Preview shows exactly what would happen; nothing is written until commit.
 router.post('/import/preview',
   requireUser, requirePermission('attendance.import'),
-  (req, res) => {
+  async (req, res) => {
     const csv = req.body?.csv;
     if (!csv || typeof csv !== 'string') {
       return res.status(400).json({ status: 'ERROR', message: 'Send the file contents as { "csv": "..." }.' });
     }
 
-    const result = importer.preview(csv);
+    const result = await importer.preview(csv);
     if (!result.ok) return res.status(400).json({ status: 'ERROR', ...result });
 
     res.json({
@@ -500,7 +506,7 @@ router.post('/import/preview',
 
 router.post('/import/commit',
   requireUser, requirePermission('attendance.import'),
-  (req, res) => {
+  async (req, res) => {
     const csv = req.body?.csv;
     const confirm = String(req.body?.confirm || '');
     if (!csv || typeof csv !== 'string') {
@@ -513,7 +519,7 @@ router.post('/import/commit',
       });
     }
 
-    const result = importer.commit(csv, {
+    const result = await importer.commit(csv, {
       actor: `user:${req.auth.id}`,
       replaceExisting: req.body?.replaceExisting === true,
     });

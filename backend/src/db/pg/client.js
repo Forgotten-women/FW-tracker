@@ -49,6 +49,19 @@ function getPool() {
   const url = connectionString();
   const local = /(^|@)(localhost|127\.0\.0\.1)[:/]/.test(url);
 
+  // Test isolation. Each test file works in its own Postgres schema inside one
+  // database, so suites cannot see each other's rows without needing a database
+  // each. Unset in normal operation.
+  //
+  // Passed as a connection START-UP option rather than by issuing `SET
+  // search_path` on the pool's connect event: the event handler cannot be
+  // awaited, so a query could reach the server before the SET landed and end up
+  // reading the wrong schema.
+  const schema = (process.env.PG_SCHEMA || '').trim();
+  if (schema && !/^[a-z_][a-z0-9_]*$/i.test(schema)) {
+    throw new Error(`PG_SCHEMA must be a plain identifier, got: ${schema}`);
+  }
+
   pool = new Pool({
     connectionString: url,
     // Serverless instances are numerous and short-lived, so each one keeps a
@@ -58,6 +71,7 @@ function getPool() {
     connectionTimeoutMillis: 10_000,
     // Supabase requires TLS; a local test container does not offer it.
     ssl: local ? false : { rejectUnauthorized: false },
+    ...(schema ? { options: `-c search_path=${schema},public` } : {}),
   });
 
   pool.on('error', err => {

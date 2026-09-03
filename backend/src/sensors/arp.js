@@ -72,7 +72,7 @@ function scanOnce() {
   if (scanning) return;             // never let scans overlap
   scanning = true;
 
-  exec('arp -a', { timeout: 15000, windowsHide: true }, (err, stdout) => {
+  exec('arp -a', { timeout: 15000, windowsHide: true }, async (err, stdout) => {
     scanning = false;
     if (err || !stdout) return;
 
@@ -80,7 +80,7 @@ function scanOnce() {
     const touched = new Set();
 
     for (const d of parseArpOutput(stdout)) {
-      const r = P.recordEvent({
+      const r = await P.recordEvent({
         employeeId: null,          // never guessed here - see header
         source: 'ARP',
         mac: d.mac,
@@ -94,7 +94,7 @@ function scanOnce() {
     }
 
     const dayKey = T.dateKey(nowMs);
-    for (const empId of touched) P.recomputeDay(empId, dayKey, nowMs);
+    for (const empId of touched) await P.recomputeDay(empId, dayKey, nowMs);
   });
 }
 

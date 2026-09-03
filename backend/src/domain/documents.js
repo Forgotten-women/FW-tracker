@@ -28,10 +28,10 @@ const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
 // document_access_log.user_id is a foreign key into users. An actor may be a
 // system or device identity with no user row, so it is stored only when it
 // resolves; the action is logged regardless.
-function resolveUserId(actor) {
+async function resolveUserId(actor) {
   const raw = String(actor || '').replace(/^user:/, '');
   if (!raw) return null;
-  return db.prepare('SELECT id FROM users WHERE id = ?').get(raw) ? raw : null;
+  return await db.prepare('SELECT id FROM users WHERE id = ?').get(raw) ? raw : null;
 }
 
 // Which permission a confidentiality level requires to read.
@@ -51,8 +51,8 @@ function readPermissionFor(documentTypeId, confidentiality) {
 // Document Types
 // ---------------------------------------------------------------------------
 
-function listDocumentTypes() {
-  return db.prepare('SELECT * FROM document_types ORDER BY name ASC').all();
+async function listDocumentTypes() {
+  return await db.prepare('SELECT * FROM document_types ORDER BY name ASC').all();
 }
 
 // ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ function listDocumentTypes() {
  *
  * `file` is a multer file: { buffer, originalname, mimetype, size }.
  */
-function upload({
+async function upload({
   employeeId,
   documentTypeId,
   title,
@@ -75,10 +75,10 @@ function upload({
   actor,
   status = null,
 }) {
-  const type = db.prepare('SELECT * FROM document_types WHERE id = ?').get(documentTypeId);
+  const type = await db.prepare('SELECT * FROM document_types WHERE id = ?').get(documentTypeId);
   if (!type) throw new Error('Unknown document type: ' + documentTypeId);
   if (!file || !file.buffer) throw new Error('A file is required.');
-  if (!db.prepare('SELECT 1 FROM employees WHERE id = ?').get(employeeId)) {
+  if (!await db.prepare('SELECT 1 FROM employees WHERE id = ?').get(employeeId)) {
     throw new Error('No such employee: ' + employeeId);
   }
   if (type.requires_expiry && !expiryDate) {
@@ -115,18 +115,18 @@ function upload({
 
   // Replacing an existing document of the same type for this employee adds a
   // version rather than a second record. A fresh type is a new document.
-  let doc = db.prepare(
+  let doc = await db.prepare(
     'SELECT * FROM employee_documents WHERE employee_id = ? AND document_type_id = ? AND archived_at IS NULL'
   ).get(employeeId, documentTypeId);
 
   let documentId;
   let version;
 
-  const run = tx(() => {
+  await tx(async () => {
     if (doc) {
       documentId = doc.id;
       version = doc.current_version + 1;
-      db.prepare(`
+      await db.prepare(`
         UPDATE employee_documents
         SET current_version = ?,
             title = ?,
@@ -152,7 +152,7 @@ function upload({
     } else {
       documentId = id('doc');
       version = 1;
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO employee_documents
           (id, employee_id, document_type_id, title, current_version, effective_date,
            expiry_date, confidentiality, verification_status, verified_by, verified_at,
@@ -176,7 +176,7 @@ function upload({
       );
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO document_versions
         (id, document_id, version, filename, storage_path, mime_type, size_bytes,
          checksum, storage_provider, uploaded_at, uploaded_by)
@@ -197,14 +197,14 @@ function upload({
 
     // Documents requiring acknowledgement
     if (type.requires_acknowledgement) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO document_acknowledgements (id, document_id, employee_id, requested_at)
         VALUES (?,?,?,?)
         ON CONFLICT(document_id, employee_id) DO UPDATE SET requested_at = excluded.requested_at, acknowledged_at = NULL
       `).run(id('da'), documentId, employeeId, nowMs);
     }
 
-    audit({
+    await audit({
       actor,
       action: version === 1 ? 'DOCUMENT_UPLOADED' : 'DOCUMENT_VERSIONED',
       targetType: 'document',
@@ -220,13 +220,13 @@ function upload({
     });
   });
 
-  run();
+  
 
   if (initialStatus === 'PENDING_VERIFICATION') {
     try {
-      const emp = db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
+      const emp = await db.prepare('SELECT name FROM employees WHERE id = ?').get(employeeId);
       const empName = emp?.name || employeeId;
-      N.notify({
+      await N.notify({
         category: 'DOCUMENT',
         title: `Document Uploaded: ${empName}`,
         body: `${empName} uploaded ${title || type.name} for HR verification.`,
@@ -250,12 +250,12 @@ function upload({
 // Verification & Rejection
 // ---------------------------------------------------------------------------
 
-function verifyDocument({ documentId, verifiedBy, actor }) {
-  const doc = db.prepare('SELECT * FROM employee_documents WHERE id = ? AND archived_at IS NULL').get(documentId);
+async function verifyDocument({ documentId, verifiedBy, actor }) {
+  const doc = await db.prepare('SELECT * FROM employee_documents WHERE id = ? AND archived_at IS NULL').get(documentId);
   if (!doc) throw new Error('No such active document.');
 
   const nowMs = T.now();
-  db.prepare(`
+  await db.prepare(`
     UPDATE employee_documents
     SET verification_status = 'VERIFIED',
         verified_by = ?,
@@ -264,7 +264,7 @@ function verifyDocument({ documentId, verifiedBy, actor }) {
     WHERE id = ?
   `).run(verifiedBy || actor, nowMs, documentId);
 
-  audit({
+  await audit({
     actor,
     action: 'DOCUMENT_VERIFIED',
     targetType: 'document',
@@ -273,7 +273,7 @@ function verifyDocument({ documentId, verifiedBy, actor }) {
   });
 
   try {
-    N.notify({
+    await N.notify({
       employeeId: doc.employee_id,
       category: 'DOCUMENT',
       title: 'Document Verified',
@@ -287,16 +287,16 @@ function verifyDocument({ documentId, verifiedBy, actor }) {
   return { status: 'SUCCESS', documentId, verificationStatus: 'VERIFIED' };
 }
 
-function rejectDocument({ documentId, rejectionReason, rejectedBy, actor }) {
+async function rejectDocument({ documentId, rejectionReason, rejectedBy, actor }) {
   if (!rejectionReason || !rejectionReason.trim()) {
     throw new Error('A rejection reason is required explaining what needs correction.');
   }
 
-  const doc = db.prepare('SELECT * FROM employee_documents WHERE id = ? AND archived_at IS NULL').get(documentId);
+  const doc = await db.prepare('SELECT * FROM employee_documents WHERE id = ? AND archived_at IS NULL').get(documentId);
   if (!doc) throw new Error('No such active document.');
 
   const nowMs = T.now();
-  db.prepare(`
+  await db.prepare(`
     UPDATE employee_documents
     SET verification_status = 'REJECTED',
         verified_by = ?,
@@ -305,7 +305,7 @@ function rejectDocument({ documentId, rejectionReason, rejectedBy, actor }) {
     WHERE id = ?
   `).run(rejectedBy || actor, nowMs, rejectionReason.trim(), documentId);
 
-  audit({
+  await audit({
     actor,
     action: 'DOCUMENT_REJECTED',
     targetType: 'document',
@@ -314,7 +314,7 @@ function rejectDocument({ documentId, rejectionReason, rejectedBy, actor }) {
   });
 
   try {
-    N.notify({
+    await N.notify({
       employeeId: doc.employee_id,
       category: 'DOCUMENT',
       title: 'Document Rejected by HR',
@@ -332,8 +332,8 @@ function rejectDocument({ documentId, rejectionReason, rejectedBy, actor }) {
 // Listing and KYC Checklist
 // ---------------------------------------------------------------------------
 
-function listFor(employeeId, permissions = new Set()) {
-  const rows = db.prepare(`
+async function listFor(employeeId, permissions = new Set()) {
+  const rows = await db.prepare(`
     SELECT d.*, dt.name AS type_name, dt.requires_acknowledgement
     FROM employee_documents d
     JOIN document_types dt ON dt.id = d.document_type_id
@@ -341,14 +341,14 @@ function listFor(employeeId, permissions = new Set()) {
     ORDER BY d.created_at DESC
   `).all(employeeId);
 
-  return rows
+  return Promise.all(rows
     .filter(d => permissions.has(readPermissionFor(d.document_type_id, d.confidentiality)))
-    .map(d => {
-      const ack = db.prepare(
+    .map(async d => {
+      const ack = await db.prepare(
         'SELECT * FROM document_acknowledgements WHERE document_id = ? AND employee_id = ?'
       ).get(d.id, employeeId);
 
-      const latestVersion = db.prepare(
+      const latestVersion = await db.prepare(
         'SELECT filename, size_bytes, mime_type, storage_provider FROM document_versions WHERE document_id = ? AND version = ?'
       ).get(d.id, d.current_version);
 
@@ -373,11 +373,11 @@ function listFor(employeeId, permissions = new Set()) {
         acknowledgementRequired: !!ack && !ack.acknowledged_at,
         acknowledgedAt: ack?.acknowledged_at ? T.displayTime(ack.acknowledged_at) : null,
       };
-    });
+    }));
 }
 
-function listPendingVerification() {
-  const rows = db.prepare(`
+async function listPendingVerification() {
+  const rows = await db.prepare(`
     SELECT d.*, dt.name AS type_name, e.name AS employee_name, e.role AS employee_role,
            v.filename, v.size_bytes, v.mime_type
     FROM employee_documents d
@@ -410,8 +410,8 @@ function listPendingVerification() {
 /**
  * Derives the complete staff KYC checklist for an employee.
  */
-function kycChecklistFor(employeeId) {
-  const employee = db.prepare('SELECT id, name, role FROM employees WHERE id = ?').get(employeeId);
+async function kycChecklistFor(employeeId) {
+  const employee = await db.prepare('SELECT id, name, role FROM employees WHERE id = ?').get(employeeId);
   if (!employee) throw new Error('No such employee: ' + employeeId);
 
   const MANDATORY_REQUIREMENTS = [
@@ -429,7 +429,7 @@ function kycChecklistFor(employeeId) {
   ];
 
   const docsMap = new Map();
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT d.*, dt.name AS type_name, v.filename, v.size_bytes
     FROM employee_documents d
     JOIN document_types dt ON dt.id = d.document_type_id
@@ -507,8 +507,8 @@ function kycChecklistFor(employeeId) {
   };
 }
 
-function requiredReadPermission(documentId) {
-  const d = db.prepare('SELECT document_type_id, confidentiality FROM employee_documents WHERE id = ?').get(documentId);
+async function requiredReadPermission(documentId) {
+  const d = await db.prepare('SELECT document_type_id, confidentiality FROM employee_documents WHERE id = ?').get(documentId);
   if (!d) return null;
   return readPermissionFor(d.document_type_id, d.confidentiality);
 }
@@ -520,8 +520,8 @@ function requiredReadPermission(documentId) {
 const grants = new Map();
 const GRANT_TTL_MS = 60 * 1000;
 
-function issueDownloadToken({ documentId, permissions, actor, ip = null }) {
-  const perm = requiredReadPermission(documentId);
+async function issueDownloadToken({ documentId, permissions, actor, ip = null }) {
+  const perm = await requiredReadPermission(documentId);
   if (!perm) throw new Error('No such document.');
   if (!permissions.has(perm)) return null;
 
@@ -530,27 +530,27 @@ function issueDownloadToken({ documentId, permissions, actor, ip = null }) {
   grants.set(token, { documentId, expires: nowMs + GRANT_TTL_MS });
   for (const [k, g] of grants) if (g.expires < nowMs) grants.delete(k);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO document_access_log (document_id, user_id, at, action, ip) VALUES (?,?,?,?,?)
-  `).run(documentId, resolveUserId(actor), nowMs, 'LINK_ISSUED', ip);
+  `).run(documentId, await resolveUserId(actor), nowMs, 'LINK_ISSUED', ip);
 
   return { token, expiresInMs: GRANT_TTL_MS };
 }
 
-function redeemDownloadToken(token, { ip = null } = {}) {
+async function redeemDownloadToken(token, { ip = null } = {}) {
   const g = grants.get(token);
   if (!g) return null;
   grants.delete(token);
   if (g.expires < T.now()) return null;
 
-  const version = db.prepare(`
+  const version = await db.prepare(`
     SELECT dv.* FROM document_versions dv
     JOIN employee_documents d ON d.id = dv.document_id
     WHERE dv.document_id = ? AND dv.version = d.current_version
   `).get(g.documentId);
   if (!version) return null;
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO document_access_log (document_id, user_id, at, action, ip) VALUES (?,?,?,?,?)
   `).run(g.documentId, null, T.now(), 'DOWNLOAD', ip);
 
@@ -561,10 +561,10 @@ function redeemDownloadToken(token, { ip = null } = {}) {
   };
 }
 
-function accessLog(documentId, limit = 100) {
-  return db.prepare(
+async function accessLog(documentId, limit = 100) {
+  return (await db.prepare(
     'SELECT * FROM document_access_log WHERE document_id = ? ORDER BY at DESC LIMIT ?'
-  ).all(documentId, limit).map(r => ({
+  ).all(documentId, limit)).map(r => ({
     at: T.displayTime(r.at), action: r.action, by: r.user_id, ip: r.ip,
   }));
 }
@@ -573,44 +573,44 @@ function accessLog(documentId, limit = 100) {
 // Acknowledgement and Archiving
 // ---------------------------------------------------------------------------
 
-function acknowledge({ documentId, employeeId, nowMs = T.now() }) {
-  const ack = db.prepare(
+async function acknowledge({ documentId, employeeId, nowMs = T.now() }) {
+  const ack = await db.prepare(
     'SELECT * FROM document_acknowledgements WHERE document_id = ? AND employee_id = ?'
   ).get(documentId, employeeId);
   if (!ack) throw new Error('No acknowledgement is outstanding for this document.');
   if (ack.acknowledged_at) return { alreadyAcknowledged: true };
 
-  db.prepare('UPDATE document_acknowledgements SET acknowledged_at = ? WHERE id = ?').run(nowMs, ack.id);
-  audit({ actor: `employee:${employeeId}`, action: 'DOCUMENT_ACKNOWLEDGED', targetType: 'document', targetId: documentId });
+  await db.prepare('UPDATE document_acknowledgements SET acknowledged_at = ? WHERE id = ?').run(nowMs, ack.id);
+  await audit({ actor: `employee:${employeeId}`, action: 'DOCUMENT_ACKNOWLEDGED', targetType: 'document', targetId: documentId });
   return { acknowledged: true };
 }
 
-function archive({ documentId, reason, actor }) {
-  const doc = db.prepare('SELECT * FROM employee_documents WHERE id = ?').get(documentId);
+async function archive({ documentId, reason, actor }) {
+  const doc = await db.prepare('SELECT * FROM employee_documents WHERE id = ?').get(documentId);
   if (!doc) throw new Error('No such document.');
-  db.prepare('UPDATE employee_documents SET archived_at = ? WHERE id = ?').run(T.now(), documentId);
-  audit({ actor, action: 'DOCUMENT_ARCHIVED', targetType: 'document', targetId: documentId, note: reason });
+  await db.prepare('UPDATE employee_documents SET archived_at = ? WHERE id = ?').run(T.now(), documentId);
+  await audit({ actor, action: 'DOCUMENT_ARCHIVED', targetType: 'document', targetId: documentId, note: reason });
   return { archived: true };
 }
 
 async function deleteDocument({ documentId, actor }) {
-  const doc = db.prepare('SELECT * FROM employee_documents WHERE id = ?').get(documentId);
+  const doc = await db.prepare('SELECT * FROM employee_documents WHERE id = ?').get(documentId);
   if (!doc) throw new Error('No such document.');
 
-  const versions = db.prepare('SELECT * FROM document_versions WHERE document_id = ?').all(documentId);
+  const versions = await db.prepare('SELECT * FROM document_versions WHERE document_id = ?').all(documentId);
   for (const v of versions) {
     if (v.storage_path) {
       await storage.deleteFile(v.storage_path).catch(() => {});
     }
   }
 
-  const run = tx(() => {
-    db.prepare('DELETE FROM document_access_log WHERE document_id = ?').run(documentId);
-    db.prepare('DELETE FROM document_acknowledgements WHERE document_id = ?').run(documentId);
-    db.prepare('DELETE FROM document_versions WHERE document_id = ?').run(documentId);
-    db.prepare('DELETE FROM employee_documents WHERE id = ?').run(documentId);
+  await tx(async () => {
+    await db.prepare('DELETE FROM document_access_log WHERE document_id = ?').run(documentId);
+    await db.prepare('DELETE FROM document_acknowledgements WHERE document_id = ?').run(documentId);
+    await db.prepare('DELETE FROM document_versions WHERE document_id = ?').run(documentId);
+    await db.prepare('DELETE FROM employee_documents WHERE id = ?').run(documentId);
 
-    audit({
+    await audit({
       actor,
       action: 'DOCUMENT_DELETED',
       targetType: 'document',
@@ -622,7 +622,7 @@ async function deleteDocument({ documentId, actor }) {
       },
     });
   });
-  run();
+  
   return { deleted: true, documentId };
 }
 

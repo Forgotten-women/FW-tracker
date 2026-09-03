@@ -145,9 +145,9 @@ test('an authenticated heartbeat from the office records attendance', async () =
 // The buddy-punching case. Same valid token, but the request is not coming
 // from the office network.
 test('an authenticated heartbeat from outside the office does not count', async () => {
-  const before = db.prepare(
+  const before = (await db.prepare(
     "SELECT COUNT(*) c FROM presence_events WHERE employee_id = ? AND location = 'OFFICE'"
-  ).get(employeeId).c;
+  ).get(employeeId)).c;
 
   const res = await req('POST', '/api/attendance/ping', {
     headers: { Authorization: `Bearer ${deviceToken}`, ...HOME_IP },
@@ -162,14 +162,14 @@ test('an authenticated heartbeat from outside the office does not count', async 
   assert.equal(body.verified, false, 'a remote heartbeat must not report as verified');
   assert.equal(body.location, 'REMOTE');
 
-  const after = db.prepare(
+  const after = (await db.prepare(
     "SELECT COUNT(*) c FROM presence_events WHERE employee_id = ? AND location = 'OFFICE'"
-  ).get(employeeId).c;
+  ).get(employeeId)).c;
   assert.equal(after, before, 'a remote ping must not add office presence');
 
-  const remote = db.prepare(
+  const remote = (await db.prepare(
     "SELECT COUNT(*) c FROM presence_events WHERE employee_id = ? AND location = 'REMOTE'"
-  ).get(employeeId).c;
+  ).get(employeeId)).c;
   assert.ok(remote >= 1, 'but it is still recorded, as REMOTE');
 });
 
@@ -268,15 +268,15 @@ test('a stale sensor timestamp is rejected', async () => {
   assert.equal((await res.json()).code, 'STALE');
 });
 
-test('network sightings never carry an employee identity', () => {
-  const rows = db.prepare("SELECT employee_id FROM presence_events WHERE source = 'ESP_SNIFFER'").all();
+test('network sightings never carry an employee identity', async () => {
+  const rows = await db.prepare("SELECT employee_id FROM presence_events WHERE source = 'ESP_SNIFFER'").all();
   assert.ok(rows.length > 0);
   assert.ok(rows.every(r => r.employee_id === null),
     'a MAC sighting must never be attributed to a person - MACs randomise');
 });
 
-test('unknown-device MACs are stored hashed, never in the clear', () => {
-  const rows = db.prepare('SELECT mac_hash FROM unknown_devices').all();
+test('unknown-device MACs are stored hashed, never in the clear', async () => {
+  const rows = await db.prepare('SELECT mac_hash FROM unknown_devices').all();
   assert.ok(rows.length > 0);
   for (const r of rows) {
     assert.match(r.mac_hash, /^[0-9a-f]{32}$/);

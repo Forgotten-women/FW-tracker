@@ -73,8 +73,8 @@ const selectSalaryAt = db.prepare(`
  * paid in June" stays answerable after a pay rise. Spec section 17 requires
  * exactly this.
  */
-function salaryAt(employeeId, dateKey = T.dateKey()) {
-  const row = selectSalaryAt.get(employeeId, dateKey, dateKey);
+async function salaryAt(employeeId, dateKey = T.dateKey()) {
+  const row = await selectSalaryAt.get(employeeId, dateKey, dateKey);
   if (!row) {
     return {
       blocked: true,
@@ -97,7 +97,7 @@ function salaryAt(employeeId, dateKey = T.dateKey()) {
  * Records a new salary. Append-only: the previous row is closed, never edited,
  * so historical payroll can always be reconstructed.
  */
-function setSalary({ employeeId, amount, effectiveFrom, reason, actor, currency = P.currency, payFrequency = 'Monthly' }) {
+async function setSalary({ employeeId, amount, effectiveFrom, reason, actor, currency = P.currency, payFrequency = 'Monthly' }) {
   if (!Number.isFinite(Number(amount)) || Number(amount) < 0) {
     throw new Error('A salary amount is required.');
   }
@@ -110,18 +110,18 @@ function setSalary({ employeeId, amount, effectiveFrom, reason, actor, currency 
 
   const id = 'sal_' + crypto.randomBytes(8).toString('hex');
   const nowMs = T.now();
-  const previous = selectSalaryAt.get(employeeId, effectiveFrom, effectiveFrom);
+  const previous = await selectSalaryAt.get(employeeId, effectiveFrom, effectiveFrom);
 
-  tx(() => {
+  await tx(async () => {
     if (previous) {
       // Closed the day before the new one starts, so the two never overlap and
       // salaryAt() can never return two answers for one date.
       const dayBefore = T.dateKey(T.startOfDay(effectiveFrom) - 1);
-      db.prepare('UPDATE salary_history SET effective_to = ? WHERE id = ?')
+      await db.prepare('UPDATE salary_history SET effective_to = ? WHERE id = ?')
         .run(dayBefore, previous.id);
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO salary_history
         (id, employee_id, amount, currency, pay_frequency, effective_from,
          daily_rate, reason, created_at, created_by)
@@ -129,22 +129,22 @@ function setSalary({ employeeId, amount, effectiveFrom, reason, actor, currency 
     `).run(id, employeeId, Number(amount), currency, payFrequency, effectiveFrom,
            rates(amount).dailyPrecise, String(reason).trim(), nowMs, actor);
 
-    audit({
+    await audit({
       actor, action: 'SALARY_SET',
       targetType: 'employee', targetId: employeeId,
       before: previous ? { amount: previous.amount, effectiveFrom: previous.effective_from } : null,
       after: { amount: Number(amount), effectiveFrom },
       note: String(reason).trim(),
     });
-  })();
+  });
 
-  return salaryAt(employeeId, effectiveFrom);
+  return await salaryAt(employeeId, effectiveFrom);
 }
 
-function salaryHistoryFor(employeeId) {
-  return db.prepare(
+async function salaryHistoryFor(employeeId) {
+  return (await db.prepare(
     'SELECT * FROM salary_history WHERE employee_id = ? ORDER BY effective_from DESC'
-  ).all(employeeId).map(r => ({
+  ).all(employeeId)).map(r => ({
     from: r.effective_from,
     to: r.effective_to,
     reason: r.reason,
@@ -159,8 +159,8 @@ function salaryHistoryFor(employeeId) {
 // ---------------------------------------------------------------------------
 
 /** Scheduled working days for an employee in a range, honouring the calendar. */
-function eligibleWorkingDays(employeeId, fromDate, toDate) {
-  return schedule.workingDaysBetween(employeeId, fromDate, toDate);
+async function eligibleWorkingDays(employeeId, fromDate, toDate) {
+  return await schedule.workingDaysBetween(employeeId, fromDate, toDate);
 }
 
 const selectEmploymentDates = db.prepare(`
@@ -178,8 +178,8 @@ const selectEmploymentDates = db.prepare(`
  * Spec 18: daily salary x eligible working days. A starter who works four days
  * in their first month is paid for four days.
  */
-function starterCalculation({ employeeId, periodStart, periodEnd }) {
-  const employment = selectEmploymentDates.get(employeeId);
+async function starterCalculation({ employeeId, periodStart, periodEnd }) {
+  const employment = await selectEmploymentDates.get(employeeId);
   if (!employment || !employment.start_date) {
     return { applicable: false, blocked: true, reason: 'NO_START_DATE' };
   }
@@ -190,11 +190,11 @@ function starterCalculation({ employeeId, periodStart, periodEnd }) {
     return { applicable: false };
   }
 
-  const salary = salaryAt(employeeId, startDate);
+  const salary = await salaryAt(employeeId, startDate);
   if (salary.blocked) return { applicable: true, blocked: true, ...salary };
 
-  const workedDays = eligibleWorkingDays(employeeId, startDate, periodEnd);
-  const fullPeriodDays = eligibleWorkingDays(employeeId, periodStart, periodEnd);
+  const workedDays = await eligibleWorkingDays(employeeId, startDate, periodEnd);
+  const fullPeriodDays = await eligibleWorkingDays(employeeId, periodStart, periodEnd);
 
   const grossPrecise = salary.dailyPrecise * workedDays.length;
 
@@ -225,24 +225,24 @@ function starterCalculation({ employeeId, periodStart, periodEnd }) {
  * calculations for a person to act on. It does not create payroll adjustments,
  * touch leave, or net anything off.
  */
-function leaverCalculation({ employeeId, lastWorkingDate, periodStart = null }) {
+async function leaverCalculation({ employeeId, lastWorkingDate, periodStart = null }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(lastWorkingDate || ''))) {
     throw new Error('lastWorkingDate must be YYYY-MM-DD.');
   }
 
-  const salary = salaryAt(employeeId, lastWorkingDate);
+  const salary = await salaryAt(employeeId, lastWorkingDate);
   if (salary.blocked) return { blocked: true, ...salary };
 
-  const employment = selectEmploymentDates.get(employeeId);
+  const employment = await selectEmploymentDates.get(employeeId);
   const from = periodStart
     || (employment?.start_date && employment.start_date > lastWorkingDate.slice(0, 8) + '01'
         ? employment.start_date
         : lastWorkingDate.slice(0, 8) + '01');
 
-  const workedDays = eligibleWorkingDays(employeeId, from, lastWorkingDate);
+  const workedDays = await eligibleWorkingDays(employeeId, from, lastWorkingDate);
 
   // Leave position at the leaving date.
-  const balance = leave.balanceFor(employeeId, lastWorkingDate);
+  const balance = await leave.balanceFor(employeeId, lastWorkingDate);
   const leaveBlocked = balance.blocked;
 
   const untakenDays = leaveBlocked ? null : Math.max(0, balance.availableDays);
@@ -251,7 +251,7 @@ function leaverCalculation({ employeeId, lastWorkingDate, periodStart = null }) 
   // Attendance deficit, as whole-day equivalents. Spec 8.3 says reaching 480
   // minutes creates an HR ACTION - it is not an automatic deduction, so it is
   // reported here and nothing more.
-  const deficit = attendance.balanceFor(employeeId);
+  const deficit = await attendance.balanceFor(employeeId);
 
   return {
     blocked: false,
@@ -301,7 +301,7 @@ function leaverCalculation({ employeeId, lastWorkingDate, periodStart = null }) 
 // Periods and adjustments
 // ---------------------------------------------------------------------------
 
-function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, actor }) {
+async function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, actor }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     throw new Error('startDate and endDate must be YYYY-MM-DD.');
   }
@@ -309,18 +309,18 @@ function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, actor })
 
   const rate = Number(exchangeRate) > 0 ? Number(exchangeRate) : 350.0;
   const id = 'pp_' + crypto.randomBytes(6).toString('hex');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO payroll_periods (id, name, start_date, end_date, exchange_rate, status, created_at)
     VALUES (?,?,?,?,?, 'OPEN', ?)
   `).run(id, name || `${startDate} to ${endDate}`, startDate, endDate, rate, T.now());
 
-  audit({ actor, action: 'PAYROLL_PERIOD_CREATED', targetType: 'payroll_period', targetId: id,
+  await audit({ actor, action: 'PAYROLL_PERIOD_CREATED', targetType: 'payroll_period', targetId: id,
           after: { startDate, endDate, exchangeRate: rate } });
   return { id, name: name || `${startDate} to ${endDate}`, startDate, endDate, exchangeRate: rate, status: 'OPEN' };
 }
 
-function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
-  const period = db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
+async function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
+  const period = await db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
   if (!period) throw new Error('No such payroll period.');
   if (period.status === 'CLOSED') throw new Error('Cannot change exchange rate of a closed payroll period.');
 
@@ -329,8 +329,8 @@ function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
     throw new Error('A positive numeric exchange rate is required.');
   }
 
-  db.prepare('UPDATE payroll_periods SET exchange_rate = ? WHERE id = ?').run(rate, periodId);
-  audit({
+  await db.prepare('UPDATE payroll_periods SET exchange_rate = ? WHERE id = ?').run(rate, periodId);
+  await audit({
     actor, action: 'PAYROLL_PERIOD_EXCHANGE_RATE_UPDATED', targetType: 'payroll_period', targetId: periodId,
     before: { exchangeRate: period.exchange_rate }, after: { exchangeRate: rate },
   });
@@ -344,26 +344,26 @@ function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
  * Read-only by design: it computes what each employee's position looks like and
  * writes nothing. Adjustments are created only when a person chooses to.
  */
-function preparePeriod(periodId) {
-  const period = db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
+async function preparePeriod(periodId) {
+  const period = await db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
   if (!period) throw new Error('No such payroll period.');
 
-  const employees = db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
+  const employees = await db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
   const rows = [];
   const blocked = [];
 
   for (const e of employees) {
-    const salary = salaryAt(e.id, period.end_date);
+    const salary = await salaryAt(e.id, period.end_date);
     if (salary.blocked) {
       blocked.push({ employeeId: e.id, employeeName: e.name, reason: salary.reason, message: salary.message });
       continue;
     }
 
-    const starter = starterCalculation({
+    const starter = await starterCalculation({
       employeeId: e.id, periodStart: period.start_date, periodEnd: period.end_date,
     });
 
-    const employment = selectEmploymentDates.get(e.id);
+    const employment = await selectEmploymentDates.get(e.id);
     const effectiveStart = (employment?.start_date && employment.start_date > period.start_date)
       ? employment.start_date
       : period.start_date;
@@ -373,17 +373,17 @@ function preparePeriod(periodId) {
 
     let workingDaysCount = 0;
     if (effectiveStart <= period.end_date && effectiveEnd >= period.start_date) {
-      const workedDays = eligibleWorkingDays(e.id, effectiveStart, effectiveEnd);
+      const workedDays = await eligibleWorkingDays(e.id, effectiveStart, effectiveEnd);
       workingDaysCount = workedDays.length;
     }
 
-    const fullPeriodDays = eligibleWorkingDays(e.id, period.start_date, period.end_date).length;
+    const fullPeriodDays = await (await eligibleWorkingDays(e.id, period.start_date, period.end_date)).length;
     const calculatedPeriodGross = money(salary.dailyPrecise * workingDaysCount);
 
-    const deficit = attendance.balanceFor(e.id);
-    const balance = leave.balanceFor(e.id, period.end_date);
+    const deficit = await attendance.balanceFor(e.id);
+    const balance = await leave.balanceFor(e.id, period.end_date);
 
-    const existing = db.prepare(
+    const existing = await db.prepare(
       'SELECT * FROM payroll_adjustments WHERE period_id = ? AND employee_id = ?'
     ).all(periodId, e.id);
 
@@ -436,16 +436,16 @@ function preparePeriod(periodId) {
 }
 
 /** Creates a PROPOSED adjustment. Never approved at the same time. */
-function proposeAdjustment({ periodId, employeeId, adjustmentType, calculatedDays = 0, calculatedAmount = 0, explanation, sourceReference = null, actor }) {
+async function proposeAdjustment({ periodId, employeeId, adjustmentType, calculatedDays = 0, calculatedAmount = 0, explanation, sourceReference = null, actor }) {
   if (!explanation || !String(explanation).trim()) {
     throw new Error('An explanation is required for any payroll adjustment.');
   }
-  const period = db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
+  const period = await db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
   if (!period) throw new Error('No such payroll period.');
   if (period.status === 'CLOSED') throw new Error('This payroll period is closed.');
 
   const id = 'pa_' + crypto.randomBytes(8).toString('hex');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO payroll_adjustments
       (id, period_id, employee_id, adjustment_type, calculated_days, calculated_amount,
        source_reference, explanation, status, created_at)
@@ -453,7 +453,7 @@ function proposeAdjustment({ periodId, employeeId, adjustmentType, calculatedDay
   `).run(id, periodId, employeeId, adjustmentType, Number(calculatedDays) || 0,
          Number(calculatedAmount) || 0, sourceReference, String(explanation).trim(), T.now());
 
-  audit({
+  await audit({
     actor, action: 'PAYROLL_ADJUSTMENT_PROPOSED',
     targetType: 'employee', targetId: employeeId,
     after: { adjustmentId: id, adjustmentType, calculatedAmount },
@@ -468,13 +468,13 @@ function proposeAdjustment({ periodId, employeeId, adjustmentType, calculatedDay
  * the calculated one, so a figure that was overridden stays visible as an
  * override rather than replacing the calculation.
  */
-function decideAdjustment({ adjustmentId, decision, approvedDays = null, approvedAmount = null, notes, actor }) {
+async function decideAdjustment({ adjustmentId, decision, approvedDays = null, approvedAmount = null, notes, actor }) {
   if (!['APPROVED', 'REJECTED'].includes(decision)) {
     throw new Error('decision must be APPROVED or REJECTED.');
   }
   if (!notes || !String(notes).trim()) throw new Error('A note explaining the decision is required.');
 
-  const adj = db.prepare('SELECT * FROM payroll_adjustments WHERE id = ?').get(adjustmentId);
+  const adj = await db.prepare('SELECT * FROM payroll_adjustments WHERE id = ?').get(adjustmentId);
   if (!adj) throw new Error('No such adjustment.');
   if (adj.status !== 'PROPOSED') throw new Error(`This adjustment is already ${adj.status.toLowerCase()}.`);
 
@@ -486,14 +486,14 @@ function decideAdjustment({ adjustmentId, decision, approvedDays = null, approve
     ? (approvedDays === null ? adj.calculated_days : Number(approvedDays))
     : null;
 
-  tx(() => {
-    db.prepare(`
+  await tx(async () => {
+    await db.prepare(`
       UPDATE payroll_adjustments
       SET status = ?, approved_days = ?, approved_amount = ?, approved_by = ?, approved_at = ?
       WHERE id = ?
     `).run(decision, finalDays, finalAmount, actor, nowMs, adjustmentId);
 
-    audit({
+    await audit({
       actor, action: 'PAYROLL_ADJUSTMENT_DECIDED',
       targetType: 'employee', targetId: adj.employee_id,
       before: { status: adj.status, calculatedAmount: adj.calculated_amount },
@@ -503,27 +503,27 @@ function decideAdjustment({ adjustmentId, decision, approvedDays = null, approve
             ? ` (overridden from the calculated ${adj.calculated_amount})`
             : ''),
     });
-  })();
+  });
 
   return { decision, approvedAmount: finalAmount, approvedDays: finalDays };
 }
 
 /** Closes a period. Only approved adjustments are final. */
-function closePeriod({ periodId, actor }) {
-  const period = db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
+async function closePeriod({ periodId, actor }) {
+  const period = await db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
   if (!period) throw new Error('No such payroll period.');
 
-  const pending = db.prepare(
+  const pending = (await db.prepare(
     "SELECT COUNT(*) c FROM payroll_adjustments WHERE period_id = ? AND status = 'PROPOSED'"
-  ).get(periodId).c;
+  ).get(periodId)).c;
   if (pending > 0) {
     throw new Error(`${pending} adjustment(s) are still awaiting a decision. Decide them before closing.`);
   }
 
-  db.prepare("UPDATE payroll_periods SET status = 'CLOSED', approved_by = ?, approved_at = ? WHERE id = ?")
+  await db.prepare("UPDATE payroll_periods SET status = 'CLOSED', approved_by = ?, approved_at = ? WHERE id = ?")
     .run(actor, T.now(), periodId);
 
-  audit({ actor, action: 'PAYROLL_PERIOD_CLOSED', targetType: 'payroll_period', targetId: periodId });
+  await audit({ actor, action: 'PAYROLL_PERIOD_CLOSED', targetType: 'payroll_period', targetId: periodId });
   return { closed: true };
 }
 
@@ -531,8 +531,8 @@ function closePeriod({ periodId, actor }) {
  * Employee self-service statement retrieval across all payroll periods.
  * Gated by org_settings.show_salary_to_employees.
  */
-function employeeStatements(employeeId) {
-  const setting = db.prepare("SELECT value FROM org_settings WHERE key = 'show_salary_to_employees'").get();
+async function employeeStatements(employeeId) {
+  const setting = await db.prepare("SELECT value FROM org_settings WHERE key = 'show_salary_to_employees'").get();
   const enabled = setting ? String(setting.value).trim() === '1' : false;
   if (!enabled) {
     return {
@@ -543,22 +543,22 @@ function employeeStatements(employeeId) {
     };
   }
 
-  const currentSalary = salaryAt(employeeId, T.dateKey());
+  const currentSalary = await salaryAt(employeeId, T.dateKey());
 
-  const periods = db.prepare('SELECT * FROM payroll_periods ORDER BY start_date DESC').all();
+  const periods = await db.prepare('SELECT * FROM payroll_periods ORDER BY start_date DESC').all();
   const periodStatements = [];
 
   for (const p of periods) {
-    const salary = salaryAt(employeeId, p.end_date);
+    const salary = await salaryAt(employeeId, p.end_date);
     if (salary.blocked) continue;
 
-    const starter = starterCalculation({
+    const starter = await starterCalculation({
       employeeId,
       periodStart: p.start_date,
       periodEnd: p.end_date,
     });
 
-    const employment = selectEmploymentDates.get(employeeId);
+    const employment = await selectEmploymentDates.get(employeeId);
     const effectiveStart = (employment?.start_date && employment.start_date > p.start_date)
       ? employment.start_date
       : p.start_date;
@@ -568,15 +568,15 @@ function employeeStatements(employeeId) {
 
     let workingDaysCount = 0;
     if (effectiveStart <= p.end_date && effectiveEnd >= p.start_date) {
-      const workedDays = eligibleWorkingDays(employeeId, effectiveStart, effectiveEnd);
+      const workedDays = await eligibleWorkingDays(employeeId, effectiveStart, effectiveEnd);
       workingDaysCount = workedDays.length;
     }
 
-    const fullPeriodDays = eligibleWorkingDays(employeeId, p.start_date, p.end_date).length;
+    const fullPeriodDays = await (await eligibleWorkingDays(employeeId, p.start_date, p.end_date)).length;
     const isStarter = starter.applicable && !starter.blocked;
     const baseGross = money(salary.dailyPrecise * workingDaysCount);
 
-    const adjustments = db.prepare(`
+    const adjustments = await db.prepare(`
       SELECT id, adjustment_type, explanation, approved_amount, approved_days, status, approved_at
       FROM payroll_adjustments
       WHERE period_id = ? AND employee_id = ? AND status = 'APPROVED'

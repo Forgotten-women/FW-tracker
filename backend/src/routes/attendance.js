@@ -28,7 +28,7 @@ const insertMovement = db.prepare(
  * Movements are now a consequence of derivation rather than something written
  * by hand at each call site, so they cannot drift from the actual state.
  */
-function emitTransition(employeeId, employeeName, before, after, nowMs) {
+async function emitTransition(employeeId, employeeName, before, after, nowMs) {
   const from = before.status;
   const to = after.status;
   if (from === to) return null;
@@ -43,7 +43,7 @@ function emitTransition(employeeId, employeeName, before, after, nowMs) {
     ? `No activity for ${after.inactivityMinutes} mins`
     : 'Detected on office Wi-Fi';
 
-  insertMovement.run(nowMs, type, employeeId, employeeName, details);
+  await insertMovement.run(nowMs, type, employeeId, employeeName, details);
   events.broadcast('MOVEMENT', { type, employeeId, employeeName, details, time: T.displayTime(nowMs) });
   return type;
 }
@@ -55,7 +55,7 @@ function emitTransition(employeeId, employeeName, before, after, nowMs) {
 // Accepts either a single observation or a batch. The app buffers heartbeats
 // locally while the server is unreachable and replays them with their ORIGINAL
 // timestamps; recordEvent dedupes, so replay is idempotent.
-router.post('/ping', requireDevice, (req, res) => {
+router.post('/ping', requireDevice, async (req, res) => {
   const { employeeId, deviceId, employeeName, employeeRole } = req.auth;
   const nowMs = T.now();
   const srcIp = T.normalizeIp(req.ip || req.socket.remoteAddress);
@@ -73,7 +73,7 @@ router.post('/ping', requireDevice, (req, res) => {
     });
   }
 
-  const before = P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
+  const before = await P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
 
   let accepted = 0, duplicates = 0, rejected = 0;
   const touchedDays = new Set();
@@ -95,7 +95,7 @@ router.post('/ping', requireDevice, (req, res) => {
       continue;
     }
 
-    const r = P.recordEvent({
+    const r = await P.recordEvent({
       employeeId, deviceId, source: 'APP',
       srcIp,
       localIp,
@@ -115,14 +115,14 @@ router.post('/ping', requireDevice, (req, res) => {
   // Establish or refresh the MAC binding while we have an authenticated
   // request to correlate against. This is what lets presence survive the app
   // being closed: the sensors keep recognising this phone afterwards.
-  const binding = bindings.bindFromAuthenticatedPing({
+  const binding = await bindings.bindFromAuthenticatedPing({
     employeeId, deviceId, srcIp, nowMs,
   });
 
-  for (const day of touchedDays) P.recomputeDay(employeeId, day, nowMs);
+  for (const day of touchedDays) await P.recomputeDay(employeeId, day, nowMs);
 
-  const after = P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
-  emitTransition(employeeId, employeeName, before, after, nowMs);
+  const after = await P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
+  await emitTransition(employeeId, employeeName, before, after, nowMs);
   events.broadcast('PRESENCE_UPDATED', { employeeId, status: after.status });
 
   res.json({
@@ -138,7 +138,7 @@ router.post('/ping', requireDevice, (req, res) => {
     notCountedReason: latestReason,
     serverTime: T.displayTime(nowMs),
     serverTimeMs: nowMs,
-    attendance: P.presentDay(after, { name: employeeName, role: employeeRole }),
+    attendance: await P.presentDay(after, { name: employeeName, role: employeeRole }),
     // Lets the app tell the employee whether closing it will interrupt their
     // attendance, instead of leaving them to find out from a payslip.
     presenceContinues: binding.bound,
@@ -147,28 +147,28 @@ router.post('/ping', requireDevice, (req, res) => {
 });
 
 // GET /api/attendance/me - the app's own record for today.
-router.get('/me', requireDevice, (req, res) => {
+router.get('/me', requireDevice, async (req, res) => {
   const { employeeId, employeeName, employeeRole, deviceId } = req.auth;
   const nowMs = T.now();
-  const d = P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
+  const d = await P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
   res.json({
     status: 'SUCCESS',
     employee: { id: employeeId, name: employeeName, role: employeeRole, deviceId },
-    attendance: P.presentDay(d, { name: employeeName, role: employeeRole }),
+    attendance: await P.presentDay(d, { name: employeeName, role: employeeRole }),
     serverTimeMs: nowMs,
   });
 });
 
 // GET /api/attendance/my-history?days=7
-router.get('/my-history', requireDevice, (req, res) => {
+router.get('/my-history', requireDevice, async (req, res) => {
   const { employeeId, employeeName, employeeRole } = req.auth;
   const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 60);
   const nowMs = T.now();
   const out = [];
   for (let i = 0; i < days; i++) {
     const key = T.dateKey(nowMs - i * 24 * 60 * 60 * 1000);
-    const d = P.deriveDay(employeeId, key, nowMs);
-    out.push(P.presentDay(d, { name: employeeName, role: employeeRole }));
+    const d = await P.deriveDay(employeeId, key, nowMs);
+    out.push(await P.presentDay(d, { name: employeeName, role: employeeRole }));
   }
   res.json({ status: 'SUCCESS', days: out });
 });
@@ -181,7 +181,7 @@ router.get('/my-history', requireDevice, (req, res) => {
 // office Wi-Fi, but it can never name a person: MAC randomisation and DHCP
 // lease reuse make that attribution unsound, and getting it wrong would put
 // the hours of one employee onto the payroll record of another.
-router.post('/heartbeat', requireSensor, (req, res) => {
+router.post('/heartbeat', requireSensor, async (req, res) => {
   const { sensorId } = req.auth;
   const nowMs = T.now();
   const devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
@@ -199,7 +199,7 @@ router.post('/heartbeat', requireSensor, (req, res) => {
     // Routers, the server itself and broadcast addresses are not people.
     if (ip && config.infrastructureIps.has(ip)) continue;
 
-    const r = P.recordEvent({
+    const r = await P.recordEvent({
       employeeId: null,
       source: 'ESP_SNIFFER',
       mac: mac || null,
@@ -214,7 +214,7 @@ router.post('/heartbeat', requireSensor, (req, res) => {
 
   // A bound sighting is now somebody's attendance, so refresh it immediately -
   // the live dashboard should not lag a sensor report by a maintenance tick.
-  for (const empId of touched) P.recomputeDay(empId, T.dateKey(nowMs), nowMs);
+  for (const empId of touched) await P.recomputeDay(empId, T.dateKey(nowMs), nowMs);
 
   res.json({
     status: 'SUCCESS',
@@ -235,9 +235,9 @@ router.post('/heartbeat', requireSensor, (req, res) => {
 // Uses the SAME derivation as /api/dashboard/summary. Previously this route
 // filtered on a denormalised employee.status field while the dashboard
 // recomputed from the ledger, so the two could disagree about the same person.
-router.get('/live', requireAdmin, (req, res) => {
+router.get('/live', requireAdmin, async (req, res) => {
   const nowMs = T.now();
-  const board = P.liveBoard(nowMs);
+  const board = await P.liveBoard(nowMs);
   res.json({
     status: 'SUCCESS',
     inOffice: board.filter(e => e.status === 'IN_OFFICE'),
@@ -248,12 +248,12 @@ router.get('/live', requireAdmin, (req, res) => {
   });
 });
 
-router.get('/logs', requireAdmin, (req, res) => {
+router.get('/logs', requireAdmin, async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 50, 500);
-  const rows = db.prepare('SELECT * FROM movements ORDER BY at DESC LIMIT ?').all(limit);
+  const rows = await db.prepare('SELECT * FROM movements ORDER BY at DESC LIMIT ?').all(limit);
   res.json({
     status: 'SUCCESS',
-    total: db.prepare('SELECT COUNT(*) c FROM movements').get().c,
+    total: (await db.prepare('SELECT COUNT(*) c FROM movements').get()).c,
     logs: rows.map(m => ({
       id: m.id,
       time: T.displayTime(m.at),

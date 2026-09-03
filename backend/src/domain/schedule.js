@@ -54,9 +54,9 @@ function weekdayKey(dateKey) {
  * the organisation default rather than throwing, because an employee with no
  * schedule should still show up on the dashboard rather than crashing it.
  */
-function resolve(employeeId, dateKey = T.dateKey()) {
-  const row = selectEmploymentPattern.get(employeeId, dateKey, dateKey);
-  const pattern = (row && row.id) ? row : selectDefaultPattern.get();
+async function resolve(employeeId, dateKey = T.dateKey()) {
+  const row = await selectEmploymentPattern.get(employeeId, dateKey, dateKey);
+  const pattern = (row && row.id) ? row : await selectDefaultPattern.get();
 
   const workingDays = (pattern?.working_days || config.office.workingDays?.join(',') || 'mon,tue,wed,thu,fri')
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -79,10 +79,10 @@ function resolve(employeeId, dateKey = T.dateKey()) {
 
   // Office calendar. Spec 16: an employee must not lose annual leave for a day
   // configured as a paid office closure.
-  const officeId = row?.office_id || selectEmployeeOffice.get(employeeId)?.office_id;
+  const officeId = row?.office_id || (await selectEmployeeOffice.get(employeeId))?.office_id;
   let calendarEntry = null;
   if (officeId) {
-    calendarEntry = selectCalendarDay.get(officeId, dateKey) || null;
+    calendarEntry = await selectCalendarDay.get(officeId, dateKey) || null;
     if (calendarEntry && calendarEntry.day_type !== 'WORKING') {
       isWorkingDay = false;
       nonWorkingReason = calendarEntry.name || calendarEntry.day_type;
@@ -114,14 +114,14 @@ function resolve(employeeId, dateKey = T.dateKey()) {
 }
 
 /** Scheduled working dates in a range, for absence detection and reports. */
-function workingDaysBetween(employeeId, fromKey, toKey) {
+async function workingDaysBetween(employeeId, fromKey, toKey) {
   const out = [];
   let cursor = T.startOfDay(fromKey);
   const end = T.startOfDay(toKey);
   // Bounded so a malformed range cannot spin.
   for (let guard = 0; cursor <= end && guard < 800; guard++) {
     const key = T.dateKey(cursor);
-    const s = resolve(employeeId, key);
+    const s = await resolve(employeeId, key);
     if (s.isWorkingDay) out.push(key);
     cursor = T.endOfDay(key);
   }

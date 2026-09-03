@@ -79,7 +79,7 @@ const insertUserRole = db.prepare(
   'INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at, granted_by) VALUES (?,?,?,?)'
 );
 
-function createUser({ email, displayName, password, roles = [], employeeId = null,
+async function createUser({ email, displayName, password, roles = [], employeeId = null,
                       mustChangePassword = false, actor = 'system' }) {
   if (!email || !String(email).includes('@')) throw new Error('A valid email is required.');
   if (!displayName) throw new Error('A display name is required.');
@@ -87,14 +87,14 @@ function createUser({ email, displayName, password, roles = [], employeeId = nul
   const problems = passwordProblems(password);
   if (problems.length) throw new Error(`Password ${problems.join('; ')}.`);
 
-  const known = new Set(db.prepare('SELECT id FROM roles').all().map(r => r.id));
+  const known = new Set((await db.prepare('SELECT id FROM roles').all()).map(r => r.id));
   for (const r of roles) if (!known.has(r)) throw new Error(`Unknown role: ${r}`);
 
   const id = 'usr_' + crypto.randomBytes(8).toString('hex');
   const nowMs = T.now();
 
-  tx(() => {
-    insertUser.run({
+  await tx(async () => {
+    await insertUser.run({
       id,
       email: String(email).trim().toLowerCase(),
       display_name: String(displayName).trim(),
@@ -103,12 +103,12 @@ function createUser({ email, displayName, password, roles = [], employeeId = nul
       must_change_password: mustChangePassword ? 1 : 0,
       now: nowMs,
     });
-    for (const r of roles) insertUserRole.run(id, r, nowMs, actor);
-    audit({
+    for (const r of roles) await insertUserRole.run(id, r, nowMs, actor);
+    await audit({
       actor, action: 'USER_CREATED', targetType: 'user', targetId: id,
       after: { email, displayName, roles, employeeId },
     });
-  })();
+  });
 
   return { id, email, displayName, roles };
 }
@@ -128,15 +128,15 @@ const selectDirectGrants = db.prepare(`
 const selectUserRoles = db.prepare('SELECT role_id FROM user_roles WHERE user_id = ?');
 
 /** Every permission a user holds, from roles and explicit grants combined. */
-function permissionsFor(userId, nowMs = T.now()) {
+async function permissionsFor(userId, nowMs = T.now()) {
   const out = new Set();
-  for (const r of selectRolePermissions.all(userId)) out.add(r.id);
-  for (const r of selectDirectGrants.all(userId, nowMs)) out.add(r.id);
+  for (const r of await selectRolePermissions.all(userId)) out.add(r.id);
+  for (const r of await selectDirectGrants.all(userId, nowMs)) out.add(r.id);
   return out;
 }
 
-function rolesFor(userId) {
-  return selectUserRoles.all(userId).map(r => r.role_id);
+async function rolesFor(userId) {
+  return (await selectUserRoles.all(userId)).map(r => r.role_id);
 }
 
 // --- employee scoping ------------------------------------------------------
@@ -150,7 +150,7 @@ const selectManagedEmployees = db.prepare(`
  * Whether `user` may see `employeeId` at all, before any question of which
  * fields. Holding a permission is necessary but never sufficient.
  */
-function canAccessEmployee(user, employeeId) {
+async function canAccessEmployee(user, employeeId) {
   if (!employeeId) return false;
   // HR and Super Admin see the whole workforce.
   if (user.roles.includes('hr') || user.roles.includes('super_admin')) return true;
@@ -158,20 +158,20 @@ function canAccessEmployee(user, employeeId) {
   if (user.employeeId && user.employeeId === employeeId) return true;
   // A manager sees their assigned reports, and only those.
   if (user.roles.includes('manager') && user.employeeId) {
-    return selectManagedEmployees.all(user.employeeId).some(r => r.employee_id === employeeId);
+    return (await selectManagedEmployees.all(user.employeeId)).some(r => r.employee_id === employeeId);
   }
   return false;
 }
 
 /** The set of employee ids a user may see, for list endpoints. */
-function accessibleEmployeeIds(user) {
+async function accessibleEmployeeIds(user) {
   if (user.roles.includes('hr') || user.roles.includes('super_admin')) {
-    return db.prepare('SELECT id FROM employees').all().map(r => r.id);
+    return (await db.prepare('SELECT id FROM employees').all()).map(r => r.id);
   }
   const ids = new Set();
   if (user.employeeId) ids.add(user.employeeId);
   if (user.roles.includes('manager') && user.employeeId) {
-    for (const r of selectManagedEmployees.all(user.employeeId)) ids.add(r.employee_id);
+    for (const r of await selectManagedEmployees.all(user.employeeId)) ids.add(r.employee_id);
   }
   return [...ids];
 }
@@ -193,14 +193,14 @@ const insertSession = db.prepare(`
  * Verifies credentials and issues a session token.
  * Returns { token, user } or throws with a deliberately generic message.
  */
-function login({ email, password, ip = null, userAgent = null }) {
+async function login({ email, password, ip = null, userAgent = null }) {
   const nowMs = T.now();
-  const user = selectUserByEmail.get(String(email || '').trim());
+  const user = await selectUserByEmail.get(String(email || '').trim());
 
   // The same message for every failure, so the endpoint cannot be used to
   // discover which email addresses have accounts.
-  const fail = (outcome) => {
-    logLogin.run(user ? user.id : null, String(email || ''), nowMs, outcome, ip, userAgent);
+  const fail = async (outcome) => {
+    await logLogin.run(user ? user.id : null, String(email || ''), nowMs, outcome, ip, userAgent);
     const err = new Error('Email or password is incorrect.');
     err.code = 'BAD_CREDENTIALS';
     throw err;
@@ -209,11 +209,11 @@ function login({ email, password, ip = null, userAgent = null }) {
   if (!user) {
     // Burn comparable time so a missing account is not distinguishable by timing.
     hashPassword('placeholder-to-equalise-timing');
-    return fail('NO_USER');
+    return await fail('NO_USER');
   }
-  if (!user.active) return fail('INACTIVE');
+  if (!user.active) return await fail('INACTIVE');
   if (user.locked_until && user.locked_until > nowMs) {
-    logLogin.run(user.id, email, nowMs, 'LOCKED', ip, userAgent);
+    await logLogin.run(user.id, email, nowMs, 'LOCKED', ip, userAgent);
     const err = new Error('This account is temporarily locked. Try again shortly.');
     err.code = 'LOCKED';
     throw err;
@@ -222,25 +222,25 @@ function login({ email, password, ip = null, userAgent = null }) {
   if (!verifyPassword(password, user.password_hash)) {
     const attempts = user.failed_attempts + 1;
     const lockedUntil = attempts >= MAX_FAILED_ATTEMPTS ? nowMs + LOCKOUT_MS : null;
-    db.prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?')
       .run(attempts, lockedUntil, user.id);
-    return fail('BAD_PASSWORD');
+    return await fail('BAD_PASSWORD');
   }
 
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = nowMs + SESSION_TTL_MS;
 
-  tx(() => {
-    db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = ? WHERE id = ?')
+  await tx(async () => {
+    await db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL, last_login_at = ? WHERE id = ?')
       .run(nowMs, user.id);
-    insertSession.run(sha256(token), user.id, nowMs, expiresAt, ip, userAgent);
-    logLogin.run(user.id, email, nowMs, 'SUCCESS', ip, userAgent);
-  })();
+    await insertSession.run(sha256(token), user.id, nowMs, expiresAt, ip, userAgent);
+    await logLogin.run(user.id, email, nowMs, 'SUCCESS', ip, userAgent);
+  });
 
   return {
     token,
     expiresAt,
-    user: describeUser(user.id),
+    user: await describeUser(user.id),
   };
 }
 
@@ -251,49 +251,49 @@ const selectSession = db.prepare(`
 `);
 
 /** Resolves a session token to a user, or null. */
-function resolveSession(token) {
+async function resolveSession(token) {
   if (!token) return null;
-  const row = selectSession.get(sha256(token));
+  const row = await selectSession.get(sha256(token));
   const nowMs = T.now();
   if (!row) return null;
   if (row.revoked_at) return null;
   if (row.expires_at < nowMs) return null;
   if (!row.user_active) return null;
 
-  db.prepare('UPDATE user_sessions SET last_used_at = ? WHERE token_hash = ?')
+  await db.prepare('UPDATE user_sessions SET last_used_at = ? WHERE token_hash = ?')
     .run(nowMs, row.token_hash);
 
-  return describeUser(row.user_id);
+  return await describeUser(row.user_id);
 }
 
-function revokeSession(token) {
-  db.prepare('UPDATE user_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
+async function revokeSession(token) {
+  await db.prepare('UPDATE user_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
     .run(T.now(), sha256(token));
 }
 
 /** Immediate revocation of every session for a user. Spec 27, for leavers. */
-function revokeAllSessions(userId) {
-  return db.prepare('UPDATE user_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL')
-    .run(T.now(), userId).changes;
+async function revokeAllSessions(userId) {
+  return (await db.prepare('UPDATE user_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL')
+    .run(T.now(), userId)).changes;
 }
 
-function describeUser(userId) {
-  const u = selectUserById.get(userId);
+async function describeUser(userId) {
+  const u = await selectUserById.get(userId);
   if (!u) return null;
   return {
     id: u.id,
     email: u.email,
     displayName: u.display_name,
     employeeId: u.employee_id,
-    roles: rolesFor(u.id),
-    permissions: permissionsFor(u.id),
+    roles: await rolesFor(u.id),
+    permissions: await permissionsFor(u.id),
     mustChangePassword: !!u.must_change_password,
     mfaEnabled: !!u.mfa_enabled,
   };
 }
 
-function changePassword({ userId, currentPassword, newPassword, actor }) {
-  const u = selectUserById.get(userId);
+async function changePassword({ userId, currentPassword, newPassword, actor }) {
+  const u = await selectUserById.get(userId);
   if (!u) throw new Error('No such user.');
   if (currentPassword !== null && !verifyPassword(currentPassword, u.password_hash)) {
     const err = new Error('Current password is incorrect.');
@@ -303,14 +303,14 @@ function changePassword({ userId, currentPassword, newPassword, actor }) {
   const problems = passwordProblems(newPassword);
   if (problems.length) throw new Error(`Password ${problems.join('; ')}.`);
 
-  tx(() => {
-    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
+  await tx(async () => {
+    await db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
       .run(hashPassword(newPassword), T.now(), userId);
     // Changing a password invalidates every existing session, so a stolen one
     // cannot outlive the change.
-    revokeAllSessions(userId);
-    audit({ actor: actor || userId, action: 'PASSWORD_CHANGED', targetType: 'user', targetId: userId });
-  })();
+    await revokeAllSessions(userId);
+    await audit({ actor: actor || userId, action: 'PASSWORD_CHANGED', targetType: 'user', targetId: userId });
+  });
 }
 
 module.exports = {

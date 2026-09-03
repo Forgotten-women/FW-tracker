@@ -10,8 +10,8 @@ const AL = require('../domain/alerts');
 const T = require('../util/time');
 
 // GET /api/hr/alerts - the Advanced HR board. Spec 20.2.
-router.get('/alerts', requireUserOrAdminKey('hr.alerts.read'), (req, res) => {
-  const alerts = AL.currentAlerts();
+router.get('/alerts', requireUserOrAdminKey('hr.alerts.read'), async (req, res) => {
+  const alerts = await AL.currentAlerts();
   res.json({
     status: 'SUCCESS',
     summary: AL.summarise(alerts),
@@ -34,9 +34,9 @@ router.get('/alerts', requireUserOrAdminKey('hr.alerts.read'), (req, res) => {
 });
 
 // POST /api/hr/alerts/dismiss - stops an alert showing, until its date changes.
-router.post('/alerts/dismiss', requireUserOrAdminKey('hr.alerts.read'), (req, res) => {
+router.post('/alerts/dismiss', requireUserOrAdminKey('hr.alerts.read'), async (req, res) => {
   try {
-    const r = AL.dismissAlert({
+    const r = await AL.dismissAlert({
       alertKey: req.body?.key,
       value: req.body?.value,
       note: req.body?.note || null,
@@ -54,15 +54,15 @@ router.post('/alerts/dismiss', requireUserOrAdminKey('hr.alerts.read'), (req, re
 
 router.get('/reviews/:employeeId',
   requireUserOrAdminKey('hr.reviews.manage'), requireEmployeeAccess(),
-  (req, res) => {
-    res.json({ status: 'SUCCESS', reviews: AL.reviewsFor(req.params.employeeId) });
+  async (req, res) => {
+    res.json({ status: 'SUCCESS', reviews: await AL.reviewsFor(req.params.employeeId) });
   });
 
 router.post('/reviews',
   requireUserOrAdminKey('hr.reviews.manage'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const r = AL.scheduleReview({
+      const r = await AL.scheduleReview({
         employeeId: req.body?.employeeId,
         reviewType: req.body?.reviewType,
         dueDate: req.body?.dueDate,
@@ -76,17 +76,17 @@ router.post('/reviews',
     }
   });
 
-router.post('/reviews/:id/complete', requireUserOrAdminKey('hr.reviews.manage'), (req, res) => {
-  const review = db.prepare('SELECT * FROM performance_reviews WHERE id = ?').get(req.params.id);
+router.post('/reviews/:id/complete', requireUserOrAdminKey('hr.reviews.manage'), async (req, res) => {
+  const review = await db.prepare('SELECT * FROM performance_reviews WHERE id = ?').get(req.params.id);
   if (!review) return res.status(404).json({ status: 'ERROR', message: 'No such review.' });
 
   const rbac = require('../domain/rbac');
-  if (!rbac.canAccessEmployee(req.auth, review.employee_id)) {
+  if (!await rbac.canAccessEmployee(req.auth, review.employee_id)) {
     return res.status(404).json({ status: 'ERROR', message: 'No such review.' });
   }
 
   try {
-    const r = AL.recordReviewOutcome({
+    const r = await AL.recordReviewOutcome({
       reviewId: req.params.id,
       outcome: req.body?.outcome,
       notes: req.body?.notes,

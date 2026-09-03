@@ -16,14 +16,14 @@ const T = require('../util/time');
 // ---------------------------------------------------------------------------
 
 // GET /api/warnings/mine - spec 19.2 and 19.5.
-router.get('/mine', requireDevice, (req, res) => {
-  res.json({ status: 'SUCCESS', ...W.employeeWarningView(req.auth.employeeId) });
+router.get('/mine', requireDevice, async (req, res) => {
+  res.json({ status: 'SUCCESS', ...await W.employeeWarningView(req.auth.employeeId) });
 });
 
 // POST /api/warnings/:id/acknowledge
-router.post('/:id/acknowledge', requireDevice, (req, res) => {
+router.post('/:id/acknowledge', requireDevice, async (req, res) => {
   try {
-    const r = W.acknowledgeWarning({
+    const r = await W.acknowledgeWarning({
       warningId: req.params.id,
       employeeId: req.auth.employeeId,
       comments: req.body?.comments ? String(req.body.comments).trim() : null,
@@ -43,14 +43,14 @@ router.post('/:id/acknowledge', requireDevice, (req, res) => {
 // HR: the warning board (spec 21)
 // ---------------------------------------------------------------------------
 
-router.get('/board', requireUserOrAdminKey('warning.read'), (req, res) => {
+router.get('/board', requireUserOrAdminKey('warning.read'), async (req, res) => {
   const dateKey = String(req.query.date || T.dateKey());
-  const visible = rbac.accessibleEmployeeIds(req.auth);
-  const employees = db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all()
+  const visible = await rbac.accessibleEmployeeIds(req.auth);
+  const employees = (await db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all())
     .filter(e => visible.includes(e.id));
 
-  const rows = employees.map(e => {
-    const view = W.employeeWarningView(e.id, dateKey);
+  const rows = await Promise.all(employees.map(async e => {
+    const view = await W.employeeWarningView(e.id, dateKey);
     return {
       employeeId: e.id,
       employeeName: e.name,
@@ -65,7 +65,7 @@ router.get('/board', requireUserOrAdminKey('warning.read'), (req, res) => {
       nextLevelIfConfirmed: view.standing.nextLevelIfConfirmed,
       sequenceExhausted: view.standing.sequenceExhausted,
     };
-  });
+  }));
 
   // Ordered by urgency, so the people needing action are not buried.
   const rank = { RED: 0, AMBER: 1, UNKNOWN: 2, GREEN: 3 };
@@ -84,19 +84,19 @@ router.get('/board', requireUserOrAdminKey('warning.read'), (req, res) => {
 });
 
 // GET /api/warnings/triggers?status=PENDING_REVIEW
-router.get('/triggers', requireUserOrAdminKey('warning.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
-  const rows = db.prepare(`
+router.get('/triggers', requireUserOrAdminKey('warning.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+  const rows = (await db.prepare(`
     SELECT t.*, e.name FROM warning_triggers t
     JOIN employees e ON e.id = t.employee_id
     WHERE t.status = ? ORDER BY t.triggered_at ASC
-  `).all(String(req.query.status || 'PENDING_REVIEW'))
+  `).all(String(req.query.status || 'PENDING_REVIEW')))
     .filter(r => visible.has(r.employee_id));
 
   res.json({
     status: 'SUCCESS',
-    triggers: rows.map(r => {
-      const standing = W.standingFor(r.employee_id);
+    triggers: await Promise.all(rows.map(async r => {
+      const standing = await W.standingFor(r.employee_id);
       return {
         id: r.id,
         employeeId: r.employee_id,
@@ -114,21 +114,21 @@ router.get('/triggers', requireUserOrAdminKey('warning.read'), (req, res) => {
         sequenceExhausted: standing.sequenceExhausted,
         priorWarnings: standing.warningsIssued,
       };
-    }),
+    })),
   });
 });
 
 // GET /api/warnings/formal
-router.get('/formal', requireUserOrAdminKey('warning.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
-  const rows = db.prepare(`
+router.get('/formal', requireUserOrAdminKey('warning.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+  const rows = (await db.prepare(`
     SELECT w.*, e.name AS employee_name, e.role AS employee_role,
            a.acknowledged_at, a.comments AS ack_comments
     FROM formal_warnings w
     JOIN employees e ON e.id = w.employee_id
     LEFT JOIN warning_acknowledgements a ON a.warning_id = w.id
     ORDER BY w.issued_at DESC
-  `).all().filter(r => visible.has(r.employee_id));
+  `).all()).filter(r => visible.has(r.employee_id));
 
   res.json({
     status: 'SUCCESS',
@@ -156,15 +156,15 @@ router.get('/formal', requireUserOrAdminKey('warning.read'), (req, res) => {
 // POST /api/warnings/triggers/:id/review
 router.post('/triggers/:id/review',
   requireUserOrAdminKey('warning.issue'),
-  (req, res) => {
-    const trigger = db.prepare('SELECT * FROM warning_triggers WHERE id = ?').get(req.params.id);
+  async (req, res) => {
+    const trigger = await db.prepare('SELECT * FROM warning_triggers WHERE id = ?').get(req.params.id);
     if (!trigger) return res.status(404).json({ status: 'ERROR', message: 'No such trigger.' });
-    if (!rbac.canAccessEmployee(req.auth, trigger.employee_id)) {
+    if (!await rbac.canAccessEmployee(req.auth, trigger.employee_id)) {
       return res.status(404).json({ status: 'ERROR', message: 'No such trigger.' });
     }
 
     try {
-      const r = W.reviewTrigger({
+      const r = await W.reviewTrigger({
         triggerId: req.params.id,
         decision: req.body?.decision,
         notes: req.body?.notes,
@@ -187,15 +187,15 @@ router.post('/triggers/:id/review',
 
 router.get('/employee/:employeeId',
   requireUserOrAdminKey('warning.read'), requireEmployeeAccess(),
-  (req, res) => {
-    res.json({ status: 'SUCCESS', ...W.employeeWarningView(req.params.employeeId) });
+  async (req, res) => {
+    res.json({ status: 'SUCCESS', ...await W.employeeWarningView(req.params.employeeId) });
   });
 
 // Issue a warning directly, without a trigger. Spec 3.3 allows HR to issue
 // formal warnings; not every disciplinary matter starts with a lateness count.
 router.post('/employee/:employeeId/issue',
   requireUserOrAdminKey('warning.issue'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     const { level, warningType, explanation } = req.body || {};
     if (!explanation || !String(explanation).trim()) {
       return res.status(400).json({ status: 'ERROR', message: 'An explanation the employee will see is required.' });
@@ -208,14 +208,14 @@ router.post('/employee/:employeeId/issue',
       });
     }
 
-    const warning = W.issueFormalWarning({
+    const warning = await W.issueFormalWarning({
       employeeId: req.params.employeeId,
       level,
       warningType: String(warningType || 'OTHER'),
       explanation: String(explanation).trim(),
       actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
     });
-    W.refreshStanding(req.params.employeeId);
+    await W.refreshStanding(req.params.employeeId);
 
     res.status(201).json({
       status: 'SUCCESS',
@@ -223,15 +223,15 @@ router.post('/employee/:employeeId/issue',
     });
   });
 
-router.post('/:id/withdraw', requireUserOrAdminKey('warning.issue'), (req, res) => {
-  const w = db.prepare('SELECT * FROM formal_warnings WHERE id = ?').get(req.params.id);
+router.post('/:id/withdraw', requireUserOrAdminKey('warning.issue'), async (req, res) => {
+  const w = await db.prepare('SELECT * FROM formal_warnings WHERE id = ?').get(req.params.id);
   if (!w) return res.status(404).json({ status: 'ERROR', message: 'No such warning.' });
-  if (!rbac.canAccessEmployee(req.auth, w.employee_id)) {
+  if (!await rbac.canAccessEmployee(req.auth, w.employee_id)) {
     return res.status(404).json({ status: 'ERROR', message: 'No such warning.' });
   }
 
   try {
-    W.withdrawWarning({
+    await W.withdrawWarning({
       warningId: req.params.id,
       reason: req.body?.reason,
       actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
@@ -247,8 +247,8 @@ router.post('/:id/withdraw', requireUserOrAdminKey('warning.issue'), (req, res) 
 // ---------------------------------------------------------------------------
 
 // GET /api/warnings/absences/mine - employee view of reported absences & no-shows
-router.get('/absences/mine', requireDevice, (req, res) => {
-  const list = W.listAbsences({ employeeId: req.auth.employeeId });
+router.get('/absences/mine', requireDevice, async (req, res) => {
+  const list = await W.listAbsences({ employeeId: req.auth.employeeId });
   res.json({
     status: 'SUCCESS',
     absences: list,
@@ -256,14 +256,14 @@ router.get('/absences/mine', requireDevice, (req, res) => {
 });
 
 // POST /api/warnings/absences/self-report - employee self-reports sickness / emergency (Spec 2.2)
-router.post('/absences/self-report', requireDevice, (req, res) => {
+router.post('/absences/self-report', requireDevice, async (req, res) => {
   const { dateKey, absenceType, reason, evidenceDocumentId } = req.body || {};
   if (!dateKey) {
     return res.status(400).json({ status: 'ERROR', message: 'dateKey (YYYY-MM-DD) is required.' });
   }
 
   try {
-    const result = W.selfReportAbsence({
+    const result = await W.selfReportAbsence({
       employeeId: req.auth.employeeId,
       dateKey,
       absenceType: absenceType || 'SICK',
@@ -285,10 +285,10 @@ router.post('/absences/self-report', requireDevice, (req, res) => {
 // ---------------------------------------------------------------------------
 
 // POST /api/warnings/absences/scan - manual date scan for unscheduled no-shows
-router.post('/absences/scan', requireUserOrAdminKey('attendance.write'), (req, res) => {
+router.post('/absences/scan', requireUserOrAdminKey('attendance.write'), async (req, res) => {
   const dateKey = String(req.body?.dateKey || T.dateKey());
   try {
-    const result = W.scanDailyAbsences(dateKey, T.now(), true);
+    const result = await W.scanDailyAbsences(dateKey, T.now(), true);
     res.json({
       status: 'SUCCESS',
       ...result,
@@ -300,13 +300,13 @@ router.post('/absences/scan', requireUserOrAdminKey('attendance.write'), (req, r
 });
 
 // GET /api/warnings/absences?status=ALL|PENDING_REVIEW|CONFIRMED|DISMISSED
-router.get('/absences', requireUserOrAdminKey('warning.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+router.get('/absences', requireUserOrAdminKey('warning.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const status = String(req.query.status || 'ALL');
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
 
-  const rows = W.listAbsences({ status, from, to })
+  const rows = await (await W.listAbsences({ status, from, to }))
     .filter(r => visible.has(r.employeeId));
 
   res.json({
@@ -323,15 +323,15 @@ router.get('/absences', requireUserOrAdminKey('warning.read'), (req, res) => {
 
 router.post('/absences/:id/review',
   requireUserOrAdminKey('attendance.write'),
-  (req, res) => {
-    const record = db.prepare('SELECT * FROM absence_records WHERE id = ?').get(req.params.id);
+  async (req, res) => {
+    const record = await db.prepare('SELECT * FROM absence_records WHERE id = ?').get(req.params.id);
     if (!record) return res.status(404).json({ status: 'ERROR', message: 'No such absence record.' });
-    if (!rbac.canAccessEmployee(req.auth, record.employee_id)) {
+    if (!await rbac.canAccessEmployee(req.auth, record.employee_id)) {
       return res.status(404).json({ status: 'ERROR', message: 'No such absence record.' });
     }
 
     try {
-      const r = W.reviewAbsence({
+      const r = await W.reviewAbsence({
         absenceId: req.params.id,
         status: req.body?.status,
         deductAnnualLeave: req.body?.deductAnnualLeave ?? null,

@@ -13,7 +13,6 @@
 const crypto = require('crypto');
 const { db } = require('../db');
 const { config } = require('../config');
-const { hydrateDeviceToken } = require('../db/supabase-sync');
 const T = require('../util/time');
 
 // --- helpers ---------------------------------------------------------------
@@ -58,20 +57,30 @@ function newEnrollmentCode() {
 
 // --- device (phone app) ----------------------------------------------------
 
+// The job title comes from the employee's CURRENT employment record.
+//
+// This used to be a subquery with an ORDER BY, joined and then collapsed with
+// GROUP BY. SQLite tolerated that and picked an arbitrary row from each group -
+// the subquery's ordering is not carried through a join - so after a promotion
+// a person could authenticate showing their old title. It also never filtered
+// out superseded records. A lateral join says exactly which record is wanted.
 const selectToken = db.prepare(`
   SELECT t.token_hash, t.device_id, t.expires_at, t.revoked_at,
          d.employee_id, d.revoked_at AS device_revoked, d.model, d.platform,
-         e.name AS employee_name, COALESCE(er.job_title, e.role) AS employee_role, e.active AS employee_active
+         e.name AS employee_name,
+         COALESCE(er.job_title, e.role) AS employee_role,
+         e.active AS employee_active
   FROM device_tokens t
   JOIN devices d   ON d.id = t.device_id
   JOIN employees e ON e.id = d.employee_id
-  LEFT JOIN (
-    SELECT employee_id, job_title
+  LEFT JOIN LATERAL (
+    SELECT job_title
     FROM employment_records
+    WHERE employee_id = e.id AND effective_to IS NULL
     ORDER BY effective_from DESC
-  ) er ON er.employee_id = e.id
+    LIMIT 1
+  ) er ON TRUE
   WHERE t.token_hash = ?
-  GROUP BY t.token_hash
 `);
 const markTokenUsed = db.prepare('UPDATE device_tokens SET last_used_at = ? WHERE token_hash = ?');
 
@@ -89,22 +98,13 @@ async function requireDevice(req, res, next) {
   }
 
   const tokenHash = sha256(token);
-  let row = selectToken.get(tokenHash);
   const nowMs = T.now();
 
-  // A miss may mean the token is genuinely unknown, or simply that this
-  // instance has not caught up yet - it holds its own copy of the data and the
-  // periodic refresh is up to 15 seconds behind. Those two are not the same
-  // thing, and treating the second as the first is what sent freshly enrolled
-  // phones back to the pairing screen. So confirm against the shared database
-  // before rejecting a credential.
-  if (!row) {
-    try {
-      if (await hydrateDeviceToken(db, tokenHash)) row = selectToken.get(tokenHash);
-    } catch (err) {
-      console.warn('[auth] device token lookup fallback failed:', err.message);
-    }
-  }
+  // One lookup against one database. The second-chance lookup that used to sit
+  // here existed only because each instance held its own stale copy, so a token
+  // issued moments earlier could legitimately be missing. It cannot be missing
+  // now: enrolment wrote it to the same database this reads.
+  const row = await selectToken.get(tokenHash);
 
   if (!row) return res.status(401).json({ status: 'ERROR', code: 'BAD_TOKEN', message: 'Unrecognised device token.' });
   if (row.revoked_at) return res.status(401).json({ status: 'ERROR', code: 'REVOKED', message: 'This device token has been revoked.' });
@@ -116,7 +116,7 @@ async function requireDevice(req, res, next) {
     return res.status(403).json({ status: 'ERROR', code: 'INACTIVE', message: 'This employee record is inactive.' });
   }
 
-  markTokenUsed.run(nowMs, row.token_hash);
+  await markTokenUsed.run(nowMs, row.token_hash);
   req.auth = {
     kind: 'device',
     deviceId: row.device_id,
@@ -223,9 +223,9 @@ const rbac = require('../domain/rbac');
  * WHO acted - unusable for a payroll audit trail, which is why real accounts
  * exist.
  */
-function requireUser(req, res, next) {
+async function requireUser(req, res, next) {
   const token = bearer(req) || req.headers['x-session-token'];
-  const user = token ? rbac.resolveSession(token) : null;
+  const user = token ? await rbac.resolveSession(token) : null;
 
   if (!user) {
     return res.status(401).json({
@@ -270,12 +270,12 @@ function requirePermission(...needed) {
  * reports only, and an employee only for themselves.
  */
 function requireEmployeeAccess(paramName = 'employeeId') {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const employeeId = req.params[paramName] || req.body?.[paramName];
     if (!employeeId) {
       return res.status(400).json({ status: 'ERROR', message: `${paramName} is required.` });
     }
-    if (!rbac.canAccessEmployee(req.auth, employeeId)) {
+    if (!await rbac.canAccessEmployee(req.auth, employeeId)) {
       // 404 rather than 403: confirming that an employee exists is itself a
       // disclosure to someone with no business knowing.
       return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
@@ -292,27 +292,27 @@ function requireEmployeeAccess(paramName = 'employeeId') {
 // profile hiding bank details, say) would wrongly hide them from the admin-key
 // dashboard. Loaded once and reused.
 let adminPermissionSet = null;
-function superAdminPermissions() {
+async function superAdminPermissions() {
   if (!adminPermissionSet) {
     adminPermissionSet = new Set(
-      db.prepare("SELECT permission_id AS p FROM role_permissions WHERE role_id = 'super_admin'")
-        .all().map(r => r.p),
+      (await db.prepare("SELECT permission_id AS p FROM role_permissions WHERE role_id = 'super_admin'")
+        .all()).map(r => r.p),
     );
   }
   return adminPermissionSet;
 }
 
 function requireUserOrAdminKey(...needed) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const supplied = req.headers['x-admin-key'];
     if (supplied && config.adminApiKey && safeEqual(supplied, config.adminApiKey)) {
       req.auth = {
         kind: 'admin', actor: 'admin-key', roles: ['super_admin'],
-        permissions: superAdminPermissions(),
+        permissions: await superAdminPermissions(),
       };
       return next();
     }
-    requireUser(req, res, (err) => {
+    await requireUser(req, res, (err) => {
       if (err) return next(err);
       requirePermission(...needed)(req, res, next);
     });

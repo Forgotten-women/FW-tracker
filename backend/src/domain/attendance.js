@@ -46,16 +46,16 @@ const selectOpenBreak = db.prepare(`
   ORDER BY started_at DESC LIMIT 1
 `);
 
-function startBreak(employeeId, atMs = T.now()) {
-  const open = selectOpenBreak.get(employeeId);
+async function startBreak(employeeId, atMs = T.now()) {
+  const open = await selectOpenBreak.get(employeeId);
   if (open) {
     return { ok: false, reason: 'ALREADY_ON_BREAK', startedAt: open.started_at };
   }
   const dateKey = T.dateKey(atMs);
-  const s = schedule.resolve(employeeId, dateKey);
+  const s = await schedule.resolve(employeeId, dateKey);
   const id = 'brk_' + crypto.randomBytes(8).toString('hex');
 
-  insertBreak.run({
+  await insertBreak.run({
     id, employee_id: employeeId, date_key: dateKey,
     started_at: atMs, ended_at: null,
     permitted_minutes: s.permittedBreakMinutes,
@@ -71,8 +71,8 @@ function startBreak(employeeId, atMs = T.now()) {
   };
 }
 
-function endBreak(employeeId, atMs = T.now()) {
-  const open = selectOpenBreak.get(employeeId);
+async function endBreak(employeeId, atMs = T.now()) {
+  const open = await selectOpenBreak.get(employeeId);
   if (!open) return { ok: false, reason: 'NOT_ON_BREAK' };
 
   const actual = Math.max(0, Math.round((atMs - open.started_at) / MIN));
@@ -80,7 +80,7 @@ function endBreak(employeeId, atMs = T.now()) {
   // earns nothing back, and taking the full 30 minutes costs nothing.
   const excess = Math.max(0, actual - open.permitted_minutes);
 
-  db.prepare(
+  await db.prepare(
     'UPDATE break_records SET ended_at = ?, actual_minutes = ?, excess_minutes = ? WHERE id = ?'
   ).run(atMs, actual, excess, open.id);
 
@@ -114,11 +114,11 @@ const selectApprovedAdjustment = db.prepare(`
  * Pure: reads, computes, returns. Persisting is a separate step so the same
  * calculation can be previewed without writing anything.
  */
-function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
-  const s = schedule.resolve(employeeId, dateKey);
-  const presence = P.deriveDay(employeeId, dateKey, nowMs);
-  const breaks = selectBreaks.all(employeeId, dateKey);
-  const manual = selectManualEvents.all(employeeId, dateKey);
+async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
+  const s = await schedule.resolve(employeeId, dateKey);
+  const presence = await P.deriveDay(employeeId, dateKey, nowMs);
+  const breaks = await selectBreaks.all(employeeId, dateKey);
+  const manual = await selectManualEvents.all(employeeId, dateKey);
 
   const dayStart = T.startOfDay(dateKey);
   const dayEnd = T.endOfDay(dateKey);
@@ -229,7 +229,7 @@ function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     if (!coveredByBreak) unauthorisedMissingMinutes += gapMinutes;
   }
 
-  const approvedAdjustmentMinutes = selectApprovedAdjustment.get(employeeId, dateKey).mins || 0;
+  const approvedAdjustmentMinutes = (await selectApprovedAdjustment.get(employeeId, dateKey)).mins || 0;
 
   // Spec 8.1, exactly.
   const dailyDeficitMinutes = Math.max(0,
@@ -302,11 +302,11 @@ const selectSummary = db.prepare(
 );
 
 /** Derive and persist. Returns the derived day. */
-function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
-  const d = deriveDay(employeeId, dateKey, nowMs);
-  const previous = selectSummary.get(employeeId, dateKey);
+async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
+  const d = await deriveDay(employeeId, dateKey, nowMs);
+  const previous = await selectSummary.get(employeeId, dateKey);
 
-  upsertSummary.run({
+  await upsertSummary.run({
     employee_id: employeeId,
     date_key: dateKey,
     scheduled_start: d.schedule.startTime,
@@ -330,7 +330,7 @@ function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   // If the employee is present or has worked minutes, clear any unreviewed suspected no-show records
   if (d.firstInAt != null || d.workedMinutes > 0) {
     try {
-      db.prepare(`
+      await db.prepare(`
         DELETE FROM absence_records
         WHERE employee_id = ? AND date_key = ? AND absence_type = 'SUSPECTED_NO_SHOW' AND status = 'PENDING_REVIEW'
       `).run(employeeId, dateKey);
@@ -342,7 +342,7 @@ function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const dayEnded = nowMs >= T.endOfDay(dateKey);
   if (dayEnded) {
     const changed = !previous || previous.daily_deficit_minutes !== d.dailyDeficitMinutes;
-    if (changed) postDeficit(employeeId, dateKey, d.dailyDeficitMinutes, nowMs);
+    if (changed) await postDeficit(employeeId, dateKey, d.dailyDeficitMinutes, nowMs);
   }
 
   return d;
@@ -377,21 +377,21 @@ const insertLedger = db.prepare(`
  * carried forward, not 1.1 days. They are derived from the balance rather than
  * stored separately, so they cannot drift apart.
  */
-function balanceFor(employeeId, nowMs = T.now(), includeToday = true) {
-  const latest = selectLatestLedger.get(employeeId);
+async function balanceFor(employeeId, nowMs = T.now(), includeToday = true) {
+  const latest = await selectLatestLedger.get(employeeId);
   let balance = latest ? Math.max(0, latest.balance_after) : 0;
 
   if (includeToday) {
     const todayDateKey = T.dateKey(nowMs);
-    const todaySettled = selectLedgerForDay.get(employeeId, todayDateKey);
+    const todaySettled = await selectLedgerForDay.get(employeeId, todayDateKey);
     // If today's deficit has not yet been settled into the ledger at end of day
     if (!todaySettled) {
-      const todaySummary = deriveDay(employeeId, todayDateKey, nowMs);
+      const todaySummary = await deriveDay(employeeId, todayDateKey, nowMs);
       balance += (todaySummary.dailyDeficitMinutes || 0);
     }
   }
 
-  const dayEquivalent = schedule.resolve(employeeId).dayEquivalentMinutes;
+  const dayEquivalent = await (await schedule.resolve(employeeId)).dayEquivalentMinutes;
   return {
     balanceMinutes: balance,
     wholeDayEquivalents: Math.floor(balance / dayEquivalent),
@@ -400,14 +400,14 @@ function balanceFor(employeeId, nowMs = T.now(), includeToday = true) {
   };
 }
 
-function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { createdBy = 'system' } = {}) {
-  const existing = selectLedgerForDay.get(employeeId, dateKey);
+async function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { createdBy = 'system' } = {}) {
+  const existing = await selectLedgerForDay.get(employeeId, dateKey);
   // Recomputing a day must adjust by the difference, not post the whole figure
   // again - otherwise a correction would double-count.
   const delta = existing ? minutes - existing.minutes_delta : minutes;
   if (existing && delta === 0) return null;
 
-  const current = balanceFor(employeeId);
+  const current = await balanceFor(employeeId);
   const balanceAfter = Math.max(0, current.balanceMinutes + delta);
   const dayEquivalent = current.dayEquivalentMinutes;
 
@@ -427,7 +427,7 @@ function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { createdBy 
     created_by: createdBy,
   };
 
-  insertLedger.run(entry);
+  await insertLedger.run(entry);
 
   // Spec 8.3: reaching a whole-day equivalent "should create an HR action". It
   // deliberately does NOT alter salary, leave or discipline on its own.
@@ -438,10 +438,10 @@ function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { createdBy 
 }
 
 /** An explicit HR adjustment to the balance. Always attributed. */
-function adjustBalance({ employeeId, dateKey, minutes, reason, actor }) {
+async function adjustBalance({ employeeId, dateKey, minutes, reason, actor }) {
   if (!reason) throw new Error('An adjustment needs a reason.');
   const nowMs = T.now();
-  const current = balanceFor(employeeId);
+  const current = await balanceFor(employeeId);
   const balanceAfter = Math.max(0, current.balanceMinutes + minutes);
 
   const entry = {
@@ -457,7 +457,7 @@ function adjustBalance({ employeeId, dateKey, minutes, reason, actor }) {
     created_at: nowMs,
     created_by: actor,
   };
-  insertLedger.run(entry);
+  await insertLedger.run(entry);
   return entry;
 }
 
@@ -524,7 +524,7 @@ const selectLateDates = db.prepare(`
  * spec 9.3 is explicit that an automatic alert and a formal warning are
  * different things, because a late record may later be corrected or authorised.
  */
-function latenessStatus(employeeId, dateKey = T.dateKey()) {
+async function latenessStatus(employeeId, dateKey = T.dateKey()) {
   const window = monitoringPeriod(dateKey);
 
   if (window.unresolved) {
@@ -538,8 +538,8 @@ function latenessStatus(employeeId, dateKey = T.dateKey()) {
   }
 
   const allowed = config.latenessOccurrencesAllowed;
-  const count = countLateInRange.get(employeeId, window.from, window.to).c;
-  const occurrences = selectLateDates.all(employeeId, window.from, window.to);
+  const count = (await countLateInRange.get(employeeId, window.from, window.to)).c;
+  const occurrences = await selectLateDates.all(employeeId, window.from, window.to);
 
   const remaining = Math.max(0, allowed - count);
   const thresholdReached = count > allowed;

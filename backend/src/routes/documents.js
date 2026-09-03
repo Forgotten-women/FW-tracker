@@ -21,10 +21,10 @@ const upload = multer({
 // Document Types
 // ---------------------------------------------------------------------------
 
-router.get('/types', (req, res) => {
+router.get('/types', async (req, res) => {
   res.json({
     status: 'SUCCESS',
-    types: docs.listDocumentTypes(),
+    types: await docs.listDocumentTypes(),
   });
 });
 
@@ -32,16 +32,16 @@ router.get('/types', (req, res) => {
 // HR / Admin Management & Verification Queue
 // ---------------------------------------------------------------------------
 
-router.get('/pending-verification', requireUserOrAdminKey('document.read'), (req, res) => {
+router.get('/pending-verification', requireUserOrAdminKey('document.read'), async (req, res) => {
   res.json({
     status: 'SUCCESS',
-    pendingDocuments: docs.listPendingVerification(),
+    pendingDocuments: await docs.listPendingVerification(),
   });
 });
 
-router.post('/:documentId/verify', requireUserOrAdminKey('document.write'), (req, res) => {
+router.post('/:documentId/verify', requireUserOrAdminKey('document.write'), async (req, res) => {
   try {
-    const result = docs.verifyDocument({
+    const result = await docs.verifyDocument({
       documentId: req.params.documentId,
       verifiedBy: req.auth.actor,
       actor: req.auth.actor,
@@ -52,9 +52,9 @@ router.post('/:documentId/verify', requireUserOrAdminKey('document.write'), (req
   }
 });
 
-router.post('/:documentId/reject', requireUserOrAdminKey('document.write'), (req, res) => {
+router.post('/:documentId/reject', requireUserOrAdminKey('document.write'), async (req, res) => {
   try {
-    const result = docs.rejectDocument({
+    const result = await docs.rejectDocument({
       documentId: req.params.documentId,
       rejectionReason: req.body?.reason || req.body?.rejectionReason,
       rejectedBy: req.auth.actor,
@@ -68,9 +68,9 @@ router.post('/:documentId/reject', requireUserOrAdminKey('document.write'), (req
 
 router.get('/employee/:employeeId/kyc-checklist',
   requireUserOrAdminKey('document.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const checklist = docs.kycChecklistFor(req.params.employeeId);
+      const checklist = await docs.kycChecklistFor(req.params.employeeId);
       res.json({ status: 'SUCCESS', ...checklist });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
@@ -79,10 +79,10 @@ router.get('/employee/:employeeId/kyc-checklist',
 
 router.get('/employee/:employeeId',
   requireUserOrAdminKey('document.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     res.json({
       status: 'SUCCESS',
-      documents: docs.listFor(req.params.employeeId, req.auth.permissions),
+      documents: await docs.listFor(req.params.employeeId, req.auth.permissions),
     });
   });
 
@@ -108,15 +108,15 @@ router.post('/employee/:employeeId',
   });
 
 // Exchanges the caller's permission for a one-minute download token
-router.post('/:documentId/download-token', requireUserOrAdminKey('document.read'), (req, res) => {
-  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+router.post('/:documentId/download-token', requireUserOrAdminKey('document.read'), async (req, res) => {
+  const doc = await db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc) return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
-  if (!rbac.canAccessEmployee(req.auth, doc.employee_id)) {
+  if (!await rbac.canAccessEmployee(req.auth, doc.employee_id)) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }
 
   try {
-    const grant = docs.issueDownloadToken({
+    const grant = await docs.issueDownloadToken({
       documentId: req.params.documentId,
       permissions: req.auth.permissions,
       actor: req.auth.actor,
@@ -136,7 +136,7 @@ router.post('/:documentId/download-token', requireUserOrAdminKey('document.read'
 
 // The actual download via token
 router.get('/download/:token', async (req, res) => {
-  const file = docs.redeemDownloadToken(req.params.token, { ip: req.ip });
+  const file = await docs.redeemDownloadToken(req.params.token, { ip: req.ip });
   if (!file) {
     return res.status(404).json({ status: 'ERROR', message: 'This download link has expired or was already used.' });
   }
@@ -157,14 +157,14 @@ router.get('/download/:token', async (req, res) => {
   }
 });
 
-router.get('/:documentId/access-log', requireUserOrAdminKey('audit.read'), (req, res) => {
-  res.json({ status: 'SUCCESS', log: docs.accessLog(req.params.documentId) });
+router.get('/:documentId/access-log', requireUserOrAdminKey('audit.read'), async (req, res) => {
+  res.json({ status: 'SUCCESS', log: await docs.accessLog(req.params.documentId) });
 });
 
 router.delete('/:documentId', requireUserOrAdminKey('document.write'), async (req, res) => {
-  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  const doc = await db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc) return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
-  if (!rbac.canAccessEmployee(req.auth, doc.employee_id)) {
+  if (!await rbac.canAccessEmployee(req.auth, doc.employee_id)) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }
   try {
@@ -176,9 +176,9 @@ router.delete('/:documentId', requireUserOrAdminKey('document.write'), async (re
 });
 
 router.post('/:documentId/delete', requireUserOrAdminKey('document.write'), async (req, res) => {
-  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  const doc = await db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc) return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
-  if (!rbac.canAccessEmployee(req.auth, doc.employee_id)) {
+  if (!await rbac.canAccessEmployee(req.auth, doc.employee_id)) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }
   try {
@@ -189,14 +189,14 @@ router.post('/:documentId/delete', requireUserOrAdminKey('document.write'), asyn
   }
 });
 
-router.post('/:documentId/archive', requireUserOrAdminKey('document.write'), (req, res) => {
-  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+router.post('/:documentId/archive', requireUserOrAdminKey('document.write'), async (req, res) => {
+  const doc = await db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc) return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
-  if (!rbac.canAccessEmployee(req.auth, doc.employee_id)) {
+  if (!await rbac.canAccessEmployee(req.auth, doc.employee_id)) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }
   try {
-    docs.archive({ documentId: req.params.documentId, reason: req.body?.reason || null, actor: req.auth.actor });
+    await docs.archive({ documentId: req.params.documentId, reason: req.body?.reason || null, actor: req.auth.actor });
     res.json({ status: 'SUCCESS' });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
@@ -207,9 +207,9 @@ router.post('/:documentId/archive', requireUserOrAdminKey('document.write'), (re
 // Employee Mobile App (Device Token)
 // ---------------------------------------------------------------------------
 
-router.get('/mine/kyc-checklist', requireDevice, (req, res) => {
+router.get('/mine/kyc-checklist', requireDevice, async (req, res) => {
   try {
-    const checklist = docs.kycChecklistFor(req.auth.employeeId);
+    const checklist = await docs.kycChecklistFor(req.auth.employeeId);
     res.json({ status: 'SUCCESS', ...checklist });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
@@ -237,12 +237,12 @@ router.post('/mine/upload', requireDevice, upload.single('file'), async (req, re
   }
 });
 
-router.post('/mine/request-update', requireDevice, (req, res) => {
+router.post('/mine/request-update', requireDevice, async (req, res) => {
   const { documentTypeId, documentName, reason } = req.body || {};
   if (!reason || !reason.trim()) {
     return res.status(400).json({ status: 'ERROR', message: 'A reason or description for the update is required.' });
   }
-  const employee = db.prepare('SELECT name, role FROM employees WHERE id = ?').get(req.auth.employeeId);
+  const employee = await db.prepare('SELECT name, role FROM employees WHERE id = ?').get(req.auth.employeeId);
   const employeeName = employee ? employee.name : 'An employee';
 
   try {
@@ -268,22 +268,22 @@ router.post('/mine/request-update', requireDevice, (req, res) => {
   });
 });
 
-router.get('/mine', requireDevice, (req, res) => {
+router.get('/mine', requireDevice, async (req, res) => {
   const permitted = new Set(['document.read', 'self.document.read']);
-  res.json({ status: 'SUCCESS', documents: docs.listFor(req.auth.employeeId, permitted) });
+  res.json({ status: 'SUCCESS', documents: await docs.listFor(req.auth.employeeId, permitted) });
 });
 
-router.post('/mine/:documentId/download-token', requireDevice, (req, res) => {
-  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+router.post('/mine/:documentId/download-token', requireDevice, async (req, res) => {
+  const doc = await db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc || doc.employee_id !== req.auth.employeeId) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }
   const employeePermitted = new Set(['document.read', 'self.document.read']);
-  const required = docs.requiredReadPermission(req.params.documentId);
+  const required = await docs.requiredReadPermission(req.params.documentId);
   if (!employeePermitted.has(required)) {
     return res.status(403).json({ status: 'ERROR', message: 'This document is not available in the app.' });
   }
-  const grant = docs.issueDownloadToken({
+  const grant = await docs.issueDownloadToken({
     documentId: req.params.documentId,
     permissions: employeePermitted,
     actor: `employee:${req.auth.employeeId}`,
@@ -293,9 +293,9 @@ router.post('/mine/:documentId/download-token', requireDevice, (req, res) => {
   res.json({ status: 'SUCCESS', ...grant });
 });
 
-router.post('/mine/:documentId/acknowledge', requireDevice, (req, res) => {
+router.post('/mine/:documentId/acknowledge', requireDevice, async (req, res) => {
   try {
-    const r = docs.acknowledge({ documentId: req.params.documentId, employeeId: req.auth.employeeId });
+    const r = await docs.acknowledge({ documentId: req.params.documentId, employeeId: req.auth.employeeId });
     res.json({ status: 'SUCCESS', ...r });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
@@ -303,7 +303,7 @@ router.post('/mine/:documentId/acknowledge', requireDevice, (req, res) => {
 });
 
 router.delete('/mine/:documentId', requireDevice, async (req, res) => {
-  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  const doc = await db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc || doc.employee_id !== req.auth.employeeId) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }
@@ -316,7 +316,7 @@ router.delete('/mine/:documentId', requireDevice, async (req, res) => {
 });
 
 router.post('/mine/:documentId/delete', requireDevice, async (req, res) => {
-  const doc = db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
+  const doc = await db.prepare('SELECT employee_id FROM employee_documents WHERE id = ?').get(req.params.documentId);
   if (!doc || doc.employee_id !== req.auth.employeeId) {
     return res.status(404).json({ status: 'ERROR', message: 'No such document.' });
   }

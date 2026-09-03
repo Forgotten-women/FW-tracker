@@ -155,7 +155,7 @@ function explainLocation({ bssid, srcIp, localIp, source, location }) {
  * resends buffered heartbeats with their ORIGINAL timestamps, and the
  * dedupe_key ensures each inserts exactly once.
  */
-function recordEvent({
+async function recordEvent({
   employeeId = null, deviceId = null, source, mac = null, srcIp = null, localIp = null,
   ssid = null, bssid = null, rssi = null, observedAt = null, note = null,
 }) {
@@ -177,7 +177,7 @@ function recordEvent({
   // When an employee phone is active on office Wi-Fi, the ESP captures live frames and attributes presence.
   // When the phone disconnects or turns Wi-Fi off, ESP sightings stop immediately (no stale cache).
   if (!employeeId && macHash && source === 'ESP_SNIFFER') {
-    const bound = bindings.employeeForMac(macHash, observed);
+    const bound = await bindings.employeeForMac(macHash, observed);
     if (bound) {
       employeeId = bound.employeeId;
       deviceId = deviceId || bound.deviceId;
@@ -196,7 +196,7 @@ function recordEvent({
   const dedupeKey =
     `${source}|${employeeId || 'anon'}|${deviceIdentity}|${Math.floor(observed / 1000)}`;
 
-  const info = insertEvent.run({
+  const info = await insertEvent.run({
     employee_id: employeeId,
     device_id: deviceId,
     source,
@@ -215,13 +215,13 @@ function recordEvent({
     note: attributedVia ? `${note || ''} [attributed via ${attributedVia}]`.trim() : note,
   });
 
-  if (deviceId) touchDevice.run(observed, deviceId);
+  if (deviceId) await touchDevice.run(observed, deviceId);
 
   // A device on the office Wi-Fi that maps to no employee. Stored hashed and
   // on a short TTL - retaining the real MACs of visitors and neighbours
   // indefinitely is personal data we have no basis to keep.
   if (!employeeId && macHash && location === 'OFFICE') {
-    upsertUnknown.run({ mac_hash: macHash, at: observed, source });
+    await upsertUnknown.run({ mac_hash: macHash, at: observed, source });
   }
 
   return {
@@ -313,12 +313,12 @@ const selectAttendanceRow = db.prepare(
  * The three-state model (IN_OFFICE -> GRACE_PERIOD -> AWAY) is carried over
  * unchanged from the original getEmployeeWorkStats.
  */
-function deriveDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
+async function deriveDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
   const dayStart = T.startOfDay(dayKey);
   const dayEnd = T.endOfDay(dayKey);
-  const events = selectDayEvents.all(employeeId, dayStart, dayEnd);
+  const events = await selectDayEvents.all(employeeId, dayStart, dayEnd);
 
-  const existing = selectAttendanceRow.get(employeeId, dayKey);
+  const existing = await selectAttendanceRow.get(employeeId, dayKey);
   const adjustment = existing ? existing.adjustment_minutes : 0;
 
   if (events.length === 0) {
@@ -393,9 +393,9 @@ const upsertAttendance = db.prepare(`
 `);
 
 /** Derive and persist the cached row. Returns the derived state. */
-function recomputeDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
-  const d = deriveDay(employeeId, dayKey, nowMs);
-  upsertAttendance.run({
+async function recomputeDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
+  const d = await deriveDay(employeeId, dayKey, nowMs);
+  await upsertAttendance.run({
     employee_id: employeeId,
     date_key: dayKey,
     first_in_at: d.firstInAt,
@@ -409,19 +409,19 @@ function recomputeDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
 }
 
 /** Rebuild every cached day from the event log. Use after changing the rules. */
-function recomputeAll() {
-  const rows = db.prepare(`
+async function recomputeAll() {
+  const rows = await db.prepare(`
     SELECT DISTINCT employee_id, observed_at FROM presence_events WHERE employee_id IS NOT NULL
   `).all();
   const pairs = new Set();
   for (const r of rows) pairs.add(`${r.employee_id}|${T.dateKey(r.observed_at)}`);
-  const run = tx(() => {
+  await tx(async () => {
     for (const p of pairs) {
       const [emp, key] = p.split('|');
-      recomputeDay(emp, key);
+      await recomputeDay(emp, key);
     }
   });
-  run();
+  
   return pairs.size;
 }
 
@@ -438,9 +438,9 @@ const selectSummaryPresence = db.prepare(
 );
 
 /** Shape one derived day for an API response (formatting happens only here). */
-function presentDay(d, employee) {
-  const openBreak = selectOpenBreakPresence.get(d.employeeId);
-  const summary = selectSummaryPresence.get(d.employeeId, d.dateKey);
+async function presentDay(d, employee) {
+  const openBreak = await selectOpenBreakPresence.get(d.employeeId);
+  const summary = await selectSummaryPresence.get(d.employeeId, d.dateKey);
   const onBreak = Boolean(openBreak);
   const activeBreakMinutes = openBreak ? Math.max(0, Math.round((T.now() - openBreak.started_at) / 60000)) : 0;
 
@@ -477,26 +477,32 @@ function presentDay(d, employee) {
   };
 }
 
+// See the note on selectToken in middleware/auth.js: the previous shape let an
+// arbitrary employment record supply the job title.
 const selectActiveEmployees = db.prepare(`
   SELECT e.id, e.name, COALESCE(er.job_title, e.role) AS role, e.role AS department
   FROM employees e
-  LEFT JOIN (
-    SELECT employee_id, job_title
+  LEFT JOIN LATERAL (
+    SELECT job_title
     FROM employment_records
+    WHERE employee_id = e.id AND effective_to IS NULL
     ORDER BY effective_from DESC
-  ) er ON er.employee_id = e.id
+    LIMIT 1
+  ) er ON TRUE
   WHERE e.active = 1
-  GROUP BY e.id
   ORDER BY e.name
 `);
 
 /** Live board for every active employee, all from the same derivation. */
-function liveBoard(nowMs = T.now()) {
+async function liveBoard(nowMs = T.now()) {
   const dayKey = T.dateKey(nowMs);
-  return selectActiveEmployees.all().map(emp => {
-    const d = deriveDay(emp.id, dayKey, nowMs);
-    return presentDay(d, emp);
-  });
+  // Promise.all, not a bare .map: each row now needs a database read, and a
+  // .map over an async function yields promises rather than rows - the board
+  // would serialise as a list of empty objects.
+  return Promise.all((await selectActiveEmployees.all()).map(async emp => {
+    const d = await deriveDay(emp.id, dayKey, nowMs);
+    return await presentDay(d, emp);
+  }));
 }
 
 module.exports = {

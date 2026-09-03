@@ -54,17 +54,14 @@ app.use((err, req, res, next) => {
 morgan.token('actor', req => (req.auth ? req.auth.kind : '-'));
 app.use(morgan(':date[iso] :method :url :status :actor :response-time ms'));
 
-const { ensureHydrated } = require('./db/supabase-sync');
-
-// Hydrate SQLite state from Supabase PostgreSQL before handling requests
-app.use(async (req, res, next) => {
-  try {
-    await ensureHydrated(db);
-  } catch (err) {
-    console.warn('[server] DB hydration notice:', err.message);
-  }
-  next();
-});
+// There is no hydration step any more.
+//
+// Every request used to copy nine tables out of Postgres into a SQLite file
+// that belonged to this container alone, at most every fifteen seconds. That is
+// what made the dashboard flicker - two consecutive requests would be served by
+// different containers holding different data - and what made a freshly issued
+// device token come back as BAD_TOKEN on the very next call. Handlers now read
+// and write the one shared database directly.
 
 // No static dashboard is served from here any more. The dashboard is a separate
 // Next.js app in /dashboard, which proxies /api/* to this server, so the browser
@@ -74,10 +71,10 @@ app.use(async (req, res, next) => {
 
 // --- health ----------------------------------------------------------------
 
-const healthHandler = (req, res) => {
+const healthHandler = async (req, res) => {
   try {
-    const activeEmployees = db.prepare('SELECT COUNT(*) c FROM employees WHERE active = 1').get()?.c || 0;
-    const totalEvents = db.prepare('SELECT COUNT(*) c FROM presence_events').get()?.c || 0;
+    const activeEmployees = (await db.prepare('SELECT COUNT(*) c FROM employees WHERE active = 1').get())?.c || 0;
+    const totalEvents = (await db.prepare('SELECT COUNT(*) c FROM presence_events').get())?.c || 0;
     res.json({
       status: 'OK',
       service: 'office-tracker-backend',
@@ -171,7 +168,7 @@ let server = null;
  * on their own port without also starting the background jobs and ARP sensor.
  */
 function start(port = config.port) {
-  server = app.listen(port, '0.0.0.0', () => {
+  server = app.listen(port, '0.0.0.0', async () => {
     const actual = server.address().port;
     console.log('');
     console.log('======================================================');
@@ -189,7 +186,7 @@ function start(port = config.port) {
       console.log('');
     }
 
-    jobs.start();
+    await jobs.start();
     arpSensor.start();
   });
   return server;

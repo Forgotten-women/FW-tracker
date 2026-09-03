@@ -16,9 +16,9 @@ const T = require('../util/time');
 // Employee self-service: Monthly Statements & Period History
 // ---------------------------------------------------------------------------
 
-router.get('/mine/statements', requireDevice, (req, res) => {
+router.get('/mine/statements', requireDevice, async (req, res) => {
   const { employeeId } = req.auth;
-  const result = PR.employeeStatements(employeeId);
+  const result = await PR.employeeStatements(employeeId);
   res.json({
     status: 'SUCCESS',
     ...result,
@@ -39,22 +39,22 @@ function getActor(req) {
 
 router.get('/employee/:employeeId/salary',
   requirePermission('employee.salary.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     const onDate = String(req.query.on || T.dateKey());
-    const current = PR.salaryAt(req.params.employeeId, onDate);
+    const current = await PR.salaryAt(req.params.employeeId, onDate);
     res.json({
       status: 'SUCCESS',
       onDate,
       current,
-      history: PR.salaryHistoryFor(req.params.employeeId),
+      history: await PR.salaryHistoryFor(req.params.employeeId),
     });
   });
 
 router.post('/employee/:employeeId/salary',
   requirePermission('employee.salary.write'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const r = PR.setSalary({
+      const r = await PR.setSalary({
         employeeId: req.params.employeeId,
         amount: req.body?.amount,
         effectiveFrom: req.body?.effectiveFrom,
@@ -79,7 +79,7 @@ router.post('/employee/:employeeId/salary',
 
 router.get('/employee/:employeeId/starter',
   requirePermission('payroll.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     const periodStart = String(req.query.from || '');
     const periodEnd = String(req.query.to || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
@@ -87,7 +87,7 @@ router.get('/employee/:employeeId/starter',
     }
     res.json({
       status: 'SUCCESS',
-      calculation: PR.starterCalculation({
+      calculation: await PR.starterCalculation({
         employeeId: req.params.employeeId, periodStart, periodEnd,
       }),
     });
@@ -95,11 +95,11 @@ router.get('/employee/:employeeId/starter',
 
 router.get('/employee/:employeeId/leaver',
   requirePermission('payroll.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
       res.json({
         status: 'SUCCESS',
-        calculation: PR.leaverCalculation({
+        calculation: await PR.leaverCalculation({
           employeeId: req.params.employeeId,
           lastWorkingDate: String(req.query.lastWorkingDate || ''),
           periodStart: req.query.from ? String(req.query.from) : null,
@@ -114,8 +114,8 @@ router.get('/employee/:employeeId/leaver',
 // Periods
 // ---------------------------------------------------------------------------
 
-router.get('/periods', requirePermission('payroll.read'), (req, res) => {
-  const rows = db.prepare('SELECT * FROM payroll_periods ORDER BY start_date DESC').all();
+router.get('/periods', requirePermission('payroll.read'), async (req, res) => {
+  const rows = await db.prepare('SELECT * FROM payroll_periods ORDER BY start_date DESC').all();
   res.json({
     status: 'SUCCESS',
     periods: rows.map(p => ({
@@ -127,9 +127,9 @@ router.get('/periods', requirePermission('payroll.read'), (req, res) => {
   });
 });
 
-router.post('/periods', requirePermission('payroll.approve'), (req, res) => {
+router.post('/periods', requirePermission('payroll.approve'), async (req, res) => {
   try {
-    const p = PR.createPeriod({
+    const p = await PR.createPeriod({
       name: req.body?.name,
       startDate: req.body?.startDate,
       endDate: req.body?.endDate,
@@ -142,9 +142,9 @@ router.post('/periods', requirePermission('payroll.approve'), (req, res) => {
   }
 });
 
-router.post('/periods/:id/exchange-rate', requirePermission('payroll.approve'), (req, res) => {
+router.post('/periods/:id/exchange-rate', requirePermission('payroll.approve'), async (req, res) => {
   try {
-    const r = PR.updatePeriodExchangeRate({
+    const r = await PR.updatePeriodExchangeRate({
       periodId: req.params.id,
       exchangeRate: req.body?.exchangeRate,
       actor: getActor(req),
@@ -156,10 +156,10 @@ router.post('/periods/:id/exchange-rate', requirePermission('payroll.approve'), 
 });
 
 // The preparation sheet. Read-only: computing it writes nothing.
-router.get('/periods/:id/prepare', requirePermission('payroll.read'), (req, res) => {
+router.get('/periods/:id/prepare', requirePermission('payroll.read'), async (req, res) => {
   try {
-    const sheet = PR.preparePeriod(req.params.id);
-    const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+    const sheet = await PR.preparePeriod(req.params.id);
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
     res.json({
       status: 'SUCCESS',
       ...sheet,
@@ -171,9 +171,9 @@ router.get('/periods/:id/prepare', requirePermission('payroll.read'), (req, res)
   }
 });
 
-router.post('/periods/:id/close', requirePermission('payroll.approve'), (req, res) => {
+router.post('/periods/:id/close', requirePermission('payroll.approve'), async (req, res) => {
   try {
-    res.json({ status: 'SUCCESS', ...PR.closePeriod({ periodId: req.params.id, actor: getActor(req) }) });
+    res.json({ status: 'SUCCESS', ...await PR.closePeriod({ periodId: req.params.id, actor: getActor(req) }) });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
   }
@@ -183,13 +183,13 @@ router.post('/periods/:id/close', requirePermission('payroll.approve'), (req, re
 // Adjustments
 // ---------------------------------------------------------------------------
 
-router.get('/periods/:id/adjustments', requirePermission('payroll.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
-  const rows = db.prepare(`
+router.get('/periods/:id/adjustments', requirePermission('payroll.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+  const rows = (await db.prepare(`
     SELECT a.*, e.name FROM payroll_adjustments a
     JOIN employees e ON e.id = a.employee_id
     WHERE a.period_id = ? ORDER BY a.created_at DESC
-  `).all(req.params.id).filter(r => visible.has(r.employee_id));
+  `).all(req.params.id)).filter(r => visible.has(r.employee_id));
 
   res.json({
     status: 'SUCCESS',
@@ -212,9 +212,9 @@ router.get('/periods/:id/adjustments', requirePermission('payroll.read'), (req, 
   });
 });
 
-router.post('/periods/:id/adjustments', requirePermission('payroll.read'), (req, res) => {
+router.post('/periods/:id/adjustments', requirePermission('payroll.read'), async (req, res) => {
   try {
-    const a = PR.proposeAdjustment({
+    const a = await PR.proposeAdjustment({
       periodId: req.params.id,
       employeeId: req.body?.employeeId,
       adjustmentType: req.body?.adjustmentType,
@@ -235,9 +235,9 @@ router.post('/periods/:id/adjustments', requirePermission('payroll.read'), (req,
 
 // Approving is a distinct permission from proposing, so the person who works
 // out a deduction is not necessarily the person who signs it off.
-router.post('/adjustments/:id/decide', requirePermission('payroll.approve'), (req, res) => {
+router.post('/adjustments/:id/decide', requirePermission('payroll.approve'), async (req, res) => {
   try {
-    const r = PR.decideAdjustment({
+    const r = await PR.decideAdjustment({
       adjustmentId: req.params.id,
       decision: req.body?.decision,
       approvedDays: req.body?.approvedDays ?? null,

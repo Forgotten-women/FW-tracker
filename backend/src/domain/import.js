@@ -132,7 +132,7 @@ function parseTime(raw) {
  * Returns every row classified as valid or invalid, with a reason. Spec 24 asks
  * for exactly this summary before HR confirms.
  */
-function preview(csvText) {
+async function preview(csvText) {
   const rows = parseCsv(csvText);
   if (rows.length < 2) {
     return { ok: false, error: 'The file needs a header row and at least one data row.' };
@@ -156,7 +156,7 @@ function preview(csvText) {
   }
 
   const employeesById = new Map(
-    db.prepare('SELECT id, name, employee_number FROM employees').all()
+    (await db.prepare('SELECT id, name, employee_number FROM employees').all())
       .map(e => [e.id, e]),
   );
   const employeesByNumber = new Map(
@@ -250,9 +250,9 @@ function preview(csvText) {
   // How many valid rows would overwrite something already recorded.
   let wouldReplace = 0;
   for (const r of valid) {
-    const existing = db.prepare(
+    const existing = (await db.prepare(
       "SELECT COUNT(*) c FROM attendance_events WHERE employee_id = ? AND date_key = ? AND source = 'IMPORT' AND voided_at IS NULL"
-    ).get(r.employeeId, r.dateKey).c;
+    ).get(r.employeeId, r.dateKey)).c;
     if (existing) wouldReplace++;
   }
 
@@ -280,8 +280,8 @@ function preview(csvText) {
  * Only rows that validate are written. Invalid rows are returned again so the
  * caller can show what was skipped and why - never dropped in silence.
  */
-function commit(csvText, { actor, replaceExisting = false }) {
-  const result = preview(csvText);
+async function commit(csvText, { actor, replaceExisting = false }) {
+  const result = await preview(csvText);
   if (!result.ok) return result;
 
   const nowMs = T.now();
@@ -301,9 +301,9 @@ function commit(csvText, { actor, replaceExisting = false }) {
     VALUES (?,?,?,?,?,?,?,?,?)
   `);
 
-  tx(() => {
+  await tx(async () => {
     for (const r of result.valid) {
-      const existing = db.prepare(
+      const existing = await db.prepare(
         "SELECT id FROM attendance_events WHERE employee_id = ? AND date_key = ? AND source = 'IMPORT' AND voided_at IS NULL"
       ).all(r.employeeId, r.dateKey);
 
@@ -312,34 +312,34 @@ function commit(csvText, { actor, replaceExisting = false }) {
         // Voided, not deleted. Spec 26: corrections are versioned changes, so
         // the superseded import stays visible in history.
         for (const e of existing) {
-          db.prepare('UPDATE attendance_events SET voided_at = ?, voided_reason = ? WHERE id = ?')
+          await db.prepare('UPDATE attendance_events SET voided_at = ?, voided_reason = ? WHERE id = ?')
             .run(nowMs, `Replaced by import at ${T.displayTime(nowMs)}`, e.id);
         }
-        db.prepare('DELETE FROM break_records WHERE employee_id = ? AND date_key = ?')
+        await db.prepare('DELETE FROM break_records WHERE employee_id = ? AND date_key = ?')
           .run(r.employeeId, r.dateKey);
         replaced++;
       }
 
-      const mk = (type, hhmm) => {
+      const mk = async (type, hhmm) => {
         if (!hhmm) return;
-        insertEvent.run(
+        await insertEvent.run(
           'ae_' + crypto.randomBytes(8).toString('hex'),
           r.employeeId, r.dateKey, T.wallClockToEpoch(r.dateKey, hhmm),
           type, nowMs, actor, r.notes,
         );
       };
 
-      mk('CLOCK_IN', r.clockIn);
-      mk('BREAK_START', r.breakStart);
-      mk('BREAK_END', r.breakEnd);
-      mk('CLOCK_OUT', r.clockOut);
+      await mk('CLOCK_IN', r.clockIn);
+      await mk('BREAK_START', r.breakStart);
+      await mk('BREAK_END', r.breakEnd);
+      await mk('CLOCK_OUT', r.clockOut);
 
       if (r.breakStart && r.breakEnd) {
         const started = T.wallClockToEpoch(r.dateKey, r.breakStart);
         const ended = T.wallClockToEpoch(r.dateKey, r.breakEnd);
         const permitted = require('./schedule').resolve(r.employeeId, r.dateKey).permittedBreakMinutes;
         const actual = Math.max(0, Math.round((ended - started) / 60000));
-        insertBreak.run(
+        await insertBreak.run(
           'brk_' + crypto.randomBytes(8).toString('hex'),
           r.employeeId, r.dateKey, started, ended, permitted,
           actual, Math.max(0, actual - permitted), nowMs,
@@ -350,7 +350,7 @@ function commit(csvText, { actor, replaceExisting = false }) {
       touched.add(`${r.employeeId}|${r.dateKey}`);
     }
 
-    audit({
+    await audit({
       actor, action: 'ATTENDANCE_IMPORTED',
       targetType: 'attendance',
       after: {
@@ -360,12 +360,12 @@ function commit(csvText, { actor, replaceExisting = false }) {
       },
       note: `${imported} row(s) imported, ${result.invalid.length} rejected`,
     });
-  })();
+  });
 
   // Derive every affected day so the ledger and summaries reflect the import.
   for (const key of touched) {
     const [employeeId, dateKey] = key.split('|');
-    A.recomputeDay(employeeId, dateKey, T.endOfDay(dateKey) + 1);
+    await A.recomputeDay(employeeId, dateKey, T.endOfDay(dateKey) + 1);
   }
 
   return {

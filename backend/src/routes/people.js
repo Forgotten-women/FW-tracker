@@ -21,19 +21,19 @@ const T = require('../util/time');
 // Employee Mobile Self-Profile
 // ---------------------------------------------------------------------------
 
-router.get('/mine/profile', (req, res, next) => {
+router.get('/mine/profile', async (req, res, next) => {
   if (req.headers['x-admin-key']) {
-    return requireUserOrAdminKey()(req, res, () => {
+    return requireUserOrAdminKey()(req, res, async () => {
       const empId = req.query.employeeId || req.auth.employeeId || req.auth.userId;
       if (!empId) return res.status(400).json({ status: 'ERROR', message: 'employeeId required for admin caller.' });
-      const prof = people.myEmployeeProfile(empId);
+      const prof = await people.myEmployeeProfile(empId);
       if (!prof) return res.status(404).json({ status: 'ERROR', message: 'Profile not found.' });
       return res.json({ status: 'SUCCESS', profile: prof });
     });
   }
-  requireDevice(req, res, () => {
+  await requireDevice(req, res, async () => {
     const employeeId = req.auth.employeeId;
-    const prof = people.myEmployeeProfile(employeeId);
+    const prof = await people.myEmployeeProfile(employeeId);
     if (!prof) return res.status(404).json({ status: 'ERROR', message: 'Profile not found.' });
     res.json({ status: 'SUCCESS', profile: prof });
   });
@@ -45,16 +45,16 @@ router.get('/mine/profile', (req, res, next) => {
 
 router.get('/employee/:employeeId/profile',
   requireUserOrAdminKey('employee.read'), requireEmployeeAccess(),
-  (req, res) => {
-    const prof = people.profile(req.params.employeeId, { permissions: req.auth.permissions });
+  async (req, res) => {
+    const prof = await people.profile(req.params.employeeId, { permissions: req.auth.permissions });
     if (!prof) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
 
     // Salary is a sensitive group of its own; attach it only with the salary
     // permission, and always the current figure plus history.
     if (req.auth.permissions.has('employee.salary.read')) {
-      const s = payroll.salaryAt(req.params.employeeId);
+      const s = await payroll.salaryAt(req.params.employeeId);
       prof.salary = s.blocked ? null : { monthly: s.monthly, annual: s.annual, daily: s.daily };
-      prof.salaryHistory = payroll.salaryHistoryFor(req.params.employeeId);
+      prof.salaryHistory = await payroll.salaryHistoryFor(req.params.employeeId);
     }
 
     res.json({ status: 'SUCCESS', profile: prof });
@@ -62,10 +62,10 @@ router.get('/employee/:employeeId/profile',
 
 router.get('/employee/:employeeId/employment-history',
   requireUserOrAdminKey('employee.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     res.json({
       status: 'SUCCESS',
-      history: people.employmentHistory(req.params.employeeId).map(er => ({
+      history: await (await people.employmentHistory(req.params.employeeId)).map(er => ({
         jobTitle: er.job_title,
         employmentType: er.employment_type,
         startDate: er.start_date,
@@ -84,9 +84,9 @@ router.get('/employee/:employeeId/employment-history',
 
 router.post('/employee/:employeeId/employment',
   requireUserOrAdminKey('employee.write'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const r = people.setEmployment({
+      const r = await people.setEmployment({
         employeeId: req.params.employeeId,
         ...req.body,
         actor: req.auth.actor,
@@ -99,9 +99,9 @@ router.post('/employee/:employeeId/employment',
 
 router.post('/employee/:employeeId/status',
   requireUserOrAdminKey('employee.write'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const r = people.setStatus({
+      const r = await people.setStatus({
         employeeId: req.params.employeeId,
         status: req.body?.status,
         effectiveDate: req.body?.effectiveDate || null,
@@ -120,9 +120,9 @@ router.post('/employee/:employeeId/status',
 
 router.post('/employee/:employeeId/personal',
   requireUserOrAdminKey('employee.write', 'employee.personal.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      people.setPersonal({ employeeId: req.params.employeeId, fields: req.body || {}, actor: req.auth.actor });
+      await people.setPersonal({ employeeId: req.params.employeeId, fields: req.body || {}, actor: req.auth.actor });
       res.json({ status: 'SUCCESS' });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
@@ -131,9 +131,9 @@ router.post('/employee/:employeeId/personal',
 
 router.post('/employee/:employeeId/bank',
   requireUserOrAdminKey('employee.write', 'employee.bank.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      people.setBank({ employeeId: req.params.employeeId, fields: req.body || {}, actor: req.auth.actor });
+      await people.setBank({ employeeId: req.params.employeeId, fields: req.body || {}, actor: req.auth.actor });
       res.json({ status: 'SUCCESS' });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
@@ -142,9 +142,9 @@ router.post('/employee/:employeeId/bank',
 
 router.post('/employee/:employeeId/emergency-contact',
   requireUserOrAdminKey('employee.write', 'employee.nextofkin.read'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const r = people.addEmergencyContact({ employeeId: req.params.employeeId, ...req.body, actor: req.auth.actor });
+      const r = await people.addEmergencyContact({ employeeId: req.params.employeeId, ...req.body, actor: req.auth.actor });
       res.status(201).json({ status: 'SUCCESS', ...r });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
@@ -155,25 +155,25 @@ router.post('/employee/:employeeId/emergency-contact',
 // Org structure
 // ---------------------------------------------------------------------------
 
-router.get('/departments', requireUserOrAdminKey('employee.read'), (req, res) => {
-  res.json({ status: 'SUCCESS', departments: people.listDepartments() });
+router.get('/departments', requireUserOrAdminKey('employee.read'), async (req, res) => {
+  res.json({ status: 'SUCCESS', departments: await people.listDepartments() });
 });
 
-router.post('/departments', requireUserOrAdminKey('employee.write'), (req, res) => {
+router.post('/departments', requireUserOrAdminKey('employee.write'), async (req, res) => {
   try {
-    res.status(201).json({ status: 'SUCCESS', department: people.createDepartment({ ...req.body, actor: req.auth.actor }) });
+    res.status(201).json({ status: 'SUCCESS', department: await people.createDepartment({ ...req.body, actor: req.auth.actor }) });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
   }
 });
 
-router.get('/offices', requireUserOrAdminKey('employee.read'), (req, res) => {
-  res.json({ status: 'SUCCESS', offices: people.listOffices() });
+router.get('/offices', requireUserOrAdminKey('employee.read'), async (req, res) => {
+  res.json({ status: 'SUCCESS', offices: await people.listOffices() });
 });
 
-router.post('/offices', requireUserOrAdminKey('settings.write'), (req, res) => {
+router.post('/offices', requireUserOrAdminKey('settings.write'), async (req, res) => {
   try {
-    res.status(201).json({ status: 'SUCCESS', office: people.createOffice({ ...req.body, actor: req.auth.actor }) });
+    res.status(201).json({ status: 'SUCCESS', office: await people.createOffice({ ...req.body, actor: req.auth.actor }) });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
   }
@@ -181,9 +181,9 @@ router.post('/offices', requireUserOrAdminKey('settings.write'), (req, res) => {
 
 router.post('/employee/:employeeId/manager',
   requireUserOrAdminKey('employee.write'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const r = people.assignManager({
+      const r = await people.assignManager({
         managerEmployeeId: req.body?.managerEmployeeId,
         employeeId: req.params.employeeId,
         actor: req.auth.actor,
@@ -196,8 +196,8 @@ router.post('/employee/:employeeId/manager',
 
 router.delete('/employee/:employeeId/manager/:managerEmployeeId',
   requireUserOrAdminKey('employee.write'), requireEmployeeAccess(),
-  (req, res) => {
-    people.endManagerAssignment({
+  async (req, res) => {
+    await people.endManagerAssignment({
       managerEmployeeId: req.params.managerEmployeeId,
       employeeId: req.params.employeeId,
       actor: req.auth.actor,

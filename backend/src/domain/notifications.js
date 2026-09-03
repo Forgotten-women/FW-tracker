@@ -21,7 +21,7 @@ const T = require('../util/time');
  * @param {string|null} [opts.link=null] - Deep link or action identifier (e.g. '/leave', 'corr_123', 'doc_456').
  * @param {number} [opts.nowMs=T.now()] - Timestamp
  */
-function notify({
+async function notify({
   employeeId = null,
   userId = null,
   category,
@@ -33,7 +33,7 @@ function notify({
 }) {
   const id = 'ntf_' + crypto.randomBytes(8).toString('hex');
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO notifications (id, employee_id, user_id, category, title, body, severity, link, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, employeeId, userId, category, title, body, severity, link, nowMs);
@@ -65,17 +65,17 @@ function notify({
 /**
  * Lists notifications for an employee.
  */
-function listForEmployee(employeeId, { includeDismissed = false, limit = 100 } = {}) {
-  const rows = db.prepare(`
+async function listForEmployee(employeeId, { includeDismissed = false, limit = 100 } = {}) {
+  const rows = await db.prepare(`
     SELECT * FROM notifications
     WHERE employee_id = ? ${includeDismissed ? '' : 'AND dismissed_at IS NULL'}
     ORDER BY created_at DESC LIMIT ?
   `).all(employeeId, limit);
 
-  const unreadCount = db.prepare(`
+  const unreadCount = (await db.prepare(`
     SELECT COUNT(*) c FROM notifications
     WHERE employee_id = ? AND read_at IS NULL AND dismissed_at IS NULL
-  `).get(employeeId).c;
+  `).get(employeeId)).c;
 
   return {
     unreadCount,
@@ -87,15 +87,15 @@ function listForEmployee(employeeId, { includeDismissed = false, limit = 100 } =
  * Lists notifications for HR / Admins.
  * If userId is provided, returns user-specific and broadcast HR notifications.
  */
-function listForHr(userId = null, { includeDismissed = false, limit = 100 } = {}) {
+async function listForHr(userId = null, { includeDismissed = false, limit = 100 } = {}) {
   const rows = userId
-    ? db.prepare(`
+    ? await db.prepare(`
         SELECT * FROM notifications
         WHERE (user_id = ? OR (user_id IS NULL AND employee_id IS NULL))
         ${includeDismissed ? '' : 'AND dismissed_at IS NULL'}
         ORDER BY created_at DESC LIMIT ?
       `).all(userId, limit)
-    : db.prepare(`
+    : await db.prepare(`
         SELECT * FROM notifications
         WHERE employee_id IS NULL
         ${includeDismissed ? '' : 'AND dismissed_at IS NULL'}
@@ -103,15 +103,15 @@ function listForHr(userId = null, { includeDismissed = false, limit = 100 } = {}
       `).all(limit);
 
   const unreadCount = userId
-    ? db.prepare(`
+    ? (await db.prepare(`
         SELECT COUNT(*) c FROM notifications
         WHERE (user_id = ? OR (user_id IS NULL AND employee_id IS NULL))
           AND read_at IS NULL AND dismissed_at IS NULL
-      `).get(userId).c
-    : db.prepare(`
+      `).get(userId)).c
+    : (await db.prepare(`
         SELECT COUNT(*) c FROM notifications
         WHERE employee_id IS NULL AND read_at IS NULL AND dismissed_at IS NULL
-      `).get().c;
+      `).get()).c;
 
   return {
     unreadCount,
@@ -122,28 +122,28 @@ function listForHr(userId = null, { includeDismissed = false, limit = 100 } = {}
 /**
  * Marks notifications as read.
  */
-function markAsRead({ id = null, employeeId = null, userId = null, nowMs = T.now() } = {}) {
+async function markAsRead({ id = null, employeeId = null, userId = null, nowMs = T.now() } = {}) {
   if (id) {
     if (employeeId) {
-      db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND employee_id = ? AND read_at IS NULL')
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND employee_id = ? AND read_at IS NULL')
         .run(nowMs, id, employeeId);
     } else if (userId) {
-      db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND (user_id = ? OR user_id IS NULL) AND read_at IS NULL')
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND (user_id = ? OR user_id IS NULL) AND read_at IS NULL')
         .run(nowMs, id, userId);
     } else {
-      db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL')
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL')
         .run(nowMs, id);
     }
   } else {
     // Mark all unread as read
     if (employeeId) {
-      db.prepare('UPDATE notifications SET read_at = ? WHERE employee_id = ? AND read_at IS NULL')
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE employee_id = ? AND read_at IS NULL')
         .run(nowMs, employeeId);
     } else if (userId) {
-      db.prepare('UPDATE notifications SET read_at = ? WHERE (user_id = ? OR user_id IS NULL) AND read_at IS NULL')
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE (user_id = ? OR user_id IS NULL) AND read_at IS NULL')
         .run(nowMs, userId);
     } else {
-      db.prepare('UPDATE notifications SET read_at = ? WHERE employee_id IS NULL AND read_at IS NULL')
+      await db.prepare('UPDATE notifications SET read_at = ? WHERE employee_id IS NULL AND read_at IS NULL')
         .run(nowMs);
     }
   }
@@ -152,15 +152,15 @@ function markAsRead({ id = null, employeeId = null, userId = null, nowMs = T.now
 /**
  * Dismisses a notification (hides from feed).
  */
-function dismiss({ id, employeeId = null, userId = null, nowMs = T.now() }) {
+async function dismiss({ id, employeeId = null, userId = null, nowMs = T.now() }) {
   if (employeeId) {
-    db.prepare('UPDATE notifications SET dismissed_at = ? WHERE id = ? AND employee_id = ?')
+    await db.prepare('UPDATE notifications SET dismissed_at = ? WHERE id = ? AND employee_id = ?')
       .run(nowMs, id, employeeId);
   } else if (userId) {
-    db.prepare('UPDATE notifications SET dismissed_at = ? WHERE id = ? AND (user_id = ? OR user_id IS NULL)')
+    await db.prepare('UPDATE notifications SET dismissed_at = ? WHERE id = ? AND (user_id = ? OR user_id IS NULL)')
       .run(nowMs, id, userId);
   } else {
-    db.prepare('UPDATE notifications SET dismissed_at = ? WHERE id = ?')
+    await db.prepare('UPDATE notifications SET dismissed_at = ? WHERE id = ?')
       .run(nowMs, id);
   }
 }

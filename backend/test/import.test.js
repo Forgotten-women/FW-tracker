@@ -19,8 +19,8 @@ const I = require('../src/domain/import');
 const A = require('../src/domain/attendance');
 const T = require('../src/util/time');
 
-function makeEmployee(id, name, number = null) {
-  db.prepare(`
+async function makeEmployee(id, name, number = null) {
+  await db.prepare(`
     INSERT OR REPLACE INTO employees (id, name, role, active, employee_number, created_at, updated_at)
     VALUES (?,?,?,1,?,?,?)
   `).run(id, name, 'Engineering', number, T.now(), T.now());
@@ -71,13 +71,13 @@ test('times are accepted in 12 and 24 hour form', () => {
 // Validation
 // ---------------------------------------------------------------------------
 
-test('a file missing required columns is rejected as a whole', () => {
-  const result = I.preview('Clock In,Clock Out\n11:00,19:00\n');
+test('a file missing required columns is rejected as a whole', async () => {
+  const result = await I.preview('Clock In,Clock Out\n11:00,19:00\n');
   assert.equal(result.ok, false);
   assert.match(result.error, /missing/i);
 });
 
-test('valid rows and invalid rows are reported separately', () => {
+test('valid rows and invalid rows are reported separately', async () => {
   const csv = [
     'Employee ID,Date,Clock In,Clock Out',
     'FW001,2026-08-03,11:00,19:00',        // fine
@@ -87,7 +87,7 @@ test('valid rows and invalid rows are reported separately', () => {
     'FW001,2026-08-04,19:00,11:00',        // out before in
   ].join('\n');
 
-  const r = I.preview(csv);
+  const r = await I.preview(csv);
   assert.equal(r.ok, true);
   assert.equal(r.summary.rowsRead, 5);
   assert.equal(r.summary.valid, 1);
@@ -103,70 +103,70 @@ test('valid rows and invalid rows are reported separately', () => {
   assert.ok(r.invalid.some(x => x.problems.some(p => /before clock in/.test(p))));
 });
 
-test('employees match by id, employee number or name', () => {
+test('employees match by id, employee number or name', async () => {
   const csv = [
     'Employee,Date,Clock In',
     'Abdullah Shahid,2026-08-05,11:00',
     'FW002,2026-08-05,11:00',
   ].join('\n');
-  const r = I.preview(csv);
+  const r = await I.preview(csv);
   assert.equal(r.summary.valid, 2);
   assert.deepEqual(r.valid.map(v => v.employeeId).sort(), ['emp_aa', 'emp_bb']);
 });
 
 // A date like 03/04/2026 means different things in different countries, and
 // guessing silently would put someone's attendance on the wrong day.
-test('an ambiguous date is reported rather than guessed', () => {
-  const r = I.preview('Employee ID,Date,Clock In\nFW001,03/04/2026,11:00\n');
+test('an ambiguous date is reported rather than guessed', async () => {
+  const r = await I.preview('Employee ID,Date,Clock In\nFW001,03/04/2026,11:00\n');
   assert.equal(r.summary.valid, 0);
   assert.match(r.invalid[0].problems[0], /Ambiguous date/);
 });
 
-test('an unambiguous day-first date is accepted', () => {
-  const r = I.preview('Employee ID,Date,Clock In\nFW001,26/08/2026,11:00\n');
+test('an unambiguous day-first date is accepted', async () => {
+  const r = await I.preview('Employee ID,Date,Clock In\nFW001,26/08/2026,11:00\n');
   assert.equal(r.summary.valid, 1);
   assert.equal(r.valid[0].dateKey, '2026-08-26');
 });
 
-test('duplicate rows for one employee-day are caught', () => {
+test('duplicate rows for one employee-day are caught', async () => {
   const csv = [
     'Employee ID,Date,Clock In',
     'FW001,2026-08-06,11:00',
     'FW001,2026-08-06,12:00',
   ].join('\n');
-  const r = I.preview(csv);
+  const r = await I.preview(csv);
   assert.equal(r.summary.valid, 1);
   assert.match(r.invalid[0].problems[0], /Duplicate/);
 });
 
-test('an unpaired break is caught', () => {
-  const r = I.preview('Employee ID,Date,Clock In,Break Start,Clock Out\nFW001,2026-08-07,11:00,14:00,19:00\n');
+test('an unpaired break is caught', async () => {
+  const r = await I.preview('Employee ID,Date,Clock In,Break Start,Clock Out\nFW001,2026-08-07,11:00,14:00,19:00\n');
   assert.equal(r.summary.valid, 0);
   assert.match(r.invalid[0].problems[0], /Break start with no break end/);
 });
 
-test('preview writes nothing', () => {
-  const before = db.prepare('SELECT COUNT(*) c FROM attendance_events').get().c;
-  I.preview('Employee ID,Date,Clock In,Clock Out\nFW001,2026-08-08,11:00,19:00\n');
-  assert.equal(db.prepare('SELECT COUNT(*) c FROM attendance_events').get().c, before);
+test('preview writes nothing', async () => {
+  const before = (await db.prepare('SELECT COUNT(*) c FROM attendance_events').get()).c;
+  await I.preview('Employee ID,Date,Clock In,Clock Out\nFW001,2026-08-08,11:00,19:00\n');
+  assert.equal((await db.prepare('SELECT COUNT(*) c FROM attendance_events').get()).c, before);
 });
 
 // ---------------------------------------------------------------------------
 // Commit
 // ---------------------------------------------------------------------------
 
-test('committing imports valid rows and skips invalid ones', () => {
+test('committing imports valid rows and skips invalid ones', async () => {
   const csv = [
     'Employee ID,Date,Clock In,Break Start,Break End,Clock Out',
     'FW001,2026-08-10,11:17,14:00,14:42,18:53',
     'FW999,2026-08-10,11:00,,,19:00',
   ].join('\n');
 
-  const r = I.commit(csv, { actor: 'user:test' });
+  const r = await I.commit(csv, { actor: 'user:test' });
   assert.equal(r.summary.imported, 1);
   assert.equal(r.summary.invalid, 1, 'the unknown employee is still reported, not dropped');
 
-  const events = db.prepare(
+  const events = await db.prepare(
     "SELECT event_type, source FROM attendance_events WHERE employee_id = 'emp_aa' AND date_key = '2026-08-10' ORDER BY occurred_at"
   ).all();
   assert.deepEqual(events.map(e => e.event_type), ['CLOCK_IN', 'BREAK_START', 'BREAK_END', 'CLOCK_OUT']);
@@ -175,8 +175,8 @@ test('committing imports valid rows and skips invalid ones', () => {
   assert.ok(events.every(e => e.source === 'IMPORT'));
 });
 
-test('imported days are derived, matching the spec 8.1 worked example', () => {
-  const row = db.prepare(
+test('imported days are derived, matching the spec 8.1 worked example', async () => {
+  const row = await db.prepare(
     "SELECT * FROM attendance_daily_summary WHERE employee_id = 'emp_aa' AND date_key = '2026-08-10'"
   ).get();
 
@@ -188,32 +188,32 @@ test('imported days are derived, matching the spec 8.1 worked example', () => {
   assert.equal(row.is_late_occurrence, 1);
 });
 
-test('re-importing the same day is skipped unless replacement is asked for', () => {
+test('re-importing the same day is skipped unless replacement is asked for', async () => {
   const csv = 'Employee ID,Date,Clock In,Clock Out\nFW001,2026-08-10,11:00,19:00\n';
 
-  const again = I.commit(csv, { actor: 'user:test' });
+  const again = await I.commit(csv, { actor: 'user:test' });
   assert.equal(again.summary.imported, 0, 'existing data is not silently overwritten');
 
-  const replaced = I.commit(csv, { actor: 'user:test', replaceExisting: true });
+  const replaced = await I.commit(csv, { actor: 'user:test', replaceExisting: true });
   assert.equal(replaced.summary.imported, 1);
   assert.equal(replaced.summary.replaced, 1);
 
   // The superseded rows are voided, not deleted. Spec 26.
-  const voided = db.prepare(
+  const voided = (await db.prepare(
     "SELECT COUNT(*) c FROM attendance_events WHERE employee_id = 'emp_aa' AND date_key = '2026-08-10' AND voided_at IS NOT NULL"
-  ).get().c;
+  ).get()).c;
   assert.ok(voided > 0, 'the replaced import must remain in history');
 
   // And the day now reflects the replacement: 11:00 start, so no lateness.
-  const row = db.prepare(
+  const row = await db.prepare(
     "SELECT * FROM attendance_daily_summary WHERE employee_id = 'emp_aa' AND date_key = '2026-08-10'"
   ).get();
   assert.equal(row.late_minutes, 0);
   assert.equal(row.is_late_occurrence, 0);
 });
 
-test('the import is audited with its counts', () => {
-  const entry = db.prepare(
+test('the import is audited with its counts', async () => {
+  const entry = await db.prepare(
     "SELECT * FROM audit_log WHERE action = 'ATTENDANCE_IMPORTED' ORDER BY at DESC LIMIT 1"
   ).get();
   assert.ok(entry);
@@ -223,7 +223,7 @@ test('the import is audited with its counts', () => {
   assert.match(entry.note, /rejected/);
 });
 
-test('imported lateness feeds the occurrence count', () => {
+test('imported lateness feeds the occurrence count', async () => {
   // Four late days imported at once should reach the threshold, exactly as if
   // they had been observed live.
   const csv = [
@@ -234,13 +234,13 @@ test('imported lateness feeds the occurrence count', () => {
     'FW002,2026-09-04,11:20,19:00',
   ].join('\n');
 
-  const r = I.commit(csv, { actor: 'user:test' });
+  const r = await I.commit(csv, { actor: 'user:test' });
   assert.equal(r.summary.imported, 4);
 
-  const status = A.latenessStatus('emp_bb', '2026-09-15');
+  const status = await A.latenessStatus('emp_bb', '2026-09-15');
   assert.equal(status.count, 4);
   assert.equal(status.thresholdReached, true);
 
   // Still only a referral. Spec 9.3.
-  assert.equal(db.prepare('SELECT COUNT(*) c FROM formal_warnings').get().c, 0);
+  assert.equal((await db.prepare('SELECT COUNT(*) c FROM formal_warnings').get()).c, 0);
 });

@@ -35,11 +35,11 @@ function presentBalance(b) {
 // Employee self-service
 // ---------------------------------------------------------------------------
 
-router.get('/mine', requireDevice, (req, res) => {
+router.get('/mine', requireDevice, async (req, res) => {
   const { employeeId } = req.auth;
-  const balance = L.balanceFor(employeeId);
+  const balance = await L.balanceFor(employeeId);
 
-  const requests = db.prepare(`
+  const requests = await db.prepare(`
     SELECT r.*, t.name AS type_name FROM leave_requests r
     JOIN leave_types t ON t.id = r.leave_type_id
     WHERE r.employee_id = ? ORDER BY r.start_date DESC LIMIT 50
@@ -57,8 +57,8 @@ router.get('/mine', requireDevice, (req, res) => {
   });
 });
 
-router.get('/types', requireDevice, (req, res) => {
-  const rows = db.prepare('SELECT * FROM leave_types WHERE active = 1').all();
+router.get('/types', requireDevice, async (req, res) => {
+  const rows = await db.prepare('SELECT * FROM leave_types WHERE active = 1').all();
   res.json({
     status: 'SUCCESS',
     types: rows.map(t => ({
@@ -72,9 +72,9 @@ router.get('/types', requireDevice, (req, res) => {
 
 // Spec 15 asks for the figures to be shown BEFORE submission, so nobody
 // discovers a shortfall after the fact.
-router.post('/preview', requireDevice, (req, res) => {
+router.post('/preview', requireDevice, async (req, res) => {
   const { leaveTypeId, startDate, endDate, dayPortion } = req.body || {};
-  const p = L.previewRequest({
+  const p = await L.previewRequest({
     employeeId: req.auth.employeeId, leaveTypeId, startDate, endDate, dayPortion,
   });
   if (!p.ok) return res.status(400).json({ status: 'ERROR', ...p });
@@ -91,10 +91,10 @@ router.post('/preview', requireDevice, (req, res) => {
   });
 });
 
-router.post('/request', requireDevice, (req, res) => {
+router.post('/request', requireDevice, async (req, res) => {
   const { leaveTypeId, startDate, endDate, dayPortion, reason, evidenceDocumentId } = req.body || {};
   try {
-    const r = L.submitRequest({
+    const r = await L.submitRequest({
       employeeId: req.auth.employeeId,
       leaveTypeId, startDate, endDate, dayPortion, reason, evidenceDocumentId,
     });
@@ -113,13 +113,13 @@ router.post('/request', requireDevice, (req, res) => {
   }
 });
 
-router.post('/request/:id/cancel', requireDevice, (req, res) => {
-  const r = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
+router.post('/request/:id/cancel', requireDevice, async (req, res) => {
+  const r = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
   if (!r || r.employee_id !== req.auth.employeeId) {
     return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
   }
   try {
-    const out = L.cancelRequest({
+    const out = await L.cancelRequest({
       requestId: req.params.id,
       actor: `employee:${req.auth.employeeId}`,
       reason: req.body?.reason || null,
@@ -134,21 +134,21 @@ router.post('/request/:id/cancel', requireDevice, (req, res) => {
 // HR / Admin Leave Management
 // ---------------------------------------------------------------------------
 
-router.get('/pending', requireUserOrAdminKey('leave.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
-  const rows = db.prepare(`
+router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+  const rows = (await db.prepare(`
     SELECT r.*, e.name AS employee_name, e.role AS employee_role, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
     WHERE r.status IN ('PENDING_HR','PENDING_MANAGER') AND r.cancelled_at IS NULL
     ORDER BY r.start_date ASC
-  `).all().filter(r => visible.has(r.employee_id));
+  `).all()).filter(r => visible.has(r.employee_id));
 
   res.json({
     status: 'SUCCESS',
-    requests: rows.map(r => {
-      const preview = L.previewRequest({
+    requests: await Promise.all(rows.map(async r => {
+      const preview = await L.previewRequest({
         employeeId: r.employee_id, leaveTypeId: r.leave_type_id,
         startDate: r.start_date, endDate: r.end_date, dayPortion: r.day_portion,
         excludeRequestId: r.id,
@@ -171,12 +171,12 @@ router.get('/pending', requireUserOrAdminKey('leave.read'), (req, res) => {
         reducesEntitlement: !!r.reduces_entitlement,
         requiresEvidence: !!r.requires_evidence,
       };
-    }),
+    })),
   });
 });
 
-router.get('/requests', requireUserOrAdminKey('leave.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const statusFilter = req.query.status;
 
   let query = `
@@ -192,7 +192,7 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), (req, res) => {
   }
   query += ' ORDER BY r.start_date DESC LIMIT 200';
 
-  const rows = db.prepare(query).all(...params).filter(r => visible.has(r.employee_id));
+  const rows = (await db.prepare(query).all(...params)).filter(r => visible.has(r.employee_id));
 
   res.json({
     status: 'SUCCESS',
@@ -220,20 +220,20 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), (req, res) => {
   });
 });
 
-router.get('/balances', requireUserOrAdminKey('leave.read'), (req, res) => {
-  const visible = rbac.accessibleEmployeeIds(req.auth);
-  const employees = db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all()
+router.get('/balances', requireUserOrAdminKey('leave.read'), async (req, res) => {
+  const visible = await rbac.accessibleEmployeeIds(req.auth);
+  const employees = (await db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all())
     .filter(e => visible.includes(e.id));
 
-  const rows = employees.map(e => {
-    const b = L.balanceFor(e.id);
+  const rows = await Promise.all(employees.map(async e => {
+    const b = await L.balanceFor(e.id);
     return {
       employeeId: e.id,
       employeeName: e.name,
       role: e.role,
       balance: presentBalance(b),
     };
-  });
+  }));
 
   res.json({
     status: 'SUCCESS',
@@ -241,12 +241,12 @@ router.get('/balances', requireUserOrAdminKey('leave.read'), (req, res) => {
   });
 });
 
-router.get('/calendar', requireUserOrAdminKey('leave.read'), (req, res) => {
-  const visible = new Set(rbac.accessibleEmployeeIds(req.auth));
+router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) => {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const from = String(req.query.from || T.dateKey(T.now() - 30 * 24 * 60 * 60 * 1000));
   const to = String(req.query.to || T.dateKey(T.now() + 60 * 24 * 60 * 60 * 1000));
 
-  const rows = db.prepare(`
+  const rows = (await db.prepare(`
     SELECT r.*, e.name AS employee_name, t.name AS type_name
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
@@ -254,7 +254,7 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), (req, res) => {
     WHERE r.status = 'APPROVED' AND r.cancelled_at IS NULL
       AND r.start_date <= ? AND r.end_date >= ?
     ORDER BY r.start_date ASC
-  `).all(to, from).filter(r => visible.has(r.employee_id));
+  `).all(to, from)).filter(r => visible.has(r.employee_id));
 
   res.json({
     status: 'SUCCESS',
@@ -274,23 +274,23 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), (req, res) => {
 
 router.post('/request/:id/decide',
   requireUserOrAdminKey('leave.approve'),
-  (req, res) => {
-    const r = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
+  async (req, res) => {
+    const r = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
-    if (!rbac.canAccessEmployee(req.auth, r.employee_id)) {
+    if (!await rbac.canAccessEmployee(req.auth, r.employee_id)) {
       return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
     }
 
     try {
       const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
-      const out = L.decideRequest({
+      const out = await L.decideRequest({
         requestId: req.params.id,
         decision: req.body?.decision,
         notes: req.body?.notes,
         overdraftReason: req.body?.overdraftReason || null,
         actor,
       });
-      res.json({ status: 'SUCCESS', ...out, balance: presentBalance(L.balanceFor(r.employee_id)) });
+      res.json({ status: 'SUCCESS', ...out, balance: presentBalance(await L.balanceFor(r.employee_id)) });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
     }
@@ -298,9 +298,9 @@ router.post('/request/:id/decide',
 
 router.get('/employee/:employeeId',
   requireUserOrAdminKey('leave.read'), requireEmployeeAccess(),
-  (req, res) => {
-    const balance = L.balanceFor(req.params.employeeId);
-    const ledger = db.prepare(`
+  async (req, res) => {
+    const balance = await L.balanceFor(req.params.employeeId);
+    const ledger = await db.prepare(`
       SELECT * FROM leave_accrual_ledger WHERE employee_id = ?
       ORDER BY rowid DESC LIMIT 200
     `).all(req.params.employeeId);
@@ -321,10 +321,10 @@ router.get('/employee/:employeeId',
 
 router.post('/employee/:employeeId/adjust',
   requireUserOrAdminKey('leave.write'), requireEmployeeAccess(),
-  (req, res) => {
+  async (req, res) => {
     try {
       const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
-      const balance = L.adjustBalance({
+      const balance = await L.adjustBalance({
         employeeId: req.params.employeeId,
         days: Number(req.body?.days),
         reason: req.body?.reason,
@@ -340,12 +340,17 @@ router.post('/employee/:employeeId/adjust',
 // Who cannot be assessed at all, and why. Under an anniversary-based year an
 // employee with no start date has no computable balance, and that needs to be
 // visible rather than showing as zero.
-router.get('/blocked', requireUserOrAdminKey('leave.read'), (req, res) => {
-  const visible = rbac.accessibleEmployeeIds(req.auth);
-  const rows = db.prepare('SELECT id, name FROM employees WHERE active = 1').all()
-    .filter(e => visible.includes(e.id))
-    .map(e => ({ employee: e, year: L.holidayYearFor(e.id) }))
-    .filter(x => x.year.blocked);
+router.get('/blocked', requireUserOrAdminKey('leave.read'), async (req, res) => {
+  const visible = await rbac.accessibleEmployeeIds(req.auth);
+  // The .filter used to run on the results of an async .map, i.e. on promises,
+  // which are always truthy - so every active employee was reported as blocked.
+  // Resolve first, then filter.
+  const resolved = await Promise.all(
+    (await db.prepare('SELECT id, name FROM employees WHERE active = 1').all())
+      .filter(e => visible.includes(e.id))
+      .map(async e => ({ employee: e, year: await L.holidayYearFor(e.id) })),
+  );
+  const rows = resolved.filter(x => x.year.blocked);
 
   res.json({
     status: 'SUCCESS',

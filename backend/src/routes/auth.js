@@ -48,7 +48,7 @@ function present(user) {
 }
 
 // POST /api/auth/login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   if (ipThrottled(ip)) {
     return res.status(429).json({
@@ -59,7 +59,7 @@ router.post('/login', (req, res) => {
 
   const { email, password } = req.body || {};
   try {
-    const result = rbac.login({
+    const result = await rbac.login({
       email, password, ip,
       userAgent: req.headers['user-agent'] || null,
     });
@@ -76,9 +76,9 @@ router.post('/login', (req, res) => {
 });
 
 // POST /api/auth/logout
-router.post('/logout', requireUser, (req, res) => {
+router.post('/logout', requireUser, async (req, res) => {
   const token = (req.headers.authorization || '').replace(/^Bearer /, '') || req.headers['x-session-token'];
-  rbac.revokeSession(token);
+  await rbac.revokeSession(token);
   res.json({ status: 'SUCCESS', message: 'Signed out.' });
 });
 
@@ -88,10 +88,10 @@ router.get('/me', requireUser, (req, res) => {
 });
 
 // POST /api/auth/change-password
-router.post('/change-password', requireUser, (req, res) => {
+router.post('/change-password', requireUser, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   try {
-    rbac.changePassword({
+    await rbac.changePassword({
       userId: req.auth.id,
       currentPassword: currentPassword ?? '',
       newPassword,
@@ -107,8 +107,8 @@ router.post('/change-password', requireUser, (req, res) => {
 });
 
 // GET /api/auth/sessions - the user's own active sessions.
-router.get('/sessions', requireUser, (req, res) => {
-  const rows = db.prepare(`
+router.get('/sessions', requireUser, async (req, res) => {
+  const rows = await db.prepare(`
     SELECT issued_at, expires_at, last_used_at, ip, user_agent
     FROM user_sessions
     WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
@@ -128,9 +128,9 @@ router.get('/sessions', requireUser, (req, res) => {
 });
 
 // GET /api/auth/login-history - spec 27 requires this to be visible.
-router.get('/login-history', requireUser, (req, res) => {
+router.get('/login-history', requireUser, async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 20, 100);
-  const rows = db.prepare(
+  const rows = await db.prepare(
     'SELECT at, outcome, ip, user_agent FROM login_events WHERE user_id = ? ORDER BY at DESC LIMIT ?'
   ).all(req.auth.id, limit);
 
@@ -147,9 +147,9 @@ router.get('/login-history', requireUser, (req, res) => {
 });
 
 // POST /api/auth/revoke-all - "sign out everywhere" after a suspected compromise.
-router.post('/revoke-all', requireUser, (req, res) => {
-  const count = rbac.revokeAllSessions(req.auth.id);
-  audit({
+router.post('/revoke-all', requireUser, async (req, res) => {
+  const count = await rbac.revokeAllSessions(req.auth.id);
+  await audit({
     actor: `user:${req.auth.id}`, action: 'SESSIONS_REVOKED',
     targetType: 'user', targetId: req.auth.id, after: { revoked: count },
   });

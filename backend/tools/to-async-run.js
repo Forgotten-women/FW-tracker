@@ -178,7 +178,25 @@ for (const a of info.values()) {
         return;
       }
 
-      s.appendLeft(node.start, 'await ');
+      // If the result is dereferenced further - `stmt.get().name`,
+      // `schedule.resolve(id).dayEquivalentMinutes`, `rows.all().map(...)` -
+      // then a bare `await` prefix binds to the WHOLE chain and reads the
+      // property off the Promise instead of the value. The await has to wrap
+      // just this call.
+      //
+      // Getting this wrong also stopped the codemod converging: the call itself
+      // still had no AwaitExpression as its parent, so every run added another
+      // one, and the file filled up with `await await`.
+      const dereferenced = parent
+        && ((parent.type === 'MemberExpression' && parent.object === node)
+          || (parent.type === 'CallExpression' && parent.callee === node));
+
+      if (dereferenced) {
+        s.appendLeft(node.start, '(await ');
+        s.appendRight(node.end, ')');
+      } else {
+        s.appendLeft(node.start, 'await ');
+      }
       report.awaits++;
       touched = true;
     },
@@ -189,6 +207,15 @@ for (const a of info.values()) {
     CallExpression(node, _state, ancestors) {
       if (node.callee.type !== 'MemberExpression') return;
       if (!SYNC_HIGHER_ORDER.has(node.callee.property.name)) return;
+
+      // Promise.all(xs.map(async …)) is the correct shape, not a finding.
+      const parent = ancestors[ancestors.length - 2];
+      if (parent
+        && parent.type === 'CallExpression'
+        && parent.callee.type === 'MemberExpression'
+        && parent.callee.object.name === 'Promise'
+        && parent.callee.property.name === 'all') return;
+
       for (const arg of node.arguments) {
         if (!FUNCTION_TYPES.has(arg.type)) continue;
         if (!a.asyncNodes.has(arg) && !arg.async) continue;
