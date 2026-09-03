@@ -47,6 +47,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _error;
   Timer? _foregroundTimer;
   Timer? _breakTimer;
+  Timer? _offlineBreak5mTimer;
+  Timer? _offlineBreakEndedTimer;
   int _breakElapsedSeconds = 0;
 
   @override
@@ -1109,8 +1111,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _buildActionHub(ActiveBreakInfo breakInfo, bool isPresent) {
     final bool breakAlreadyTaken =
-        (breakInfo.breakMinutesTaken > 0 || _attendance.breakMinutes > 0) &&
-        !breakInfo.onBreak;
+        breakInfo.breakMinutesTaken > 0 && !breakInfo.onBreak;
 
     final int permittedSeconds = 30 * 60;
     final int remainingSeconds = permittedSeconds - _breakElapsedSeconds;
