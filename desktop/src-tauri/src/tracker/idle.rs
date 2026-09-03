@@ -8,7 +8,7 @@
 pub fn get_idle_seconds() -> u64 {
     use std::mem;
     use windows_sys::Win32::System::SystemInformation::GetTickCount;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetLastInputInfo, LASTINPUTINFO};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 
     unsafe {
         let mut lii: LASTINPUTINFO = mem::zeroed();

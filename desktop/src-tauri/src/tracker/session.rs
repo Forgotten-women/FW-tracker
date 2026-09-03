@@ -16,6 +16,7 @@ pub fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
+#[allow(dead_code)]
 pub fn set_screen_locked(locked: bool) {
     let prev = IS_LOCKED.swap(locked, Ordering::SeqCst);
     if locked && !prev {

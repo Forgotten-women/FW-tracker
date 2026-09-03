@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct LocalEvent {
     pub event_id: String,
@@ -14,10 +15,12 @@ pub struct LocalEvent {
     pub retry_count: i32,
 }
 
+#[allow(dead_code)]
 pub struct OfflineStore {
     pool: SqlitePool,
 }
 
+#[allow(dead_code)]
 impl OfflineStore {
     pub async fn init(db_path: PathBuf) -> Result<Self, sqlx::Error> {
         let conn_str = format!("sqlite://{}?mode=rwc", db_path.to_string_lossy());

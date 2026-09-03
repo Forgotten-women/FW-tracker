@@ -31,7 +31,7 @@
       "identifier": "com.rethink.officetracker.desktop",
       "longDescription": "Workstation presence, active time tracking, and in-office corroboration.",
       "macOS": {
-        "frameworks": ["CoreWLAN", "CoreGraphics"],
+        "frameworks": [],
         "minimumSystemVersion": ""
       },
       "resources": [],
