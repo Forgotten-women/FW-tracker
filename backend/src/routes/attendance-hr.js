@@ -30,11 +30,13 @@ router.get('/today', requireDevice, async (req, res) => {
   const day = await A.deriveDay(employeeId, dateKey, nowMs);
   const lateness = await A.latenessStatus(employeeId, dateKey);
   const balance = await A.balanceFor(employeeId);
+  const workingHours = await A.calculateWorkingHoursMetrics(employeeId, dateKey);
 
   res.json({
     status: 'SUCCESS',
     employee: { id: employeeId, name: employeeName },
     today: A.present(day),
+    workingHours,
     // Spec 19.2: the employee must see their lateness standing clearly.
     lateness,
     // Spec 19.3: the deficit broken down, not one unexplained number.
@@ -231,9 +233,12 @@ router.get('/employee/:employeeId/summary',
       ORDER BY date_key DESC
     `).all(employeeId, from, to);
 
+    const workingHours = await A.calculateWorkingHoursMetrics(employeeId, to);
+
     res.json({
       status: 'SUCCESS',
       from, to,
+      workingHours,
       totals: {
         lateOccurrences: rows.filter(r => r.is_late_occurrence).length,
         lateMinutes: rows.reduce((a, r) => a + r.late_minutes, 0),

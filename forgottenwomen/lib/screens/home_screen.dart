@@ -760,6 +760,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final breakInfo = _todayDetails?.breakInfo ?? ActiveBreakInfo.empty();
     final deficit = _todayDetails?.deficitBalance ?? DeficitBalance.empty();
+    final workingHours = _todayDetails?.workingHours ?? const WorkingHoursMetrics();
     final isPresent = _attendance.status == PresenceStatus.inOffice ||
         _attendance.status == PresenceStatus.gracePeriod;
 
@@ -902,6 +903,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _buildShiftHeroCard(breakInfo, deficit, isPresent),
                   const SizedBox(height: 16),
 
+                  // Working Hours & Productivity Metrics Card (7h 30m Policy)
+                  _buildWorkingHoursCard(workingHours),
+                  const SizedBox(height: 16),
+
                   // 2. Action Hub (Break In/Out, Clock Out, Dispute)
                   _buildActionHub(breakInfo, isPresent),
                   const SizedBox(height: 20),
@@ -985,7 +990,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       statusIcon = Icons.radio_button_unchecked;
     }
 
-    final double progressPercent = (_attendance.totalMinutes / 480.0).clamp(0.0, 1.0);
+    final double progressPercent = (_attendance.totalMinutes / 450.0).clamp(0.0, 1.0);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1032,7 +1037,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
               Text(
-                'Shift Target: 8h 00m',
+                'Shift Target: 7h 30m',
                 style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
               ),
             ],
@@ -1106,6 +1111,161 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         const SizedBox(height: 2),
         Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
       ],
+    );
+  }
+
+  Widget _buildWorkingHoursCard(WorkingHoursMetrics metrics) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: const [
+                  Icon(Icons.timer_outlined, size: 16, color: AppColors.primaryLight),
+                  SizedBox(width: 6),
+                  Text(
+                    'WORKING HOURS BREAKDOWN',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                      color: AppColors.primaryLight,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                ),
+                child: const Text(
+                  'Daily Req: 7h 30m',
+                  style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Daily, Weekly, Monthly 3-card row
+          Row(
+            children: [
+              Expanded(
+                child: _buildPeriodTile(
+                  title: 'DAILY',
+                  worked: metrics.daily.formattedWorked,
+                  target: '7h 30m',
+                  shortText: metrics.daily.shortMinutes > 0 ? metrics.daily.formattedShort : null,
+                  extraText: metrics.daily.additionalMinutes > 0 ? metrics.daily.formattedAdditional : null,
+                  isMet: metrics.daily.isTargetMet,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildPeriodTile(
+                  title: 'WEEKLY',
+                  worked: metrics.weekly.formattedWorked,
+                  target: metrics.weekly.formattedRequiredToDate,
+                  shortText: metrics.weekly.shortMinutes > 0 ? metrics.weekly.formattedShort : null,
+                  extraText: metrics.weekly.additionalMinutes > 0 ? metrics.weekly.formattedAdditional : null,
+                  isMet: metrics.weekly.isTargetMet,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildPeriodTile(
+                  title: 'MONTHLY',
+                  worked: metrics.monthly.formattedWorked,
+                  target: metrics.monthly.formattedRequired,
+                  shortText: metrics.monthly.shortMinutes > 0 ? metrics.monthly.formattedShort : null,
+                  extraText: metrics.monthly.additionalMinutes > 0 ? metrics.monthly.formattedAdditional : null,
+                  isMet: metrics.monthly.isTargetMet,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPeriodTile({
+    required String title,
+    required String worked,
+    required String target,
+    String? shortText,
+    String? extraText,
+    required bool isMet,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.bgDark,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.textMuted, letterSpacing: 0.5),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            worked,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Target: $target',
+            style: const TextStyle(fontSize: 8.5, color: AppColors.textMuted),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          if (isMet)
+            Text(
+              extraText != null ? '+$extraText extra' : 'Target Met',
+              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.teal),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            )
+          else if (shortText != null)
+            Text(
+              'Short: $shortText',
+              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.amber),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            )
+          else
+            const Text(
+              'In progress',
+              style: TextStyle(fontSize: 9, color: AppColors.textMuted),
+            ),
+        ],
+      ),
     );
   }
 

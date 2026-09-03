@@ -512,3 +512,58 @@ test('arriving at 11:20 and leaving at 7:00 PM has 0 recovery (10m deficit)', as
   assert.equal(d.attendanceStatus, 'LATE');
 });
 
+// ---------------------------------------------------------------------------
+// 7:30 Hours Daily Required Policy & Multi-Period Metrics Tests
+// ---------------------------------------------------------------------------
+
+test('7h 30m policy: working exactly 450 minutes meets target with 0 short and 0 additional', async () => {
+  const emp = await makeEmployee('emp_hours_exact');
+  // 11:00 to 18:30 is 7.5 hours = 450 minutes
+  await present(emp, '11:00', '18:30');
+
+  const metrics = await A.calculateWorkingHoursMetrics(emp, DAY);
+  assert.equal(metrics.policy.targetDailyMinutes, 450);
+  assert.equal(metrics.policy.targetDailyHoursFormatted, '7h 30m');
+  assert.equal(metrics.daily.requiredMinutes, 450);
+  assert.equal(metrics.daily.workedMinutes, 450);
+  assert.equal(metrics.daily.shortMinutes, 0);
+  assert.equal(metrics.daily.additionalMinutes, 0);
+  assert.equal(metrics.daily.isTargetMet, true);
+  assert.equal(metrics.daily.formattedWorked, '7h 30m');
+  assert.equal(metrics.daily.formattedRequired, '7h 30m');
+  assert.equal(metrics.daily.percent, 100);
+});
+
+test('7h 30m policy: working 6h 30m (390 mins) results in 60 mins short hours', async () => {
+  const emp = await makeEmployee('emp_hours_short');
+  // 11:00 to 17:30 is 6.5 hours = 390 minutes
+  await present(emp, '11:00', '17:30');
+
+  const metrics = await A.calculateWorkingHoursMetrics(emp, DAY);
+  assert.equal(metrics.daily.requiredMinutes, 450);
+  assert.equal(metrics.daily.workedMinutes, 390);
+  assert.equal(metrics.daily.shortMinutes, 60);
+  assert.equal(metrics.daily.additionalMinutes, 0);
+  assert.equal(metrics.daily.isTargetMet, false);
+  assert.equal(metrics.daily.formattedShort, '1h 00m');
+  assert.equal(metrics.daily.formattedWorked, '6h 30m');
+});
+
+test('7h 30m policy: working 8h 00m (480 mins) results in 30 mins additional hours', async () => {
+  const emp = await makeEmployee('emp_hours_surplus');
+  // 11:00 to 19:00 is 8 hours = 480 minutes
+  await present(emp, '11:00', '19:00');
+
+  const metrics = await A.calculateWorkingHoursMetrics(emp, DAY);
+  assert.equal(metrics.daily.requiredMinutes, 450);
+  assert.equal(metrics.daily.workedMinutes, 480);
+  assert.equal(metrics.daily.shortMinutes, 0);
+  assert.equal(metrics.daily.additionalMinutes, 30);
+  assert.equal(metrics.daily.isTargetMet, true);
+  assert.equal(metrics.daily.formattedAdditional, '0h 30m');
+  assert.equal(metrics.daily.formattedWorked, '8h 00m');
+  assert.ok(metrics.weekly.requiredMinutes >= 450);
+  assert.ok(metrics.monthly.requiredMinutes >= 450);
+});
+
+

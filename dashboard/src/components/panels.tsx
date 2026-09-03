@@ -572,6 +572,21 @@ export function AttendanceTable({
         </div>
       }
     >
+      <div className="mb-3 px-3.5 py-2.5 rounded-xl bg-teal-500/10 border border-teal-500/20 text-xs text-teal-300 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-teal-400 font-bold flex items-center gap-1.5">
+            <span>⏱️</span> Required Working Time:
+          </span>
+          <span className="font-semibold text-white">7 hours 30 minutes / day</span>
+          <span className="text-teal-400/80">(37.5 hours / week)</span>
+        </div>
+        <div className="text-slate-400 text-[11px] flex items-center gap-3">
+          <span>Office Window: <strong className="text-slate-200">11:00 AM – 7:00 PM</strong></span>
+          <span>•</span>
+          <span>Authorised Break: <strong className="text-slate-200">30 mins</strong></span>
+        </div>
+      </div>
+
       <div className="overflow-x-auto rounded-xl border border-white/8">
         <table className="w-full min-w-[760px] border-collapse text-left text-xs">
           <thead className="bg-slate-900/90 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/8">
@@ -580,7 +595,7 @@ export function AttendanceTable({
               <th className="px-3 py-3.5">First In</th>
               <th className="px-3 py-3.5">Last Seen</th>
               <th className="px-3 py-3.5">Sessions</th>
-              <th className="px-3 py-3.5">Worked</th>
+              <th className="px-3 py-3.5">Worked (7h 30m Target)</th>
               <th className="px-3 py-3.5">Break Taken</th>
               <th className="px-3 py-3.5">Deficit</th>
               <th className="px-4 py-3.5 text-right">Status</th>
@@ -599,6 +614,10 @@ export function AttendanceTable({
                   const meta = STATUS_META[a.status] ?? STATUS_META.NOT_CHECKED_IN;
                   const hasExcessBreak = (a.excessBreakMinutes ?? 0) > 0;
                   const hasDeficit = (a.dailyDeficitMinutes ?? 0) > 0;
+                  const netWorkedMinutes = Math.max(0, (a.totalMinutes || 0) - (a.breakMinutes || a.activeBreakMinutes || 0));
+                  const isTargetMet = netWorkedMinutes >= 450;
+                  const shortMins = Math.max(0, 450 - netWorkedMinutes);
+                  const extraMins = Math.max(0, netWorkedMinutes - 450);
 
                   return (
                     <tr key={a.employeeId} className="hover:bg-white/[0.02] transition-colors">
@@ -630,11 +649,22 @@ export function AttendanceTable({
                         <strong className="text-emerald-400 text-sm font-bold block">{a.timeWorkedFormatted}</strong>
                         {((a.breakMinutes ?? 0) > 0 || (a.activeBreakMinutes ?? 0) > 0) ? (
                           <div className="text-[11px] text-slate-400 mt-0.5">
-                            Net: <span className="text-teal-300 font-semibold">{Math.floor(Math.max(0, (a.totalMinutes || 0) - (a.breakMinutes || a.activeBreakMinutes || 0)) / 60)}h {Math.max(0, (a.totalMinutes || 0) - (a.breakMinutes || a.activeBreakMinutes || 0)) % 60}m</span>
+                            Net: <span className="text-teal-300 font-semibold">{Math.floor(netWorkedMinutes / 60)}h {netWorkedMinutes % 60}m</span>
                           </div>
                         ) : (
                           <div className="text-[11px] text-slate-500 mt-0.5">Full presence</div>
                         )}
+                        <div className="mt-1">
+                          {isTargetMet ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/20">
+                              ✓ 7h 30m met {extraMins > 0 ? `(+${Math.floor(extraMins / 60)}h ${extraMins % 60}m)` : ''}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 border border-amber-500/20">
+                              ⏳ Short: {Math.floor(shortMins / 60)}h {shortMins % 60}m of 7h 30m
+                            </span>
+                          )}
+                        </div>
                         {a.adjustmentMinutes !== 0 && (
                           <span className="text-[10px] text-amber-400 font-semibold block mt-0.5">
                             incl. {a.adjustmentMinutes}m adj.
@@ -733,11 +763,13 @@ export function AttendanceTable({
                       {h.adjustmentNote ? h.adjustmentNote : '—'}
                     </td>
                     <td className="px-3 py-3.5">
-                      {h.totalMinutes >= 480 ? (
-                        <span className="text-xs text-emerald-400 font-bold">Completed</span>
+                      {h.totalMinutes >= 450 ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/20">
+                          ✓ 7h 30m met {h.totalMinutes > 450 ? `(+${Math.floor((h.totalMinutes - 450) / 60)}h ${(h.totalMinutes - 450) % 60}m)` : ''}
+                        </span>
                       ) : (
-                        <span className="text-xs text-amber-400 font-bold">
-                          {480 - h.totalMinutes}m deficit
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 border border-amber-500/20">
+                          ⏳ Short: {Math.floor((450 - h.totalMinutes) / 60)}h {(450 - h.totalMinutes) % 60}m
                         </span>
                       )}
                     </td>
@@ -1627,14 +1659,18 @@ export function EmployeeProfileModal({
                     <span className="font-semibold text-white">{schedule.startTime} – {schedule.endTime}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block text-[11px]">Grace Window</span>
-                    <span className="font-semibold text-white">{schedule.graceMinutes} min (to 11:10)</span>
+                    <span className="text-slate-400 block text-[11px]">Required Working Time</span>
+                    <span className="font-semibold text-teal-300">7h 30m / day (37.5h / wk)</span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[11px]">Paid Break</span>
                     <span className="font-semibold text-white">{schedule.breakMinutes} min</span>
                   </div>
-                  <div className="sm:col-span-3">
+                  <div>
+                    <span className="text-slate-400 block text-[11px]">Grace Window</span>
+                    <span className="font-semibold text-white">{schedule.graceMinutes} min (to 11:10)</span>
+                  </div>
+                  <div className="sm:col-span-2">
                     <span className="text-slate-400 block text-[11px]">Scheduled Working Days</span>
                     <span className="font-semibold text-white">{schedule.workDays}</span>
                   </div>

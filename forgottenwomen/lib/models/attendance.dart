@@ -372,6 +372,7 @@ class TodayAttendanceDetails {
   final ActiveBreakInfo breakInfo;
   final DeficitBalance deficitBalance;
   final String? latenessMessage;
+  final WorkingHoursMetrics workingHours;
 
   const TodayAttendanceDetails({
     required this.employeeName,
@@ -379,6 +380,7 @@ class TodayAttendanceDetails {
     required this.breakInfo,
     required this.deficitBalance,
     this.latenessMessage,
+    this.workingHours = const WorkingHoursMetrics(),
   });
 
   factory TodayAttendanceDetails.fromJson(Map<String, dynamic> json) {
@@ -392,6 +394,7 @@ class TodayAttendanceDetails {
     final breakdown = DeficitBreakdown.fromJson(deficitBreakdownMap);
     final deficit = DeficitBalance.fromJson(deficitMap, todayBreakdown: breakdown);
     final breakInfo = ActiveBreakInfo.fromJson(todayMap);
+    final workingHours = WorkingHoursMetrics.fromJson(json['workingHours'] as Map<String, dynamic>?);
 
     return TodayAttendanceDetails(
       employeeName: employeeMap['name'] as String? ?? '',
@@ -403,6 +406,7 @@ class TodayAttendanceDetails {
       breakInfo: breakInfo,
       deficitBalance: deficit,
       latenessMessage: latenessMap['message'] as String?,
+      workingHours: workingHours,
     );
   }
 }
@@ -450,4 +454,85 @@ class CorrectionRequest {
   bool get isApproved => status == 'APPROVED';
   bool get isRejected => status == 'REJECTED';
   bool get isAmended => status == 'AMENDED';
+}
+
+/// Working hours tracking for a specific time window (Daily, Weekly, Monthly)
+class WorkingHoursPeriod {
+  final int requiredMinutes;
+  final int workedMinutes;
+  final int shortMinutes;
+  final int additionalMinutes;
+  final int recoveredMinutes;
+  final String formattedRequired;
+  final String formattedRequiredToDate;
+  final String formattedWorked;
+  final String formattedShort;
+  final String formattedAdditional;
+  final String formattedRecovered;
+  final bool isTargetMet;
+  final int percent;
+
+  const WorkingHoursPeriod({
+    this.requiredMinutes = 0,
+    this.workedMinutes = 0,
+    this.shortMinutes = 0,
+    this.additionalMinutes = 0,
+    this.recoveredMinutes = 0,
+    this.formattedRequired = '0h 00m',
+    this.formattedRequiredToDate = '0h 00m',
+    this.formattedWorked = '0h 00m',
+    this.formattedShort = '0h 00m',
+    this.formattedAdditional = '0h 00m',
+    this.formattedRecovered = '0h 00m',
+    this.isTargetMet = false,
+    this.percent = 0,
+  });
+
+  factory WorkingHoursPeriod.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const WorkingHoursPeriod();
+    return WorkingHoursPeriod(
+      requiredMinutes: (json['requiredMinutes'] as num?)?.toInt() ?? 0,
+      workedMinutes: (json['workedMinutes'] as num?)?.toInt() ?? 0,
+      shortMinutes: (json['shortMinutes'] as num?)?.toInt() ?? 0,
+      additionalMinutes: (json['additionalMinutes'] as num?)?.toInt() ?? 0,
+      recoveredMinutes: (json['recoveredMinutes'] as num?)?.toInt() ?? 0,
+      formattedRequired: json['formattedRequired'] as String? ?? '0h 00m',
+      formattedRequiredToDate: (json['formattedRequiredToDate'] ?? json['formattedRequired']) as String? ?? '0h 00m',
+      formattedWorked: json['formattedWorked'] as String? ?? '0h 00m',
+      formattedShort: json['formattedShort'] as String? ?? '0h 00m',
+      formattedAdditional: json['formattedAdditional'] as String? ?? '0h 00m',
+      formattedRecovered: json['formattedRecovered'] as String? ?? '0h 00m',
+      isTargetMet: json['isTargetMet'] as bool? ?? false,
+      percent: (json['percent'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// Comprehensive working hours metrics across Daily, Weekly, and Monthly (Spec 7:30h policy)
+class WorkingHoursMetrics {
+  final WorkingHoursPeriod daily;
+  final WorkingHoursPeriod weekly;
+  final WorkingHoursPeriod monthly;
+  final String targetDailyHours;
+  final String officeWindow;
+
+  const WorkingHoursMetrics({
+    this.daily = const WorkingHoursPeriod(),
+    this.weekly = const WorkingHoursPeriod(),
+    this.monthly = const WorkingHoursPeriod(),
+    this.targetDailyHours = '7h 30m',
+    this.officeWindow = '11:00 – 19:00',
+  });
+
+  factory WorkingHoursMetrics.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const WorkingHoursMetrics();
+    final policy = json['policy'] as Map<String, dynamic>?;
+    return WorkingHoursMetrics(
+      daily: WorkingHoursPeriod.fromJson(json['daily'] as Map<String, dynamic>?),
+      weekly: WorkingHoursPeriod.fromJson(json['weekly'] as Map<String, dynamic>?),
+      monthly: WorkingHoursPeriod.fromJson(json['monthly'] as Map<String, dynamic>?),
+      targetDailyHours: policy?['targetDailyHoursFormatted'] as String? ?? '7h 30m',
+      officeWindow: policy?['officeWindow'] as String? ?? '11:00 – 19:00',
+    );
+  }
 }

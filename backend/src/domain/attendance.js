@@ -678,9 +678,164 @@ function present(d) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Multi-Period Working Hours Metrics (7:30h / 450m Target Policy)
+// ---------------------------------------------------------------------------
+
+function formatHoursMinutes(minutes) {
+  const m = Math.round(minutes || 0);
+  const sign = m < 0 ? '-' : '';
+  const abs = Math.abs(m);
+  const hrs = Math.floor(abs / 60);
+  const remMins = abs % 60;
+  return `${sign}${hrs}h ${String(remMins).padStart(2, '0')}m`;
+}
+
+/**
+ * Calculates working hours metrics across Daily, Weekly, and Monthly windows.
+ * Based on the policy of 7h 30m (450 mins) required working time per working day.
+ */
+async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey()) {
+  const sched = await schedule.resolve(employeeId, dateKey);
+  const targetPerDay = sched.requiredWorkingMinutes || config.office.requiredDailyWorkingMinutes || 450; // 450 = 7h 30m
+
+  const todayDay = await deriveDay(employeeId, dateKey);
+  const isWorkingDay = sched.isWorkingDay;
+  const dailyRequiredMinutes = isWorkingDay ? targetPerDay : 0;
+  const dailyWorkedMinutes = todayDay.workedMinutes || 0;
+  const dailyShortMinutes = Math.max(0, dailyRequiredMinutes - dailyWorkedMinutes);
+  const dailyAdditionalMinutes = Math.max(0, dailyWorkedMinutes - dailyRequiredMinutes);
+  const dailyRecoveredMinutes = todayDay.recoveredLateMinutes || 0;
+
+  // --- Week calculation (Monday through Sunday) ---
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const dayOfWeek = dt.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const mondayMs = dt.getTime() + diffToMonday * 24 * 60 * 60 * 1000;
+  const sundayMs = mondayMs + 6 * 24 * 60 * 60 * 1000;
+  const weekStartKey = T.dateKey(mondayMs);
+  const weekEndKey = T.dateKey(sundayMs);
+
+  const weekWorkingDays = await schedule.workingDaysBetween(employeeId, weekStartKey, weekEndKey);
+  const weekWorkingDaysSoFar = weekWorkingDays.filter(k => k <= dateKey);
+
+  const weekRows = await db.prepare(`
+    SELECT date_key, worked_minutes FROM attendance_daily_summary
+    WHERE employee_id = ? AND date_key >= ? AND date_key <= ?
+  `).all(employeeId, weekStartKey, weekEndKey);
+
+  const weekWorkedMap = new Map();
+  for (const r of weekRows) {
+    weekWorkedMap.set(r.date_key, r.worked_minutes || 0);
+  }
+  // If today is in this week, use live todayDay workedMinutes
+  weekWorkedMap.set(dateKey, dailyWorkedMinutes);
+
+  let weeklyWorkedMinutes = 0;
+  for (const k of weekWorkingDaysSoFar) {
+    weeklyWorkedMinutes += (weekWorkedMap.get(k) || 0);
+  }
+
+  const weeklyRequiredMinutes = weekWorkingDays.length * targetPerDay;
+  const weeklyRequiredToDateMinutes = weekWorkingDaysSoFar.length * targetPerDay;
+  const weeklyShortMinutes = Math.max(0, weeklyRequiredToDateMinutes - weeklyWorkedMinutes);
+  const weeklyAdditionalMinutes = Math.max(0, weeklyWorkedMinutes - weeklyRequiredToDateMinutes);
+
+  // --- Month calculation (1st to last day of month) ---
+  const monthStartKey = `${y}-${String(m).padStart(2, '0')}-01`;
+  const lastDayOfMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const monthEndKey = `${y}-${String(m).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
+
+  const monthWorkingDays = await schedule.workingDaysBetween(employeeId, monthStartKey, monthEndKey);
+  const monthWorkingDaysSoFar = monthWorkingDays.filter(k => k <= dateKey);
+
+  const monthRows = await db.prepare(`
+    SELECT date_key, worked_minutes FROM attendance_daily_summary
+    WHERE employee_id = ? AND date_key >= ? AND date_key <= ?
+  `).all(employeeId, monthStartKey, monthEndKey);
+
+  const monthWorkedMap = new Map();
+  for (const r of monthRows) {
+    monthWorkedMap.set(r.date_key, r.worked_minutes || 0);
+  }
+  // Ensure today's live minutes are included
+  monthWorkedMap.set(dateKey, dailyWorkedMinutes);
+
+  let monthlyWorkedMinutes = 0;
+  for (const k of monthWorkingDaysSoFar) {
+    monthlyWorkedMinutes += (monthWorkedMap.get(k) || 0);
+  }
+
+  const monthlyRequiredMinutes = monthWorkingDays.length * targetPerDay;
+  const monthlyRequiredToDateMinutes = monthWorkingDaysSoFar.length * targetPerDay;
+  const monthlyShortMinutes = Math.max(0, monthlyRequiredToDateMinutes - monthlyWorkedMinutes);
+  const monthlyAdditionalMinutes = Math.max(0, monthlyWorkedMinutes - monthlyRequiredToDateMinutes);
+
+  return {
+    policy: {
+      targetDailyHoursFormatted: formatHoursMinutes(targetPerDay),
+      targetDailyMinutes: targetPerDay,
+      officeWindow: `${sched.startTime} – ${sched.endTime}`,
+    },
+    daily: {
+      dateKey,
+      isWorkingDay,
+      requiredMinutes: dailyRequiredMinutes,
+      workedMinutes: dailyWorkedMinutes,
+      shortMinutes: dailyShortMinutes,
+      additionalMinutes: dailyAdditionalMinutes,
+      recoveredMinutes: dailyRecoveredMinutes,
+      formattedRequired: formatHoursMinutes(dailyRequiredMinutes),
+      formattedWorked: formatHoursMinutes(dailyWorkedMinutes),
+      formattedShort: formatHoursMinutes(dailyShortMinutes),
+      formattedAdditional: formatHoursMinutes(dailyAdditionalMinutes),
+      formattedRecovered: formatHoursMinutes(dailyRecoveredMinutes),
+      isTargetMet: dailyWorkedMinutes >= dailyRequiredMinutes,
+      percent: dailyRequiredMinutes > 0 ? Math.min(100, Math.round((dailyWorkedMinutes / dailyRequiredMinutes) * 100)) : 100,
+    },
+    weekly: {
+      weekStartKey,
+      weekEndKey,
+      workingDaysCount: weekWorkingDays.length,
+      workingDaysSoFarCount: weekWorkingDaysSoFar.length,
+      requiredMinutes: weeklyRequiredMinutes,
+      requiredToDateMinutes: weeklyRequiredToDateMinutes,
+      workedMinutes: weeklyWorkedMinutes,
+      shortMinutes: weeklyShortMinutes,
+      additionalMinutes: weeklyAdditionalMinutes,
+      formattedRequired: formatHoursMinutes(weeklyRequiredMinutes),
+      formattedRequiredToDate: formatHoursMinutes(weeklyRequiredToDateMinutes),
+      formattedWorked: formatHoursMinutes(weeklyWorkedMinutes),
+      formattedShort: formatHoursMinutes(weeklyShortMinutes),
+      formattedAdditional: formatHoursMinutes(weeklyAdditionalMinutes),
+      isTargetMet: weeklyWorkedMinutes >= weeklyRequiredToDateMinutes,
+      percent: weeklyRequiredToDateMinutes > 0 ? Math.min(100, Math.round((weeklyWorkedMinutes / weeklyRequiredToDateMinutes) * 100)) : 100,
+    },
+    monthly: {
+      monthKey: `${y}-${String(m).padStart(2, '0')}`,
+      scheduledWorkingDays: monthWorkingDays.length,
+      workingDaysSoFarCount: monthWorkingDaysSoFar.length,
+      requiredMinutes: monthlyRequiredMinutes,
+      requiredToDateMinutes: monthlyRequiredToDateMinutes,
+      workedMinutes: monthlyWorkedMinutes,
+      shortMinutes: monthlyShortMinutes,
+      additionalMinutes: monthlyAdditionalMinutes,
+      formattedRequired: formatHoursMinutes(monthlyRequiredMinutes),
+      formattedRequiredToDate: formatHoursMinutes(monthlyRequiredToDateMinutes),
+      formattedWorked: formatHoursMinutes(monthlyWorkedMinutes),
+      formattedShort: formatHoursMinutes(monthlyShortMinutes),
+      formattedAdditional: formatHoursMinutes(monthlyAdditionalMinutes),
+      isTargetMet: monthlyWorkedMinutes >= monthlyRequiredToDateMinutes,
+      percent: monthlyRequiredMinutes > 0 ? Math.min(100, Math.round((monthlyWorkedMinutes / monthlyRequiredMinutes) * 100)) : 100,
+    },
+  };
+}
+
 module.exports = {
   deriveDay, recomputeDay, present,
   startBreak, endBreak,
   balanceFor, postDeficit, adjustBalance,
   latenessStatus, monitoringPeriod,
+  calculateWorkingHoursMetrics,
 };
