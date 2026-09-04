@@ -27,10 +27,12 @@ router.get('/today', requireDevice, async (req, res) => {
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
 
-  const day = await A.deriveDay(employeeId, dateKey, nowMs);
-  const lateness = await A.latenessStatus(employeeId, dateKey);
-  const balance = await A.balanceFor(employeeId);
-  const workingHours = await A.calculateWorkingHoursMetrics(employeeId, dateKey);
+  const [day, lateness, balance, workingHours] = await Promise.all([
+    A.deriveDay(employeeId, dateKey, nowMs),
+    A.latenessStatus(employeeId, dateKey),
+    A.balanceFor(employeeId),
+    A.calculateWorkingHoursMetrics(employeeId, dateKey),
+  ]);
 
   res.json({
     status: 'SUCCESS',

@@ -164,12 +164,16 @@ router.get('/my-history', requireDevice, async (req, res) => {
   const { employeeId, employeeName, employeeRole } = req.auth;
   const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 60);
   const nowMs = T.now();
-  const out = [];
+  const dayKeys = [];
   for (let i = 0; i < days; i++) {
-    const key = T.dateKey(nowMs - i * 24 * 60 * 60 * 1000);
-    const d = await P.deriveDay(employeeId, key, nowMs);
-    out.push(await P.presentDay(d, { name: employeeName, role: employeeRole }));
+    dayKeys.push(T.dateKey(nowMs - i * 24 * 60 * 60 * 1000));
   }
+  const out = await Promise.all(
+    dayKeys.map(async (key) => {
+      const d = await P.deriveDay(employeeId, key, nowMs);
+      return P.presentDay(d, { name: employeeName, role: employeeRole });
+    })
+  );
   res.json({ status: 'SUCCESS', days: out });
 });
 
