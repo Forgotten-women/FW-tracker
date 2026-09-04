@@ -4,6 +4,7 @@
 // Persists server URL, device token, and employee details in local app config.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -27,6 +28,10 @@ pub struct HeartbeatPayload {
     pub current_wifi_mac: Option<String>,
     pub local_ip: Option<String>,
     pub is_manual_break: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_app: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_breakdown: Option<HashMap<String, u64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

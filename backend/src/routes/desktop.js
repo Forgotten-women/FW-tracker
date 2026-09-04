@@ -175,18 +175,23 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const entries = [];
   if (inOffice && status === 'ACTIVE') {
     const appBreakdown = req.body?.appBreakdown;
+    let hasBreakdownEntries = false;
     if (appBreakdown && typeof appBreakdown === 'object') {
       for (const [name, secs] of Object.entries(appBreakdown)) {
         const trimmed = String(name || '').trim();
         const s = parseInt(secs, 10) || 0;
         if (trimmed && trimmed !== 'unknown.exe' && s > 0) {
           entries.push({ name: trimmed, seconds: s });
+          hasBreakdownEntries = true;
         }
       }
-    } else {
+    }
+    if (!hasBreakdownEntries) {
       const singleApp = String(req.body?.currentApp || '').trim();
       if (singleApp && singleApp !== 'unknown.exe') {
         entries.push({ name: singleApp, seconds: effectiveActive || 60 });
+      } else if (effectiveActive > 0) {
+        entries.push({ name: 'Desktop Active', seconds: effectiveActive });
       }
     }
   }

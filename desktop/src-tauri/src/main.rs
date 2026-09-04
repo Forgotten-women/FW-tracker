@@ -108,6 +108,8 @@ fn main() {
                 let mut sample_count = 0;
                 let mut accumulated_active = 0;
                 let mut accumulated_idle = 0;
+                let mut app_breakdown: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+                let mut latest_app: Option<String> = None;
                 let mut first_run = true;
 
                 loop {
@@ -128,6 +130,8 @@ fn main() {
                             current_wifi_mac: None,
                             local_ip,
                             is_manual_break: false,
+                            current_app: None,
+                            app_breakdown: None,
                         };
                         if let Ok(resp) = client::send_heartbeat(&cfg, payload).await {
                             *state.latest_response.lock().unwrap() = Some(resp.clone());
@@ -152,6 +156,13 @@ fn main() {
                         accumulated_idle += 10;
                     } else {
                         accumulated_active += 10;
+                        if let Some((proc_name, title)) = tracker::process::get_foreground_window_info() {
+                            let app_name = tracker::process::parse_active_application(&proc_name, &title);
+                            latest_app = Some(app_name.clone());
+                            *app_breakdown.entry(app_name).or_insert(0) += 10;
+                        } else {
+                            *app_breakdown.entry("Desktop Active".to_string()).or_insert(0) += 10;
+                        }
                     }
 
                     // Check for unapproved process anomalies (e.g. mouse jigglers / unknown apps)
@@ -178,11 +189,14 @@ fn main() {
                             current_wifi_mac: None,
                             local_ip,
                             is_manual_break: is_break,
+                            current_app: latest_app.clone(),
+                            app_breakdown: if app_breakdown.is_empty() { None } else { Some(app_breakdown.clone()) },
                         };
                         match client::send_heartbeat(&cfg, payload).await {
                             Ok(resp) => {
                                 accumulated_active = 0;
                                 accumulated_idle = 0;
+                                app_breakdown.clear();
                                 IS_MANUAL_BREAK.store(resp.today.on_break, Ordering::SeqCst);
                                 *state.latest_response.lock().unwrap() = Some(resp.clone());
                                 let _ = app_handle.emit_all("heartbeat-updated", resp);
