@@ -418,7 +418,7 @@ router.get('/workstations', async (req, res) => {
         label: r.label,
         status: effectiveStatus,
         activeMinutes: Math.round(r.active_seconds / 60),
-        idleMinutes: Math.round(r.idle_seconds / 60),
+        idleMinutes: Math.floor((r.idle_seconds || 0) / 60),
         breakMinutes: totalBreakMins,
         presenceMinutes: presenceMins,
         inOffice: timeSinceHeartbeat <= 10 * 60 * 1000 && !!r.in_office,

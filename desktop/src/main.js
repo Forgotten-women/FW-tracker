@@ -106,9 +106,9 @@ async function refreshStatus() {
           }
         }
 
-        const breakMins = Math.round((data.latest.today.breakSeconds || 0) / 60);
+        const breakMins = Math.floor((data.latest.today.breakSeconds || 0) / 60);
         statBreak.textContent = `${breakMins}m`;
-        statIdle.textContent = `${Math.round((data.latest.today.idleSeconds || 0) / 60)}m`;
+        statIdle.textContent = `${Math.floor((data.latest.today.idleSeconds || 0) / 60)}m`;
 
         const isOnBreak = data.isManualBreak || (data.latest.today && data.latest.today.onBreak);
         const isBreakUsed = Boolean(data.latest.today && data.latest.today.breakAlreadyTaken);
