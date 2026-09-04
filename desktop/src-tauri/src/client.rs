@@ -47,6 +47,10 @@ pub struct SessionStats {
     pub active_seconds: u64,
     pub idle_seconds: u64,
     pub break_seconds: u64,
+    #[serde(default)]
+    pub on_break: bool,
+    #[serde(default)]
+    pub break_already_taken: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -168,4 +172,34 @@ pub async fn report_anomaly(cfg: &AppConfig, process_name: &str, duration_secs: 
         .await;
 
     Ok(())
+}
+
+pub async fn send_break(cfg: &AppConfig, on_break: bool) -> Result<serde_json::Value, String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/desktop/break", cfg.server_url.trim_end_matches('/'));
+
+    let body = serde_json::json!({
+        "onBreak": on_break,
+        "reason": if on_break { "Desktop Break Started" } else { "Desktop Break Resumed" },
+    });
+
+    let res = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        let err_json: serde_json::Value = res.json().await.unwrap_or_default();
+        let msg = err_json["message"].as_str().unwrap_or("Failed to update break state");
+        return Err(msg.to_string());
+    }
+
+    res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
 }

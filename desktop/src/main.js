@@ -89,25 +89,51 @@ async function refreshStatus() {
           currentActiveSecs = Math.max(currentActiveSecs, serverActive);
         }
 
-        statBreak.textContent = `${Math.round((data.latest.today.breakSeconds || 0) / 60)}m`;
+        const breakMins = Math.round((data.latest.today.breakSeconds || 0) / 60);
+        statBreak.textContent = `${breakMins}m`;
         statIdle.textContent = `${Math.round((data.latest.today.idleSeconds || 0) / 60)}m`;
-        
-        if (data.isManualBreak) {
+
+        const isOnBreak = data.isManualBreak || (data.latest.today && data.latest.today.onBreak);
+        const isBreakUsed = Boolean(data.latest.today && data.latest.today.breakAlreadyTaken);
+
+        if (isOnBreak) {
           statusBanner.className = 'status-banner away';
-          statusText.textContent = '☕ On Manual Break';
+          statusText.textContent = '☕ On Break';
           breakToggleBtn.textContent = '▶ Resume Work';
+          breakToggleBtn.disabled = false;
+          breakToggleBtn.classList.remove('disabled');
+        } else if (isBreakUsed) {
+          if (data.latest.workstationStatus === 'AWAY') {
+            statusBanner.className = 'status-banner away';
+            statusText.textContent = '🔒 Screen Locked (Away)';
+          } else if (data.latest.workstationStatus === 'IDLE') {
+            statusBanner.className = 'status-banner away';
+            statusText.textContent = '⏳ Idle Inactivity';
+          } else {
+            statusBanner.className = 'status-banner';
+            statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
+          }
+          breakToggleBtn.textContent = `☕ Break Taken (${breakMins}m used)`;
+          breakToggleBtn.disabled = true;
+          breakToggleBtn.classList.add('disabled');
         } else if (data.latest.workstationStatus === 'AWAY') {
           statusBanner.className = 'status-banner away';
           statusText.textContent = '🔒 Screen Locked (Away)';
           breakToggleBtn.textContent = '☕ Take Break';
+          breakToggleBtn.disabled = false;
+          breakToggleBtn.classList.remove('disabled');
         } else if (data.latest.workstationStatus === 'IDLE') {
           statusBanner.className = 'status-banner away';
           statusText.textContent = '⏳ Idle Inactivity';
           breakToggleBtn.textContent = '☕ Take Break';
+          breakToggleBtn.disabled = false;
+          breakToggleBtn.classList.remove('disabled');
         } else {
           statusBanner.className = 'status-banner';
           statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
           breakToggleBtn.textContent = '☕ Take Break';
+          breakToggleBtn.disabled = false;
+          breakToggleBtn.classList.remove('disabled');
         }
 
         networkText.textContent = data.latest.inOffice ? 'Connected to Office Wi-Fi' : 'Outside Office Network';
@@ -197,11 +223,17 @@ if (closeBtn) {
 
 if (breakToggleBtn) {
   breakToggleBtn.addEventListener('click', async () => {
+    if (breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
     try {
+      breakToggleBtn.disabled = true;
       await callBackend('toggle_manual_break');
-      refreshStatus();
+      await refreshStatus();
     } catch (err) {
       console.error('Break toggle failed:', err);
+      alert(err || 'Could not change break status. Only one break is permitted per working day.');
+      await refreshStatus();
+    } finally {
+      // refreshStatus() sets the correct disabled/enabled state
     }
   });
 }

@@ -263,6 +263,15 @@ input:focus {
   transition: background 0.2s;
 }
 
-.action-btn:hover {
+.action-btn:hover:not(:disabled) {
   background: #475569;
+}
+
+.action-btn:disabled,
+.action-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #1e293b;
+  border-color: #334155;
+  color: #94a3b8;
 }

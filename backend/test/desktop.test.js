@@ -149,6 +149,42 @@ test('Desktop Workstation Agent & Unified Multi-Device Pairing', async () => {
   const breakData = await breakRes.json();
   assert.equal(breakData.workstationStatus, 'ON_BREAK');
 
+  // Resume Work (End break)
+  const resumeRes = await req('POST', '/api/desktop/break', {
+    headers: { 'Authorization': `Bearer ${desktopToken}` },
+    body: { onBreak: false, reason: 'Back from lunch' },
+  });
+  assert.equal(resumeRes.status, 200);
+  const resumeData = await resumeRes.json();
+  assert.equal(resumeData.workstationStatus, 'ACTIVE');
+
+  // Heartbeat must now report breakAlreadyTaken = true and onBreak = false
+  const hbAfterBreak = await req('POST', '/api/desktop/heartbeat', {
+    headers: { 'Authorization': `Bearer ${desktopToken}` },
+    body: { activeSeconds: 60, idleSeconds: 0, lockState: 'UNLOCKED' },
+  });
+  assert.equal(hbAfterBreak.status, 200);
+  const hbDataAfter = await hbAfterBreak.json();
+  assert.equal(hbDataAfter.today.onBreak, false);
+  assert.equal(hbDataAfter.today.breakAlreadyTaken, true);
+
+  // Attempting second break from desktop must be REJECTED (400)
+  const secondBreakDesktop = await req('POST', '/api/desktop/break', {
+    headers: { 'Authorization': `Bearer ${desktopToken}` },
+    body: { onBreak: true, reason: 'Second break attempt' },
+  });
+  assert.equal(secondBreakDesktop.status, 400);
+  const secondDesktopData = await secondBreakDesktop.json();
+  assert.equal(secondDesktopData.status, 'ERROR');
+
+  // Attempting second break from mobile must ALSO be REJECTED (409)
+  const secondBreakMobile = await req('POST', '/api/attendance/break/start', {
+    headers: { 'Authorization': `Bearer ${mobileToken}` },
+  });
+  assert.equal(secondBreakMobile.status, 409);
+  const secondMobileData = await secondBreakMobile.json();
+  assert.equal(secondMobileData.code, 'BREAK_ALREADY_USED');
+
   // 10. Test Anomaly Reporting
   const anomRes = await req('POST', '/api/desktop/anomaly', {
     headers: { 'Authorization': `Bearer ${desktopToken}` },

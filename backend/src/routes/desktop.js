@@ -212,8 +212,36 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     }
   }
 
-  // 7. Fetch updated daily summary
+  // 7. Fetch updated daily summary and sync break records
   const sessionRow = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
+
+  const breakRecords = await db.prepare(`
+    SELECT * FROM break_records WHERE employee_id = ? AND date_key = ? ORDER BY started_at ASC
+  `).all(employeeId, dateKey);
+
+  let totalBreakSecondsFromRecords = 0;
+  let hasOpenBreak = false;
+  let breakAlreadyTaken = false;
+
+  for (const br of breakRecords) {
+    if (br.ended_at) {
+      const mins = br.actual_minutes != null ? br.actual_minutes : Math.round((br.ended_at - br.started_at) / 60000);
+      totalBreakSecondsFromRecords += (mins * 60);
+      breakAlreadyTaken = true;
+    } else {
+      hasOpenBreak = true;
+      const elapsedSecs = Math.max(0, Math.round((nowMs - br.started_at) / 1000));
+      totalBreakSecondsFromRecords += elapsedSecs;
+    }
+  }
+
+  const effectiveBreakSeconds = Math.max(sessionRow ? (sessionRow.break_seconds || 0) : 0, totalBreakSecondsFromRecords);
+
+  if (sessionRow && (sessionRow.break_seconds || 0) < effectiveBreakSeconds) {
+    try {
+      await db.prepare('UPDATE workstation_sessions SET break_seconds = ? WHERE id = ?').run(effectiveBreakSeconds, sessionRow.id);
+    } catch (_) {}
+  }
 
   res.json({
     status: 'SUCCESS',
@@ -224,7 +252,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       dateKey,
       activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
       idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
-      breakSeconds: sessionRow ? sessionRow.break_seconds : 0,
+      breakSeconds: effectiveBreakSeconds,
+      onBreak: hasOpenBreak || status === 'ON_BREAK',
+      breakAlreadyTaken: breakAlreadyTaken && !hasOpenBreak,
     },
     policy: {
       idleThresholdMinutes: idleThresholdMins,
@@ -244,25 +274,40 @@ router.post('/break', requireDevice, async (req, res) => {
   const dateKey = T.dateKey(nowMs);
   const newStatus = onBreak ? 'ON_BREAK' : 'ACTIVE';
 
+  const A = require('../domain/attendance');
   try {
-    const A = require('../domain/attendance');
     if (onBreak) {
-      await A.startBreak(employeeId, nowMs);
+      const result = await A.startBreak(employeeId, nowMs);
+      if (!result.ok) {
+        return res.status(400).json({
+          status: 'ERROR',
+          code: result.reason,
+          message: result.message || 'You have already taken your permitted 30-minute break for today. Only one break is permitted per working day.',
+        });
+      }
     } else {
-      await A.endBreak(employeeId, nowMs);
+      const result = await A.endBreak(employeeId, nowMs);
+      if (!result.ok) {
+        return res.status(400).json({
+          status: 'ERROR',
+          code: result.reason,
+          message: 'No break is currently running.',
+        });
+      }
     }
     await A.recomputeDay(employeeId, dateKey, nowMs);
 
     await db.prepare(`
       UPDATE workstation_sessions
       SET status = ?, updated_at = ?
-      WHERE device_id = ? AND session_date = ?
-    `).run(newStatus, nowMs, deviceId, dateKey);
+      WHERE employee_id = ? AND session_date = ?
+    `).run(newStatus, nowMs, employeeId, dateKey);
 
     await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
       .run(nowMs, onBreak ? 'MANUAL_BREAK_STARTED' : 'MANUAL_BREAK_ENDED', employeeId, employeeName, reason || (onBreak ? 'Employee paused work session' : 'Employee resumed work session'));
   } catch (err) {
     console.warn('[desktop/break] break state sync note:', err.message);
+    return res.status(500).json({ status: 'ERROR', message: err.message });
   }
 
   res.json({ status: 'SUCCESS', workstationStatus: newStatus });

@@ -136,7 +136,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (mounted) {
         setState(() {
-          _attendance = ping.attendance;
+          _attendance = (todayFull.attendance.totalMinutes > ping.attendance.totalMinutes ||
+                  (ping.attendance.status == PresenceStatus.notCheckedIn &&
+                      todayFull.attendance.status != PresenceStatus.notCheckedIn))
+              ? todayFull.attendance
+              : ping.attendance;
           _verified = ping.verified;
           _network = net;
           _history = hist;
@@ -145,8 +149,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _pendingCount = 0;
           _loading = false;
           _sending = false;
-          if (ping.attendance.employeeName.isNotEmpty) {
-            _employeeName = ping.attendance.employeeName;
+          final empName = ping.attendance.employeeName.isNotEmpty
+              ? ping.attendance.employeeName
+              : todayFull.employeeName;
+          if (empName.isNotEmpty) {
+            _employeeName = empName;
           }
           if (ping.attendance.role.isNotEmpty) {
             _employeeRole = ping.attendance.role;
@@ -1135,21 +1142,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: const [
-                  Icon(Icons.timer_outlined, size: 16, color: AppColors.primaryLight),
-                  SizedBox(width: 6),
-                  Text(
-                    'WORKING HOURS BREAKDOWN',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.0,
-                      color: AppColors.primaryLight,
+              const Expanded(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.timer_outlined, size: 15, color: AppColors.primaryLight),
+                    SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        'WORKING HOURS',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.8,
+                          color: AppColors.primaryLight,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -1184,7 +1198,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: _buildPeriodTile(
                   title: 'WEEKLY',
                   worked: metrics.weekly.formattedWorked,
-                  target: metrics.weekly.formattedRequiredToDate,
+                  target: metrics.weekly.formattedRequiredToDate != '0h 00m'
+                      ? metrics.weekly.formattedRequiredToDate
+                      : '37h 30m',
                   shortText: metrics.weekly.shortMinutes > 0 ? metrics.weekly.formattedShort : null,
                   extraText: metrics.weekly.additionalMinutes > 0 ? metrics.weekly.formattedAdditional : null,
                   isMet: metrics.weekly.isTargetMet,
@@ -1195,7 +1211,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: _buildPeriodTile(
                   title: 'MONTHLY',
                   worked: metrics.monthly.formattedWorked,
-                  target: metrics.monthly.formattedRequired,
+                  target: metrics.monthly.formattedRequired != '0h 00m'
+                      ? metrics.monthly.formattedRequired
+                      : '165h 00m',
                   shortText: metrics.monthly.shortMinutes > 0 ? metrics.monthly.formattedShort : null,
                   extraText: metrics.monthly.additionalMinutes > 0 ? metrics.monthly.formattedAdditional : null,
                   isMet: metrics.monthly.isTargetMet,

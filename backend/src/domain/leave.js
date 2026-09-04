@@ -318,6 +318,13 @@ async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestId = n
   const year = await holidayYearFor(employeeId, onDate);
   if (year.blocked) return { blocked: true, ...year };
 
+  // Always ensure accruals are current for completed months of service before calculating balance
+  try {
+    await accrue(employeeId, onDate);
+  } catch (err) {
+    console.error('Auto-accrual error in balanceFor:', err);
+  }
+
   const raw = await balanceRaw(employeeId, year, onDate, excludeRequestId);
   const round2 = (n) => Math.round(n * 100) / 100;
 

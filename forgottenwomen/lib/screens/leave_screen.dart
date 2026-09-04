@@ -318,14 +318,10 @@ class _LeaveScreenState extends State<LeaveScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
-                child: Text(
-                  'AVAILABLE LEAVE BALANCE',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
-                  overflow: TextOverflow.ellipsis,
-                ),
+              const Text(
+                'AVAILABLE LEAVE',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
               ),
-              const SizedBox(width: 8),
               if (b.yearFrom != null)
                 Text(
                   '${b.yearFrom} → ${b.yearTo}',

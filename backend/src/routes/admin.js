@@ -12,6 +12,7 @@ const { db, tx, audit, backup } = require('../db');
 const { requireAdmin, newEnrollmentCode, issueSseTicket } = require('../middleware/auth');
 const P = require('../domain/presence');
 const bindings = require('../domain/bindings');
+const L = require('../domain/leave');
 const T = require('../util/time');
 const { config } = require('../config');
 
@@ -107,6 +108,12 @@ router.post('/employees', async (req, res) => {
 
     await audit({ actor: 'admin', action: 'EMPLOYEE_CREATED', targetType: 'employee', targetId: id, after: employee });
   });
+
+  if (startDate) {
+    try {
+      await L.accrue(id, T.dateKey());
+    } catch (_) {}
+  }
 
   res.status(201).json({ status: 'SUCCESS', employee });
 });
@@ -204,6 +211,13 @@ router.patch('/employees/:id/employment', async (req, res) => {
       `).run(cleanStartDate, earliestSalary.id);
     }
   });
+
+  try {
+    await db.prepare("DELETE FROM leave_accrual_ledger WHERE employee_id = ? AND entry_type = 'ACCRUAL'").run(employeeId);
+    await L.accrue(employeeId, T.dateKey());
+  } catch (err) {
+    console.error('Error re-accruing leave for employee:', err);
+  }
 
   const updatedRecord = await db.prepare(`
     SELECT * FROM employment_records

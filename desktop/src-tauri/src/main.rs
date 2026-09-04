@@ -28,7 +28,8 @@ struct AppState {
 async fn get_app_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let cfg = state.config.lock().unwrap().clone();
     let resp = state.latest_response.lock().unwrap().clone();
-    let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
+    let server_on_break = resp.as_ref().map(|r| r.today.on_break).unwrap_or(false);
+    let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst) || server_on_break;
     let (lock_state, _) = tracker::session::get_lock_state();
     let idle_secs = tracker::idle::get_idle_seconds();
 
@@ -56,9 +57,19 @@ async fn enroll_device(
 }
 
 #[tauri::command]
-async fn toggle_manual_break() -> Result<bool, String> {
-    let prev = IS_MANUAL_BREAK.fetch_xor(true, Ordering::SeqCst);
-    Ok(!prev)
+async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    let resp = state.latest_response.lock().unwrap().clone();
+    let server_on_break = resp.as_ref().map(|r| r.today.on_break).unwrap_or(false);
+    let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst) || server_on_break;
+    let target = !is_break;
+
+    if !cfg.token.is_empty() {
+        client::send_break(&cfg, target).await?;
+    }
+
+    IS_MANUAL_BREAK.store(target, Ordering::SeqCst);
+    Ok(target)
 }
 
 fn main() {
@@ -159,6 +170,7 @@ fn main() {
                             Ok(resp) => {
                                 accumulated_active = 0;
                                 accumulated_idle = 0;
+                                IS_MANUAL_BREAK.store(resp.today.on_break, Ordering::SeqCst);
                                 *state.latest_response.lock().unwrap() = Some(resp.clone());
                                 let _ = app_handle.emit_all("heartbeat-updated", resp);
                             }
