@@ -56,7 +56,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _bootstrap();
-    _foregroundTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refresh());
+    _foregroundTimer = Timer.periodic(const Duration(seconds: 20), (_) => _refresh());
     _breakTimer = Timer.periodic(const Duration(seconds: 1), (_) => _tickBreak());
   }
 
@@ -111,7 +111,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_sending) return;
     setState(() {
       _sending = true;
-      _error = null;
     });
 
     try {
@@ -124,39 +123,107 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         localIp: net.localIp,
       );
 
-      final ping = await _api.ping([...pending, currentObs]);
+      TodayAttendanceDetails? todayFull;
+      PingResult? ping;
+      List<Attendance>? hist;
+      List<CorrectionRequest>? corrections;
+      String? caughtError;
 
-      if (pending.isNotEmpty) {
-        await _queue.removeDelivered(pending.length);
+      // 1. Fetch Today Details (Authoritative source for daily worked time & working hours)
+      try {
+        todayFull = await _api.fetchTodayDetails();
+      } on ApiException catch (e) {
+        if (e.needsReEnrollment) {
+          await _store.clearToken();
+          if (mounted) widget.onSignedOut();
+          return;
+        }
+        caughtError = e.message;
+        debugPrint('fetchTodayDetails ApiException: ${e.message}');
+      } catch (e) {
+        caughtError = e.toString();
+        debugPrint('fetchTodayDetails error: $e');
       }
 
-      final hist = await _api.history(days: 7);
-      final todayFull = await _api.fetchTodayDetails();
-      final corrections = await _api.fetchMyCorrections();
+      // 2. Ping to verify network / Wi-Fi location and flush observations
+      try {
+        ping = await _api.ping([...pending, currentObs]);
+        if (pending.isNotEmpty) {
+          await _queue.removeDelivered(pending.length);
+        }
+      } on ApiException catch (e) {
+        if (e.needsReEnrollment) {
+          await _store.clearToken();
+          if (mounted) widget.onSignedOut();
+          return;
+        }
+        debugPrint('ping ApiException: ${e.message}');
+      } catch (e) {
+        debugPrint('ping error: $e');
+      }
+
+      // 3. Fetch past 7 days history
+      try {
+        hist = await _api.history(days: 7);
+      } catch (e) {
+        debugPrint('history error: $e');
+      }
+
+      // 4. Fetch employee corrections / disputes
+      try {
+        corrections = await _api.fetchMyCorrections();
+      } catch (e) {
+        debugPrint('corrections error: $e');
+      }
 
       if (mounted) {
         setState(() {
-          _attendance = (todayFull.attendance.totalMinutes > ping.attendance.totalMinutes ||
-                  (ping.attendance.status == PresenceStatus.notCheckedIn &&
-                      todayFull.attendance.status != PresenceStatus.notCheckedIn))
-              ? todayFull.attendance
-              : ping.attendance;
-          _verified = ping.verified;
           _network = net;
-          _history = hist;
-          _todayDetails = todayFull;
-          _myCorrections = corrections;
+
+          if (todayFull != null) {
+            _todayDetails = todayFull;
+            if (todayFull.attendance.totalMinutes > 0 ||
+                todayFull.attendance.status == PresenceStatus.inOffice ||
+                ping == null ||
+                ping.attendance.totalMinutes == 0) {
+              _attendance = todayFull.attendance;
+            } else {
+              _attendance = ping.attendance;
+            }
+            if (todayFull.employeeName.isNotEmpty) {
+              _employeeName = todayFull.employeeName;
+            }
+          } else if (ping != null) {
+            _attendance = ping.attendance;
+          }
+
+          if (ping != null) {
+            _verified = ping.verified;
+            if (ping.attendance.employeeName.isNotEmpty) {
+              _employeeName = ping.attendance.employeeName;
+            }
+            if (ping.attendance.role.isNotEmpty) {
+              _employeeRole = ping.attendance.role;
+            }
+          }
+
+          if (hist != null && hist.isNotEmpty) {
+            _history = hist;
+          }
+
+          if (corrections != null) {
+            _myCorrections = corrections;
+          }
+
           _pendingCount = 0;
           _loading = false;
           _sending = false;
-          final empName = ping.attendance.employeeName.isNotEmpty
-              ? ping.attendance.employeeName
-              : todayFull.employeeName;
-          if (empName.isNotEmpty) {
-            _employeeName = empName;
-          }
-          if (ping.attendance.role.isNotEmpty) {
-            _employeeRole = ping.attendance.role;
+
+          // Only show error banner if we couldn't get today's details AND couldn't ping
+          if (todayFull == null && ping == null && caughtError != null) {
+            _error = caughtError;
+          } else {
+            _error = null;
           }
         });
       }
@@ -165,37 +232,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       try {
         await NotificationService().checkAndDispatchUnseenNotifications(store: _store);
       } catch (_) {}
-    } on ApiException catch (e) {
-      if (e.needsReEnrollment) {
-        await _store.clearToken();
-        if (mounted) widget.onSignedOut();
-        return;
-      }
-      try {
-        final cachedAttendance = await _api.today();
-        final cachedDetails = await _api.fetchTodayDetails();
-        final cachedCorrections = await _api.fetchMyCorrections();
-        final pending = await _queue.readAll();
-        if (mounted) {
-          setState(() {
-            _attendance = cachedAttendance;
-            _todayDetails = cachedDetails;
-            _myCorrections = cachedCorrections;
-            _pendingCount = pending.length;
-            _error = e.message;
-            _loading = false;
-            _sending = false;
-          });
-        }
-      } catch (_) {
-        if (mounted) {
-          setState(() {
-            _error = e.message;
-            _loading = false;
-            _sending = false;
-          });
-        }
-      }
     } catch (e) {
       if (mounted) {
         setState(() {

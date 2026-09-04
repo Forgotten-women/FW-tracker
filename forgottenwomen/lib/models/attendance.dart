@@ -38,8 +38,10 @@ enum PresenceStatus {
   closed;
 
   static PresenceStatus parse(String? raw) {
-    switch (raw) {
+    switch (raw?.toUpperCase()) {
       case 'IN_OFFICE':
+      case 'PRESENT':
+      case 'ACTIVE':
         return PresenceStatus.inOffice;
       case 'GRACE_PERIOD':
         return PresenceStatus.gracePeriod;
@@ -87,33 +89,47 @@ class Attendance {
     required this.sessions,
   });
 
-  factory Attendance.fromJson(Map<String, dynamic> json) => Attendance(
-        employeeId: json['employeeId'] as String? ?? '',
-        employeeName: json['employeeName'] as String? ?? '',
-        role: json['role'] as String? ?? '',
-        date: (json['date'] ?? json['dateKey']) as String? ?? '',
-        status: PresenceStatus.parse(json['status'] as String?),
-        statusLabel: json['statusLabel'] as String? ?? '',
-        firstCheckIn:
-            (json['firstCheckIn'] ?? json['firstIn']) as String? ?? '--',
-        lastActiveTime:
-            (json['lastActiveTime'] ?? json['lastSeen']) as String? ?? '--',
-        totalMinutes:
-            ((json['totalMinutes'] ?? json['workedMinutes']) as num?)?.toInt() ??
-                0,
-        timeWorkedFormatted:
-            (json['timeWorkedFormatted'] ?? json['worked']) as String? ??
-                '0 mins',
-        adjustmentMinutes: (json['adjustmentMinutes'] as num?)?.toInt() ?? 0,
-        needsReview: json['needsReview'] is bool
-            ? json['needsReview'] as bool
-            : (json['needsReview'] is List
-                ? (json['needsReview'] as List).isNotEmpty
-                : false),
-        sessions: (json['sessions'] as List<dynamic>? ?? [])
-            .map((s) => WorkSession.fromJson(s as Map<String, dynamic>))
-            .toList(),
-      );
+  factory Attendance.fromJson(Map<String, dynamic> json) {
+    final status = PresenceStatus.parse(json['status'] as String?);
+    final statusLabel = (json['statusLabel'] as String?)?.isNotEmpty == true
+        ? json['statusLabel'] as String
+        : (status == PresenceStatus.inOffice
+            ? 'Active in Office'
+            : (status == PresenceStatus.gracePeriod
+                ? 'Grace Period'
+                : (status == PresenceStatus.away
+                    ? 'Away / Off-Site'
+                    : (status == PresenceStatus.closed
+                        ? 'Shift Ended'
+                        : 'Not checked in'))));
+    return Attendance(
+      employeeId: json['employeeId'] as String? ?? '',
+      employeeName: json['employeeName'] as String? ?? '',
+      role: json['role'] as String? ?? '',
+      date: (json['date'] ?? json['dateKey']) as String? ?? '',
+      status: status,
+      statusLabel: statusLabel,
+      firstCheckIn:
+          (json['firstCheckIn'] ?? json['firstIn']) as String? ?? '--',
+      lastActiveTime:
+          (json['lastActiveTime'] ?? json['lastSeen']) as String? ?? '--',
+      totalMinutes:
+          ((json['totalMinutes'] ?? json['workedMinutes']) as num?)?.toInt() ??
+              0,
+      timeWorkedFormatted:
+          (json['timeWorkedFormatted'] ?? json['worked']) as String? ??
+              '0 mins',
+      adjustmentMinutes: (json['adjustmentMinutes'] as num?)?.toInt() ?? 0,
+      needsReview: json['needsReview'] is bool
+          ? json['needsReview'] as bool
+          : (json['needsReview'] is List
+              ? (json['needsReview'] as List).isNotEmpty
+              : false),
+      sessions: (json['sessions'] as List<dynamic>? ?? [])
+          .map((s) => WorkSession.fromJson(s as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 
   static Attendance empty() => const Attendance(
         employeeId: '',

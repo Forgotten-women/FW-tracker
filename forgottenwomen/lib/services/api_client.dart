@@ -39,7 +39,7 @@ class ApiClient {
   final http.Client _http;
   final Duration timeout;
 
-  ApiClient({TokenStore? store, http.Client? client, this.timeout = const Duration(seconds: 8)})
+  ApiClient({TokenStore? store, http.Client? client, this.timeout = const Duration(seconds: 25)})
       : _store = store ?? TokenStore(),
         _http = client ?? http.Client();
 
