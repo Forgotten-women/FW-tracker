@@ -58,7 +58,9 @@ const networkText = document.getElementById('network-text');
 
 let currentActiveSecs = 0;
 let lastSyncedServerSecs = -1;
+let lastSyncedDateKey = '';
 let timerInterval = null;
+let lastLocalDay = new Date().toDateString();
 
 function formatHMS(seconds) {
   const total = Math.max(0, parseInt(seconds, 10) || 0);
@@ -77,16 +79,31 @@ async function refreshStatus() {
       employeeBadge.textContent = `${data.employeeName || 'Staff'} (${data.employeeRole || 'Member'})`;
 
       if (data.latest && data.latest.today) {
+        const serverDateKey = data.latest.today.dateKey || '';
         const serverActive = data.latest.today.activeSeconds || 0;
-        if (lastSyncedServerSecs === -1) {
+
+        // Date rollover: if the day changed overnight or across midnight, reset to today's active seconds
+        if (serverDateKey && lastSyncedDateKey && serverDateKey !== lastSyncedDateKey) {
+          console.log(`[desktop] Day changed from ${lastSyncedDateKey} to ${serverDateKey}. Resetting active counter.`);
           currentActiveSecs = serverActive;
           lastSyncedServerSecs = serverActive;
+          lastSyncedDateKey = serverDateKey;
+        } else if (lastSyncedServerSecs === -1) {
+          currentActiveSecs = serverActive;
+          lastSyncedServerSecs = serverActive;
+          lastSyncedDateKey = serverDateKey;
         } else if (serverActive > lastSyncedServerSecs) {
           currentActiveSecs = Math.max(currentActiveSecs, serverActive);
           lastSyncedServerSecs = serverActive;
+        } else if (serverActive < lastSyncedServerSecs) {
+          // If server reports fewer seconds (e.g. day roll over or correction)
+          currentActiveSecs = serverActive;
+          lastSyncedServerSecs = serverActive;
         } else {
-          // Preserve local progression; never reset backwards between 60s heartbeats
-          currentActiveSecs = Math.max(currentActiveSecs, serverActive);
+          // If local timer drifted ahead of server by >90s, pull back to server active time
+          if (currentActiveSecs > serverActive + 90) {
+            currentActiveSecs = serverActive;
+          }
         }
 
         const breakMins = Math.round((data.latest.today.breakSeconds || 0) / 60);
@@ -152,6 +169,17 @@ async function refreshStatus() {
 // Tick timer locally every second when actively working
 clearInterval(timerInterval);
 timerInterval = setInterval(() => {
+  // Midnight rollover detection on local machine
+  const nowDay = new Date().toDateString();
+  if (nowDay !== lastLocalDay) {
+    lastLocalDay = nowDay;
+    currentActiveSecs = 0;
+    lastSyncedServerSecs = -1;
+    lastSyncedDateKey = '';
+    refreshStatus();
+    return;
+  }
+
   if (statusBanner && !statusBanner.classList.contains('away') && !statusBanner.classList.contains('offline')) {
     currentActiveSecs++;
     if (activeTimer) {

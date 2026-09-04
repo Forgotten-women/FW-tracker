@@ -1,8 +1,10 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
 mod client;
 mod db;
+mod single_instance;
 mod tracker {
     pub mod idle;
     pub mod network;
@@ -73,6 +75,16 @@ async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String>
 }
 
 fn main() {
+    let instance_role = single_instance::check_single_instance();
+    let single_instance_listener = match instance_role {
+        single_instance::InstanceRole::Primary(listener) => listener,
+        single_instance::InstanceRole::Secondary => {
+            // Another instance is already running and has been instructed to show window.
+            return;
+        }
+    };
+
+    autostart::ensure_autostart_registered();
     let initial_config = client::load_config();
 
     tauri::Builder::default()
@@ -87,8 +99,9 @@ fn main() {
             enroll_device,
             toggle_manual_break
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let app_handle = app.handle();
+            single_instance::start_listener(single_instance_listener, app_handle.clone());
 
             // Background Monitoring & Heartbeat Task
             tauri::async_runtime::spawn(async move {
