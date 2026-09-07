@@ -11,6 +11,7 @@ import type {
   DashboardSummary,
   DocumentTypeOption,
   EmployeeDocumentItem,
+  EmployeeDeviceItem,
   EmployeeLeaveOverview,
   EnrollmentCode,
   FormalWarningItem,
@@ -142,6 +143,19 @@ export const api = {
     request<{ status: string; count: number; message: string }>(
       `/api/admin/employees/${encodeURIComponent(employeeId)}/unpair-devices`,
       { method: 'POST' },
+    ),
+
+  getEmployeeDevices: (employeeId: string) =>
+    request<{
+      status: string;
+      employee: { id: string; name: string; employeeNumber?: string | null };
+      devices: EmployeeDeviceItem[];
+    }>(`/api/admin/employees/${encodeURIComponent(employeeId)}/devices`),
+
+  revokeDevice: (deviceId: string) =>
+    request<{ status: string; message: string }>(
+      `/api/admin/devices/${encodeURIComponent(deviceId)}`,
+      { method: 'DELETE' },
     ),
 
   getEmployeeProfile: (employeeId: string) =>

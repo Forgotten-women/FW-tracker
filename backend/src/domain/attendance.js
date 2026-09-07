@@ -144,6 +144,19 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const firstIn = manualIn ? manualIn.occurred_at : presence.firstInAt;
   const lastSeen = manualOut ? manualOut.occurred_at : presence.lastActiveAt;
 
+  // Active shift worked minutes strictly count from scheduled start time onwards (e.g. 11:00 AM).
+  // Check-in before scheduled start is recorded in firstInAt but does not accumulate worked shift minutes.
+  let shiftWorkedMinutes = 0;
+  if (s.isWorkingDay && s.scheduledStartAt) {
+    shiftWorkedMinutes = (presence.sessions || []).reduce((acc, sess) => {
+      const start = Math.max(sess.start, s.scheduledStartAt);
+      const end = Math.max(sess.end, s.scheduledStartAt);
+      return acc + Math.max(0, Math.round((end - start) / MIN));
+    }, 0);
+  } else {
+    shiftWorkedMinutes = presence.totalMinutes;
+  }
+
   const base = {
     employeeId,
     dateKey,
@@ -154,7 +167,8 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     presenceStatus: presence.status,
     presenceSource: presence.lastSource,
     sensorCarried: presence.sensorCarried,
-    workedMinutes: presence.totalMinutes,
+    workedMinutes: shiftWorkedMinutes,
+    rawPresenceMinutes: presence.totalMinutes,
     sessions: presence.sessions,
     breaks: breaks.map(b => ({
       startedAt: b.started_at,
@@ -251,19 +265,39 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     if (!coveredByBreak) unauthorisedMissingMinutes += gapMinutes;
   }
 
-  // --- late arrival recovery by staying later ------------------------------
-  // Employees have the option to recover late-arrival time by staying later.
-  // Additional time worked past scheduledEndAt automatically offsets late arrival.
+  // --- late arrival & break offset policy ----------------------------------
+  // 1. Staying late past scheduled end (e.g. 7:00 PM / 19:00) does NOT offset morning lateness.
+  //    (Overtime is recorded for visibility, but does not forgive late arrival).
   const overtimeMinutes = (lastSeen && lastSeen > s.scheduledEndAt)
     ? Math.max(0, Math.round((lastSeen - s.scheduledEndAt) / MIN))
     : 0;
-  const recoveredLateMinutes = Math.min(lateMinutes, overtimeMinutes);
+
+  // 2. Break Offset Rule:
+  //    If an employee arrives within the 30-minute late window (by 11:30 AM), takes NO break
+  //    during the entire day (0 break minutes taken), AND completes the full 8-hour shift time
+  //    (shiftWorkedMinutes >= dayEquivalentMinutes || 480), their permitted break allowance
+  //    offsets their late arrival without penalty.
+  const isWithin30MinLateWindow = firstIn <= (s.scheduledStartAt + 30 * MIN);
+  const totalBreakMinutesTaken = breaks.reduce((sum, b) => {
+    const mins = b.actual_minutes != null
+      ? b.actual_minutes
+      : (b.ended_at ? Math.max(0, Math.round((b.ended_at - b.started_at) / MIN)) : Math.max(0, Math.round((nowMs - b.started_at) / MIN)));
+    return sum + mins;
+  }, 0);
+
+  const completes8Hours = shiftWorkedMinutes >= (s.dayEquivalentMinutes || 480);
+  let breakOffsetLateMinutes = 0;
+  if (isLateArrival && isWithin30MinLateWindow && totalBreakMinutesTaken === 0 && completes8Hours) {
+    breakOffsetLateMinutes = Math.min(lateMinutes, s.permittedBreakMinutes || 30);
+  }
+
+  const recoveredLateMinutes = breakOffsetLateMinutes;
   const netLateMinutes = Math.max(0, lateMinutes - recoveredLateMinutes);
   const isLateOccurrence = isLateArrival && netLateMinutes > 0;
 
   const approvedAdjustmentMinutes = (await selectApprovedAdjustment.get(employeeId, dateKey)).mins || 0;
 
-  // Spec 8.1, with late arrival recovery:
+  // Deficit calculation:
   const dailyDeficitMinutes = Math.max(0,
     netLateMinutes
     + excessBreakMinutes
@@ -290,6 +324,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     recoveredLateMinutes,
     netLateMinutes,
     overtimeMinutes,
+    totalBreakMinutesTaken,
     isLateOccurrence,
     excessBreakMinutes,
     earlyDepartureMinutes,

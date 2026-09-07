@@ -7,6 +7,7 @@ import type {
   AttendanceCorrection,
   DashboardSummary,
   EmployeeDay,
+  EmployeeDeviceItem,
   Movement,
   PresenceStatus,
 } from '@/lib/types';
@@ -817,6 +818,7 @@ export function TeamPanel({
   const [showSalaryModal, setShowSalaryModal] = useState(false);
   const [selectedEmpId, setSelectedEmpId] = useState<string | undefined>(undefined);
   const [viewProfileEmp, setViewProfileEmp] = useState<AdminEmployee | null>(null);
+  const [manageDevicesEmp, setManageDevicesEmp] = useState<AdminEmployee | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -995,16 +997,16 @@ export function TeamPanel({
                     {e.deviceCount > 0 && (
                       <Button
                         size="sm"
-                        variant="danger"
+                        variant="secondary"
                         disabled={busy}
-                        onClick={() => void handleUnpair(e)}
+                        onClick={() => setManageDevicesEmp(e)}
                         icon={
-                          <svg className="h-3.5 w-3.5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                          <svg className="h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                           </svg>
                         }
                       >
-                        Unpair App
+                        Devices ({e.deviceCount})
                       </Button>
                     )}
                   </div>
@@ -1033,6 +1035,16 @@ export function TeamPanel({
         <EmployeeProfileModal
           employee={viewProfileEmp}
           onClose={() => setViewProfileEmp(null)}
+        />
+      )}
+
+      {manageDevicesEmp && (
+        <ManageDevicesModal
+          employee={manageDevicesEmp}
+          onClose={() => setManageDevicesEmp(null)}
+          onDevicesChanged={() => {
+            onRefresh?.();
+          }}
         />
       )}
     </>
@@ -1730,6 +1742,250 @@ export function EmployeeProfileModal({
         <div className="mt-6 flex justify-end">
           <Button variant="secondary" onClick={onClose}>
             Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ManageDevicesModal({
+  employee,
+  onClose,
+  onDevicesChanged,
+}: {
+  employee: AdminEmployee;
+  onClose: () => void;
+  onDevicesChanged?: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [devices, setDevices] = useState<EmployeeDeviceItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [bulkRevoking, setBulkRevoking] = useState(false);
+
+  const loadDevices = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await api.getEmployeeDevices(employee.id);
+      setDevices(res.devices || []);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load devices');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDevices();
+  }, [employee.id]);
+
+  const handleRevokeSingle = async (device: EmployeeDeviceItem) => {
+    const modelName = device.model || device.label || 'Unknown Device';
+    const warningMsg = device.isRecentlyActive
+      ? `⚠️ WARNING: This device was ACTIVE RECENTLY (${device.lastSeen})!\n\nAre you sure you want to unpair "${modelName}"? It appears to be this employee's active phone.\n\n`
+      : `Last active: ${device.lastSeen}.\n\nAre you sure you want to unpair "${modelName}" (${device.platform.toUpperCase()})?\n\n`;
+
+    const ok = window.confirm(
+      `${warningMsg}Unpairing will log this device out immediately. Historical attendance and payroll records will remain safe.`
+    );
+    if (!ok) return;
+
+    try {
+      setRevokingId(device.id);
+      const res = await api.revokeDevice(device.id);
+      alert(res.message || 'Device successfully unpaired.');
+      await loadDevices();
+      onDevicesChanged?.();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to unpair device');
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  const handleRevokeAll = async () => {
+    const ok = window.confirm(
+      `Are you sure you want to unpair ALL ${devices.length} device(s) for "${employee.name}"?\n\n` +
+      `This will disconnect all mobile app sessions. Attendance history will remain safe.`
+    );
+    if (!ok) return;
+
+    try {
+      setBulkRevoking(true);
+      const res = await api.unpairEmployeeDevices(employee.id);
+      alert(res.message || 'All devices unpaired.');
+      await loadDevices();
+      onDevicesChanged?.();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to unpair devices');
+    } finally {
+      setBulkRevoking(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 sm:p-6 backdrop-blur-md overflow-y-auto">
+      <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-slate-900 p-6 sm:p-7 shadow-2xl my-8">
+        {/* Modal Header */}
+        <div className="flex items-start justify-between border-b border-white/10 pb-5">
+          <div className="flex items-center gap-3.5">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-indigo-500/20 text-indigo-400 font-bold text-lg border border-indigo-500/30">
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+                Paired Mobile Devices
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {employee.name} {employee.employeeNumber ? `(${employee.employeeNumber})` : ''} • {devices.length} registered device{devices.length === 1 ? '' : 's'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-white/10 bg-slate-800/80 p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="mt-5 space-y-4">
+          <div className="rounded-xl bg-slate-800/40 border border-white/5 p-3 text-xs text-slate-400 flex items-start gap-2.5">
+            <svg className="h-4 w-4 text-sky-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>
+              Review the <strong>Last Active</strong> timestamp before unpairing to make sure you do not unpair the employee&apos;s active device.
+            </span>
+          </div>
+
+          {loading ? (
+            <div className="py-12 text-center text-slate-400 text-sm flex flex-col items-center gap-2">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+              <span>Loading registered devices...</span>
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-center">
+              <p className="text-sm text-rose-400">{error}</p>
+              <Button size="sm" variant="secondary" className="mt-3" onClick={loadDevices}>
+                Retry
+              </Button>
+            </div>
+          ) : devices.length === 0 ? (
+            <div className="py-10 text-center text-slate-400 text-sm rounded-2xl border border-white/5 bg-slate-900/50">
+              <p className="font-semibold text-white">No Paired Devices</p>
+              <p className="text-xs text-slate-500 mt-1">This employee currently has no paired mobile devices.</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+              {devices.map((d) => {
+                const isBusy = revokingId === d.id || bulkRevoking;
+                const isAndroid = d.platform.toLowerCase() === 'android';
+                return (
+                  <div
+                    key={d.id}
+                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 rounded-2xl border p-4 transition-all ${
+                      d.isRecentlyActive
+                        ? 'border-emerald-500/30 bg-emerald-500/[0.04]'
+                        : 'border-white/10 bg-slate-800/50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div
+                        className={`grid h-10 w-10 place-items-center rounded-xl border shrink-0 ${
+                          isAndroid
+                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                            : 'bg-sky-500/10 border-sky-500/20 text-sky-400'
+                        }`}
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-white text-sm truncate">
+                            {d.model || d.label || 'Mobile Device'}
+                          </span>
+                          <span className="rounded px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-white/5 text-slate-300 border border-white/10">
+                            {d.platform}
+                          </span>
+                          {d.isRecentlyActive ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              Active Recently
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 border border-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                              <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
+                              Inactive
+                            </span>
+                          )}
+                        </div>
+                        {d.label && d.label !== d.model && (
+                          <div className="text-xs text-slate-400 truncate">
+                            Label: {d.label}
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-400">
+                          <span>
+                            <strong className="text-slate-300">Last Active:</strong>{' '}
+                            <span className={d.isRecentlyActive ? 'text-emerald-400 font-semibold' : 'text-slate-300'}>
+                              {d.lastSeen}
+                            </span>
+                          </span>
+                          <span>
+                            <strong className="text-slate-300">Enrolled:</strong>{' '}
+                            {d.enrolledAt}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center sm:justify-end shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={isBusy}
+                        onClick={() => void handleRevokeSingle(d)}
+                        icon={
+                          <svg className="h-3.5 w-3.5 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        }
+                      >
+                        {revokingId === d.id ? 'Unpairing…' : 'Unpair'}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
+          <div>
+            {devices.length > 1 && (
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={loading || bulkRevoking}
+                onClick={handleRevokeAll}
+              >
+                {bulkRevoking ? 'Unpairing All…' : 'Unpair All Devices'}
+              </Button>
+            )}
+          </div>
+          <Button variant="secondary" onClick={onClose}>
+            Done
           </Button>
         </div>
       </div>

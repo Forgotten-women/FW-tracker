@@ -485,6 +485,20 @@ async function presentDay(d, employee) {
   const excessBreakMinutes = summary ? summary.excess_break_minutes : 0;
   const dailyDeficitMinutes = (summary ? summary.daily_deficit_minutes : 0) || (isLate ? lateMinutes : 0);
 
+  // Active shift minutes strictly count from scheduled start time onwards (e.g. 11:00 AM).
+  // Early arrival before scheduled start is preserved in firstCheckIn but does not count as active worked time.
+  let shiftWorkedMinutes = 0;
+  if (s.isWorkingDay && s.scheduledStartAt) {
+    shiftWorkedMinutes = (d.sessions || []).reduce((acc, sess) => {
+      const start = Math.max(sess.start, s.scheduledStartAt);
+      const end = Math.max(sess.end, s.scheduledStartAt);
+      return acc + Math.max(0, Math.round((end - start) / 60000));
+    }, 0);
+    shiftWorkedMinutes = Math.max(0, shiftWorkedMinutes + (d.adjustmentMinutes || 0));
+  } else {
+    shiftWorkedMinutes = d.totalMinutes;
+  }
+
   return {
     employeeId: d.employeeId,
     employeeName: employee ? employee.name : 'Unknown',
@@ -503,8 +517,9 @@ async function presentDay(d, employee) {
     scheduledStartTime: s.startTime,
     firstCheckIn: d.firstInAt ? T.displayTime(d.firstInAt) : '--',
     lastActiveTime: d.lastActiveAt ? T.displayTime(d.lastActiveAt) : '--',
-    totalMinutes: d.totalMinutes,
-    timeWorkedFormatted: T.formatMinutes(d.totalMinutes),
+    totalMinutes: shiftWorkedMinutes,
+    timeWorkedFormatted: T.formatMinutes(shiftWorkedMinutes),
+    rawPresenceMinutes: d.totalMinutes,
     inactivityMinutes: d.inactivityMinutes,
     graceMinutesLeft: d.graceMinutesLeft,
     adjustmentMinutes: d.adjustmentMinutes,

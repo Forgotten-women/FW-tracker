@@ -87,6 +87,7 @@ test('arriving before the start time is not late', async () => {
   assert.equal(d.isLateOccurrence, false);
   assert.equal(d.lateMinutes, 0);
   assert.equal(d.attendanceStatus, 'PRESENT');
+  assert.equal(d.workedMinutes, 480, 'active minutes strictly count from 11:00 onwards');
 });
 
 test('inside the 10-minute grace period has 0 late minutes and is NOT a late occurrence', async () => {
@@ -469,45 +470,79 @@ test('arriving at 11:10 and staying until 7:10 PM covers the arrival with no sho
   assert.equal(d.workedMinutes, 480, 'worked full 480 minutes (8 hours)');
 });
 
-test('arriving at 11:20 and staying until 7:20 PM fully recovers 10m lateness (0 deficit, status RECOVERED)', async () => {
-  const emp = await makeEmployee('emp_rec_1120_full');
-  await present(emp, '11:20', '19:20');
+// ---------------------------------------------------------------------------
+// Late Arrival Policy: No Evening Overtime Recovery; Break Offset if No Break Taken
+// ---------------------------------------------------------------------------
+
+test('evening overtime does NOT adjust or excuse morning lateness if break was taken', async () => {
+  const emp = await makeEmployee('emp_no_ot_rec');
+  // Arrived 11:20 (10m late beyond grace), took 30m break, stayed until 19:20
+  await present(emp, '11:20', '14:00');
+  await A.startBreak(emp, at('14:00'));
+  await A.endBreak(emp, at('14:30'));
+  await present(emp, '14:30', '19:20');
 
   const d = await A.deriveDay(emp, DAY, at('19:40'));
   assert.equal(d.lateMinutes, 10, '10 minutes beyond 10m grace');
   assert.equal(d.overtimeMinutes, 20, '20 minutes worked past 19:00');
-  assert.equal(d.recoveredLateMinutes, 10, 'recovers the full 10 late minutes');
-  assert.equal(d.netLateMinutes, 0, '0 net late minutes remaining');
-  assert.equal(d.dailyDeficitMinutes, 0, '0 deficit after recovery');
-  assert.equal(d.isLateOccurrence, false, 'cleared late occurrence upon full recovery');
-  assert.equal(d.attendanceStatus, 'RECOVERED');
-  assert.equal(d.workedMinutes, 480, 'worked full 480 minutes (8 hours)');
-});
-
-test('arriving at 11:20 and staying until 7:05 PM partially recovers lateness (5m deficit remaining)', async () => {
-  const emp = await makeEmployee('emp_rec_1120_part');
-  await present(emp, '11:20', '19:05');
-
-  const d = await A.deriveDay(emp, DAY, at('19:30'));
-  assert.equal(d.lateMinutes, 10, '10 minutes beyond 10m grace');
-  assert.equal(d.overtimeMinutes, 5, '5 minutes past 19:00');
-  assert.equal(d.recoveredLateMinutes, 5, '5 minutes recovered');
-  assert.equal(d.netLateMinutes, 5, '5 minutes net deficit remaining');
-  assert.equal(d.dailyDeficitMinutes, 5, '5 deficit');
-  assert.equal(d.isLateOccurrence, true, 'still a late occurrence because net > 0');
+  assert.equal(d.recoveredLateMinutes, 0, 'evening overtime does NOT recover morning lateness');
+  assert.equal(d.netLateMinutes, 10, '10 net late minutes remain');
+  assert.equal(d.isLateOccurrence, true, 'still a late occurrence because late is late');
   assert.equal(d.attendanceStatus, 'LATE');
 });
 
-test('arriving at 11:20 and leaving at 7:00 PM has 0 recovery (10m deficit)', async () => {
-  const emp = await makeEmployee('emp_rec_1120_none');
+test('break offset rule: arriving within 30m window (11:20) and completing 8 hours with NO break offsets lateness', async () => {
+  const emp = await makeEmployee('emp_break_offset_1120');
+  // Continuous presence from 11:20 to 19:20 (completes full 8 hours = 480m) with 0 breaks
+  await present(emp, '11:20', '19:20');
+
+  const d = await A.deriveDay(emp, DAY, at('19:40'));
+  assert.equal(d.lateMinutes, 10, '10 minutes beyond 10m grace');
+  assert.equal(d.workedMinutes, 480, 'worked full 8 hours');
+  assert.equal(d.totalBreakMinutesTaken, 0, 'no breaks taken');
+  assert.equal(d.recoveredLateMinutes, 10, '30m break allowance offsets the 10m lateness');
+  assert.equal(d.netLateMinutes, 0, '0 net late minutes remaining');
+  assert.equal(d.dailyDeficitMinutes, 0, '0 deficit after break offset');
+  assert.equal(d.isLateOccurrence, false, 'not penalized as late when break offset applies');
+  assert.equal(d.attendanceStatus, 'RECOVERED');
+});
+
+test('break offset rule: arriving at 11:30 and completing 8 hours with NO break offsets full 20m lateness', async () => {
+  const emp = await makeEmployee('emp_break_offset_1130');
+  // Arrived at 11:30 (last minute of 30m late window) to 19:30 with 0 breaks (480 minutes worked)
+  await present(emp, '11:30', '19:30');
+
+  const d = await A.deriveDay(emp, DAY, at('19:45'));
+  assert.equal(d.lateMinutes, 20);
+  assert.ok(d.workedMinutes >= 480, 'completed at least 8 hours');
+  assert.equal(d.totalBreakMinutesTaken, 0);
+  assert.equal(d.recoveredLateMinutes, 20, 'offsets full 20m lateness');
+  assert.equal(d.netLateMinutes, 0);
+  assert.equal(d.isLateOccurrence, false);
+  assert.equal(d.attendanceStatus, 'RECOVERED');
+});
+
+test('arriving at 11:20 and leaving at 19:00 without completing 8 hours is NOT excused by break offset', async () => {
+  const emp = await makeEmployee('emp_late_no_8hr');
+  // Left at 19:00, only worked 460 minutes (< 480 minutes target)
   await present(emp, '11:20', '19:00');
 
   const d = await A.deriveDay(emp, DAY, at('19:30'));
   assert.equal(d.lateMinutes, 10);
-  assert.equal(d.overtimeMinutes, 0);
-  assert.equal(d.recoveredLateMinutes, 0);
+  assert.equal(d.recoveredLateMinutes, 0, 'did not complete 8 hours');
   assert.equal(d.netLateMinutes, 10);
-  assert.equal(d.dailyDeficitMinutes, 10);
+  assert.equal(d.isLateOccurrence, true);
+  assert.equal(d.attendanceStatus, 'LATE');
+});
+
+test('arriving after 30m window (11:35) is not eligible for break offset even with no breaks', async () => {
+  const emp = await makeEmployee('emp_late_1135');
+  await present(emp, '11:35', '19:00');
+
+  const d = await A.deriveDay(emp, DAY, at('19:30'));
+  assert.equal(d.lateMinutes, 25);
+  assert.equal(d.recoveredLateMinutes, 0, 'outside 30m late arrival window');
+  assert.equal(d.netLateMinutes, 25);
   assert.equal(d.isLateOccurrence, true);
   assert.equal(d.attendanceStatus, 'LATE');
 });

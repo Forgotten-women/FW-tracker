@@ -585,6 +585,28 @@ export interface OtaConfig {
   githubRepoName: string;
 }
 
+export interface EmployeeDeviceItem {
+  id: string;
+  employeeId: string;
+  platform: string;
+  model: string;
+  label?: string | null;
+  enrolledAt: string;
+  lastSeenAt: number | null;
+  lastSeen: string;
+  isRecentlyActive: boolean;
+}
+
+export interface EmployeeDevicesResponse {
+  status: string;
+  employee: {
+    id: string;
+    name: string;
+    employeeNumber?: string | null;
+  };
+  devices: EmployeeDeviceItem[];
+}
+
 export interface WorkstationItem {
   id: string;
   employeeId: string;
