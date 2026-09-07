@@ -52,6 +52,7 @@ router.get('/employees', async (req, res) => {
       id: r.id,
       name: r.name,
       role: r.effective_job_title || r.role,
+      employeeNumber: r.employee_number || null,
       active: !!r.active,
       deviceCount: r.device_count,
       baseSalary: r.base_salary !== null && r.base_salary !== undefined ? Number(r.base_salary) : null,
@@ -65,17 +66,35 @@ router.get('/employees', async (req, res) => {
 
 router.post('/employees', async (req, res) => {
   const { name, role, baseSalary, currency, startDate, reason } = req.body || {};
+  let { employeeNumber } = req.body || {};
   if (!name || !String(name).trim()) {
     return res.status(400).json({ status: 'ERROR', message: 'Employee name is required.' });
   }
+
+  const people = require('../domain/people');
+  if (employeeNumber && String(employeeNumber).trim()) {
+    employeeNumber = String(employeeNumber).trim().toUpperCase();
+    const existing = await db.prepare('SELECT id FROM employees WHERE UPPER(employee_number) = ?').get(employeeNumber);
+    if (existing) {
+      return res.status(409).json({ status: 'ERROR', message: `Employee ID ${employeeNumber} is already assigned to another employee.` });
+    }
+  } else {
+    employeeNumber = await people.nextEmployeeNumber();
+  }
+
   const id = 'emp_' + crypto.randomBytes(6).toString('hex');
   const nowMs = T.now();
-  const employee = { id, name: String(name).trim(), role: String(role || 'Team Member').trim() };
+  const employee = {
+    id,
+    name: String(name).trim(),
+    role: String(role || 'Team Member').trim(),
+    employeeNumber,
+  };
   const PR = require('../domain/payroll');
 
   await tx(async () => {
-    await db.prepare('INSERT INTO employees (id,name,role,active,created_at,updated_at) VALUES (?,?,?,1,?,?)')
-      .run(employee.id, employee.name, employee.role, nowMs, nowMs);
+    await db.prepare('INSERT INTO employees (id,name,role,active,employee_number,created_at,updated_at) VALUES (?,?,?,1,?,?,?)')
+      .run(employee.id, employee.name, employee.role, employeeNumber, nowMs, nowMs);
 
     if (startDate) {
       await db.prepare(`
@@ -122,6 +141,13 @@ router.patch('/employees/:id', async (req, res) => {
   const before = await db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
   if (!before) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
 
+  if (req.body?.employeeNumber !== undefined && req.body.employeeNumber !== before.employee_number) {
+    return res.status(400).json({ status: 'ERROR', message: 'Employee ID is permanent and cannot be modified.' });
+  }
+  if (req.body?.employee_number !== undefined && req.body.employee_number !== before.employee_number) {
+    return res.status(400).json({ status: 'ERROR', message: 'Employee ID is permanent and cannot be modified.' });
+  }
+
   const name = req.body?.name !== undefined ? String(req.body.name).trim() : before.name;
   const role = req.body?.role !== undefined ? String(req.body.role).trim() : before.role;
   const active = req.body?.active !== undefined ? (req.body.active ? 1 : 0) : before.active;
@@ -136,7 +162,10 @@ router.patch('/employees/:id', async (req, res) => {
     });
   });
 
-  res.json({ status: 'SUCCESS', employee: { id: req.params.id, name, role, active: !!active } });
+  res.json({
+    status: 'SUCCESS',
+    employee: { id: req.params.id, name, role, employeeNumber: before.employee_number, active: !!active },
+  });
 });
 
 router.patch('/employees/:id/employment', async (req, res) => {
@@ -234,76 +263,23 @@ router.patch('/employees/:id/employment', async (req, res) => {
 });
 
 router.delete('/employees/:id', async (req, res) => {
-  const employeeId = req.params.id;
-  const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
-  if (!employee) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
-
-  const TABLES_WITH_EMPLOYEE_ID = [
-    'absence_records',
-    'attendance_corrections',
-    'attendance_daily_summary',
-    'attendance_days',
-    'attendance_deficit_ledger',
-    'attendance_events',
-    'break_records',
-    'device_mac_bindings',
-    'document_acknowledgements',
-    'emergency_contacts',
-    'employee_bank_details',
-    'employee_documents',
-    'employee_personal',
-    'employee_warning_standing',
-    'employment_records',
-    'employment_status_history',
-    'enrollment_codes',
-    'formal_warnings',
-    'leave_accrual_ledger',
-    'leave_entitlements',
-    'leave_overdraft_approvals',
-    'leave_requests',
-    'mac_binding_events',
-    'manager_assignments',
-    'movements',
-    'notifications',
-    'payroll_adjustments',
-    'performance_reviews',
-    'presence_events',
-    'process_anomalies',
-    'salary_history',
-    'users',
-    'warning_acknowledgements',
-    'warning_triggers',
-    'workstation_app_usage',
-    'workstation_sessions',
-  ];
-
-  await tx(async () => {
-    // 1. Delete device_tokens for all devices owned by this employee
-    await db.prepare('DELETE FROM device_tokens WHERE device_id IN (SELECT id FROM devices WHERE employee_id = ?)').run(employeeId);
-
-    // 2. Delete from all employee-referencing tables
-    for (const tbl of TABLES_WITH_EMPLOYEE_ID) {
-      try {
-        await db.prepare(`DELETE FROM ${tbl} WHERE employee_id = ?`).run(employeeId);
-      } catch (err) {
-        console.warn(`[admin/delete-employee] table ${tbl} delete non-fatal:`, err.message);
-      }
-    }
-
-    // 3. Delete devices
-    await db.prepare('DELETE FROM devices WHERE employee_id = ?').run(employeeId);
-
-    // 4. Finally delete the employee record itself
-    await db.prepare('DELETE FROM employees WHERE id = ?').run(employeeId);
-
-    await audit({
-      actor: 'admin', action: 'EMPLOYEE_DELETED', targetType: 'employee', targetId: employeeId,
-      before: { name: employee.name, role: employee.role },
-      after: null,
-    });
+  return res.status(400).json({
+    status: 'ERROR',
+    message: 'Permanent deletion of employee records is strictly prohibited to preserve historical attendance, payroll, leave, and audit integrity. Every Employee ID must remain attached to its historical record and cannot be deleted or reissued. To disconnect the mobile app, use "Unpair App"; to mark an employee departure, change their status to "Left employment".',
   });
+});
 
-  res.json({ status: 'SUCCESS', message: `Employee ${employee.name} permanently deleted from all records.` });
+router.post('/employees/:id/unpair-devices', async (req, res) => {
+  const people = require('../domain/people');
+  try {
+    const result = await people.unpairEmployeeDevices({
+      employeeId: req.params.id,
+      actor: 'admin',
+    });
+    res.json({ status: 'SUCCESS', ...result });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 // --- enrolment codes -------------------------------------------------------

@@ -643,7 +643,7 @@ async function selfReportAbsence({ employeeId, dateKey, absenceType = 'SICK', re
  */
 async function listAbsences({ status = 'ALL', from = null, to = null, employeeId = null } = {}) {
   let query = `
-    SELECT a.*, e.name as employee_name, e.role as employee_role, d.title as document_title
+    SELECT a.*, e.name as employee_name, e.role as employee_role, e.employee_number, d.title as document_title
     FROM absence_records a
     JOIN employees e ON e.id = a.employee_id
     LEFT JOIN employee_documents d ON d.id = a.evidence_document_id
@@ -675,6 +675,7 @@ async function listAbsences({ status = 'ALL', from = null, to = null, employeeId
     id: r.id,
     employeeId: r.employee_id,
     employeeName: r.employee_name,
+    employeeNumber: r.employee_number || null,
     role: r.employee_role,
     date: r.date_key,
     absenceType: r.absence_type,

@@ -348,14 +348,14 @@ async function preparePeriod(periodId) {
   const period = await db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
   if (!period) throw new Error('No such payroll period.');
 
-  const employees = await db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
+  const employees = await db.prepare('SELECT id, name, employee_number FROM employees WHERE active = 1').all();
   const rows = [];
   const blocked = [];
 
   for (const e of employees) {
     const salary = await salaryAt(e.id, period.end_date);
     if (salary.blocked) {
-      blocked.push({ employeeId: e.id, employeeName: e.name, reason: salary.reason, message: salary.message });
+      blocked.push({ employeeId: e.id, employeeName: e.name, employeeNumber: e.employee_number || null, reason: salary.reason, message: salary.message });
       continue;
     }
 
@@ -390,6 +390,7 @@ async function preparePeriod(periodId) {
     rows.push({
       employeeId: e.id,
       employeeName: e.name,
+      employeeNumber: e.employee_number || null,
       salary: { monthly: salary.monthly, daily: salary.daily, annual: salary.annual, currency: salary.currency || 'GBP' },
       workingDaysCount,
       fullPeriodDays,

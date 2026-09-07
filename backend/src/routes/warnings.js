@@ -46,7 +46,7 @@ router.post('/:id/acknowledge', requireDevice, async (req, res) => {
 router.get('/board', requireUserOrAdminKey('warning.read'), async (req, res) => {
   const dateKey = String(req.query.date || T.dateKey());
   const visible = await rbac.accessibleEmployeeIds(req.auth);
-  const employees = (await db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all())
+  const employees = (await db.prepare('SELECT id, name, role, employee_number FROM employees WHERE active = 1').all())
     .filter(e => visible.includes(e.id));
 
   const rows = await Promise.all(employees.map(async e => {
@@ -54,6 +54,7 @@ router.get('/board', requireUserOrAdminKey('warning.read'), async (req, res) => 
     return {
       employeeId: e.id,
       employeeName: e.name,
+      employeeNumber: e.employee_number || null,
       role: e.role,
       band: view.band,
       bandLabel: view.bandLabel,
@@ -87,7 +88,7 @@ router.get('/board', requireUserOrAdminKey('warning.read'), async (req, res) => 
 router.get('/triggers', requireUserOrAdminKey('warning.read'), async (req, res) => {
   const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const rows = (await db.prepare(`
-    SELECT t.*, e.name FROM warning_triggers t
+    SELECT t.*, e.name, e.employee_number FROM warning_triggers t
     JOIN employees e ON e.id = t.employee_id
     WHERE t.status = ? ORDER BY t.triggered_at ASC
   `).all(String(req.query.status || 'PENDING_REVIEW')))
@@ -101,6 +102,7 @@ router.get('/triggers', requireUserOrAdminKey('warning.read'), async (req, res) 
         id: r.id,
         employeeId: r.employee_id,
         employeeName: r.name,
+        employeeNumber: r.employee_number || null,
         reason: r.trigger_reason,
         occurrences: r.occurrence_count,
         period: r.related_dates,
@@ -122,7 +124,7 @@ router.get('/triggers', requireUserOrAdminKey('warning.read'), async (req, res) 
 router.get('/formal', requireUserOrAdminKey('warning.read'), async (req, res) => {
   const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const rows = (await db.prepare(`
-    SELECT w.*, e.name AS employee_name, e.role AS employee_role,
+    SELECT w.*, e.name AS employee_name, e.role AS employee_role, e.employee_number,
            a.acknowledged_at, a.comments AS ack_comments
     FROM formal_warnings w
     JOIN employees e ON e.id = w.employee_id
@@ -136,6 +138,7 @@ router.get('/formal', requireUserOrAdminKey('warning.read'), async (req, res) =>
       id: r.id,
       employeeId: r.employee_id,
       employeeName: r.employee_name,
+      employeeNumber: r.employee_number || null,
       employeeRole: r.employee_role,
       level: r.warning_level,
       levelLabel: W.levelLabel(r.warning_level),

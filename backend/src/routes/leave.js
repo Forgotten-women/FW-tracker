@@ -137,7 +137,7 @@ router.post('/request/:id/cancel', requireDevice, async (req, res) => {
 router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => {
   const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const rows = (await db.prepare(`
-    SELECT r.*, e.name AS employee_name, e.role AS employee_role, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
+    SELECT r.*, e.name AS employee_name, e.role AS employee_role, e.employee_number, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
@@ -157,6 +157,7 @@ router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => 
         id: r.id,
         employeeId: r.employee_id,
         employeeName: r.employee_name,
+        employeeNumber: r.employee_number || null,
         employeeRole: r.employee_role,
         type: r.type_name,
         leaveTypeId: r.leave_type_id,
@@ -180,7 +181,7 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
   const statusFilter = req.query.status;
 
   let query = `
-    SELECT r.*, e.name AS employee_name, e.role AS employee_role, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
+    SELECT r.*, e.name AS employee_name, e.role AS employee_role, e.employee_number, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
@@ -200,6 +201,7 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
       id: r.id,
       employeeId: r.employee_id,
       employeeName: r.employee_name,
+      employeeNumber: r.employee_number || null,
       employeeRole: r.employee_role,
       type: r.type_name,
       leaveTypeId: r.leave_type_id,
@@ -222,7 +224,7 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
 
 router.get('/balances', requireUserOrAdminKey('leave.read'), async (req, res) => {
   const visible = await rbac.accessibleEmployeeIds(req.auth);
-  const employees = (await db.prepare('SELECT id, name, role FROM employees WHERE active = 1').all())
+  const employees = (await db.prepare('SELECT id, name, role, employee_number FROM employees WHERE active = 1').all())
     .filter(e => visible.includes(e.id));
 
   const rows = await Promise.all(employees.map(async e => {
@@ -230,6 +232,7 @@ router.get('/balances', requireUserOrAdminKey('leave.read'), async (req, res) =>
     return {
       employeeId: e.id,
       employeeName: e.name,
+      employeeNumber: e.employee_number || null,
       role: e.role,
       balance: presentBalance(b),
     };
@@ -247,7 +250,7 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) =>
   const to = String(req.query.to || T.dateKey(T.now() + 60 * 24 * 60 * 60 * 1000));
 
   const rows = (await db.prepare(`
-    SELECT r.*, e.name AS employee_name, t.name AS type_name
+    SELECT r.*, e.name AS employee_name, e.employee_number, t.name AS type_name
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
@@ -264,6 +267,7 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) =>
       id: r.id,
       employeeId: r.employee_id,
       employeeName: r.employee_name,
+      employeeNumber: r.employee_number || null,
       type: r.type_name,
       from: r.start_date,
       to: r.end_date,

@@ -211,7 +211,11 @@ export function LeaveManagementPanel() {
   const filteredBalances = balances.filter((b) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
-    return b.employeeName.toLowerCase().includes(q) || b.role.toLowerCase().includes(q);
+    return (
+      b.employeeName.toLowerCase().includes(q) ||
+      (b.employeeNumber && b.employeeNumber.toLowerCase().includes(q)) ||
+      b.role.toLowerCase().includes(q)
+    );
   });
 
   const filteredHistory = allRequests.filter((r) => {
@@ -219,6 +223,7 @@ export function LeaveManagementPanel() {
     const q = search.toLowerCase();
     return (
       r.employeeName.toLowerCase().includes(q) ||
+      (r.employeeNumber && r.employeeNumber.toLowerCase().includes(q)) ||
       (r.employeeRole && r.employeeRole.toLowerCase().includes(q)) ||
       r.type.toLowerCase().includes(q)
     );
@@ -230,6 +235,7 @@ export function LeaveManagementPanel() {
     const q = search.toLowerCase();
     return (
       a.employeeName.toLowerCase().includes(q) ||
+      (a.employeeNumber && a.employeeNumber.toLowerCase().includes(q)) ||
       (a.role && a.role.toLowerCase().includes(q)) ||
       a.absenceType.toLowerCase().includes(q) ||
       (a.reason && a.reason.toLowerCase().includes(q))
@@ -399,7 +405,14 @@ export function LeaveManagementPanel() {
                     return (
                       <tr key={r.id} className="hover:bg-white/[0.02]">
                         <td className="px-3 py-3 align-top">
-                          <div className="font-semibold text-text">{r.employeeName}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-text">{r.employeeName}</span>
+                            {r.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {r.employeeNumber}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-muted">{r.employeeRole ?? ''}</div>
                           {r.reason && (
                             <div className="mt-1 text-[11px] text-dim max-w-[200px] truncate">
@@ -512,7 +525,14 @@ export function LeaveManagementPanel() {
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-sm text-text">{l.employeeName}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-sm text-text">{l.employeeName}</span>
+                        {l.employeeNumber && (
+                          <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                            {l.employeeNumber}
+                          </span>
+                        )}
+                      </div>
                       <Badge tone={isTodayActive ? 'brand' : 'muted'}>
                         {isTodayActive ? 'Away Today' : `${l.days}d`}
                       </Badge>
@@ -573,7 +593,14 @@ export function LeaveManagementPanel() {
                       return (
                         <tr key={b.employeeId} className="hover:bg-white/[0.02]">
                           <td className="px-3 py-3 align-middle">
-                            <div className="font-semibold text-text">{b.employeeName}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-text">{b.employeeName}</span>
+                              {b.employeeNumber && (
+                                <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                  {b.employeeNumber}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[11px] text-muted">{b.role}</div>
                           </td>
                           <td colSpan={6} className="px-3 py-3 align-middle text-dim italic">
@@ -597,7 +624,14 @@ export function LeaveManagementPanel() {
                     return (
                       <tr key={b.employeeId} className="hover:bg-white/[0.02]">
                         <td className="px-3 py-3 align-middle">
-                          <div className="font-semibold text-text">{b.employeeName}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-text">{b.employeeName}</span>
+                            {b.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {b.employeeNumber}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-muted">{b.role}</div>
                         </td>
                         <td className="px-3 py-3 align-middle font-mono text-[11px] text-dim">
@@ -703,7 +737,14 @@ export function LeaveManagementPanel() {
                     return (
                       <tr key={r.id} className="hover:bg-white/[0.02]">
                         <td className="px-3 py-3 align-middle">
-                          <div className="font-semibold text-text">{r.employeeName}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-text">{r.employeeName}</span>
+                            {r.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {r.employeeNumber}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-muted">{r.employeeRole ?? ''}</div>
                         </td>
                         <td className="px-3 py-3 align-middle">
@@ -795,7 +836,14 @@ export function LeaveManagementPanel() {
                     return (
                       <tr key={abs.id} className="hover:bg-white/[0.02]">
                         <td className="px-3 py-3 align-middle">
-                          <div className="font-semibold text-text">{abs.employeeName}</div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-text">{abs.employeeName}</span>
+                            {abs.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {abs.employeeNumber}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-muted">{abs.role || ''}</div>
                         </td>
                         <td className="px-3 py-3 align-middle font-mono font-medium text-slate-200">
@@ -1122,7 +1170,7 @@ export function LeaveManagementPanel() {
                   <option value="">-- Choose Employee --</option>
                   {balances.map((b) => (
                     <option key={b.employeeId} value={b.employeeId}>
-                      {b.employeeName} ({b.role}) - Available: {b.balance.available}d
+                      {b.employeeNumber ? `[${b.employeeNumber}] ` : ''}{b.employeeName} ({b.role}) - Available: {b.balance.available}d
                     </option>
                   ))}
                 </select>

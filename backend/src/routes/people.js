@@ -151,8 +151,10 @@ router.get('/employee/:employeeId/profile',
 router.get('/employee/:employeeId/employment-history',
   requireUserOrAdminKey('employee.read'), requireEmployeeAccess(),
   async (req, res) => {
+    const emp = await db.prepare('SELECT id, name, employee_number FROM employees WHERE id = ?').get(req.params.employeeId);
     res.json({
       status: 'SUCCESS',
+      employee: emp ? { id: emp.id, name: emp.name, employeeNumber: emp.employee_number || null } : null,
       history: await (await people.employmentHistory(req.params.employeeId)).map(er => ({
         jobTitle: er.job_title,
         employmentType: er.employment_type,

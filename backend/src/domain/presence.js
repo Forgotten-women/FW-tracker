@@ -488,6 +488,7 @@ async function presentDay(d, employee) {
   return {
     employeeId: d.employeeId,
     employeeName: employee ? employee.name : 'Unknown',
+    employeeNumber: employee ? (employee.employee_number || employee.employeeNumber || null) : null,
     role: employee ? employee.role : '',
     date: d.dateKey,
     status: d.status,
@@ -523,7 +524,7 @@ async function presentDay(d, employee) {
 // See the note on selectToken in middleware/auth.js: the previous shape let an
 // arbitrary employment record supply the job title.
 const selectActiveEmployees = db.prepare(`
-  SELECT e.id, e.name, COALESCE(er.job_title, e.role) AS role, e.role AS department
+  SELECT e.id, e.name, e.employee_number, COALESCE(er.job_title, e.role) AS role, e.role AS department
   FROM employees e
   LEFT JOIN LATERAL (
     SELECT job_title

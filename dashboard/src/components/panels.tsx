@@ -349,9 +349,16 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
                       {initials}
                     </div>
                     <div className="min-w-0">
-                      <h4 className="truncate text-sm font-bold text-white">
-                        {e.employeeName}
-                      </h4>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h4 className="truncate text-sm font-bold text-white">
+                          {e.employeeName}
+                        </h4>
+                        {e.employeeNumber && (
+                          <span className="shrink-0 rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                            {e.employeeNumber}
+                          </span>
+                        )}
+                      </div>
                       <p className="truncate text-xs text-slate-400">{e.role}</p>
                     </div>
                   </div>
@@ -826,18 +833,19 @@ export function TeamPanel({
     }
   };
 
-  const handleDelete = async (emp: AdminEmployee) => {
+  const handleUnpair = async (emp: AdminEmployee) => {
     const ok = window.confirm(
-      `Are you sure you want to permanently delete "${emp.name}" from all places?\n\nThis will permanently delete all paired devices, attendance records, active workstation sessions, application usage history, salary records, and document files.`
+      `Are you sure you want to unpair all devices for "${emp.name}" (${emp.employeeNumber || emp.id})?\n\nThis will disconnect active mobile app sessions. Attendance and payroll history will be safely preserved.`
     );
     if (!ok) return;
 
     try {
       setBusy(true);
-      await api.deleteEmployee(emp.id);
+      const res = await api.unpairEmployeeDevices(emp.id);
+      alert(res.message || 'Devices successfully unpaired.');
       if (onRefresh) onRefresh();
     } catch (err: any) {
-      alert(err?.message || 'Failed to delete employee');
+      alert(err?.message || 'Failed to unpair devices');
     } finally {
       setBusy(false);
     }
@@ -904,24 +912,29 @@ export function TeamPanel({
               return (
                 <div
                   key={e.id}
-                  className="flex flex-col justify-between gap-3 rounded-2xl border border-white/8 bg-slate-900/60 p-4 transition-all hover:border-white/15"
+                  className="flex flex-col justify-between gap-3 rounded-2xl border border-white/8 bg-slate-900/60 p-4 transition-all hover:border-white/15 overflow-hidden"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/20">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/20 shrink-0">
                         {e.name.charAt(0).toUpperCase()}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-white text-sm">{e.name}</span>
-                          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 border border-emerald-500/20">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-white text-sm truncate">{e.name}</span>
+                          {e.employeeNumber && (
+                            <span className="rounded-md bg-indigo-500/15 px-2 py-0.5 text-[11px] font-mono font-bold text-indigo-300 border border-indigo-500/30 shrink-0">
+                              {e.employeeNumber}
+                            </span>
+                          )}
+                          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 border border-emerald-500/20 shrink-0">
                             {e.deviceCount} Device{e.deviceCount === 1 ? '' : 's'}
                           </span>
                         </div>
-                        <span className="text-xs text-slate-400">{e.role}</span>
+                        <span className="text-xs text-slate-400 block truncate">{e.role}</span>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       {e.baseSalary ? (
                         <div className="font-mono text-xs font-bold text-emerald-400">
                           {curSymbol}{Number(e.baseSalary).toLocaleString()}
@@ -937,7 +950,7 @@ export function TeamPanel({
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center justify-end gap-2 border-t border-white/5 pt-2.5">
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/5 pt-2.5">
                     <Button
                       size="sm"
                       variant="secondary"
@@ -979,19 +992,21 @@ export function TeamPanel({
                     >
                       Pair App
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={busy}
-                      onClick={() => void handleDelete(e)}
-                      icon={
-                        <svg className="h-3.5 w-3.5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      }
-                    >
-                      Delete
-                    </Button>
+                    {e.deviceCount > 0 && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => void handleUnpair(e)}
+                        icon={
+                          <svg className="h-3.5 w-3.5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                          </svg>
+                        }
+                      >
+                        Unpair App
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
@@ -1453,7 +1468,7 @@ export function EmployeeProfileModal({
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                {employee.role || 'Team Member'} · ID: <span className="font-mono text-slate-300">{employee.id}</span>
+                {employee.role || 'Team Member'} · ID: <span className="font-mono text-indigo-400 font-bold">{profile?.employeeNumber || employee.employeeNumber || employee.id}</span>
               </p>
             </div>
           </div>

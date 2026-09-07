@@ -140,6 +140,7 @@ function ExchangeRateModal({
 interface PrepareEmployee {
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   salary: { monthly: number; daily: number; annual: number; currency?: string };
   workingDaysCount?: number;
   fullPeriodDays?: number;
@@ -166,6 +167,7 @@ interface PrepareEmployee {
 interface PrepareBlocked {
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   reason: string;
   message: string;
 }
@@ -653,7 +655,9 @@ function DecideAdjModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#0F172A] p-6 shadow-2xl">
         <h2 className="mb-1 text-base font-bold text-white">Review Adjustment</h2>
-        <p className="mb-4 text-xs text-slate-400">{adj.employeeName} · {adj.type}</p>
+        <p className="mb-4 text-xs text-slate-400">
+          {adj.employeeName} {adj.employeeNumber && <span className="font-mono text-indigo-400 font-bold">({adj.employeeNumber})</span>} · {adj.type}
+        </p>
         {error && (
           <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-300">{error}</div>
         )}
@@ -1126,12 +1130,19 @@ function PeriodDetailView({
                     return (
                       <tr key={emp.employeeId} className="hover:bg-slate-800/30 transition-colors">
                         <td className="py-2.5 font-medium text-white">
-                          {emp.employeeName}
-                          {emp.salary.currency && (
-                            <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400 border border-slate-700">
-                              {emp.salary.currency}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>{emp.employeeName}</span>
+                            {emp.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {emp.employeeNumber}
+                              </span>
+                            )}
+                            {emp.salary.currency && (
+                              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400 border border-slate-700">
+                                {emp.salary.currency}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2.5 text-right font-mono text-slate-200">
                           <div>
@@ -1149,27 +1160,64 @@ function PeriodDetailView({
                         <td className="py-2.5 text-right font-mono text-slate-400">
                           {formatMoney(emp.salary.monthly, currency, emp.salary.currency, periodRate)}
                         </td>
-                        <td className={`py-2.5 text-right font-mono ${emp.leave.isNegative ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {emp.leave.blocked ? <span className="text-slate-500">—</span> : `${emp.leave.available?.toFixed(2)} d`}
+                        <td className="py-2.5 text-right font-mono">
+                          {emp.leave.blocked ? (
+                            <span className="text-amber-400 text-xs">⚠️ {emp.leave.reason || 'Blocked'}</span>
+                          ) : (
+                            <span className={emp.leave.isNegative ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+                              {emp.leave.available ?? '—'}d
+                            </span>
+                          )}
                         </td>
-                        <td className={`py-2.5 text-right font-mono ${emp.attendanceDeficit.needsHrDecision ? 'text-amber-400' : 'text-slate-400'}`}>
-                          {emp.attendanceDeficit.wholeDayEquivalents > 0
-                            ? <>{emp.attendanceDeficit.wholeDayEquivalents}d <span className="text-[10px]">({formatMoney(emp.attendanceDeficit.valueIfDeducted, currency, emp.salary.currency, periodRate)})</span></>
-                            : '—'}
+                        <td className="py-2.5 text-right font-mono">
+                          {emp.attendanceDeficit.needsHrDecision ? (
+                            <div>
+                              <span className="text-rose-400 font-bold">
+                                {emp.attendanceDeficit.wholeDayEquivalents}d
+                              </span>
+                              <div className="text-[10px] text-slate-400 font-sans">
+                                Val: {formatMoney(emp.attendanceDeficit.valueIfDeducted, currency, emp.salary.currency, periodRate)}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
                         </td>
-                        <td className="py-2.5 text-right font-mono text-slate-300">
-                          {emp.adjustments.length > 0
-                            ? <span className={adjTotal < 0 ? 'text-rose-400' : 'text-emerald-400'}>{adjTotal > 0 ? '+' : ''}{formatMoney(adjTotal, currency, emp.salary.currency, periodRate)}</span>
-                            : <span className="text-slate-500">—</span>}
-                        </td>
-                        <td className="py-2.5 pl-3 text-slate-400">
-                          {emp.adjustments.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {emp.adjustments.map((a) => (
-                                <StatusBadge key={a.id} status={a.status} />
-                              ))}
+                        <td className="py-2.5 text-right font-mono">
+                          {emp.adjustments.length === 0 ? (
+                            <span className="text-slate-500">—</span>
+                          ) : (
+                            <div>
+                              <span className={adjTotal < 0 ? 'text-rose-400 font-bold' : adjTotal > 0 ? 'text-emerald-400 font-bold' : 'text-slate-300'}>
+                                {adjTotal !== 0 ? formatMoney(adjTotal, currency, emp.salary.currency, periodRate) : '—'}
+                              </span>
+                              <div className="text-[10px] text-slate-400 font-sans">
+                                {approvedAdjs.length}/{emp.adjustments.length} approved
+                              </div>
                             </div>
                           )}
+                        </td>
+                        <td className="py-2.5 pl-3 text-slate-400">
+                          <div className="flex flex-col gap-0.5">
+                            {emp.isStarter && (
+                              <span className="text-sky-400 font-medium text-[11px]">
+                                🟢 Starter ({emp.starter?.eligibleWorkingDays}/{emp.fullPeriodDays} days)
+                              </span>
+                            )}
+                            {emp.attendanceDeficit.needsHrDecision && (
+                              <span className="text-amber-400 text-[11px]">
+                                ⚠️ Deficit ({emp.attendanceDeficit.wholeDayEquivalents}d) — pending decision
+                              </span>
+                            )}
+                            {emp.leave.isNegative && (
+                              <span className="text-rose-400 text-[11px]">
+                                🔴 Negative leave balance
+                              </span>
+                            )}
+                            {!emp.isStarter && !emp.attendanceDeficit.needsHrDecision && !emp.leave.isNegative && (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1190,7 +1238,14 @@ function PeriodDetailView({
                 {sheet.blocked.map((b) => (
                   <div key={b.employeeId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-sm text-amber-300 font-bold">{b.employeeName}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm text-amber-300 font-bold">{b.employeeName}</span>
+                        {b.employeeNumber && (
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-300 border border-amber-500/30">
+                            {b.employeeNumber}
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs text-amber-400/80">{b.message}</span>
                     </div>
                     <button
@@ -1229,7 +1284,16 @@ function PeriodDetailView({
                   <tbody className="divide-y divide-slate-800/60">
                     {adjustments.map((adj) => (
                       <tr key={adj.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-2.5 font-medium text-white">{adj.employeeName}</td>
+                        <td className="py-2.5 font-medium text-white">
+                          <div className="flex items-center gap-1.5">
+                            <span>{adj.employeeName}</span>
+                            {adj.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {adj.employeeNumber}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-2.5 text-slate-300">{adj.type.replace(/_/g, ' ')}</td>
                         <td className="py-2.5 text-right font-mono text-slate-300">{formatMoney(adj.calculated.amount, currency)}</td>
                         <td className="py-2.5 text-right font-mono text-emerald-400">

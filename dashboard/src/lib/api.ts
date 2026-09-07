@@ -138,6 +138,12 @@ export const api = {
       { method: 'DELETE' },
     ),
 
+  unpairEmployeeDevices: (employeeId: string) =>
+    request<{ status: string; count: number; message: string }>(
+      `/api/admin/employees/${encodeURIComponent(employeeId)}/unpair-devices`,
+      { method: 'POST' },
+    ),
+
   getEmployeeProfile: (employeeId: string) =>
     request<{ status: string; profile: any }>(
       `/api/people/mine/profile?employeeId=${encodeURIComponent(employeeId)}`,

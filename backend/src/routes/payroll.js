@@ -186,7 +186,7 @@ router.post('/periods/:id/close', requirePermission('payroll.approve'), async (r
 router.get('/periods/:id/adjustments', requirePermission('payroll.read'), async (req, res) => {
   const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const rows = (await db.prepare(`
-    SELECT a.*, e.name FROM payroll_adjustments a
+    SELECT a.*, e.name, e.employee_number FROM payroll_adjustments a
     JOIN employees e ON e.id = a.employee_id
     WHERE a.period_id = ? ORDER BY a.created_at DESC
   `).all(req.params.id)).filter(r => visible.has(r.employee_id));
@@ -197,6 +197,7 @@ router.get('/periods/:id/adjustments', requirePermission('payroll.read'), async 
       id: a.id,
       employeeId: a.employee_id,
       employeeName: a.name,
+      employeeNumber: a.employee_number || null,
       type: a.adjustment_type,
       // Kept apart on purpose: an overridden figure stays visible as an
       // override rather than replacing what was calculated.

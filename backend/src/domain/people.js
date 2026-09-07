@@ -524,11 +524,71 @@ async function myEmployeeProfile(employeeId) {
   };
 }
 
+/**
+ * Generates the next sequential permanent Employee ID (e.g. FW001, FW002, FW003...).
+ * Queries all historical employees (including inactive and former employees).
+ * IDs are permanent and never reused.
+ */
+async function nextEmployeeNumber() {
+  const rows = await db.prepare('SELECT employee_number FROM employees WHERE employee_number IS NOT NULL').all();
+  let maxNum = 0;
+  for (const r of rows) {
+    if (r.employee_number) {
+      const match = /^FW(\d+)$/i.exec(String(r.employee_number).trim());
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (Number.isFinite(n) && n > maxNum) {
+          maxNum = n;
+        }
+      }
+    }
+  }
+  return 'FW' + String(maxNum + 1).padStart(3, '0');
+}
+
+/**
+ * Unpairs/revokes all active devices associated with an employee.
+ * Disconnects the mobile app without deleting or modifying any historical records.
+ */
+async function unpairEmployeeDevices({ employeeId, actor }) {
+  const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+  if (!employee) throw new Error('No such employee.');
+
+  const activeDevices = await db.prepare('SELECT id, model FROM devices WHERE employee_id = ? AND revoked_at IS NULL').all(employeeId);
+  if (!activeDevices || activeDevices.length === 0) {
+    return { ok: true, count: 0, message: 'No active devices paired with this employee.' };
+  }
+
+  const nowMs = T.now();
+  const bindings = require('./bindings');
+
+  await tx(async () => {
+    for (const d of activeDevices) {
+      await db.prepare('UPDATE devices SET revoked_at = ? WHERE id = ?').run(nowMs, d.id);
+      await db.prepare('UPDATE device_tokens SET revoked_at = ? WHERE device_id = ?').run(nowMs, d.id);
+      await bindings.revokeForDevice(d.id, `Unpaired by ${actor || 'admin'}`);
+    }
+    await audit({
+      actor: actor || 'admin',
+      action: 'EMPLOYEE_DEVICES_UNPAIRED',
+      targetType: 'employee',
+      targetId: employeeId,
+      before: { activeDevicesCount: activeDevices.length },
+      after: { activeDevicesCount: 0 },
+      note: `Unpaired ${activeDevices.length} device(s) for ${employee.name}`,
+    });
+  });
+
+  return { ok: true, count: activeDevices.length, message: `Successfully unpaired ${activeDevices.length} device(s).` };
+}
+
 module.exports = {
   createOffice, listOffices, createDepartment, listDepartments,
   assignManager, endManagerAssignment,
   setEmployment, currentEmployment, employmentHistory,
   setStatus, setPersonal, setBank, addEmergencyContact,
   updateEmergencyContact, deleteEmergencyContact,
-  profile, myEmployeeProfile, VALID_TYPES, VALID_STATUS,
+  profile, myEmployeeProfile, nextEmployeeNumber, unpairEmployeeDevices,
+  VALID_TYPES, VALID_STATUS,
 };
+

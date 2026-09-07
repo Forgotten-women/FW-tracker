@@ -20,6 +20,7 @@ export interface WorkSession {
 export interface EmployeeDay {
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   role: string;
   date: string;
   status: PresenceStatus;
@@ -108,6 +109,7 @@ export interface AdminEmployee {
   id: string;
   name: string;
   role: string;
+  employeeNumber?: string | null;
   active: boolean;
   deviceCount: number;
   createdAt: string;
@@ -162,6 +164,7 @@ export interface AttendanceCorrection {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   role: string;
   date: string;
   reason: string;
@@ -183,6 +186,7 @@ export interface WarningTrigger {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   reason: string;
   occurrences: number;
   period: string;
@@ -199,6 +203,7 @@ export interface FormalWarningItem {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   employeeRole?: string;
   level: string;
   levelLabel: string;
@@ -217,6 +222,7 @@ export interface FormalWarningItem {
 export interface WarningBoardEmployee {
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   role: string;
   band: 'GREEN' | 'AMBER' | 'RED' | 'UNKNOWN';
   bandLabel: string;
@@ -243,6 +249,7 @@ export interface AbsenceRecord {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   role?: string;
   date: string;
   absenceType: string;
@@ -282,6 +289,7 @@ export interface LeaveRequestItem {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   employeeRole?: string;
   type: string;
   leaveTypeId: string;
@@ -306,6 +314,7 @@ export interface LeaveRequestItem {
 export interface EmployeeLeaveOverview {
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   role: string;
   balance: LeaveBalanceDetails;
 }
@@ -314,6 +323,7 @@ export interface TeamCalendarLeave {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   type: string;
   from: string;
   to: string;
@@ -362,6 +372,7 @@ export interface PendingVerificationDoc {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   employeeRole?: string;
   documentTypeId: string;
   documentTypeName: string;
@@ -392,6 +403,7 @@ export interface KycRequirementItem {
 export interface KycChecklistResponse {
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   employeeRole: string;
   overallKycStatus: 'COMPLETE' | 'PENDING_REVIEW' | 'INCOMPLETE';
   completionPercentage: number;
@@ -506,6 +518,7 @@ export interface PayrollAdjustment {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   type: string;
   calculated: { days: number | null; amount: number | null };
   approved: { days: number | null; amount: number | null } | null;
@@ -576,6 +589,7 @@ export interface WorkstationItem {
   id: string;
   employeeId: string;
   employeeName: string;
+  employeeNumber?: string | null;
   employeeRole: string;
   deviceId: string;
   platform: string;

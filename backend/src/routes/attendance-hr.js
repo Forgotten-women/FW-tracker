@@ -235,10 +235,12 @@ router.get('/employee/:employeeId/summary',
       ORDER BY date_key DESC
     `).all(employeeId, from, to);
 
+    const empInfo = await db.prepare('SELECT id, name, employee_number FROM employees WHERE id = ?').get(employeeId);
     const workingHours = await A.calculateWorkingHoursMetrics(employeeId, to);
 
     res.json({
       status: 'SUCCESS',
+      employee: empInfo ? { id: empInfo.id, name: empInfo.name, employeeNumber: empInfo.employee_number || null } : null,
       from, to,
       workingHours,
       totals: {
@@ -277,7 +279,7 @@ router.get('/deficits', requireUser, requirePermission('attendance.read'), async
   // the id as a stable tiebreak for entries written in the same millisecond.
   const rows = (await db.prepare(`
     SELECT DISTINCT ON (l.employee_id)
-           l.employee_id, l.balance_after, l.whole_days_after, l.carry_forward_after, e.name
+           l.employee_id, l.balance_after, l.whole_days_after, l.carry_forward_after, e.name, e.employee_number
     FROM attendance_deficit_ledger l
     JOIN employees e ON e.id = l.employee_id
     ORDER BY l.employee_id, l.created_at DESC, l.id DESC
@@ -288,6 +290,7 @@ router.get('/deficits', requireUser, requirePermission('attendance.read'), async
     employees: rows.map(r => ({
       employeeId: r.employee_id,
       employeeName: r.name,
+      employeeNumber: r.employee_number || null,
       balanceMinutes: r.balance_after,
       balanceFormatted: T.formatMinutes(r.balance_after),
       wholeDayEquivalents: r.whole_days_after,
@@ -302,12 +305,12 @@ router.get('/deficits', requireUser, requirePermission('attendance.read'), async
 router.get('/lateness', requireUser, requirePermission('attendance.read'), async (req, res) => {
   const dateKey = String(req.query.date || T.dateKey());
   const visible = await rbac.accessibleEmployeeIds(req.auth);
-  const rows = (await db.prepare('SELECT id, name FROM employees WHERE active = 1').all())
+  const rows = (await db.prepare('SELECT id, name, employee_number FROM employees WHERE active = 1').all())
     .filter(e => visible.includes(e.id));
 
   const employees = await Promise.all(rows.map(async e => {
     const status = await A.latenessStatus(e.id, dateKey);
-    return { employeeId: e.id, employeeName: e.name, ...status };
+    return { employeeId: e.id, employeeName: e.name, employeeNumber: e.employee_number || null, ...status };
   }));
 
   // Spec 21 asks for green/amber/red, with colour supplementing text and never
@@ -336,12 +339,12 @@ router.get('/corrections',
     const statusQuery = String(req.query.status || 'PENDING');
     const rows = (statusQuery === 'ALL'
       ? await db.prepare(`
-          SELECT c.*, e.name, e.role FROM attendance_corrections c
+          SELECT c.*, e.name, e.role, e.employee_number FROM attendance_corrections c
           JOIN employees e ON e.id = c.employee_id
           ORDER BY c.requested_at DESC
         `).all()
       : await db.prepare(`
-          SELECT c.*, e.name, e.role FROM attendance_corrections c
+          SELECT c.*, e.name, e.role, e.employee_number FROM attendance_corrections c
           JOIN employees e ON e.id = c.employee_id
           WHERE c.status = ? ORDER BY c.requested_at ASC
         `).all(statusQuery)
@@ -353,6 +356,7 @@ router.get('/corrections',
         id: r.id,
         employeeId: r.employee_id,
         employeeName: r.name,
+        employeeNumber: r.employee_number || null,
         role: r.role,
         date: r.date_key,
         reason: r.reason,
