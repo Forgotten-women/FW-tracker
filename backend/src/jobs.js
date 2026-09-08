@@ -185,6 +185,13 @@ async function accrueLeave(nowMs = T.now()) {
   lastAccrualKey = todayKey;
 
   try {
+    // 1. Execute anniversary rollovers (crediting approved carry-over, lapsing remainder)
+    // and send 14-day cycle-end notifications
+    const ro = await L.checkAndRolloverAll(todayKey);
+    if (ro.rolledOverCount) console.log(`[jobs] leave anniversary rolled over for ${ro.rolledOverCount} employee(s)`);
+    if (ro.notifiedCount) console.log(`[jobs] 14-day leave renewal advisory sent to ${ro.notifiedCount} employee(s)`);
+
+    // 2. Accrue monthly entitlements
     const r = await L.accrueAll(todayKey);
     if (r.accrued) console.log(`[jobs] leave accrued for ${r.accrued} employee(s)`);
     if (r.blocked.length) {

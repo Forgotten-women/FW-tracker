@@ -20,6 +20,15 @@ class LeaveBalance {
   final String? yearFrom;
   final String? yearTo;
   final String? nextAccrualDate;
+  final String? cycleStartDate;
+  final String? cycleEndDate;
+  final String? nextRenewalDate;
+  final String? officialJoiningDate;
+  final double approvedCarryForward;
+  final double remainingCurrentCycle;
+  final double dueToExpire;
+  final double alreadyLapsed;
+  final String? renewalDate;
 
   const LeaveBalance({
     required this.blocked,
@@ -33,6 +42,15 @@ class LeaveBalance {
     this.yearFrom,
     this.yearTo,
     this.nextAccrualDate,
+    this.cycleStartDate,
+    this.cycleEndDate,
+    this.nextRenewalDate,
+    this.officialJoiningDate,
+    this.approvedCarryForward = 0,
+    this.remainingCurrentCycle = 0,
+    this.dueToExpire = 0,
+    this.alreadyLapsed = 0,
+    this.renewalDate,
   });
 
   static double _d(dynamic v) => (v as num?)?.toDouble() ?? 0;
@@ -44,15 +62,24 @@ class LeaveBalance {
     final year = json['holidayYear'] as Map<String, dynamic>?;
     return LeaveBalance(
       blocked: false,
-      annualEntitlement: _d(json['annualEntitlement']),
-      accrued: _d(json['accrued']),
-      taken: _d(json['taken']),
-      booked: _d(json['booked']),
-      available: _d(json['available']),
+      annualEntitlement: _d(json['annualEntitlementDays'] ?? json['annualEntitlement']),
+      accrued: _d(json['accruedDays'] ?? json['accrued']),
+      taken: _d(json['takenDays'] ?? json['taken']),
+      booked: _d(json['bookedDays'] ?? json['booked']),
+      available: _d(json['availableDays'] ?? json['available']),
       isNegative: json['isNegative'] as bool? ?? false,
       yearFrom: year?['from'] as String?,
       yearTo: year?['to'] as String?,
       nextAccrualDate: json['nextAccrualDate'] as String?,
+      cycleStartDate: json['cycleStartDate'] as String? ?? year?['from'] as String?,
+      cycleEndDate: json['cycleEndDate'] as String? ?? year?['to'] as String?,
+      nextRenewalDate: json['nextRenewalDate'] as String? ?? year?['anniversaryDate'] as String?,
+      officialJoiningDate: json['officialJoiningDate'] as String?,
+      approvedCarryForward: _d(json['approvedCarryForwardDays'] ?? json['approvedCarryForward']),
+      remainingCurrentCycle: _d(json['remainingCurrentCycleDays'] ?? json['remainingCurrentCycle'] ?? json['availableDays'] ?? json['available']),
+      dueToExpire: _d(json['leaveDueToExpire'] ?? json['dueToExpire']),
+      alreadyLapsed: _d(json['leaveAlreadyLapsed'] ?? json['alreadyLapsed']),
+      renewalDate: json['renewalDate'] as String? ?? json['nextRenewalDate'] as String?,
     );
   }
 }

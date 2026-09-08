@@ -275,15 +275,42 @@ export interface LeaveBalanceDetails {
   holidayYear?: {
     from: string;
     to: string;
+    anniversaryDate?: string;
     monthsCompleted: number;
   };
+  cycleStartDate?: string;
+  cycleEndDate?: string;
+  nextRenewalDate?: string;
   nextAccrualDate?: string;
+  officialJoiningDate?: string;
   annualEntitlement: number;
+  annualEntitlementDays?: number;
   accrued: number;
+  accruedDays?: number;
   taken: number;
+  takenDays?: number;
+  approvedCarryForward?: number;
+  approvedCarryForwardDays?: number;
+  remainingCurrentCycle?: number;
+  remainingCurrentCycleDays?: number;
+  dueToExpire?: number;
+  leaveDueToExpire?: number;
+  alreadyLapsed?: number;
+  leaveAlreadyLapsed?: number;
+  renewalDate?: string;
   booked: number;
+  bookedDays?: number;
   available: number;
+  availableDays?: number;
   isNegative: boolean;
+  carryForwardDecision?: {
+    approvedDays: number;
+    lapsedDays: number;
+    decision: string;
+    approvedBy?: string;
+    approvedAt?: number;
+    notes?: string;
+  } | null;
 }
 
 export interface LeaveRequestItem {
@@ -656,6 +683,86 @@ export interface AppUsageItem {
   workstationActiveSeconds?: number;
   lastUsedAt: string;
 }
+
+export interface ApproachingAnniversaryEmployee {
+  employeeId: string;
+  name: string;
+  employeeNumber?: string | null;
+  role: string;
+  officialJoiningDate: string;
+  cycleStartDate: string;
+  cycleEndDate: string;
+  nextRenewalDate: string;
+  daysUntilAnniversary: number;
+  availableDays: number;
+  accruedDays: number;
+  takenDays: number;
+  maxEligibleCarryForward: number;
+  potentialLapsedDays: number;
+  carryForwardDecision: {
+    approvedDays: number;
+    lapsedDays: number;
+    decision: string;
+    approvedBy?: string;
+    approvedAt?: number;
+    notes?: string;
+  } | null;
+}
+
+export interface HistoricalLeaveCycle {
+  cycleIndex: number;
+  cycleStartDate: string;
+  cycleEndDate: string;
+  renewalDate: string;
+  status: 'COMPLETED' | 'ACTIVE';
+  entitlementDays: number;
+  accruedDays: number;
+  takenDays: number;
+  carriedForwardIn: number;
+  lapsedDays: number;
+  netClosingBalance: number;
+  carryForwardRecord: {
+    approvedDays: number;
+    lapsedDays: number;
+    decision: string;
+    approvedBy?: string;
+    approvedAt?: number;
+    notes?: string;
+  } | null;
+}
+
+export interface EmployeeAppBacklog {
+  employee: {
+    id: string;
+    name: string;
+    role: string;
+    employee_number?: string | null;
+  };
+  range: {
+    startDate?: string | null;
+    endDate?: string | null;
+  };
+  totalActiveSeconds: number;
+  totalActiveMinutes: number;
+  topApps: Array<{
+    appName: string;
+    activeSeconds: number;
+    activeMinutes: number;
+    percentage: number;
+  }>;
+  dailyBreakdown: Array<{
+    date: string;
+    totalSeconds: number;
+    totalMinutes: number;
+    apps: Array<{
+      appName: string;
+      activeSeconds: number;
+      activeMinutes: number;
+      lastUsedAt: string;
+    }>;
+  }>;
+}
+
 
 
 

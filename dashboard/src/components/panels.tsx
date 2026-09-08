@@ -1614,7 +1614,7 @@ export function EmployeeProfileModal({
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  Employment & Join Date (HR Only)
+                  Employment & Official Joining Date (HR Only)
                 </div>
                 {!editingStartDate && (
                   <button
@@ -1625,7 +1625,7 @@ export function EmployeeProfileModal({
                     }}
                     className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
                   >
-                    Edit Join Date
+                    Edit Official Joining Date
                   </button>
                 )}
               </div>
@@ -1654,9 +1654,9 @@ export function EmployeeProfileModal({
                             if (ref?.profile) setProfile(ref.profile);
                           } catch {}
                           setEditingStartDate(false);
-                          setStartDateSuccess('Join date updated successfully.');
+                          setStartDateSuccess('Official joining date updated. Anniversary leave cycle recalculated.');
                         } catch (err: any) {
-                          alert(err?.message || 'Failed to update start date');
+                          alert(err?.message || 'Failed to update official joining date');
                         } finally {
                           setSavingStartDate(false);
                         }
@@ -1672,16 +1672,32 @@ export function EmployeeProfileModal({
                     </button>
                   </div>
                   <p className="text-[10px] text-slate-400">
-                    Updating the employee's official start date updates all initial employment records and audit logs.
+                    Updating the employee's official joining date recalculates their annual leave cycle based on their work anniversary and updates all employment records.
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div>
-                    <span className="text-slate-400 block text-[11px]">Official Start Date</span>
+                    <span className="text-slate-400 block text-[11px]">Official Joining Date</span>
                     <span className="font-semibold text-white">
-                      {currentStartDate || employee.startDate || 'Not Set'}
+                      {(() => {
+                        const raw = currentStartDate || employee.startDate;
+                        if (!raw) return 'Not Set';
+                        const parts = raw.split('-');
+                        if (parts.length === 3) {
+                          const dt = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                          if (!isNaN(dt.getTime())) {
+                            return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+                          }
+                        }
+                        return raw;
+                      })()}
                     </span>
+                    {(currentStartDate || employee.startDate) && (
+                      <span className="text-[10px] text-indigo-400/80 block font-mono">
+                        {currentStartDate || employee.startDate}
+                      </span>
+                    )}
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[11px]">Designation</span>

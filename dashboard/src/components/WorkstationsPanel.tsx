@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { WorkstationItem, AppUsageItem } from '../lib/types';
+import type { WorkstationItem, AppUsageItem, EmployeeAppBacklog } from '../lib/types';
 import { Badge } from './primitives';
 
 function formatAppDuration(seconds: number) {
@@ -40,8 +40,16 @@ export function WorkstationsPanel() {
   const [appUsage, setAppUsage] = useState<AppUsageItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'workstations' | 'app_usage'>('workstations');
+  const [activeTab, setActiveTab] = useState<'workstations' | 'app_usage' | 'app_backlog'>('workstations');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Backlog query state
+  const [backlogEmployeeId, setBacklogEmployeeId] = useState('');
+  const [backlogStartDate, setBacklogStartDate] = useState('');
+  const [backlogEndDate, setBacklogEndDate] = useState('');
+  const [backlogData, setBacklogData] = useState<EmployeeAppBacklog | null>(null);
+  const [backlogLoading, setBacklogLoading] = useState(false);
+  const [backlogError, setBacklogError] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
@@ -58,6 +66,46 @@ export function WorkstationsPanel() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const knownEmployees = React.useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const w of workstations) {
+      if (w.employeeId && !map.has(w.employeeId)) {
+        map.set(w.employeeId, { id: w.employeeId, name: w.employeeName });
+      }
+    }
+    for (const a of appUsage) {
+      if (a.employeeId && !map.has(a.employeeId)) {
+        map.set(a.employeeId, { id: a.employeeId, name: a.employeeName });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [workstations, appUsage]);
+
+  const handleQueryBacklog = async (empId?: string, sDate?: string, eDate?: string) => {
+    const targetId = empId || backlogEmployeeId;
+    if (!targetId) return;
+    setBacklogLoading(true);
+    setBacklogError(null);
+    try {
+      const res = await api.fetchEmployeeAppBacklog(
+        targetId,
+        sDate !== undefined ? sDate : backlogStartDate,
+        eDate !== undefined ? eDate : backlogEndDate
+      );
+      setBacklogData(res);
+    } catch (err: any) {
+      setBacklogError(err?.message || 'Failed to fetch employee app backlog.');
+    } finally {
+      setBacklogLoading(false);
+    }
+  };
+
+  const openEmployeeBacklog = (empId: string) => {
+    setBacklogEmployeeId(empId);
+    setActiveTab('app_backlog');
+    handleQueryBacklog(empId);
   };
 
   useEffect(() => {
@@ -239,6 +287,24 @@ export function WorkstationsPanel() {
           }`}
         >
           📊 Application & Software Usage ({appUsage.length})
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('app_backlog');
+            if (backlogEmployeeId) {
+              handleQueryBacklog(backlogEmployeeId);
+            } else if (knownEmployees.length > 0) {
+              setBacklogEmployeeId(knownEmployees[0].id);
+              handleQueryBacklog(knownEmployees[0].id);
+            }
+          }}
+          className={`pb-3 text-sm font-semibold transition-colors flex items-center gap-2 cursor-pointer ${
+            activeTab === 'app_backlog'
+              ? 'text-teal-400 border-b-2 border-teal-400'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          🗂️ Employee App Backlog
         </button>
       </div>
 
@@ -561,6 +627,228 @@ export function WorkstationsPanel() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Employee App Activity Backlog (Storage Optimized) */}
+      {activeTab === 'app_backlog' && (
+        <div className="space-y-4">
+          <div className="glass-panel rounded-2xl p-4 border border-teal-500/20 bg-teal-500/5">
+            <div className="flex items-start gap-3">
+              <span className="text-xl">🗂️</span>
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  Storage-Optimized Employee Activity Backlog
+                </h3>
+                <p className="mt-1 text-xs text-slate-300 leading-relaxed">
+                  Historical workstation software activity aggregated daily per employee and application.
+                  Designed for minimal Supabase database footprint (zero minute-by-minute heartbeat bloat) while providing complete audit visibility over any date range.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Bar */}
+          <div className="glass-panel rounded-2xl p-4 border border-slate-800 flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                Select Employee
+              </label>
+              <select
+                value={backlogEmployeeId}
+                onChange={(e) => {
+                  setBacklogEmployeeId(e.target.value);
+                  handleQueryBacklog(e.target.value);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-xs text-white focus:border-teal-500 focus:outline-none"
+              >
+                <option value="">-- Choose Employee --</option>
+                {knownEmployees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="w-40">
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                From Date
+              </label>
+              <input
+                type="date"
+                value={backlogStartDate}
+                onChange={(e) => setBacklogStartDate(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 p-1.5 text-xs text-white focus:border-teal-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="w-40">
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                To Date
+              </label>
+              <input
+                type="date"
+                value={backlogEndDate}
+                onChange={(e) => setBacklogEndDate(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 p-1.5 text-xs text-white focus:border-teal-500 focus:outline-none"
+              />
+            </div>
+
+            <button
+              onClick={() => handleQueryBacklog()}
+              disabled={backlogLoading || !backlogEmployeeId}
+              className="px-4 py-2 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              {backlogLoading ? 'Loading…' : 'Query Backlog'}
+            </button>
+          </div>
+
+          {backlogError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-400">
+              {backlogError}
+            </div>
+          )}
+
+          {!backlogData && !backlogLoading && (
+            <div className="glass-panel rounded-2xl p-12 text-center border border-slate-800">
+              <span className="text-3xl">🔍</span>
+              <p className="mt-2 text-xs text-slate-400">
+                Select an employee and click "Query Backlog" to review historical software usage.
+              </p>
+            </div>
+          )}
+
+          {backlogData && (
+            <div className="space-y-4">
+              {/* Summary KPIs */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="glass-panel rounded-2xl p-4 border border-slate-800">
+                  <div className="text-xs text-slate-400 font-semibold uppercase">Employee</div>
+                  <div className="mt-1 text-base font-bold text-white">
+                    {backlogData.employee.name}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {backlogData.employee.role || 'Employee'} {backlogData.employee.employee_number ? `(${backlogData.employee.employee_number})` : ''}
+                  </div>
+                </div>
+
+                <div className="glass-panel rounded-2xl p-4 border border-teal-500/20 bg-teal-500/5">
+                  <div className="text-xs text-teal-400 font-semibold uppercase">Total Active Time</div>
+                  <div className="mt-1 text-2xl font-extrabold text-white">
+                    {formatAppDuration(backlogData.totalActiveSeconds)}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {backlogData.totalActiveMinutes} minutes across period
+                  </div>
+                </div>
+
+                <div className="glass-panel rounded-2xl p-4 border border-slate-800">
+                  <div className="text-xs text-slate-400 font-semibold uppercase">Days with Activity</div>
+                  <div className="mt-1 text-2xl font-extrabold text-indigo-400">
+                    {backlogData.dailyBreakdown.length}
+                  </div>
+                  <div className="text-[11px] text-slate-400">Distinct work dates recorded</div>
+                </div>
+              </div>
+
+              {/* Top Applications */}
+              {backlogData.topApps.length > 0 && (
+                <div className="glass-panel rounded-2xl p-4 border border-slate-800">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                    Top Software Usage Across Selected Period
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {backlogData.topApps.slice(0, 8).map((app) => {
+                      const cat = getAppCategory(app.appName);
+                      return (
+                        <div
+                          key={app.appName}
+                          className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-mono text-xs font-semibold text-white truncate max-w-[140px]">
+                              {cat.icon} {app.appName}
+                            </span>
+                            <span className="text-[11px] font-bold text-teal-400 font-mono">
+                              {app.percentage}%
+                            </span>
+                          </div>
+                          <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden mb-2">
+                            <div
+                              className="bg-teal-400 h-full rounded-full"
+                              style={{ width: `${app.percentage}%` }}
+                            />
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono">
+                            {formatAppDuration(app.activeSeconds)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Daily Breakdown Table */}
+              <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+                <div className="p-4 border-b border-slate-800 bg-slate-900/60">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Daily Activity Log Breakdown
+                  </h4>
+                </div>
+                {backlogData.dailyBreakdown.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-500">
+                    No activity recorded in this date range.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-800">
+                    {backlogData.dailyBreakdown.map((day) => (
+                      <div key={day.date} className="p-4 hover:bg-slate-900/30 transition-colors">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-white font-mono">{day.date}</span>
+                            <span className="rounded bg-teal-500/10 px-2 py-0.5 text-[10px] font-bold text-teal-400 border border-teal-500/20 font-mono">
+                              {formatAppDuration(day.totalSeconds)}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-400">
+                            {day.apps.length} {day.apps.length === 1 ? 'app' : 'apps'} active
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {day.apps.map((app) => {
+                            const cat = getAppCategory(app.appName);
+                            return (
+                              <div
+                                key={app.appName}
+                                className="flex items-center justify-between rounded-lg bg-slate-900/40 border border-slate-800/80 px-3 py-2 text-xs"
+                              >
+                                <span className="font-mono text-slate-200 truncate max-w-[140px]">
+                                  {cat.icon} {app.appName}
+                                </span>
+                                <div className="text-right">
+                                  <span className="font-mono font-bold text-teal-400 text-xs">
+                                    {formatAppDuration(app.activeSeconds)}
+                                  </span>
+                                  {app.lastUsedAt && (
+                                    <div className="text-[9px] text-slate-500">
+                                      {app.lastUsedAt}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

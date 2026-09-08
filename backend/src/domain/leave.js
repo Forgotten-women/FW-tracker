@@ -83,6 +83,10 @@ async function holidayYearFor(employeeId, onDate = T.dateKey()) {
     monthsCompleted++;
   }
 
+  const cycleStartDate = yearStart;
+  const cycleEndDate = T.dateKey(T.startOfDay(yearEnd) - 1);
+  const nextRenewalDate = yearEnd;
+
   return {
     blocked: false,
     startDate,
@@ -91,6 +95,9 @@ async function holidayYearFor(employeeId, onDate = T.dateKey()) {
     leaveYear: `${yearStart}/${yearsOfService}`,
     yearStart,
     yearEnd,
+    cycleStartDate,
+    cycleEndDate,
+    nextRenewalDate,
     monthsCompleted,
     nextAccrualDate: monthsCompleted < 12 ? addMonths(yearStart, monthsCompleted + 1) : yearEnd,
   };
@@ -222,36 +229,61 @@ async function accrueAll(onDate = T.dateKey()) {
  * rather than by resetting a number, so an employee can always see what was
  * lost and when.
  */
-async function closeHolidayYear(employeeId, leaveYear, unusedDays, onDate, { actor = 'system' } = {}) {
-  if (unusedDays <= 0.005) return { forfeited: 0 };
-  if (config.leave.carryOverDays > 0) {
-    const carried = Math.min(unusedDays, config.leave.carryOverDays);
-    // Not reachable under the confirmed policy, but the branch exists so
-    // turning carry-over on later is a config change rather than a rewrite.
-    return { carried, forfeited: unusedDays - carried };
-  }
+const selectCarryForwardRecord = db.prepare(`
+  SELECT * FROM leave_carry_forward_records
+  WHERE employee_id = ? AND from_leave_year = ?
+`);
 
-  await insertLedger.run({
-    id: 'lal_' + crypto.randomBytes(8).toString('hex'),
-    employee_id: employeeId,
-    leave_year: leaveYear,
-    entry_type: 'FORFEIT',
-    days_delta: -unusedDays,
-    balance_after: 0,
-    effective_date: onDate,
-    leave_request_id: null,
-    description: `${unusedDays.toFixed(2)} day(s) unused at the end of the holiday year. Nothing carries over.`,
-    created_at: T.now(),
-    created_by: actor,
-  });
+const upsertCarryForwardRecord = db.prepare(`
+  INSERT INTO leave_carry_forward_records
+    (id, employee_id, from_leave_year, to_leave_year, unused_days_at_close, approved_days,
+     lapsed_days, decision, approved_by, approved_at, notes, applied_at, created_at)
+  VALUES (@id, @employee_id, @from_leave_year, @to_leave_year, @unused_days_at_close, @approved_days,
+          @lapsed_days, @decision, @approved_by, @approved_at, @notes, @applied_at, @created_at)
+  ON CONFLICT (employee_id, from_leave_year) DO UPDATE SET
+    approved_days = EXCLUDED.approved_days,
+    lapsed_days = EXCLUDED.lapsed_days,
+    decision = EXCLUDED.decision,
+    approved_by = EXCLUDED.approved_by,
+    approved_at = EXCLUDED.approved_at,
+    notes = EXCLUDED.notes
+`);
+
+/**
+ * Closes a holiday year, carrying forward approved days (max 5) and forfeiting remainder.
+ */
+async function closeHolidayYear(employeeId, leaveYear, unusedDays, onDate, { actor = 'system' } = {}) {
+  if (unusedDays <= 0.005) return { forfeited: 0, carried: 0 };
+
+  const cf = await selectCarryForwardRecord.get(employeeId, leaveYear);
+  const approved = (cf && cf.decision === 'APPROVED')
+    ? Math.min(cf.approved_days, Math.min(5, unusedDays))
+    : (config.leave.carryOverDays > 0 ? Math.min(unusedDays, config.leave.carryOverDays) : 0);
+  const lapsed = Math.max(0, unusedDays - approved);
+
+  if (lapsed > 0.005) {
+    await insertLedger.run({
+      id: 'lal_' + crypto.randomBytes(8).toString('hex'),
+      employee_id: employeeId,
+      leave_year: leaveYear,
+      entry_type: 'FORFEIT',
+      days_delta: -lapsed,
+      balance_after: approved,
+      effective_date: onDate,
+      leave_request_id: null,
+      description: `${lapsed.toFixed(2)} day(s) unused at the end of the holiday year lapsed. ${approved > 0 ? `${approved.toFixed(2)} day(s) approved for carry forward.` : 'No carry-forward approved.'}`,
+      created_at: T.now(),
+      created_by: actor,
+    });
+  }
 
   await audit({
     actor, action: 'LEAVE_FORFEITED',
     targetType: 'employee', targetId: employeeId,
-    after: { leaveYear, forfeitedDays: unusedDays },
+    after: { leaveYear, forfeitedDays: lapsed, approvedDays: approved },
   });
 
-  return { forfeited: unusedDays };
+  return { forfeited: lapsed, carried: approved };
 }
 
 // ---------------------------------------------------------------------------
@@ -266,10 +298,6 @@ const selectLedgerTotals = db.prepare(`
 `);
 
 // Requests that consume entitlement, scoped to ONE holiday year.
-//
-// Scoping matters: without the year bounds, leave approved in a previous year
-// would keep being subtracted from the current year's balance, and under an
-// anniversary-based year every employee has different bounds.
 const selectYearRequests = db.prepare(`
   SELECT r.id, r.start_date, r.end_date, r.total_days, r.status
   FROM leave_requests r
@@ -286,61 +314,111 @@ async function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequest
   for (const row of await selectLedgerTotals.all(employeeId, year.leaveYear)) {
     totals[row.entry_type] = row.days;
   }
+  const carryOver = totals.CARRY_OVER || 0;
+  const accrued = totals.ACCRUAL || 0;
+  const adjustments = totals.ADJUSTMENT || 0;
+  const forfeit = totals.FORFEIT || 0;
   // BOOKED and CANCELLED ledger entries are the audit trail of approvals; the
   // authoritative figure comes from the requests themselves, so counting both
   // would deduct every booking twice.
-  const credited = (totals.ACCRUAL || 0) + (totals.ADJUSTMENT || 0) + (totals.FORFEIT || 0);
+  const credited = accrued + carryOver + adjustments + forfeit;
 
   let taken = 0;
   let booked = 0;
   for (const r of await selectYearRequests.all(employeeId, year.yearStart, year.yearEnd, excludeRequestId)) {
-    // Already used versus still to come. Both reduce what is available; the
-    // split only exists because spec 14 asks the dashboard to show them apart.
     if (r.status === 'APPROVED' && r.end_date < onDate) taken += r.total_days;
     else booked += r.total_days;
   }
 
+  // FIFO draw: leave is drawn against carry-forward first, then current cycle accrual
+  const totalUsed = taken + booked;
+  const carryOverUsed = Math.min(carryOver, totalUsed);
+  const remainingCarryForward = Math.max(0, carryOver - totalUsed);
+  const currentAccrualUsed = Math.max(0, totalUsed - carryOver);
+  const remainingCurrentCycle = Math.max(0, (accrued + adjustments + forfeit) - currentAccrualUsed);
+
   return {
-    accruedDays: credited,
+    accruedDays: accrued,
+    carryOverDays: carryOver,
+    adjustmentDays: adjustments,
+    forfeitDays: forfeit,
+    creditedDays: credited,
     takenDays: taken,
     bookedDays: booked,
+    carryOverUsed,
+    remainingCarryForwardDays: remainingCarryForward,
+    remainingCurrentCycleDays: remainingCurrentCycle,
     availableDays: credited - taken - booked,
   };
 }
 
 /**
- * The employee leave dashboard figures from spec 14.
- *
- * Full precision is kept internally and rounded only for display, so twelve
- * monthly accruals sum to exactly 20.00 rather than 19.99.
+ * The employee leave dashboard figures with full 8-metric report.
  */
 async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestId = null) {
   const year = await holidayYearFor(employeeId, onDate);
   if (year.blocked) return { blocked: true, ...year };
 
-  // Always ensure accruals are current for completed months of service before calculating balance
+  // Always ensure accruals and rollovers are current
   try {
+    if (year.yearsOfService > 0) {
+      await rolloverHolidayYear(employeeId, onDate);
+    }
     await accrue(employeeId, onDate);
   } catch (err) {
-    console.error('Auto-accrual error in balanceFor:', err);
+    console.error('Auto-accrual/rollover error in balanceFor:', err);
   }
 
   const raw = await balanceRaw(employeeId, year, onDate, excludeRequestId);
   const round2 = (n) => Math.round(n * 100) / 100;
+
+  // Check carry-forward approval for this closing cycle
+  const cf = await selectCarryForwardRecord.get(employeeId, year.leaveYear);
+  const approvedCarryForwardForCycle = (cf && cf.decision === 'APPROVED') ? cf.approved_days : 0;
+
+  // Leave due to expire: unused available leave minus any approved carry-forward (max 5)
+  const leaveDueToExpire = round2(Math.max(0, raw.availableDays - approvedCarryForwardForCycle));
+
+  // Historical lapsed/forfeited leave across all cycles for this employee
+  const lapsedRow = await db.prepare(`
+    SELECT COALESCE(SUM(ABS(days_delta)), 0) AS days
+    FROM leave_accrual_ledger
+    WHERE employee_id = ? AND entry_type = 'FORFEIT'
+  `).get(employeeId);
+  const leaveAlreadyLapsed = round2(lapsedRow?.days || 0);
 
   return {
     blocked: false,
     leaveYear: year.leaveYear,
     yearStart: year.yearStart,
     yearEnd: year.yearEnd,
+    cycleStartDate: year.cycleStartDate,
+    cycleEndDate: year.cycleEndDate,
+    nextRenewalDate: year.nextRenewalDate,
+    officialJoiningDate: year.startDate,
     monthsCompleted: year.monthsCompleted,
     nextAccrualDate: year.nextAccrualDate,
 
+    // The 8 distinct metrics required by policy:
     annualEntitlementDays: ENTITLEMENT,
     accruedDays: round2(raw.accruedDays),
     takenDays: round2(raw.takenDays),
+    approvedCarryForwardDays: round2(raw.carryOverDays),
+    remainingCurrentCycleDays: round2(raw.remainingCurrentCycleDays),
+    leaveDueToExpire,
+    leaveAlreadyLapsed,
+
+    // Additional convenient figures
     bookedDays: round2(raw.bookedDays),
     availableDays: round2(raw.availableDays),
+    carryForwardDecision: cf ? {
+      decision: cf.decision,
+      approvedDays: cf.approved_days,
+      lapsedDays: cf.lapsed_days,
+      approvedBy: cf.approved_by,
+      approvedAt: cf.approved_at,
+      notes: cf.notes,
+    } : null,
 
     // Kept unrounded for arithmetic that must not drift.
     precise: raw,
@@ -708,10 +786,375 @@ async function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateK
   return await balanceFor(employeeId, onDate);
 }
 
+// ---------------------------------------------------------------------------
+// Carry Forward & Anniversary Rollover Management
+// ---------------------------------------------------------------------------
+
+/**
+ * HR/Management records an approval or rejection for carrying forward up to 5 days
+ * of unused annual leave into the next leave cycle.
+ */
+async function recordCarryForwardApproval({ employeeId, approvedDays, notes = '', actor, onDate, today }) {
+  const effectiveDate = today || onDate || T.dateKey();
+  const numDays = Number(approvedDays);
+  if (isNaN(numDays) || numDays < 0) {
+    throw new Error('Approved carry-forward days must be a non-negative number.');
+  }
+  if (numDays > 5) {
+    throw new Error('Maximum allowable carry-forward is 5 days.');
+  }
+
+  const year = await holidayYearFor(employeeId, effectiveDate);
+  if (year.blocked) throw new Error(year.message);
+
+  const raw = await balanceRaw(employeeId, year, effectiveDate);
+  const available = Math.max(0, raw.availableDays);
+  if (numDays > available) {
+    throw new Error(`Cannot approve ${numDays} days: employee only has ${available.toFixed(2)} days available.`);
+  }
+
+  const fromLeaveYear = year.leaveYear;
+  const nextServiceYear = year.yearsOfService + 1;
+  const toLeaveYear = `${year.yearEnd}/${nextServiceYear}`;
+  const lapsed = Math.max(0, available - numDays);
+  const decision = numDays > 0 ? 'APPROVED' : 'REJECTED';
+  const nowMs = T.now();
+
+  const recordId = 'lcf_' + crypto.randomBytes(8).toString('hex');
+
+  await upsertCarryForwardRecord.run({
+    id: recordId,
+    employee_id: employeeId,
+    from_leave_year: fromLeaveYear,
+    to_leave_year: toLeaveYear,
+    unused_days_at_close: available,
+    approved_days: numDays,
+    lapsed_days: lapsed,
+    decision,
+    approved_by: actor,
+    approved_at: nowMs,
+    notes: String(notes || '').trim(),
+    applied_at: null,
+    created_at: nowMs,
+  });
+
+  await audit({
+    actor,
+    action: 'LEAVE_CARRY_FORWARD_DECIDED',
+    targetType: 'employee',
+    targetId: employeeId,
+    after: { fromLeaveYear, toLeaveYear, approvedDays: numDays, decision, notes },
+  });
+
+  return await selectCarryForwardRecord.get(employeeId, fromLeaveYear);
+}
+
+/**
+ * Executes work anniversary rollover for an employee:
+ * - Credits full 20 days final accrual for the outgoing year.
+ * - Applies approved carry-forward (max 5 days) as CARRY_OVER in the new cycle ledger.
+ * - Forfeits any remaining unused days with a FORFEIT entry in the outgoing cycle ledger.
+ * - If no approval was recorded, all remaining unused days forfeit per policy.
+ */
+async function rolloverHolidayYear(employeeId, onDate = T.dateKey(), { actor = 'system' } = {}) {
+  const row = await selectStartDate.get(employeeId);
+  if (!row || !row.start_date) return { rolledOver: false, reason: 'NO_START_DATE' };
+
+  const startDate = row.start_date;
+  if (onDate < startDate) return { rolledOver: false, reason: 'NOT_STARTED' };
+
+  let yearsOfService = 0;
+  while (addMonths(startDate, (yearsOfService + 1) * 12) <= onDate) yearsOfService++;
+
+  if (yearsOfService <= 0) return { rolledOver: false, upToDate: true };
+
+  const results = [];
+
+  for (let y = 0; y < yearsOfService; y++) {
+    const yearStart = addMonths(startDate, y * 12);
+    const yearEnd = addMonths(startDate, (y + 1) * 12);
+    const leaveYear = `${yearStart}/${y}`;
+    const nextLeaveYear = `${yearEnd}/${y + 1}`;
+
+    // 1. Ensure full 20 days final accrual for this fully-served outgoing year
+    await finaliseYear(employeeId, y, startDate, { actor });
+
+    // 2. Check if this cycle has already been rolled over
+    const alreadyForfeit = await db.prepare(
+      "SELECT 1 FROM leave_accrual_ledger WHERE employee_id = ? AND leave_year = ? AND entry_type = 'FORFEIT'"
+    ).get(employeeId, leaveYear);
+    const alreadyCarried = await db.prepare(
+      "SELECT 1 FROM leave_accrual_ledger WHERE employee_id = ? AND leave_year = ? AND entry_type = 'CARRY_OVER'"
+    ).get(employeeId, nextLeaveYear);
+
+    if (alreadyForfeit || alreadyCarried) {
+      continue;
+    }
+
+    // 3. Compute unused days in this outgoing cycle
+    const totals = {};
+    for (const r of await selectLedgerTotals.all(employeeId, leaveYear)) {
+      totals[r.entry_type] = r.days;
+    }
+    const credited = (totals.ACCRUAL || 0) + (totals.CARRY_OVER || 0) + (totals.ADJUSTMENT || 0) + (totals.FORFEIT || 0);
+
+    let taken = 0;
+    for (const req of await selectYearRequests.all(employeeId, yearStart, yearEnd, null)) {
+      if (req.status === 'APPROVED') taken += req.total_days;
+    }
+
+    const unusedDays = Math.max(0, credited - taken);
+
+    // 4. Look up carry-forward approval for this cycle
+    const cf = await selectCarryForwardRecord.get(employeeId, leaveYear);
+    let approvedDays = 0;
+    if (cf && cf.decision === 'APPROVED') {
+      approvedDays = Math.min(cf.approved_days, Math.min(5, unusedDays));
+    }
+    const lapsedDays = Math.max(0, unusedDays - approvedDays);
+    const nowMs = T.now();
+
+    // 5. Post FORFEIT for lapsed days in outgoing year
+    if (lapsedDays > 0.005) {
+      await insertLedger.run({
+        id: 'lal_' + crypto.randomBytes(8).toString('hex'),
+        employee_id: employeeId,
+        leave_year: leaveYear,
+        entry_type: 'FORFEIT',
+        days_delta: -lapsedDays,
+        balance_after: approvedDays,
+        effective_date: T.dateKey(T.startOfDay(yearEnd) - 1),
+        leave_request_id: null,
+        description: `${lapsedDays.toFixed(2)} day(s) unused at end of cycle lapsed. ${approvedDays > 0 ? `${approvedDays.toFixed(2)} day(s) carried forward.` : 'No carry-forward approved.'}`,
+        created_at: nowMs,
+        created_by: actor,
+      });
+    }
+
+    // 6. Post CARRY_OVER for approved days in new year
+    if (approvedDays > 0.005) {
+      await insertLedger.run({
+        id: 'lal_' + crypto.randomBytes(8).toString('hex'),
+        employee_id: employeeId,
+        leave_year: nextLeaveYear,
+        entry_type: 'CARRY_OVER',
+        days_delta: approvedDays,
+        balance_after: approvedDays,
+        effective_date: yearEnd,
+        leave_request_id: null,
+        description: `Approved carry forward from cycle ${leaveYear}. Approved by ${cf?.approved_by || actor}.`,
+        created_at: nowMs,
+        created_by: actor,
+      });
+    }
+
+    // 7. Update carry-forward record
+    if (cf) {
+      await db.prepare(`
+        UPDATE leave_carry_forward_records
+        SET applied_at = ?, unused_days_at_close = ?, approved_days = ?, lapsed_days = ?
+        WHERE id = ?
+      `).run(nowMs, unusedDays, approvedDays, lapsedDays, cf.id);
+    } else {
+      await upsertCarryForwardRecord.run({
+        id: 'lcf_' + crypto.randomBytes(8).toString('hex'),
+        employee_id: employeeId,
+        from_leave_year: leaveYear,
+        to_leave_year: nextLeaveYear,
+        unused_days_at_close: unusedDays,
+        approved_days: 0,
+        lapsed_days: lapsedDays,
+        decision: 'NO_REQUEST_LAPSED',
+        approved_by: 'system',
+        approved_at: nowMs,
+        notes: 'No carry-forward approved before cycle end; unused leave lapsed in accordance with policy.',
+        applied_at: nowMs,
+        created_at: nowMs,
+      });
+    }
+
+    await audit({
+      actor,
+      action: 'LEAVE_CYCLE_ROLLED_OVER',
+      targetType: 'employee',
+      targetId: employeeId,
+      after: { fromLeaveYear: leaveYear, toLeaveYear: nextLeaveYear, approvedDays, lapsedDays },
+    });
+
+    results.push({ leaveYear, nextLeaveYear, approvedDays, lapsedDays });
+  }
+
+  const carriedOverDays = results.reduce((acc, c) => acc + c.approvedDays, 0);
+  const forfeitedDays = results.reduce((acc, c) => acc + c.lapsedDays, 0);
+
+  return { rolledOver: true, carriedOverDays, forfeitedDays, cycles: results };
+}
+
+/** Runs anniversary rollover and 14-day cycle end notifications for all active employees. */
+async function checkAndRolloverAll(onDate = T.dateKey()) {
+  const employees = await db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
+  let rolledOverCount = 0;
+  let notifiedCount = 0;
+  const nowMs = T.now();
+
+  for (const e of employees) {
+    try {
+      const r = await rolloverHolidayYear(e.id, onDate);
+      if (r.rolledOver && r.cycles && r.cycles.length > 0) rolledOverCount++;
+    } catch (err) {
+      console.error(`[leave] Rollover error for ${e.id}:`, err.message);
+    }
+
+    // 14-day pre-anniversary advisory notification
+    try {
+      const year = await holidayYearFor(e.id, onDate);
+      if (!year.blocked) {
+        const daysLeft = daysBetween(onDate, year.nextRenewalDate);
+        if (daysLeft === 14) {
+          const notifKey = `leave_renew_14d_${e.id}_${year.nextRenewalDate}`;
+          const already = await db.prepare(`
+            SELECT id FROM notifications
+            WHERE employee_id = ? AND link = ?
+          `).get(e.id, notifKey);
+
+          if (!already) {
+            const bal = await balanceFor(e.id, onDate);
+            const cf = await selectCarryForwardRecord.get(e.id, year.leaveYear);
+            const carryInfo = (cf && cf.decision === 'APPROVED')
+              ? `${cf.approved_days} day(s) approved by management to carry forward.`
+              : 'No carry-forward has been approved yet (up to 5 days permitted, subject to Management approval).';
+
+            await N.notify({
+              employeeId: e.id,
+              category: 'LEAVE',
+              title: 'Annual Leave Cycle Ending Soon',
+              body: `Your leave cycle renews on ${year.nextRenewalDate} (in 14 days). You have ${bal.availableDays.toFixed(1)} day(s) remaining. ${carryInfo} Any unapproved leave will lapse on your work anniversary.`,
+              severity: 'info',
+              link: notifKey,
+              nowMs,
+            });
+            notifiedCount++;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[leave] Notification error for ${e.id}:`, err.message);
+    }
+  }
+
+  return { rolledOverCount, notifiedCount };
+}
+
+/**
+ * Returns previous completed leave cycles and current cycle for an employee.
+ * Essential for HR / audit purposes.
+ */
+async function historicalCyclesFor(employeeId, asOfDate = T.dateKey()) {
+  const row = await selectStartDate.get(employeeId);
+  if (!row || !row.start_date) return [];
+
+  const startDate = row.start_date;
+  const onDate = asOfDate;
+
+  let yearsOfService = 0;
+  while (addMonths(startDate, (yearsOfService + 1) * 12) <= onDate) yearsOfService++;
+
+  const cycles = [];
+  for (let y = 0; y <= yearsOfService; y++) {
+    const yearStart = addMonths(startDate, y * 12);
+    const yearEnd = addMonths(startDate, (y + 1) * 12);
+    const cycleEndDate = T.dateKey(T.startOfDay(yearEnd) - 1);
+    const leaveYear = `${yearStart}/${y}`;
+    const isCurrent = (y === yearsOfService);
+    const status = isCurrent ? 'ACTIVE' : 'COMPLETED';
+
+    const totals = {};
+    for (const r of await selectLedgerTotals.all(employeeId, leaveYear)) {
+      totals[r.entry_type] = r.days;
+    }
+
+    let taken = 0;
+    for (const req of await selectYearRequests.all(employeeId, yearStart, yearEnd, null)) {
+      if (req.status === 'APPROVED') taken += req.total_days;
+    }
+
+    const carryForwardRec = await selectCarryForwardRecord.get(employeeId, leaveYear);
+    const cfData = carryForwardRec ? {
+      decision: carryForwardRec.decision,
+      approvedDays: carryForwardRec.approved_days,
+      lapsedDays: carryForwardRec.lapsed_days,
+      approvedBy: carryForwardRec.approved_by,
+      approvedAt: carryForwardRec.approved_at ? T.displayTime(carryForwardRec.approved_at) : null,
+      notes: carryForwardRec.notes,
+      applied: !!carryForwardRec.applied_at,
+    } : null;
+
+    cycles.push({
+      leaveYear,
+      cycleNumber: y + 1,
+      isCurrent,
+      status,
+      cycleStartDate: yearStart,
+      cycleEndDate,
+      nextRenewalDate: yearEnd,
+      annualEntitlement: ENTITLEMENT,
+      accrued: Math.round((totals.ACCRUAL || 0) * 100) / 100,
+      carriedForwardIn: Math.round((totals.CARRY_OVER || 0) * 100) / 100,
+      adjustments: Math.round((totals.ADJUSTMENT || 0) * 100) / 100,
+      taken: Math.round(taken * 100) / 100,
+      lapsed: Math.round(Math.abs(totals.FORFEIT || 0) * 100) / 100,
+      available: isCurrent ? (await balanceFor(employeeId, onDate)).availableDays : 0,
+      carryForwardDecision: cfData,
+      carryForwardRecord: cfData,
+    });
+  }
+
+  return cycles.reverse();
+}
+
+/** Lists active employees within 30 days of cycle end with unused leave. */
+async function employeesApproachingAnniversary(today = T.dateKey()) {
+  const employees = await db.prepare('SELECT id, name, role, employee_number FROM employees WHERE active = 1').all();
+  const list = [];
+  for (const e of employees) {
+    const year = await holidayYearFor(e.id, today);
+    if (year.blocked) continue;
+    const daysLeft = daysBetween(today, year.nextRenewalDate);
+    if (daysLeft >= 0 && daysLeft <= 30) {
+      const bal = await balanceFor(e.id, today);
+      const cf = await selectCarryForwardRecord.get(e.id, year.leaveYear);
+      list.push({
+        employeeId: e.id,
+        employeeName: e.name,
+        employeeNumber: e.employee_number || null,
+        role: e.role,
+        cycleStartDate: year.cycleStartDate,
+        cycleEndDate: year.cycleEndDate,
+        nextRenewalDate: year.nextRenewalDate,
+        daysUntilRenewal: daysLeft,
+        availableDays: bal.availableDays,
+        accruedDays: bal.accruedDays,
+        takenDays: bal.takenDays,
+        carryForwardRecord: cf ? {
+          approvedDays: cf.approved_days,
+          decision: cf.decision,
+          approvedBy: cf.approved_by,
+          approvedAt: cf.approved_at ? T.displayTime(cf.approved_at) : null,
+          notes: cf.notes,
+        } : null,
+      });
+    }
+  }
+  list.sort((a, b) => a.daysUntilRenewal - b.daysUntilRenewal);
+  return list;
+}
+
 module.exports = {
   holidayYearFor, addMonths, daysBetween,
   accrue, accrueAll, finaliseYear, closeHolidayYear,
   balanceFor, countLeaveDays,
   previewRequest, submitRequest, decideRequest, cancelRequest, adjustBalance,
+  recordCarryForwardApproval, rolloverHolidayYear, checkAndRolloverAll,
+  historicalCyclesFor, employeesApproachingAnniversary,
   ENTITLEMENT,
 };

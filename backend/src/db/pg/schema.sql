@@ -1343,6 +1343,10 @@ DO $$ BEGIN
   ALTER TABLE workstation_sessions ADD CONSTRAINT fk_workstation_sessions_device_id
     FOREIGN KEY (device_id) REFERENCES devices (id) ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE leave_carry_forward_records ADD CONSTRAINT fk_carry_forward_records_employee_id
+    FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Indexes ------------------------------------------------------------------
 
@@ -1417,3 +1421,22 @@ CREATE TABLE IF NOT EXISTS desktop_heartbeat_dedupe (
   received_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_desktop_dedupe_device_time ON desktop_heartbeat_dedupe(device_id, received_at);
+
+-- Migration 017
+CREATE TABLE IF NOT EXISTS leave_carry_forward_records (
+  id                    TEXT PRIMARY KEY,
+  employee_id           TEXT NOT NULL,
+  from_leave_year       TEXT NOT NULL,
+  to_leave_year         TEXT NOT NULL,
+  unused_days_at_close  DOUBLE PRECISION NOT NULL,
+  approved_days         DOUBLE PRECISION NOT NULL DEFAULT 0,
+  lapsed_days           DOUBLE PRECISION NOT NULL DEFAULT 0,
+  decision              TEXT NOT NULL,
+  approved_by           TEXT,
+  approved_at           BIGINT,
+  notes                 TEXT,
+  applied_at            BIGINT,
+  created_at            BIGINT NOT NULL,
+  CONSTRAINT uq_carry_forward_emp_year UNIQUE (employee_id, from_leave_year)
+);
+CREATE INDEX IF NOT EXISTS idx_carry_forward_emp ON leave_carry_forward_records(employee_id);

@@ -498,13 +498,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  String _formatJoiningDate(String? raw) {
+    if (raw == null || raw.isEmpty) return '—';
+    try {
+      final dt = DateTime.parse(raw);
+      const months = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      return '${dt.day} ${months[dt.month - 1]} ${dt.year} ($raw)';
+    } catch (_) {
+      return raw;
+    }
+  }
+
   Widget _buildEmploymentCard(EmployeeProfile p) {
     return _buildSectionContainer(
       title: 'Employment & Schedule',
       icon: Icons.badge_outlined,
       children: [
         _buildDetailRow('Employment Type', p.employmentType ?? 'Full-time'),
-        _buildDetailRow('Start Date', p.startDate ?? '—'),
+        _buildDetailRow('Official Joining Date', _formatJoiningDate(p.startDate)),
         _buildDetailRow('Assigned Hours', '${p.startTime} – ${p.endTime}'),
         _buildDetailRow('Grace Window', '${p.graceMinutes} minutes (11:10:59 limit)'),
         _buildDetailRow('Daily Break', '${p.breakMinutes} minutes paid allowance'),

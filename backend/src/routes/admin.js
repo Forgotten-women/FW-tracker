@@ -551,6 +551,83 @@ router.get('/app-usage', async (req, res) => {
   });
 });
 
+router.get('/employees/:id/app-backlog', async (req, res) => {
+  const employeeId = req.params.id;
+  const employee = await db.prepare('SELECT id, name, role, employee_number FROM employees WHERE id = ?').get(employeeId);
+  if (!employee) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
+
+  const startDate = req.query.startDate ? String(req.query.startDate).trim() : null;
+  const endDate = req.query.endDate ? String(req.query.endDate).trim() : null;
+
+  let query = `
+    SELECT au.session_date, au.app_name, SUM(au.active_seconds) AS active_seconds, MAX(au.last_used_at) AS last_used_at
+    FROM workstation_app_usage au
+    WHERE au.employee_id = ?
+  `;
+  const params = [employeeId];
+
+  if (startDate) {
+    query += ' AND au.session_date >= ? ';
+    params.push(startDate);
+  }
+  if (endDate) {
+    query += ' AND au.session_date <= ? ';
+    params.push(endDate);
+  }
+
+  query += ' GROUP BY au.session_date, au.app_name ORDER BY au.session_date DESC, active_seconds DESC';
+
+  const rows = await db.prepare(query).all(...params);
+
+  // Aggregate totals
+  let totalActiveSeconds = 0;
+  const appTotals = new Map();
+  const dailyMap = new Map();
+
+  for (const r of rows) {
+    const s = Number(r.active_seconds) || 0;
+    totalActiveSeconds += s;
+    appTotals.set(r.app_name, (appTotals.get(r.app_name) || 0) + s);
+
+    if (!dailyMap.has(r.session_date)) {
+      dailyMap.set(r.session_date, {
+        date: r.session_date,
+        totalSeconds: 0,
+        totalMinutes: 0,
+        apps: [],
+      });
+    }
+    const day = dailyMap.get(r.session_date);
+    day.totalSeconds += s;
+    day.totalMinutes = Math.round(day.totalSeconds / 60);
+    day.apps.push({
+      appName: r.app_name,
+      activeSeconds: s,
+      activeMinutes: Math.round(s / 60),
+      lastUsedAt: T.displayTime(r.last_used_at),
+    });
+  }
+
+  const topApps = Array.from(appTotals.entries())
+    .map(([appName, secs]) => ({
+      appName,
+      activeSeconds: secs,
+      activeMinutes: Math.round(secs / 60),
+      percentage: totalActiveSeconds > 0 ? Math.round((secs / totalActiveSeconds) * 100) : 0,
+    }))
+    .sort((a, b) => b.activeSeconds - a.activeSeconds);
+
+  res.json({
+    status: 'SUCCESS',
+    employee,
+    range: { startDate, endDate },
+    totalActiveSeconds,
+    totalActiveMinutes: Math.round(totalActiveSeconds / 60),
+    topApps,
+    dailyBreakdown: Array.from(dailyMap.values()),
+  });
+});
+
 router.post('/anomalies/:id/resolve', async (req, res) => {
   await db.prepare('UPDATE process_anomalies SET resolved = 1 WHERE id = ?').run(req.params.id);
   res.json({ status: 'SUCCESS' });

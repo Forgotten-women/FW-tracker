@@ -38,6 +38,10 @@ import type {
   WorkstationItem,
   ProcessAnomalyItem,
   AppUsageItem,
+  LeaveBalanceDetails,
+  ApproachingAnniversaryEmployee,
+  HistoricalLeaveCycle,
+  EmployeeAppBacklog,
 } from './types';
 
 
@@ -403,6 +407,25 @@ export const api = {
       },
     ),
 
+  fetchApproachingAnniversaries: (date?: string) =>
+    request<{ status: string; employees: ApproachingAnniversaryEmployee[] }>(
+      `/api/leave/carry-forward/approaching${date ? `?date=${encodeURIComponent(date)}` : ''}`
+    ),
+
+  recordCarryForward: (data: { employeeId: string; approvedDays: number; notes?: string }) =>
+    request<{ status: string; message: string; record: unknown; balance: LeaveBalanceDetails }>(
+      '/api/leave/carry-forward/record',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
+
+  fetchEmployeeLeaveCycles: (employeeId: string) =>
+    request<{ status: string; employeeId: string; currentBalance: LeaveBalanceDetails; cycles: HistoricalLeaveCycle[] }>(
+      `/api/leave/employee/${encodeURIComponent(employeeId)}/cycles`
+    ),
+
   leaveTypes: () =>
     request<{ status: string; types: LeaveTypeItem[] }>(
       '/api/leave/types',
@@ -673,6 +696,16 @@ export const api = {
 
   fetchAppUsage: (date?: string) =>
     request<{ status: string; dateKey: string; appUsage: AppUsageItem[] }>(`/api/admin/app-usage${date ? `?date=${encodeURIComponent(date)}` : ''}`),
+
+  fetchEmployeeAppBacklog: (employeeId: string, startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    return request<EmployeeAppBacklog>(
+      `/api/admin/employees/${encodeURIComponent(employeeId)}/app-backlog${qs ? `?${qs}` : ''}`
+    );
+  },
 
   resolveAnomaly: (id: string) =>
     request<{ status: string }>(`/api/admin/anomalies/${encodeURIComponent(id)}/resolve`, {

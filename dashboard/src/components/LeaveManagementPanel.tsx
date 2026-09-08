@@ -7,6 +7,9 @@ import type {
   EmployeeLeaveOverview,
   LeaveRequestItem,
   TeamCalendarLeave,
+  ApproachingAnniversaryEmployee,
+  HistoricalLeaveCycle,
+  LeaveBalanceDetails,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
 
@@ -16,11 +19,12 @@ export function LeaveManagementPanel() {
   const [balances, setBalances] = useState<EmployeeLeaveOverview[]>([]);
   const [calendarLeaves, setCalendarLeaves] = useState<TeamCalendarLeave[]>([]);
   const [absences, setAbsences] = useState<AbsenceRecord[]>([]);
+  const [approachingEmployees, setApproachingEmployees] = useState<ApproachingAnniversaryEmployee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Tabs: 'pending' | 'absences' | 'calendar' | 'all' | 'balances'
-  const [activeTab, setActiveTab] = useState<'pending' | 'absences' | 'calendar' | 'all' | 'balances'>('pending');
+  // Tabs: 'pending' | 'absences' | 'calendar' | 'all' | 'balances' | 'carry_forward'
+  const [activeTab, setActiveTab] = useState<'pending' | 'absences' | 'calendar' | 'all' | 'balances' | 'carry_forward'>('pending');
 
   // Filters
   const [historyFilter, setHistoryFilter] = useState<'ALL' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('ALL');
@@ -50,22 +54,38 @@ export function LeaveManagementPanel() {
   const [adjustReason, setAdjustReason] = useState('');
   const [adjustDate, setAdjustDate] = useState('');
 
+  // Carry Forward Review Modal
+  const [carryModalEmployee, setCarryModalEmployee] = useState<ApproachingAnniversaryEmployee | null>(null);
+  const [carryApprovedDays, setCarryApprovedDays] = useState<number>(0);
+  const [carryNotes, setCarryNotes] = useState<string>('');
+  const [carrySaving, setCarrySaving] = useState<boolean>(false);
+
+  // Historical Leave Cycles Modal
+  const [showCyclesModal, setShowCyclesModal] = useState<boolean>(false);
+  const [cyclesEmployeeName, setCyclesEmployeeName] = useState<string>('');
+  const [cyclesEmployeeId, setCyclesEmployeeId] = useState<string>('');
+  const [historicalCycles, setHistoricalCycles] = useState<HistoricalLeaveCycle[]>([]);
+  const [cyclesCurrentBalance, setCyclesCurrentBalance] = useState<LeaveBalanceDetails | null>(null);
+  const [cyclesLoading, setCyclesLoading] = useState<boolean>(false);
+
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [pData, rData, bData, cData, aData] = await Promise.all([
+      const [pData, rData, bData, cData, aData, appData] = await Promise.all([
         api.pendingLeaveRequests(),
         api.leaveRequests(historyFilter),
         api.leaveBalances(),
         api.teamLeaveCalendar(),
         api.absences('ALL'),
+        api.fetchApproachingAnniversaries().catch(() => ({ employees: [] })),
       ]);
       setPendingRequests(pData.requests || []);
       setAllRequests(rData.requests || []);
       setBalances(bData.employees || []);
       setCalendarLeaves(cData.leaves || []);
       setAbsences(aData.absences || []);
+      setApproachingEmployees(appData.employees || []);
     } catch (err: unknown) {
       if (!silent) setError(err instanceof Error ? err.message : 'Failed to load leave data.');
     } finally {
@@ -196,6 +216,61 @@ export function LeaveManagementPanel() {
     }
   };
 
+  const formatFullDate = (d?: string | null) => {
+    if (!d) return '—';
+    const parts = d.split('-');
+    if (parts.length === 3) {
+      const dt = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      if (!isNaN(dt.getTime())) {
+        return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      }
+    }
+    return d;
+  };
+
+  const openCarryModal = (emp: ApproachingAnniversaryEmployee) => {
+    setCarryModalEmployee(emp);
+    const existingDays = emp.carryForwardDecision?.approvedDays != null
+      ? emp.carryForwardDecision.approvedDays
+      : Math.min(5, Math.max(0, emp.availableDays));
+    setCarryApprovedDays(existingDays);
+    setCarryNotes(emp.carryForwardDecision?.notes || '');
+  };
+
+  const handleSaveCarryForward = async () => {
+    if (!carryModalEmployee) return;
+    setCarrySaving(true);
+    try {
+      await api.recordCarryForward({
+        employeeId: carryModalEmployee.employeeId,
+        approvedDays: carryApprovedDays,
+        notes: carryNotes.trim(),
+      });
+      setCarryModalEmployee(null);
+      await refresh();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to record carry forward decision.');
+    } finally {
+      setCarrySaving(false);
+    }
+  };
+
+  const openCyclesModal = async (empId: string, empName: string) => {
+    setCyclesEmployeeId(empId);
+    setCyclesEmployeeName(empName);
+    setShowCyclesModal(true);
+    setCyclesLoading(true);
+    try {
+      const res = await api.fetchEmployeeLeaveCycles(empId);
+      setHistoricalCycles(res.cycles || []);
+      setCyclesCurrentBalance(res.currentBalance || null);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to load employee leave cycles.');
+    } finally {
+      setCyclesLoading(false);
+    }
+  };
+
   // Derive summary metrics
   const pendingCount = pendingRequests.length;
   const pendingAbsencesCount = absences.filter((a) => a.status === 'PENDING_REVIEW').length;
@@ -277,6 +352,18 @@ export function LeaveManagementPanel() {
             Workforce Balances
           </Button>
           <Button
+            variant={activeTab === 'carry_forward' ? 'primary' : 'ghost'}
+            onClick={() => setActiveTab('carry_forward')}
+            className="py-1 px-3 text-xs flex items-center gap-1.5"
+          >
+            Carry-Forward & Rollovers
+            {approachingEmployees.length > 0 && (
+              <span className="rounded-full bg-warn/20 px-1.5 py-0.2 text-[10px] font-bold text-warn border border-warn/30">
+                {approachingEmployees.length}
+              </span>
+            )}
+          </Button>
+          <Button
             variant={activeTab === 'all' ? 'primary' : 'ghost'}
             onClick={() => setActiveTab('all')}
             className="py-1 px-3 text-xs"
@@ -303,7 +390,7 @@ export function LeaveManagementPanel() {
       )}
 
       {/* Summary KPI Cards (Spec 14.1 & 15.1) */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-6">
         <div
           onClick={() => setActiveTab('pending')}
           className={`cursor-pointer rounded-xl border p-3.5 transition-all ${
@@ -359,6 +446,22 @@ export function LeaveManagementPanel() {
           </div>
           <div className="mt-2 text-2xl font-extrabold text-danger">{shortfallCount}</div>
           <div className="mt-0.5 text-[10px] text-muted">Exceeds accrued balance</div>
+        </div>
+
+        <div
+          onClick={() => setActiveTab('carry_forward')}
+          className={`cursor-pointer rounded-xl border p-3.5 transition-all ${
+            activeTab === 'carry_forward'
+              ? 'border-brand bg-brand-dim/30 ring-1 ring-brand'
+              : 'border-line bg-surface hover:bg-raised'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-text">Anniversaries (30d)</span>
+            {approachingEmployees.length > 0 && <span className="h-2 w-2 rounded-full bg-warn animate-pulse" />}
+          </div>
+          <div className="mt-2 text-2xl font-extrabold text-warn">{approachingEmployees.length}</div>
+          <div className="mt-0.5 text-[10px] text-muted">Carry-forward reviews</div>
         </div>
 
         <div
@@ -577,12 +680,14 @@ export function LeaveManagementPanel() {
                 <thead>
                   <tr className="border-b border-line bg-raised text-dim">
                     <th className="px-3 py-2.5 font-semibold">Employee</th>
-                    <th className="px-3 py-2.5 font-semibold">Holiday Year (Anniversary)</th>
-                    <th className="px-3 py-2.5 font-semibold">Annual Entitlement</th>
-                    <th className="px-3 py-2.5 font-semibold">Accrued to Date</th>
+                    <th className="px-3 py-2.5 font-semibold">Official Joining Date & Cycle</th>
+                    <th className="px-3 py-2.5 font-semibold">Entitlement</th>
+                    <th className="px-3 py-2.5 font-semibold">Accrued</th>
                     <th className="px-3 py-2.5 font-semibold">Taken</th>
-                    <th className="px-3 py-2.5 font-semibold">Booked</th>
-                    <th className="px-3 py-2.5 font-semibold">Available Balance</th>
+                    <th className="px-3 py-2.5 font-semibold">Carried In</th>
+                    <th className="px-3 py-2.5 font-semibold">Remaining (Cycle)</th>
+                    <th className="px-3 py-2.5 font-semibold">Expiring / Lapsed</th>
+                    <th className="px-3 py-2.5 font-semibold">Net Available</th>
                     <th className="px-3 py-2.5 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
@@ -603,8 +708,8 @@ export function LeaveManagementPanel() {
                             </div>
                             <div className="text-[11px] text-muted">{b.role}</div>
                           </td>
-                          <td colSpan={6} className="px-3 py-3 align-middle text-dim italic">
-                            Blocked: {bal.message ?? 'No start date on record'}
+                          <td colSpan={8} className="px-3 py-3 align-middle text-dim italic">
+                            Blocked: {bal.message ?? 'No official joining date on record'}
                           </td>
                           <td className="px-3 py-3 align-middle text-right">
                             <Button
@@ -621,6 +726,14 @@ export function LeaveManagementPanel() {
                       );
                     }
 
+                    const cycleStart = bal.cycleStartDate || bal.holidayYear?.from || '—';
+                    const cycleEnd = bal.cycleEndDate || bal.holidayYear?.to || '—';
+                    const renewal = bal.nextRenewalDate || bal.renewalDate || bal.holidayYear?.anniversaryDate || '—';
+                    const carriedIn = bal.approvedCarryForwardDays ?? bal.approvedCarryForward ?? 0;
+                    const dueExpire = bal.leaveDueToExpire ?? bal.dueToExpire ?? 0;
+                    const lapsed = bal.leaveAlreadyLapsed ?? bal.alreadyLapsed ?? 0;
+                    const remainingCycle = bal.remainingCurrentCycleDays ?? bal.remainingCurrentCycle ?? bal.available;
+
                     return (
                       <tr key={b.employeeId} className="hover:bg-white/[0.02]">
                         <td className="px-3 py-3 align-middle">
@@ -635,19 +748,46 @@ export function LeaveManagementPanel() {
                           <div className="text-[11px] text-muted">{b.role}</div>
                         </td>
                         <td className="px-3 py-3 align-middle font-mono text-[11px] text-dim">
-                          {bal.holidayYear ? `${bal.holidayYear.from} → ${bal.holidayYear.to}` : '—'}
-                          <div className="text-[10px]">
-                            {bal.holidayYear?.monthsCompleted ?? 0} mos completed
+                          <div className="font-semibold text-text">
+                            Joined: {formatFullDate(bal.officialJoiningDate)}
+                          </div>
+                          <div className="text-[10px] text-dim">
+                            Cycle: {cycleStart} &rarr; {cycleEnd}
+                          </div>
+                          <div className="text-[10px] text-indigo-400">
+                            Renews: {renewal}
                           </div>
                         </td>
                         <td className="px-3 py-3 align-middle font-semibold text-text">
-                          {bal.annualEntitlement}d
+                          {bal.annualEntitlementDays ?? bal.annualEntitlement}d
                         </td>
                         <td className="px-3 py-3 align-middle font-semibold text-brand">
-                          {bal.accrued}d
+                          {bal.accruedDays ?? bal.accrued}d
                         </td>
-                        <td className="px-3 py-3 align-middle text-dim">{bal.taken}d</td>
-                        <td className="px-3 py-3 align-middle text-dim">{bal.booked}d</td>
+                        <td className="px-3 py-3 align-middle text-dim">
+                          {bal.takenDays ?? bal.taken}d
+                        </td>
+                        <td className="px-3 py-3 align-middle text-teal-400 font-semibold">
+                          {carriedIn > 0 ? `+${carriedIn}d` : '0d'}
+                        </td>
+                        <td className="px-3 py-3 align-middle text-text font-medium">
+                          {remainingCycle}d
+                        </td>
+                        <td className="px-3 py-3 align-middle text-[11px]">
+                          {dueExpire > 0 && (
+                            <div className="text-warn font-semibold">
+                              Due: {dueExpire}d
+                            </div>
+                          )}
+                          {lapsed > 0 && (
+                            <div className="text-dim">
+                              Lapsed: {lapsed}d
+                            </div>
+                          )}
+                          {dueExpire === 0 && lapsed === 0 && (
+                            <span className="text-dim">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-3 align-middle">
                           <span
                             className={`font-extrabold text-sm ${
@@ -658,15 +798,166 @@ export function LeaveManagementPanel() {
                           </span>
                         </td>
                         <td className="px-3 py-3 align-middle text-right">
-                          <Button
-                            onClick={() => {
-                              setAdjustEmployeeId(b.employeeId);
-                              setShowAdjustModal(true);
-                            }}
-                            className="py-1 px-2.5 text-[11px]"
-                          >
-                            Adjust
-                          </Button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              onClick={() => openCyclesModal(b.employeeId, b.employeeName)}
+                              className="py-1 px-2 text-[10px]"
+                            >
+                              📜 Cycles
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setAdjustEmployeeId(b.employeeId);
+                                setShowAdjustModal(true);
+                              }}
+                              className="py-1 px-2 text-[10px]"
+                            >
+                              Adjust
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Carry-Forward & Work Anniversary Rollovers */}
+      {activeTab === 'carry_forward' && (
+        <div>
+          <div className="mb-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+            <div className="flex items-start gap-3">
+              <span className="text-xl">🔄</span>
+              <div>
+                <h3 className="text-sm font-bold text-text">
+                  Work Anniversary Leave Rollovers & Carry-Forward (Max 5 Days)
+                </h3>
+                <p className="mt-1 text-xs text-muted leading-relaxed">
+                  Each employee's annual leave entitlement is tied strictly to their <strong>Official Joining Date</strong>.
+                  Upon their work anniversary, management can review and approve up to <strong>5.0 days</strong> of unused leave to carry forward into the new 12-month cycle.
+                  Any unapproved leave or unused balance exceeding 5 days automatically lapses upon rollover.
+                  Employees approaching their anniversary receive automated 14-day cycle-end notifications.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs font-semibold text-text">
+              Employees Approaching Anniversary (Next 30 Days): {approachingEmployees.length}
+            </div>
+            <Button onClick={() => refresh()} disabled={loading} className="py-1 px-3 text-xs">
+              {loading ? 'Refreshing…' : 'Scan Renewals'}
+            </Button>
+          </div>
+
+          {approachingEmployees.length === 0 ? (
+            <Empty>
+              No employees have upcoming work anniversaries within the next 30 days. All active leave cycles are up to date.
+            </Empty>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-line bg-raised text-dim">
+                    <th className="px-3 py-2.5 font-semibold">Employee</th>
+                    <th className="px-3 py-2.5 font-semibold">Official Joining Date</th>
+                    <th className="px-3 py-2.5 font-semibold">Current Cycle Range</th>
+                    <th className="px-3 py-2.5 font-semibold">Renewal Date</th>
+                    <th className="px-3 py-2.5 font-semibold">Available Unused</th>
+                    <th className="px-3 py-2.5 font-semibold">Max Eligible Carry-Over</th>
+                    <th className="px-3 py-2.5 font-semibold">Decision / Status</th>
+                    <th className="px-3 py-2.5 font-semibold text-right">Management Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {approachingEmployees.map((emp) => {
+                    const dec = emp.carryForwardDecision;
+                    return (
+                      <tr key={emp.employeeId} className="hover:bg-white/[0.02]">
+                        <td className="px-3 py-3 align-middle">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-text">{emp.name}</span>
+                            {emp.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {emp.employeeNumber}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-muted">{emp.role}</div>
+                        </td>
+                        <td className="px-3 py-3 align-middle text-text font-medium">
+                          {formatFullDate(emp.officialJoiningDate)}
+                        </td>
+                        <td className="px-3 py-3 align-middle font-mono text-[11px] text-dim">
+                          {emp.cycleStartDate} &rarr; {emp.cycleEndDate}
+                        </td>
+                        <td className="px-3 py-3 align-middle">
+                          <div className="font-semibold text-text">{emp.nextRenewalDate}</div>
+                          <div className="text-[10px] text-warn font-medium">
+                            {emp.daysUntilAnniversary === 0
+                              ? 'Due today!'
+                              : `In ${emp.daysUntilAnniversary} days`}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 align-middle">
+                          <span className="font-extrabold text-sm text-text">
+                            {emp.availableDays}d
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 align-middle font-semibold text-teal-400">
+                          {emp.maxEligibleCarryForward}d
+                        </td>
+                        <td className="px-3 py-3 align-middle">
+                          {dec ? (
+                            dec.decision === 'APPROVED' ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-bold text-emerald-400 border border-emerald-500/20">
+                                  ✓ Approved: {dec.approvedDays}d
+                                </span>
+                                {dec.lapsedDays > 0 && (
+                                  <div className="text-[10px] text-muted mt-0.5">
+                                    {dec.lapsedDays}d will lapse
+                                  </div>
+                                )}
+                                {dec.approvedBy && (
+                                  <div className="text-[9px] text-dim">By {dec.approvedBy}</div>
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 px-2 py-0.5 text-[11px] font-bold text-rose-400 border border-rose-500/20">
+                                  ✕ Rejected (0d)
+                                </span>
+                                <div className="text-[10px] text-dim mt-0.5">All unused will lapse</div>
+                              </div>
+                            )
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 text-[11px] font-bold text-amber-400 border border-amber-500/20 animate-pulse">
+                              ⏳ Awaiting Decision
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-middle text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              onClick={() => openCarryModal(emp)}
+                              variant="primary"
+                              className="py-1 px-2.5 text-[11px]"
+                            >
+                              Review Carry-Forward
+                            </Button>
+                            <Button
+                              onClick={() => openCyclesModal(emp.employeeId, emp.name)}
+                              className="py-1 px-2.5 text-[11px]"
+                            >
+                              📜 Cycles
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1224,6 +1515,261 @@ export function LeaveManagementPanel() {
               </Button>
               <Button variant="primary" onClick={handleAdjustBalance} disabled={submitting}>
                 {submitting ? 'Applying…' : 'Apply Adjustment'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Carry-Forward Management Approval Modal */}
+      {carryModalEmployee && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
+          <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div>
+                <h2 className="text-base font-bold text-text">
+                  Review Leave Carry-Forward
+                </h2>
+                <p className="text-xs text-muted">
+                  Employee: <strong>{carryModalEmployee.name}</strong> · Official Joining Date: {formatFullDate(carryModalEmployee.officialJoiningDate)}
+                </p>
+              </div>
+              <button
+                onClick={() => setCarryModalEmployee(null)}
+                className="text-muted hover:text-text text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="my-4 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3 rounded-xl border border-line bg-raised p-3">
+                <div>
+                  <span className="text-muted block text-[10px] uppercase font-semibold">Current Cycle</span>
+                  <span className="font-mono text-text">
+                    {carryModalEmployee.cycleStartDate} &rarr; {carryModalEmployee.cycleEndDate}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted block text-[10px] uppercase font-semibold">Work Anniversary Renewal</span>
+                  <span className="font-semibold text-brand">
+                    {carryModalEmployee.nextRenewalDate} ({carryModalEmployee.daysUntilAnniversary === 0 ? 'Today' : `in ${carryModalEmployee.daysUntilAnniversary}d`})
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted block text-[10px] uppercase font-semibold">Available Unused Leave</span>
+                  <span className="text-base font-extrabold text-text">
+                    {carryModalEmployee.availableDays} days
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted block text-[10px] uppercase font-semibold">Company Policy Cap</span>
+                  <span className="text-base font-extrabold text-teal-400">
+                    Max 5.0 days
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1.5">
+                  Approved Days to Carry Forward (Max 5.0 Days)
+                </label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    min="0"
+                    max={Math.min(5, Math.max(0, carryModalEmployee.availableDays))}
+                    step="0.5"
+                    value={carryApprovedDays}
+                    onChange={(e) => setCarryApprovedDays(Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
+                    className="w-32 text-sm font-bold py-1.5 text-center"
+                  />
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[0, 1, 2, 3, 4, 5]
+                      .filter((d) => d <= carryModalEmployee.availableDays)
+                      .map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setCarryApprovedDays(d)}
+                          className={`rounded px-2.5 py-1 font-mono font-bold text-xs transition-colors ${
+                            carryApprovedDays === d
+                              ? 'bg-brand text-white'
+                              : 'bg-raised text-muted hover:text-text border border-line'
+                          }`}
+                        >
+                          {d}d
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="mt-2 text-[11px] text-muted flex items-center gap-4">
+                  <span>
+                    Will Carry Forward: <strong className="text-emerald-400">{carryApprovedDays} days</strong>
+                  </span>
+                  <span>
+                    Will Automatically Lapse: <strong className="text-rose-400">{Math.max(0, carryModalEmployee.availableDays - carryApprovedDays)} days</strong>
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1">
+                  Management Decision Notes & Justification (Optional)
+                </label>
+                <textarea
+                  value={carryNotes}
+                  onChange={(e) => setCarryNotes(e.target.value)}
+                  placeholder="e.g. Approved 5 days due to operational project delivery in Q4..."
+                  rows={3}
+                  className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                />
+              </div>
+
+              <div className="rounded-lg bg-white/[0.03] border border-line p-2.5 text-[11px] text-dim">
+                ℹ️ <strong>Audit Trail:</strong> Approver identity and timestamp will be permanently saved to the ledger and cycle record.
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-line pt-3">
+              <Button onClick={() => setCarryModalEmployee(null)} disabled={carrySaving}>
+                Cancel
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setCarryApprovedDays(0);
+                  setTimeout(() => handleSaveCarryForward(), 50);
+                }}
+                disabled={carrySaving}
+                className="text-rose-400 hover:bg-rose-500/10"
+              >
+                Reject (All Lapse)
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSaveCarryForward}
+                disabled={carrySaving}
+              >
+                {carrySaving ? 'Saving…' : `Confirm ${carryApprovedDays}d Carry-Forward`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Historical Leave Cycles Audit Modal */}
+      {showCyclesModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-6">
+          <div className="w-full max-w-2xl rounded-2xl border border-line bg-surface p-6 shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div>
+                <h2 className="text-base font-bold text-text">
+                  📜 Historical Leave Cycles & Audit Record
+                </h2>
+                <p className="text-xs text-muted">
+                  Employee: <strong>{cyclesEmployeeName}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCyclesModal(false)}
+                className="text-muted hover:text-text text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="my-4 overflow-y-auto pr-1 flex-1 space-y-4">
+              {cyclesLoading ? (
+                <div className="py-12 text-center text-xs text-muted">
+                  Loading historical cycle records…
+                </div>
+              ) : historicalCycles.length === 0 ? (
+                <Empty>No completed or recorded leave cycles found for this employee.</Empty>
+              ) : (
+                historicalCycles.map((c) => (
+                  <div
+                    key={c.cycleIndex}
+                    className={`rounded-xl border p-4 transition-all ${
+                      c.status === 'ACTIVE'
+                        ? 'border-brand/40 bg-brand-dim/10'
+                        : 'border-line bg-raised'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-text">
+                          Cycle #{c.cycleIndex}: {c.cycleStartDate} &rarr; {c.cycleEndDate}
+                        </span>
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                            c.status === 'ACTIVE'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                          }`}
+                        >
+                          {c.status}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-muted">
+                        Renewal: <strong>{c.renewalDate}</strong>
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 my-2 text-center">
+                      <div className="rounded-lg bg-surface/60 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Entitlement</div>
+                        <div className="text-xs font-bold text-text">{c.entitlementDays}d</div>
+                      </div>
+                      <div className="rounded-lg bg-surface/60 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Accrued</div>
+                        <div className="text-xs font-bold text-brand">{c.accruedDays}d</div>
+                      </div>
+                      <div className="rounded-lg bg-surface/60 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Taken</div>
+                        <div className="text-xs font-bold text-dim">{c.takenDays}d</div>
+                      </div>
+                      <div className="rounded-lg bg-surface/60 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Carried In</div>
+                        <div className="text-xs font-bold text-teal-400">+{c.carriedForwardIn}d</div>
+                      </div>
+                      <div className="rounded-lg bg-surface/60 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Lapsed</div>
+                        <div className="text-xs font-bold text-rose-400">-{c.lapsedDays}d</div>
+                      </div>
+                      <div className="rounded-lg bg-surface/60 p-2 border border-line">
+                        <div className="text-[10px] text-muted">
+                          {c.status === 'ACTIVE' ? 'Net Available' : 'Closing Net'}
+                        </div>
+                        <div className="text-xs font-extrabold text-brand">{c.netClosingBalance}d</div>
+                      </div>
+                    </div>
+
+                    {c.carryForwardRecord ? (
+                      <div className="mt-2 rounded-lg bg-white/[0.03] border border-line p-2 text-[11px] text-dim">
+                        <span className="font-semibold text-text">Carry-Forward Decision:</span>{' '}
+                        <strong className="text-teal-400">{c.carryForwardRecord.decision}</strong> · Approved: {c.carryForwardRecord.approvedDays}d · Lapsed: {c.carryForwardRecord.lapsedDays}d
+                        {c.carryForwardRecord.approvedBy && (
+                          <span> · By: <strong className="text-text">{c.carryForwardRecord.approvedBy}</strong></span>
+                        )}
+                        {c.carryForwardRecord.notes && (
+                          <div className="text-[10px] text-muted italic mt-0.5">Notes: "{c.carryForwardRecord.notes}"</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-[10px] text-dim">
+                        No carry-forward record filed for this cycle.
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-line pt-3">
+              <Button onClick={() => setShowCyclesModal(false)}>
+                Close Audit Record
               </Button>
             </div>
           </div>

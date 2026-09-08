@@ -298,6 +298,10 @@ class _LeaveScreenState extends State<LeaveScreen> {
     }
 
     String d(double v) => v.toStringAsFixed(2);
+    final cycleStart = b.cycleStartDate ?? b.yearFrom;
+    final cycleEnd = b.cycleEndDate ?? b.yearTo;
+    final renewal = b.nextRenewalDate ?? b.renewalDate;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -322,14 +326,30 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 'AVAILABLE LEAVE',
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
               ),
-              if (b.yearFrom != null)
-                Text(
-                  '${b.yearFrom} → ${b.yearTo}',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+              if (renewal != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+                  ),
+                  child: Text(
+                    'Renews: $renewal',
+                    style: const TextStyle(color: AppColors.primaryLight, fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
                 ),
             ],
           ),
-          const SizedBox(height: 6),
+          if (cycleStart != null && cycleEnd != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Work Anniversary Cycle: $cycleStart → $cycleEnd',
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+              ),
+            ),
+          const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
@@ -358,24 +378,66 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 style: TextStyle(color: AppColors.amber, fontSize: 11),
               ),
             ),
+          if (b.dueToExpire > 0)
+            Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.amber.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.amber.withOpacity(0.35)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.amber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${d(b.dueToExpire)} days due to expire at cycle end. Management can approve up to 5 days to carry forward.',
+                      style: const TextStyle(color: AppColors.amber, fontSize: 11, height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 16),
+          // 8-Metric Breakdown Grid
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
             decoration: BoxDecoration(
               color: AppColors.bgDark,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            child: Column(
               children: [
-                _metric('Entitlement', '${d(b.annualEntitlement)}d'),
-                Container(width: 1, height: 26, color: AppColors.border),
-                _metric('Accrued', '${d(b.accrued)}d'),
-                Container(width: 1, height: 26, color: AppColors.border),
-                _metric('Taken', '${d(b.taken)}d'),
-                Container(width: 1, height: 26, color: AppColors.border),
-                _metric('Booked', '${d(b.booked)}d'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _metric('Entitlement', '${d(b.annualEntitlement)}d'),
+                    Container(width: 1, height: 26, color: AppColors.border),
+                    _metric('Accrued', '${d(b.accrued)}d'),
+                    Container(width: 1, height: 26, color: AppColors.border),
+                    _metric('Taken', '${d(b.taken)}d'),
+                    Container(width: 1, height: 26, color: AppColors.border),
+                    _metric('Booked', '${d(b.booked)}d'),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Divider(color: AppColors.border, height: 1),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _metric('Carried In', '+${d(b.approvedCarryForward)}d'),
+                    Container(width: 1, height: 26, color: AppColors.border),
+                    _metric('Remaining', '${d(b.remainingCurrentCycle)}d'),
+                    Container(width: 1, height: 26, color: AppColors.border),
+                    _metric('Expiring', '${d(b.dueToExpire)}d'),
+                    Container(width: 1, height: 26, color: AppColors.border),
+                    _metric('Lapsed', '${d(b.alreadyLapsed)}d'),
+                  ],
+                ),
               ],
             ),
           ),

@@ -19,15 +19,50 @@ function presentBalance(b) {
   }
   return {
     blocked: false,
-    holidayYear: { from: b.yearStart, to: b.yearEnd, monthsCompleted: b.monthsCompleted },
+    holidayYear: {
+      from: b.cycleStartDate || b.yearStart,
+      to: b.cycleEndDate || b.yearEnd,
+      anniversaryDate: b.nextRenewalDate || b.yearEnd,
+      monthsCompleted: b.monthsCompleted,
+    },
+    cycleStartDate: b.cycleStartDate || b.yearStart,
+    cycleEndDate: b.cycleEndDate || b.yearEnd,
+    nextRenewalDate: b.nextRenewalDate || b.yearEnd,
     nextAccrualDate: b.nextAccrualDate,
-    // The five figures spec 19.4 asks the employee dashboard to show.
+    officialJoiningDate: b.officialJoiningDate || b.startDate,
+
+    // 8-Metric Leave Report Breakdown (spec & policy):
+    // 1. Current year's/cycle's annual leave entitlement
     annualEntitlement: b.annualEntitlementDays,
+    annualEntitlementDays: b.annualEntitlementDays,
+    // 2. Leave accrued to date
     accrued: b.accruedDays,
+    accruedDays: b.accruedDays,
+    // 3. Leave already used
     taken: b.takenDays,
+    takenDays: b.takenDays,
+    // 4. Approved carry-forward leave from the previous cycle
+    approvedCarryForward: b.approvedCarryForwardDays || 0,
+    approvedCarryForwardDays: b.approvedCarryForwardDays || 0,
+    // 5. Remaining current-cycle leave
+    remainingCurrentCycle: b.remainingCurrentCycleDays != null ? b.remainingCurrentCycleDays : b.availableDays,
+    remainingCurrentCycleDays: b.remainingCurrentCycleDays != null ? b.remainingCurrentCycleDays : b.availableDays,
+    // 6. Leave due to expire
+    dueToExpire: b.leaveDueToExpire || 0,
+    leaveDueToExpire: b.leaveDueToExpire || 0,
+    // 7. Leave that has already lapsed
+    alreadyLapsed: b.leaveAlreadyLapsed || 0,
+    leaveAlreadyLapsed: b.leaveAlreadyLapsed || 0,
+    // 8. Next leave renewal / work-anniversary date
+    renewalDate: b.nextRenewalDate || b.yearEnd,
+
+    // Balances
     booked: b.bookedDays,
+    bookedDays: b.bookedDays,
     available: b.availableDays,
+    availableDays: b.availableDays,
     isNegative: b.isNegative,
+    carryForwardDecision: b.carryForwardDecision || null,
   };
 }
 
@@ -366,5 +401,72 @@ router.get('/blocked', requireUserOrAdminKey('leave.read'), async (req, res) => 
     })),
   });
 });
+
+// ---------------------------------------------------------------------------
+// Carry Forward & Anniversary Rollover Endpoints
+// ---------------------------------------------------------------------------
+
+router.get('/carry-forward/approaching',
+  requireUserOrAdminKey('leave.read'),
+  async (req, res) => {
+    try {
+      const today = String(req.query.date || T.dateKey());
+      const list = await L.employeesApproachingAnniversary(today);
+      res.json({ status: 'SUCCESS', employees: list });
+    } catch (err) {
+      res.status(500).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
+router.post('/carry-forward/record',
+  requireUserOrAdminKey('leave.approve'),
+  async (req, res) => {
+    const { employeeId, approvedDays, notes } = req.body || {};
+    if (!employeeId) {
+      return res.status(400).json({ status: 'ERROR', message: 'employeeId is required.' });
+    }
+    if (!await rbac.canAccessEmployee(req.auth, employeeId)) {
+      return res.status(403).json({ status: 'ERROR', message: 'Access denied.' });
+    }
+
+    try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
+      const record = await L.recordCarryForwardApproval({
+        employeeId,
+        approvedDays: Number(approvedDays),
+        notes,
+        actor,
+      });
+
+      const updatedBalance = await L.balanceFor(employeeId);
+      res.json({
+        status: 'SUCCESS',
+        message: Number(approvedDays) > 0
+          ? `${approvedDays} day(s) approved for carry forward.`
+          : 'Carry forward rejected; unused leave will lapse at cycle end.',
+        record,
+        balance: presentBalance(updatedBalance),
+      });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
+router.get('/employee/:employeeId/cycles',
+  requireUserOrAdminKey('leave.read'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const cycles = await L.historicalCyclesFor(req.params.employeeId);
+      const balance = await L.balanceFor(req.params.employeeId);
+      res.json({
+        status: 'SUCCESS',
+        employeeId: req.params.employeeId,
+        currentBalance: presentBalance(balance),
+        cycles,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'ERROR', message: err.message });
+    }
+  });
 
 module.exports = router;
