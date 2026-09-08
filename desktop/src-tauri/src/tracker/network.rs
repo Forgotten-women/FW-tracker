@@ -107,3 +107,40 @@ pub fn get_local_ip() -> Option<String> {
     Some(ip.to_string())
 }
 
+pub fn get_visible_office_bssids() -> Vec<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut list = Vec::new();
+        if let Ok(output) = Command::new("netsh")
+            .args(["wlan", "show", "networks", "mode=bssid"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if let Some(mac) = extract_mac(line) {
+                    let lower = mac.to_lowercase();
+                    if !list.contains(&lower) {
+                        list.push(lower);
+                    }
+                }
+            }
+        }
+        list
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
+    }
+}
+
+pub fn auto_connect_office_wifi() {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("netsh")
+            .args(["wlan", "connect", "name=Trans K 2.4G"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+}
+

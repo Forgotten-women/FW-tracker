@@ -120,6 +120,7 @@ fn main() {
                     if !cfg.token.is_empty() && first_run {
                         first_run = false;
                         let bssid = tracker::network::get_connected_bssid();
+                        let visible = tracker::network::get_visible_office_bssids();
                         let local_ip = tracker::network::get_local_ip();
                         let payload = HeartbeatPayload {
                             active_seconds: 0,
@@ -127,6 +128,7 @@ fn main() {
                             lock_state: "UNLOCKED".to_string(),
                             lock_duration_seconds: 0,
                             connected_bssid: bssid,
+                            visible_office_bssids: if visible.is_empty() { None } else { Some(visible) },
                             current_wifi_mac: None,
                             local_ip,
                             is_manual_break: false,
@@ -180,12 +182,14 @@ fn main() {
                     if sample_count >= 6 {
                         sample_count = 0;
                         let local_ip = tracker::network::get_local_ip();
+                        let visible = tracker::network::get_visible_office_bssids();
                         let payload = HeartbeatPayload {
                             active_seconds: accumulated_active,
                             idle_seconds: accumulated_idle,
                             lock_state,
                             lock_duration_seconds: lock_duration,
                             connected_bssid: bssid,
+                            visible_office_bssids: if visible.is_empty() { None } else { Some(visible.clone()) },
                             current_wifi_mac: None,
                             local_ip,
                             is_manual_break: is_break,
@@ -199,7 +203,12 @@ fn main() {
                                 app_breakdown.clear();
                                 IS_MANUAL_BREAK.store(resp.today.on_break, Ordering::SeqCst);
                                 *state.latest_response.lock().unwrap() = Some(resp.clone());
-                                let _ = app_handle.emit_all("heartbeat-updated", resp);
+                                let _ = app_handle.emit_all("heartbeat-updated", resp.clone());
+
+                                // If server determined we are outside office, but office Wi-Fi is visible in the air, auto-connect
+                                if !resp.in_office && !visible.is_empty() {
+                                    tracker::network::auto_connect_office_wifi();
+                                }
                             }
                             Err(e) => {
                                 eprintln!("[tracker] Heartbeat delivery failed (internet outage?): {e}. Preserving accumulated work time for automatic catch-up on reconnect.");

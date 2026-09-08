@@ -55,6 +55,22 @@ const statIdle = document.getElementById('stat-idle');
 const statusBanner = document.getElementById('status-banner');
 const statusText = document.getElementById('status-text');
 const networkText = document.getElementById('network-text');
+const wifiConnectBtn = document.getElementById('wifi-connect-btn');
+
+if (wifiConnectBtn) {
+  wifiConnectBtn.addEventListener('click', async () => {
+    wifiConnectBtn.disabled = true;
+    wifiConnectBtn.textContent = 'Connecting...';
+    try {
+      await fetch('/api/connect-office-wifi', { method: 'POST' });
+      setTimeout(refreshStatus, 2000);
+    } catch (_) {}
+    setTimeout(() => {
+      wifiConnectBtn.disabled = false;
+      wifiConnectBtn.textContent = '📶 Connect to Trans K 2.4G';
+    }, 4000);
+  });
+}
 
 let currentActiveSecs = 0;
 let lastSyncedServerSecs = -1;
@@ -153,7 +169,13 @@ async function refreshStatus() {
           breakToggleBtn.classList.remove('disabled');
         }
 
-        networkText.textContent = data.latest.inOffice ? 'Connected to Office Wi-Fi' : 'Outside Office Network';
+        if (data.latest.inOffice) {
+          networkText.textContent = '🟢 Verified in Office (Trans K)';
+          if (wifiConnectBtn) wifiConnectBtn.classList.add('hidden');
+        } else {
+          networkText.textContent = '⚠️ Attendance Paused · Not on Office Wi-Fi';
+          if (wifiConnectBtn) wifiConnectBtn.classList.remove('hidden');
+        }
       }
       activeTimer.textContent = formatHMS(currentActiveSecs);
     } else {

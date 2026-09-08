@@ -80,7 +80,7 @@ const upsertUnknown = db.prepare(`
  * AP are simply two allowlisted BSSIDs, so the 2.4/5GHz split needs no special
  * handling.
  */
-function classifyLocation({ bssid, srcIp, localIp, source }) {
+function classifyLocation({ bssid, visibleOfficeBssids, srcIp, localIp, source }) {
   // Hardware sensors are physically installed in the office; anything they see
   // is by definition on the office network.
   if (source === 'ESP_SNIFFER' || source === 'ARP' || source === 'ROUTER') return 'OFFICE';
@@ -103,11 +103,30 @@ function classifyLocation({ bssid, srcIp, localIp, source }) {
   if (!config.bssidEnforced) return ipOk ? 'OFFICE' : 'REMOTE';
 
   const bssidOk = config.isOfficeBssid(bssid);
-  if (bssidOk) {
-    // If the BSSID matches the office Wi-Fi, the workstation is physically in radio range of the office AP.
-    // If a private local IP was reported and it specifically belongs to an off-office home subnet, flag as contradictory (UNKNOWN).
-    // Otherwise (e.g. local IP matches office subnet, local IP was omitted in cloud request, or local IP is a virtual adapter), confirm as OFFICE.
-    if (localIp && !config.isOfficeIp(localIp) && !config.isOfficeIp(srcIp)) {
+
+  // Over-the-air visible office AP beacons (Proximity Verification).
+  // An 802.11 beacon cannot be received over the air unless the device is physically
+  // within radio range (~20-30m) of the office access point. If an office AP is broadcasting
+  // nearby with solid signal (>= 30%), the device is physically located inside the office,
+  // even if Windows is temporarily routing internet through a mobile hotspot (e.g. commuting)
+  // or a dock/secondary adapter.
+  let airProximityOk = false;
+  if (Array.isArray(visibleOfficeBssids) && visibleOfficeBssids.length > 0) {
+    for (const v of visibleOfficeBssids) {
+      const vbssid = typeof v === 'string' ? v : v?.bssid;
+      const vsignal = typeof v === 'object' && v?.signal !== undefined ? Number(v.signal) : 50;
+      if (vbssid && config.isOfficeBssid(vbssid) && (isNaN(vsignal) || vsignal >= 30)) {
+        airProximityOk = true;
+        break;
+      }
+    }
+  }
+
+  if (bssidOk || airProximityOk) {
+    // If the BSSID matches the office Wi-Fi or air proximity confirmed physical presence:
+    // Only flag as contradictory (UNKNOWN) if connected to an off-office home subnet
+    // without verified air proximity and without office source IP.
+    if (!airProximityOk && localIp && !config.isOfficeIp(localIp) && !config.isOfficeIp(srcIp)) {
       const isVirtualSubnet = /^(172\.(1[6-9]|2[0-9]|3[0-1])|10\.)/.test(String(localIp).trim());
       if (!isVirtualSubnet) {
         return 'UNKNOWN';
@@ -133,7 +152,7 @@ function classifyLocation({ bssid, srcIp, localIp, source }) {
  * reason has to be surfaced rather than left for someone to discover from a
  * short timesheet at the end of the month.
  */
-function explainLocation({ bssid, srcIp, localIp, source, location }) {
+function explainLocation({ bssid, visibleOfficeBssids, srcIp, localIp, source, location }) {
   if (location === 'OFFICE') return null;
   if (source !== 'APP') return null;
 
@@ -142,19 +161,19 @@ function explainLocation({ bssid, srcIp, localIp, source, location }) {
     : (localIp && config.isOfficeIp(localIp) ? localIp : srcIp);
   const ipOk = config.isOfficeIp(effectiveSrcIp);
 
-  if (config.bssidEnforced && ipOk && !bssid) {
+  if (config.bssidEnforced && !bssid) {
     return {
       code: 'NO_BSSID',
-      message: 'Location permission is needed to confirm which office Wi-Fi you are on. '
+      message: 'Location permission or Wi-Fi scan is needed to confirm which office Wi-Fi you are on. '
              + 'Without it your time is not being recorded.',
       actionable: true,
     };
   }
-  if (config.bssidEnforced && ipOk && bssid) {
+  if (config.bssidEnforced && bssid) {
     return {
       code: 'UNKNOWN_ACCESS_POINT',
-      message: 'This Wi-Fi access point is not recognised as an office one. '
-             + 'If it is a new office access point, ask an administrator to add it.',
+      message: 'This Wi-Fi access point (' + bssid + ') is not recognised as an office one. '
+             + 'Connect to "Trans K 2.4G" to record your attendance.',
       actionable: true,
     };
   }
@@ -175,12 +194,12 @@ function explainLocation({ bssid, srcIp, localIp, source, location }) {
  */
 async function recordEvent({
   employeeId = null, deviceId = null, source, mac = null, srcIp = null, localIp = null,
-  ssid = null, bssid = null, rssi = null, observedAt = null, note = null,
+  ssid = null, bssid = null, visibleOfficeBssids = [], rssi = null, observedAt = null, note = null,
 }) {
   const receivedAt = T.now();
   const observed = Number(observedAt) || receivedAt;
   const macHash = mac ? T.hashMac(mac, MAC_SALT) : null;
-  const location = classifyLocation({ bssid, srcIp, localIp, source });
+  const location = classifyLocation({ bssid, visibleOfficeBssids, srcIp, localIp, source });
 
   // A network sighting carries no identity of its own. But if this MAC was
   // bound to an employee by an authenticated app heartbeat, presence keeps
@@ -244,7 +263,7 @@ async function recordEvent({
 
   return {
     inserted: info.changes > 0, location, observedAt: observed, employeeId, attributedVia,
-    reason: explainLocation({ bssid, srcIp, localIp, source, location }),
+    reason: explainLocation({ bssid, visibleOfficeBssids, srcIp, localIp, source, location }),
   };
 }
 

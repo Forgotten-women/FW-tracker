@@ -35,6 +35,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     lockState = 'UNLOCKED', // 'LOCKED', 'UNLOCKED', 'SLEEPING'
     lockDurationSeconds = 0,
     connectedBssid = null,
+    visibleOfficeBssids = [],
     currentWifiMac = null,
     localIp = null,
     isManualBreak = false,
@@ -44,9 +45,10 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const dateKey = T.dateKey(nowMs);
   const srcIp = req.ip || req.socket.remoteAddress || '';
 
-  // 1. In-Office Verification
+  // 1. In-Office Verification (Multi-Signal: Direct BSSID, Air Proximity Beacon, Office Subnet)
   const locationVerdict = presence.classifyLocation({
     bssid: connectedBssid,
+    visibleOfficeBssids,
     srcIp,
     localIp,
     source: 'APP',
@@ -78,22 +80,53 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     status = 'IDLE';
   }
 
-  // 4. Record presence event in central presence log if in office and active
-  if (inOffice && (status === 'ACTIVE' || status === 'IDLE')) {
-    try {
-      await presence.recordEvent({
-        employeeId,
-        deviceId,
-        source: 'APP',
-        srcIp,
-        localIp,
-        bssid: connectedBssid,
-        mac: currentWifiMac,
-        observedAt: nowMs,
-        note: `Desktop Agent (${status})`,
-      });
-      await presence.recomputeDay(employeeId, dateKey, nowMs);
-    } catch (_) {}
+  // 4. Retroactive Arrival Reconciliation & Presence Logging
+  // If this device was actively working earlier this morning while not yet verified
+  // (e.g. while Windows was still on phone hotspot), and is now confirmed IN_OFFICE:
+  // backfill a presence event at the original session creation time so true arrival is credited.
+  const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
+  let reconciledActiveSeconds = 0;
+
+  if (inOffice) {
+    if (existing && (existing.in_office === 0 || (Number(existing.unverified_seconds || 0) > 0))) {
+      const sessionAgeMs = nowMs - Number(existing.created_at);
+      const twoHoursMs = 2 * 60 * 60 * 1000;
+      if (sessionAgeMs > 60000 && sessionAgeMs <= twoHoursMs) {
+        try {
+          await presence.recordEvent({
+            employeeId,
+            deviceId,
+            source: 'APP',
+            srcIp,
+            localIp,
+            bssid: connectedBssid,
+            visibleOfficeBssids,
+            mac: currentWifiMac,
+            observedAt: Number(existing.created_at),
+            note: 'Desktop Agent (Arrival Reconciled)',
+          });
+        } catch (_) {}
+      }
+      reconciledActiveSeconds = Number(existing.unverified_seconds || 0);
+    }
+
+    if (status === 'ACTIVE' || status === 'IDLE') {
+      try {
+        await presence.recordEvent({
+          employeeId,
+          deviceId,
+          source: 'APP',
+          srcIp,
+          localIp,
+          bssid: connectedBssid,
+          visibleOfficeBssids,
+          mac: currentWifiMac,
+          observedAt: nowMs,
+          note: `Desktop Agent (${status})`,
+        });
+        await presence.recomputeDay(employeeId, dateKey, nowMs);
+      } catch (_) {}
+    }
   }
 
   // 5. Upsert workstation session for today
@@ -105,6 +138,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   let effectiveActive = 0;
   let effectiveIdle = 0;
   let effectiveBreak = 0;
+  let addUnverified = 0;
 
   if (status === 'ON_BREAK') {
     effectiveBreak = batchTotal;
@@ -112,12 +146,18 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     effectiveIdle = batchTotal;
   } else {
     // ACTIVE
-    effectiveActive = inOffice ? numActive : 0;
+    if (inOffice) {
+      effectiveActive = numActive + reconciledActiveSeconds;
+      addUnverified = 0;
+    } else {
+      // Not verified in office yet: preserve work in unverified_seconds rather than permanently losing it
+      effectiveActive = 0;
+      addUnverified = numActive;
+    }
     effectiveIdle = numIdle;
   }
 
   try {
-    const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
     if (existing) {
       await db.prepare(`
         UPDATE workstation_sessions
@@ -125,6 +165,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
             active_seconds = active_seconds + ?,
             idle_seconds = idle_seconds + ?,
             break_seconds = break_seconds + ?,
+            unverified_seconds = CASE WHEN ? = 1 THEN 0 ELSE COALESCE(unverified_seconds, 0) + ? END,
             lock_state = ?,
             connected_bssid = ?,
             in_office = ?,
@@ -136,6 +177,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         effectiveActive,
         effectiveIdle,
         effectiveBreak,
+        inOffice ? 1 : 0,
+        addUnverified,
         lockState,
         connectedBssid,
         inOffice ? 1 : 0,
@@ -147,9 +190,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       await db.prepare(`
         INSERT INTO workstation_sessions (
           id, device_id, employee_id, status, session_date,
-          active_seconds, idle_seconds, break_seconds, lock_state,
+          active_seconds, idle_seconds, break_seconds, unverified_seconds, lock_state,
           connected_bssid, in_office, last_heartbeat_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         sessionId,
         deviceId,
@@ -159,6 +202,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         effectiveActive,
         effectiveIdle,
         effectiveBreak,
+        addUnverified,
         lockState,
         connectedBssid,
         inOffice ? 1 : 0,
@@ -256,6 +300,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     today: {
       dateKey,
       activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
+      unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
       idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
       breakSeconds: effectiveBreakSeconds,
       onBreak: hasOpenBreak || status === 'ON_BREAK',

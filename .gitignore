@@ -19,6 +19,9 @@ backend/data/*.json
 backend/data/*.db
 backend/data/*.db-wal
 backend/data/*.db-shm
+desktop/*.db
+desktop/*.db-wal
+desktop/*.db-shm
 backend/data/backups/
 # Uploaded employee documents - PII, never committed and never web-served
 backend/data/documents/

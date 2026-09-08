@@ -120,6 +120,71 @@ function getConnectedBssid() {
   return null;
 }
 
+const KNOWN_OFFICE_BSSIDS = new Set([
+  'ba:9f:cc:db:52:58',
+  'ba:9f:cc:db:52:5e',
+  'ba:9f:cc:db:52:5c',
+  'ba:9f:cc:db:52:5d',
+]);
+
+function getVisibleOfficeBssids() {
+  const visible = [];
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync('netsh wlan show networks mode=bssid', { timeout: 3500, windowsHide: true }).toString();
+      for (const line of out.split('\n')) {
+        const trimmed = line.trim();
+        const m = MAC_ON_BSSID_LINE.exec(trimmed);
+        if (m) {
+          visible.push({ bssid: m[1].toLowerCase(), signal: 50 });
+          continue;
+        }
+        const sigMatch = /signal\s*:\s*(\d+)%/i.exec(trimmed);
+        if (sigMatch && visible.length > 0) {
+          visible[visible.length - 1].signal = parseInt(sigMatch[1], 10) || 50;
+        }
+      }
+    } catch (_) {}
+  } else if (process.platform === 'darwin') {
+    try {
+      const airport = '/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport';
+      const out = execSync(`"${airport}" -s 2>/dev/null`, { timeout: 3000 }).toString();
+      for (const line of out.split('\n')) {
+        const m = MAC_ON_BSSID_LINE.exec(line.trim());
+        if (m) visible.push({ bssid: m[1].toLowerCase(), signal: 60 });
+      }
+    } catch (_) {}
+  }
+  return visible;
+}
+
+let lastAutoConnectAttempt = 0;
+function autoConnectOfficeWifi() {
+  const now = Date.now();
+  if (now - lastAutoConnectAttempt < 60000) return;
+  lastAutoConnectAttempt = now;
+
+  if (process.platform === 'win32') {
+    try {
+      exec('netsh wlan connect name="Trans K 2.4G"', { windowsHide: true }, (err) => {
+        if (!err) {
+          console.log('[Office Tracker Desktop] Auto-connected to office Wi-Fi ("Trans K 2.4G").');
+        }
+      });
+    } catch (_) {}
+  }
+}
+
+let lastAlertAt = 0;
+function alertOutOfOffice() {
+  const now = Date.now();
+  if (now - lastAlertAt < 300000) return; // Alert at most once every 5 minutes
+  lastAlertAt = now;
+
+  console.warn('\n⚠️ [Office Tracker] ATTENDANCE PAUSED: You are not connected to Office Wi-Fi ("Trans K 2.4G").');
+  console.warn('   Please connect to "Trans K 2.4G" to record your attendance.\n');
+}
+
 // Virtual adapters installed by WSL, Hyper-V, Docker and the VM tools. They
 // hold private addresses of their own, so taking "the first private address"
 // picked one of these (172.17.x / 172.25.x on a developer machine) instead of
@@ -318,6 +383,11 @@ function startMiniAppServer(port = MINI_APP_PORT) {
     // GET /api/status
     if (parsedUrl.pathname === '/api/status' && req.method === 'GET') {
       const cfgNow = loadConfig();
+      const bssid = getConnectedBssid();
+      const visibleOfficeBssids = getVisibleOfficeBssids();
+      const isOfficeConnected = bssid && KNOWN_OFFICE_BSSIDS.has(bssid);
+      const isOfficeVisible = visibleOfficeBssids.some(v => KNOWN_OFFICE_BSSIDS.has(v.bssid));
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
         enrolled: !!(cfgNow && cfgNow.token),
@@ -326,10 +396,21 @@ function startMiniAppServer(port = MINI_APP_PORT) {
         isManualBreak,
         latest: {
           workstationStatus: isManualBreak ? 'ON_BREAK' : currentWorkstationStatus,
-          inOffice: !!getConnectedBssid(),
+          inOffice: isOfficeConnected || isOfficeVisible,
+          isOfficeConnected,
+          isOfficeVisible,
+          connectedBssid: bssid,
+          visibleOfficeBssids,
           today: todayLiveStats,
         }
       }));
+    }
+
+    // POST /api/connect-office-wifi
+    if (parsedUrl.pathname === '/api/connect-office-wifi' && req.method === 'POST') {
+      autoConnectOfficeWifi();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'SUCCESS', message: 'Attempting connection to Trans K 2.4G' }));
     }
 
     // POST /api/enroll
@@ -616,7 +697,22 @@ async function startAgent() {
       appBreakdown = {};
 
       const bssid = getConnectedBssid();
+      const visibleOfficeBssids = getVisibleOfficeBssids();
       const localIp = getLocalIp();
+
+      const isOfficeConnected = bssid && KNOWN_OFFICE_BSSIDS.has(bssid);
+      const isOfficeVisible = visibleOfficeBssids.some(v => KNOWN_OFFICE_BSSIDS.has(v.bssid));
+
+      // Auto-connect to office Wi-Fi if available in the air
+      if (!isOfficeConnected && isOfficeVisible) {
+        autoConnectOfficeWifi();
+      }
+
+      // Proactively alert employee if working while completely off office network
+      if (!isOfficeConnected && !isOfficeVisible && sendActive > 30) {
+        alertOutOfOffice();
+      }
+
       const eventId = 'evt_' + crypto.randomUUID();
       const payload = {
         eventId,
@@ -628,6 +724,7 @@ async function startAgent() {
         lockState: 'UNLOCKED',
         lockDurationSeconds: 0,
         connectedBssid: bssid,
+        visibleOfficeBssids,
         localIp,
         isManualBreak,
       };
