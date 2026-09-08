@@ -43,8 +43,11 @@ class ApiClient {
       : _store = store ?? TokenStore(),
         _http = client ?? http.Client();
 
-  Future<Uri> _uri(String path) async =>
-      Uri.parse('${await _store.readServerUrl()}$path');
+  Future<Uri> _uri(String path, [Map<String, dynamic>? query]) async {
+    final base = Uri.parse('${await _store.readServerUrl()}$path');
+    if (query == null || query.isEmpty) return base;
+    return base.replace(queryParameters: query.map((k, v) => MapEntry(k, v.toString())));
+  }
 
   Map<String, dynamic> _decode(http.Response res) {
     late final Map<String, dynamic> body;
@@ -254,6 +257,15 @@ class ApiClient {
               .map((r) => LeaveRequest.fromJson(r as Map<String, dynamic>))
               .toList(),
         };
+      });
+
+  Future<MonthlyLeaveReport> fetchMonthlyLeaveReport({String? month}) => _guard(() async {
+        final query = (month != null && month.isNotEmpty) ? {'month': month} : null;
+        final res = await _http
+            .get(await _uri('/api/leave/monthly-report', query), headers: await _authHeaders())
+            .timeout(timeout);
+        final body = _decode(res);
+        return MonthlyLeaveReport.fromJson(body['report'] as Map<String, dynamic>);
       });
 
   Future<List<LeaveType>> leaveTypes() => _guard(() async {

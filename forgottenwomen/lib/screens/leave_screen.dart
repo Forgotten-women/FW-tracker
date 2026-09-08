@@ -22,7 +22,11 @@ class _LeaveScreenState extends State<LeaveScreen> {
   LeaveBalance? _balance;
   List<LeaveRequest> _requests = const [];
   List<EmployeeAbsenceRecord> _absences = const [];
+  MonthlyLeaveReport? _monthlyReport;
+  int _selectedTab = 0; // 0: Overview, 1: Monthly Statement
   bool _loading = true;
+  bool _loadingMonthly = false;
+  String? _selectedMonthKey;
   String? _error;
 
   @override
@@ -44,15 +48,19 @@ class _LeaveScreenState extends State<LeaveScreen> {
       final results = await Future.wait([
         _api.myLeave(),
         _api.myAbsences(),
+        _api.fetchMonthlyLeaveReport(month: _selectedMonthKey),
       ]);
       if (!mounted) return;
       final leaveData = results[0] as Map<String, dynamic>;
       final absList = results[1] as List<EmployeeAbsenceRecord>;
+      final report = results[2] as MonthlyLeaveReport;
 
       setState(() {
         _balance = leaveData['balance'] as LeaveBalance;
         _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
         _absences = absList;
+        _monthlyReport = report;
+        _selectedMonthKey ??= report.monthKey;
         _error = null;
       });
 
@@ -67,24 +75,45 @@ class _LeaveScreenState extends State<LeaveScreen> {
       final results = await Future.wait([
         _api.myLeave(),
         _api.myAbsences(),
+        _api.fetchMonthlyLeaveReport(month: _selectedMonthKey),
       ]);
       if (!mounted) return;
       final leaveData = results[0] as Map<String, dynamic>;
       final absList = results[1] as List<EmployeeAbsenceRecord>;
+      final report = results[2] as MonthlyLeaveReport;
 
       setState(() {
         _balance = leaveData['balance'] as LeaveBalance;
         _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
         _absences = absList;
+        _monthlyReport = report;
+        _selectedMonthKey ??= report.monthKey;
         _error = null;
         _loading = false;
+        _loadingMonthly = false;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.message;
         _loading = false;
+        _loadingMonthly = false;
       });
+    }
+  }
+
+  Future<void> _loadMonthlyReport([String? monthKey]) async {
+    try {
+      final report = await _api.fetchMonthlyLeaveReport(month: monthKey ?? _selectedMonthKey);
+      if (!mounted) return;
+      setState(() {
+        _monthlyReport = report;
+        _selectedMonthKey = report.monthKey;
+        _loadingMonthly = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingMonthly = false);
     }
   }
 
@@ -161,7 +190,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
           ),
         ],
       ),
-      floatingActionButton: (_balance != null && !_balance!.blocked)
+      floatingActionButton: (_selectedTab == 0 && _balance != null && !_balance!.blocked)
           ? FloatingActionButton.extended(
               onPressed: _openBooking,
               backgroundColor: AppColors.primary,
@@ -169,75 +198,748 @@ class _LeaveScreenState extends State<LeaveScreen> {
               label: const Text('Apply for Leave', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             )
           : null,
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-          : RefreshIndicator(
-              color: AppColors.primary,
-              onRefresh: _load,
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 720),
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                    children: [
-                      if (_error != null) _errorBanner(_error!),
-                      if (_balance != null) _balanceCard(_balance!),
-                      const SizedBox(height: 16),
-                      _actionButtons(),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'LEAVE APPLICATIONS & HISTORY',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_requests.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceDark,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.border),
+      body: Column(
+        children: [
+          _tabSelector(),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                : RefreshIndicator(
+                    color: AppColors.primary,
+                    onRefresh: _load,
+                    child: _selectedTab == 0 ? _overviewTab() : _monthlyStatementTab(),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tabSelector() => Container(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceDark,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _selectedTab = 0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: _selectedTab == 0 ? AppColors.primary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.dashboard_outlined, size: 15, color: _selectedTab == 0 ? Colors.white : AppColors.textMuted),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Overview',
+                          style: TextStyle(
+                            color: _selectedTab == 0 ? Colors.white : AppColors.textMuted,
+                            fontWeight: _selectedTab == 0 ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 13,
                           ),
-                          child: const Center(
-                            child: Text(
-                              'No leave requests on record.\nTap "Apply for Leave" to submit a holiday or leave request.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
-                            ),
-                          ),
-                        )
-                      else
-                        ..._requests.map(_requestRow),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'SELF-REPORTED SICKNESS & ABSENCES',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_absences.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceDark,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: const Center(
-                            child: Text(
-                              'No sickness reports or absences on record.\nUse "Report Sickness / Absence" above if unwell or experiencing an emergency.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
-                            ),
-                          ),
-                        )
-                      else
-                        ..._absences.map(_absenceRow),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _selectedTab = 1),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: _selectedTab == 1 ? AppColors.primary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.calendar_month_outlined, size: 15, color: _selectedTab == 1 ? Colors.white : AppColors.textMuted),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Monthly Statement',
+                          style: TextStyle(
+                            color: _selectedTab == 1 ? Colors.white : AppColors.textMuted,
+                            fontWeight: _selectedTab == 1 ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _overviewTab() => Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
+            children: [
+              if (_error != null) _errorBanner(_error!),
+              if (_balance != null) _balanceCard(_balance!),
+              const SizedBox(height: 16),
+              _actionButtons(),
+              const SizedBox(height: 24),
+              const Text(
+                'LEAVE APPLICATIONS & HISTORY',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+              ),
+              const SizedBox(height: 10),
+              if (_requests.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceDark,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'No leave requests on record.\nTap "Apply for Leave" to submit a holiday or leave request.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+                    ),
+                  ),
+                )
+              else
+                ..._requests.map(_requestRow),
+              const SizedBox(height: 24),
+              const Text(
+                'SELF-REPORTED SICKNESS & ABSENCES',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+              ),
+              const SizedBox(height: 10),
+              if (_absences.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceDark,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'No sickness reports or absences on record.\nUse "Report Sickness / Absence" above if unwell or experiencing an emergency.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
+                    ),
+                  ),
+                )
+              else
+                ..._absences.map(_absenceRow),
+            ],
+          ),
+        ),
+      );
+
+  Widget _monthlyStatementTab() {
+    if (_loadingMonthly && _monthlyReport == null) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+
+    final r = _monthlyReport;
+    if (r == null || r.blocked) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.info_outline, size: 48, color: AppColors.amber),
+              const SizedBox(height: 12),
+              Text(
+                r?.blockedMessage ?? 'Monthly leave statement is not available yet.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    String d(double v) => v.toStringAsFixed(2);
+
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
+          children: [
+            _monthSelectorCard(r),
+            const SizedBox(height: 14),
+            _plainEnglishBanner(r),
+            const SizedBox(height: 16),
+            _coreMetricsGrid(r, d),
+            const SizedBox(height: 16),
+            _usageBreakdownCard(r, d),
+            const SizedBox(height: 16),
+            _sufficiencyCard(r, d),
+            const SizedBox(height: 16),
+            _adjustmentsCard(r, d),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _monthSelectorCard(MonthlyLeaveReport r) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.event_note, size: 16, color: AppColors.primaryLight),
+                  SizedBox(width: 8),
+                  Text(
+                    'STATEMENT PERIOD',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+              if (_loadingMonthly)
+                const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.bgDark,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: r.monthKey.isNotEmpty ? r.monthKey : null,
+                isExpanded: true,
+                dropdownColor: AppColors.surfaceDark,
+                icon: const Icon(Icons.arrow_drop_down, color: AppColors.primaryLight),
+                items: r.availableMonths.map((m) {
+                  return DropdownMenuItem<String>(
+                    value: m.monthKey,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          m.label,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                        ),
+                        if (m.isCurrent)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.teal.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'Current',
+                              style: TextStyle(color: AppColors.teal, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null && val != _selectedMonthKey) {
+                    setState(() {
+                      _selectedMonthKey = val;
+                      _loadingMonthly = true;
+                    });
+                    _loadMonthlyReport(val);
+                  }
+                },
+              ),
+            ),
+          ),
+          if (r.cycleStartDate != null && r.cycleEndDate != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Work Anniversary Cycle: ${r.cycleStartDate} → ${r.cycleEndDate} (Renews: ${r.nextRenewalDate ?? '--'})',
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _plainEnglishBanner(MonthlyLeaveReport r) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColors.primary.withOpacity(0.22),
+            AppColors.surfaceDark,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.primary.withOpacity(0.45)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.25),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.lightbulb_outline, size: 20, color: AppColors.primaryLight),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  r.summaryExplanation,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(color: AppColors.border, height: 1),
+          const SizedBox(height: 8),
+          const Text(
+            'This monthly statement updates automatically on the 1st of every month.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 10.5),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _coreMetricsGrid(MonthlyLeaveReport r, String Function(double) d) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'ENTITLEMENT & ACCRUAL SUMMARY',
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _metricBox(
+                label: 'Annual Entitlement',
+                value: '${d(r.annualEntitlementDays)}d',
+                subtext: 'Yearly base',
+                icon: Icons.flag_outlined,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _metricBox(
+                label: 'Accrued to Date',
+                value: '${d(r.accruedUpToMonth)}d',
+                subtext: 'Earned so far',
+                icon: Icons.hourglass_top_outlined,
+                color: AppColors.primaryLight,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _metricBox(
+                label: 'Currently Entitled',
+                value: '${d(r.currentlyEntitledPaidLeave)}d',
+                subtext: 'Available without overdraft',
+                icon: Icons.check_circle_outline,
+                color: AppColors.teal,
+                highlight: true,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _metricBox(
+                label: 'Remaining Annual',
+                value: '${d(r.remainingAnnualLeave)}d',
+                subtext: 'Total year remaining',
+                icon: Icons.event_available_outlined,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _metricBox({
+    required String label,
+    required String value,
+    required String subtext,
+    required IconData icon,
+    required Color color,
+    bool highlight = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: highlight ? AppColors.teal.withOpacity(0.5) : AppColors.border,
+          width: highlight ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w500),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(icon, size: 16, color: color.withOpacity(0.8)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: -0.5),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            subtext,
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _usageBreakdownCard(MonthlyLeaveReport r, String Function(double) d) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'LEAVE USAGE BREAKDOWN',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 14),
+          _usageRow(
+            icon: Icons.payments_outlined,
+            iconColor: AppColors.teal,
+            title: 'Paid Leave Used',
+            monthValue: '${d(r.monthPaidLeaveUsed)}d this month',
+            cycleValue: '${d(r.cyclePaidLeaveUsed)}d cycle total',
+          ),
+          const Divider(color: AppColors.border, height: 20),
+          _usageRow(
+            icon: Icons.money_off_csred_outlined,
+            iconColor: AppColors.amber,
+            title: 'Unpaid Leave Taken',
+            monthValue: '${d(r.monthUnpaidLeaveTaken)}d this month',
+            cycleValue: '${d(r.cycleUnpaidLeaveTaken)}d cycle total',
+          ),
+          if (r.approvedCarryForwardDays > 0) ...[
+            const Divider(color: AppColors.border, height: 20),
+            _usageRow(
+              icon: Icons.forward_outlined,
+              iconColor: AppColors.primaryLight,
+              title: 'Approved Carry-Forward',
+              monthValue: '+${d(r.approvedCarryForwardDays)}d credited in cycle',
+              cycleValue: 'Carried from previous cycle',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _usageRow({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String monthValue,
+    required String cycleValue,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: iconColor.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 18, color: iconColor),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 2),
+              Text(cycleValue, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+            ],
+          ),
+        ),
+        Text(
+          monthValue,
+          style: TextStyle(color: iconColor, fontWeight: FontWeight.bold, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  Widget _sufficiencyCard(MonthlyLeaveReport r, String Function(double) d) {
+    final suff = r.requestedLeaveSufficiency;
+    final isOk = suff.isSufficient;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isOk ? AppColors.teal.withOpacity(0.4) : AppColors.amber.withOpacity(0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'REQUESTED LEAVE SUFFICIENCY',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (isOk ? AppColors.teal : AppColors.amber).withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isOk ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+                      size: 13,
+                      color: isOk ? AppColors.teal : AppColors.amber,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      isOk ? 'Sufficient Entitlement' : 'Advance / Overdraft Needed',
+                      style: TextStyle(
+                        color: isOk ? AppColors.teal : AppColors.amber,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            suff.message,
+            style: const TextStyle(color: Colors.white, fontSize: 12.5, height: 1.4),
+          ),
+          if (suff.pendingRequests.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Divider(color: AppColors.border, height: 1),
+            const SizedBox(height: 10),
+            const Text(
+              'PENDING APPLICATIONS EVALUATED:',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+            ),
+            const SizedBox(height: 6),
+            ...suff.pendingRequests.map(
+              (p) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${p.startDate} → ${p.endDate} (${p.typeName})',
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
+                    Text(
+                      '${d(p.days)} days',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _adjustmentsCard(MonthlyLeaveReport r, String Function(double) d) {
+    final adjs = r.monthAdjustments;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'LEAVE ADJUSTMENTS IN THIS MONTH',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+              ),
+              if (r.totalMonthAdjustments != 0)
+                Text(
+                  r.totalMonthAdjustments > 0 ? '+${d(r.totalMonthAdjustments)}d' : '${d(r.totalMonthAdjustments)}d',
+                  style: TextStyle(
+                    color: r.totalMonthAdjustments > 0 ? AppColors.teal : AppColors.danger,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (adjs.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.bgDark,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.tune_outlined, size: 16, color: AppColors.textMuted),
+                  SizedBox(width: 8),
+                  Text(
+                    'No adjustments were recorded in this month.',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                  ),
+                ],
+              ),
+            )
+          else
+            ...adjs.map((a) {
+              final isPositive = a.days >= 0;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.bgDark,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: (isPositive ? AppColors.teal : AppColors.danger).withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        isPositive ? '+${d(a.days)}d' : '${d(a.days)}d',
+                        style: TextStyle(
+                          color: isPositive ? AppColors.teal : AppColors.danger,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            a.description,
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Date: ${a.date}${a.createdBy != null ? ' • by ${a.createdBy}' : ''}',
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
     );
   }
 

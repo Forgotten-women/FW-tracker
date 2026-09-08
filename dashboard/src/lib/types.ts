@@ -763,6 +763,75 @@ export interface EmployeeAppBacklog {
   }>;
 }
 
+// ---------------------------------------------------------------------------
+// Monthly Leave Entitlement Report
+// ---------------------------------------------------------------------------
 
+export interface MonthOption {
+  monthKey: string;
+  monthLabel: string;
+  monthIndex: number;
+  isCurrentMonth: boolean;
+}
 
+export interface LeaveAdjustmentEntry {
+  id: string;
+  adjustmentDate: string;
+  days: number;
+  reason: string;
+  createdAt?: string;
+}
 
+export interface PendingLeaveRequestItem {
+  id: string;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  reducesEntitlement: boolean;
+  status: string;
+}
+
+export interface RequestedLeaveSufficiency {
+  hasPendingRequests: boolean;
+  totalPendingDays: number;
+  currentlyEntitledPaidLeave: number;
+  status: 'NONE_PENDING' | 'SUFFICIENT' | 'INSUFFICIENT';
+  shortfallDays: number;
+  message: string;
+  pendingRequests: PendingLeaveRequestItem[];
+}
+
+export interface MonthlyLeaveReport {
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  employeeNumber?: string | null;
+  monthKey: string;
+  monthLabel: string;
+  monthIndex: number;
+  totalMonthsInCycle: number;
+  cycleStartDate: string;
+  cycleEndDate: string;
+  asOfDate: string;
+  totalAnnualEntitlement: number;
+  leaveTakenAnnual: number;
+  paidLeaveUsedAnnual: number;
+  unpaidLeaveTakenAnnual: number;
+  remainingLeaveBalance: number;
+  leaveAccruedToDate: number;
+  currentlyEntitledPaidLeave: number;
+  plainEnglishSummary: string;
+  plainEnglishDetail: string;
+  monthWindow: {
+    startDate: string;
+    endDate: string;
+    workingDaysInMonth: number;
+    leaveTakenInMonth: number;
+    paidLeaveInMonth: number;
+    unpaidLeaveInMonth: number;
+  };
+  requestedLeaveSufficiency: RequestedLeaveSufficiency;
+  monthAdjustments: LeaveAdjustmentEntry[];
+  monthOptions: MonthOption[];
+}

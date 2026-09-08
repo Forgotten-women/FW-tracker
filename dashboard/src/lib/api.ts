@@ -42,6 +42,7 @@ import type {
   ApproachingAnniversaryEmployee,
   HistoricalLeaveCycle,
   EmployeeAppBacklog,
+  MonthlyLeaveReport,
 } from './types';
 
 
@@ -424,6 +425,11 @@ export const api = {
   fetchEmployeeLeaveCycles: (employeeId: string) =>
     request<{ status: string; employeeId: string; currentBalance: LeaveBalanceDetails; cycles: HistoricalLeaveCycle[] }>(
       `/api/leave/employee/${encodeURIComponent(employeeId)}/cycles`
+    ),
+
+  fetchEmployeeMonthlyLeaveReport: (employeeId: string, month?: string) =>
+    request<{ status: string; report: MonthlyLeaveReport }>(
+      `/api/leave/employee/${encodeURIComponent(employeeId)}/monthly-report${month ? `?month=${encodeURIComponent(month)}` : ''}`
     ),
 
   leaveTypes: () =>

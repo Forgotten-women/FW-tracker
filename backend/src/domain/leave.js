@@ -1149,6 +1149,259 @@ async function employeesApproachingAnniversary(today = T.dateKey()) {
   return list;
 }
 
+/**
+ * Generates an employee's Monthly Leave Entitlement Statement/Report.
+ * Includes:
+ * 1. Total annual leave entitlement
+ * 2. Leave already taken (cycle total)
+ * 3. Paid leave used (cycle total and statement month breakdown)
+ * 4. Unpaid leave taken (cycle total and statement month breakdown)
+ * 5. Remaining leave balance (annual)
+ * 6. Leave accrued/earned up to that month
+ * 7. How much paid leave the employee is currently entitled to take
+ * 8. Whether the employee has sufficient accrued entitlement for any requested leave
+ * 9. Any leave adjustments made during that month
+ * Plus plain-English explanation banner and available months in current cycle.
+ */
+async function monthlyReportFor(employeeId, { monthKey = null, asOfDate = T.dateKey() } = {}) {
+  const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+  // 1. Get holiday anniversary cycle
+  const year = await holidayYearFor(employeeId, asOfDate);
+  if (year.blocked) {
+    return { blocked: true, reason: year.reason, message: year.message };
+  }
+
+  // Ensure accruals and rollovers are up to date
+  try {
+    if (year.yearsOfService > 0) await rolloverHolidayYear(employeeId, asOfDate);
+    await accrue(employeeId, asOfDate);
+  } catch (_) {}
+
+  // 2. Determine target statement month
+  const currentMonthKey = asOfDate.slice(0, 7); // e.g. "2026-09"
+  const targetMonthKey = (monthKey && /^\d{4}-\d{2}$/.test(monthKey)) ? monthKey : currentMonthKey;
+  const [yearNum, monthNum] = targetMonthKey.split('-').map(Number);
+
+  const monthStart = `${targetMonthKey}-01`;
+  const lastDay = new Date(Date.UTC(yearNum, monthNum, 0)).getUTCDate();
+  const monthEnd = `${targetMonthKey}-${String(lastDay).padStart(2, '0')}`;
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const monthName = `${monthNames[monthNum - 1]} ${yearNum}`;
+
+  // 3. Build available months list in this cycle
+  const availableMonths = [];
+  const cycleStartMonth = year.cycleStartDate.slice(0, 7);
+  let curY = Number(cycleStartMonth.slice(0, 4));
+  let curM = Number(cycleStartMonth.slice(5, 7));
+  const endY = Number(currentMonthKey.slice(0, 4));
+  const endM = Number(currentMonthKey.slice(5, 7));
+
+  while (curY < endY || (curY === endY && curM <= endM)) {
+    const mKey = `${curY}-${String(curM).padStart(2, '0')}`;
+    availableMonths.push({
+      monthKey: mKey,
+      label: `${monthNames[curM - 1]} ${curY}`,
+      isCurrent: mKey === currentMonthKey,
+      isSelected: mKey === targetMonthKey,
+    });
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+  availableMonths.reverse(); // Most recent first
+
+  // 4. Ledger totals for current cycle
+  const totals = {};
+  for (const r of await selectLedgerTotals.all(employeeId, year.leaveYear)) {
+    totals[r.entry_type] = r.days;
+  }
+  const accrued = totals.ACCRUAL || 0;
+  const carryOver = totals.CARRY_OVER || 0;
+  const adjustments = totals.ADJUSTMENT || 0;
+  const forfeit = totals.FORFEIT || 0;
+
+  // 5. Query all requests in cycle
+  const requests = await db.prepare(`
+    SELECT r.id, r.leave_type_id, r.start_date, r.end_date, r.total_days, r.status,
+           t.name AS type_name, t.is_paid, t.reduces_entitlement
+    FROM leave_requests r
+    JOIN leave_types t ON t.id = r.leave_type_id
+    WHERE r.employee_id = ?
+      AND r.cancelled_at IS NULL
+      AND r.start_date >= ? AND r.start_date < ?
+    ORDER BY r.start_date ASC
+  `).all(employeeId, year.yearStart, year.yearEnd);
+
+  let annualLeaveTaken = 0;
+  let annualLeaveBooked = 0;
+  let cyclePaidLeaveUsed = 0;
+  let cycleUnpaidLeaveTaken = 0;
+  let monthPaidLeaveUsed = 0;
+  let monthUnpaidLeaveTaken = 0;
+
+  for (const req of requests) {
+    if (req.status !== 'APPROVED') continue;
+    const isPast = req.end_date < asOfDate;
+    const days = Number(req.total_days) || 0;
+
+    // Annual leave tracking
+    if (req.reduces_entitlement) {
+      if (isPast) annualLeaveTaken += days;
+      else annualLeaveBooked += days;
+    }
+
+    // Paid vs Unpaid breakdown for the cycle
+    if (req.is_paid) {
+      if (isPast) cyclePaidLeaveUsed += days;
+    } else {
+      if (isPast) cycleUnpaidLeaveTaken += days;
+    }
+
+    // Overlap with statement month
+    if (req.end_date >= monthStart && req.start_date <= monthEnd) {
+      // Calculate overlapping fraction
+      const s = req.start_date > monthStart ? req.start_date : monthStart;
+      const e = req.end_date < monthEnd ? req.end_date : monthEnd;
+      const totalSpan = Math.max(1, (new Date(req.end_date) - new Date(req.start_date)) / 86400000 + 1);
+      const overlapSpan = Math.max(1, (new Date(e) - new Date(s)) / 86400000 + 1);
+      const monthDays = round2(days * (overlapSpan / totalSpan));
+
+      if (req.is_paid) monthPaidLeaveUsed += monthDays;
+      else monthUnpaidLeaveTaken += monthDays;
+    }
+  }
+
+  // 6. Entitlements & Balances
+  // Remaining annual balance: annual entitlement + carry forward + adjustments - annual taken - annual booked
+  const remainingAnnual = round2(ENTITLEMENT + carryOver + adjustments + forfeit - annualLeaveTaken - annualLeaveBooked);
+  // Currently entitled to take right now without overdraft: accrued to date + carry forward + adjustments - annual taken - annual booked
+  const currentlyEntitled = round2(Math.max(0, accrued + carryOver + adjustments + forfeit - annualLeaveTaken - annualLeaveBooked));
+
+  // 7. Adjustments made during the statement month
+  const monthAdjustmentsRows = await db.prepare(`
+    SELECT id, effective_date, days_delta, description, created_at, created_by
+    FROM leave_accrual_ledger
+    WHERE employee_id = ? AND entry_type = 'ADJUSTMENT'
+      AND effective_date >= ? AND effective_date <= ?
+    ORDER BY effective_date DESC, created_at DESC
+  `).all(employeeId, monthStart, monthEnd);
+
+  const adjustmentsList = monthAdjustmentsRows.map(a => ({
+    id: a.id,
+    date: a.effective_date,
+    days: round2(a.days_delta),
+    description: a.description || 'Adjustment',
+    createdBy: a.created_by,
+  }));
+  const totalMonthAdjustments = round2(adjustmentsList.reduce((acc, a) => acc + a.days, 0));
+
+  // 8. Sufficiency of accrued entitlement for pending / requested leave
+  const pendingRequests = await db.prepare(`
+    SELECT r.id, r.start_date, r.end_date, r.total_days, r.status, t.name AS type_name
+    FROM leave_requests r
+    JOIN leave_types t ON t.id = r.leave_type_id
+    WHERE r.employee_id = ?
+      AND r.cancelled_at IS NULL
+      AND r.status IN ('PENDING_MANAGER', 'PENDING_HR')
+      AND t.reduces_entitlement = 1
+    ORDER BY r.start_date ASC
+  `).all(employeeId);
+
+  const pendingTotalDays = round2(pendingRequests.reduce((acc, p) => acc + (Number(p.total_days) || 0), 0));
+  const hasRequestedLeave = pendingRequests.length > 0;
+
+  let sufficiencyStatus = 'SUFFICIENT';
+  let shortfallDays = 0;
+  let sufficiencyMessage = '';
+
+  if (!hasRequestedLeave) {
+    sufficiencyMessage = `No pending leave requests. You currently have ${currentlyEntitled} day(s) of accrued paid leave available for future requests.`;
+  } else if (pendingTotalDays <= currentlyEntitled) {
+    sufficiencyStatus = 'SUFFICIENT';
+    sufficiencyMessage = `You have sufficient accrued entitlement for your requested leave (${pendingTotalDays} day(s) requested vs ${currentlyEntitled} day(s) accrued and available).`;
+  } else {
+    shortfallDays = round2(pendingTotalDays - currentlyEntitled);
+    sufficiencyStatus = 'INSUFFICIENT';
+    sufficiencyMessage = `Requested leave (${pendingTotalDays} day(s)) exceeds your currently accrued leave (${currentlyEntitled} day(s)) by ${shortfallDays} day(s). HR advance/overdraft approval will be required.`;
+  }
+
+  // 9. Plain-English statement synthesis
+  let summaryExplanation = '';
+  if (currentlyEntitled >= remainingAnnual && remainingAnnual > 0) {
+    summaryExplanation = `You currently have ${currentlyEntitled} days of paid leave available.`;
+  } else if (currentlyEntitled < remainingAnnual && currentlyEntitled > 0) {
+    summaryExplanation = `You have ${remainingAnnual} days remaining annually, but only ${currentlyEntitled} days have accrued and are currently available to take.`;
+  } else if (currentlyEntitled <= 0 && remainingAnnual > 0) {
+    summaryExplanation = `You have ${remainingAnnual} days remaining annually, but have used all leave accrued to date (0 days currently available to take without an advance/overdraft).`;
+  } else {
+    summaryExplanation = `You currently have 0 days of paid leave available (overdraft balance).`;
+  }
+
+  return {
+    blocked: false,
+    employeeId,
+    monthKey: targetMonthKey,
+    monthName,
+    monthStart,
+    monthEnd,
+    asOfDate,
+    cycleStartDate: year.cycleStartDate,
+    cycleEndDate: year.cycleEndDate,
+    nextRenewalDate: year.nextRenewalDate,
+    officialJoiningDate: year.startDate,
+    availableMonths,
+
+    // Plain-English explanation
+    summaryExplanation,
+
+    // The Required Metrics
+    annualEntitlementDays: ENTITLEMENT,
+    leaveAlreadyTaken: round2(annualLeaveTaken),
+    paidLeaveUsed: {
+      cycleTotal: round2(cyclePaidLeaveUsed),
+      thisMonth: round2(monthPaidLeaveUsed),
+    },
+    unpaidLeaveTaken: {
+      cycleTotal: round2(cycleUnpaidLeaveTaken),
+      thisMonth: round2(monthUnpaidLeaveTaken),
+    },
+    remainingAnnualLeave: round2(remainingAnnual),
+    accruedUpToMonth: round2(accrued),
+    currentlyEntitledPaidLeave: round2(currentlyEntitled),
+    approvedCarryForwardDays: round2(carryOver),
+
+    // Requested leave sufficiency analysis
+    requestedLeaveSufficiency: {
+      hasRequestedLeave,
+      pendingDays: pendingTotalDays,
+      status: sufficiencyStatus,
+      shortfallDays,
+      message: sufficiencyMessage,
+      pendingRequests: pendingRequests.map(p => ({
+        id: p.id,
+        startDate: p.start_date,
+        endDate: p.end_date,
+        days: Number(p.total_days),
+        typeName: p.type_name,
+      })),
+    },
+
+    // Month adjustments
+    monthAdjustments: {
+      totalDays: totalMonthAdjustments,
+      count: adjustmentsList.length,
+      items: adjustmentsList,
+    },
+  };
+}
+
 module.exports = {
   holidayYearFor, addMonths, daysBetween,
   accrue, accrueAll, finaliseYear, closeHolidayYear,
@@ -1156,5 +1409,7 @@ module.exports = {
   previewRequest, submitRequest, decideRequest, cancelRequest, adjustBalance,
   recordCarryForwardApproval, rolloverHolidayYear, checkAndRolloverAll,
   historicalCyclesFor, employeesApproachingAnniversary,
+  monthlyReportFor,
   ENTITLEMENT,
 };
+

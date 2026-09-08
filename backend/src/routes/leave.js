@@ -92,6 +92,20 @@ router.get('/mine', requireDevice, async (req, res) => {
   });
 });
 
+router.get('/monthly-report', requireDevice, async (req, res) => {
+  try {
+    const { employeeId } = req.auth;
+    const { month } = req.query;
+    const report = await L.monthlyReportFor(employeeId, { monthKey: month });
+    res.json({
+      status: 'SUCCESS',
+      report,
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 router.get('/types', requireDevice, async (req, res) => {
   const rows = await db.prepare('SELECT * FROM leave_types WHERE active = 1').all();
   res.json({
@@ -463,6 +477,22 @@ router.get('/employee/:employeeId/cycles',
         employeeId: req.params.employeeId,
         currentBalance: presentBalance(balance),
         cycles,
+      });
+    } catch (err) {
+      res.status(500).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
+router.get('/employee/:employeeId/monthly-report',
+  requireUserOrAdminKey('leave.read'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const { month } = req.query;
+      const report = await L.monthlyReportFor(req.params.employeeId, { monthKey: month });
+      res.json({
+        status: 'SUCCESS',
+        employeeId: req.params.employeeId,
+        report,
       });
     } catch (err) {
       res.status(500).json({ status: 'ERROR', message: err.message });

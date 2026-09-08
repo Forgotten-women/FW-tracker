@@ -10,6 +10,7 @@ import type {
   ApproachingAnniversaryEmployee,
   HistoricalLeaveCycle,
   LeaveBalanceDetails,
+  MonthlyLeaveReport,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
 
@@ -67,6 +68,13 @@ export function LeaveManagementPanel() {
   const [historicalCycles, setHistoricalCycles] = useState<HistoricalLeaveCycle[]>([]);
   const [cyclesCurrentBalance, setCyclesCurrentBalance] = useState<LeaveBalanceDetails | null>(null);
   const [cyclesLoading, setCyclesLoading] = useState<boolean>(false);
+
+  // Monthly Leave Statement Modal
+  const [showMonthlyModal, setShowMonthlyModal] = useState<boolean>(false);
+  const [monthlyEmployeeName, setMonthlyEmployeeName] = useState<string>('');
+  const [monthlyEmployeeId, setMonthlyEmployeeId] = useState<string>('');
+  const [monthlyReport, setMonthlyReport] = useState<MonthlyLeaveReport | null>(null);
+  const [monthlyLoading, setMonthlyLoading] = useState<boolean>(false);
 
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -268,6 +276,34 @@ export function LeaveManagementPanel() {
       alert(err instanceof Error ? err.message : 'Failed to load employee leave cycles.');
     } finally {
       setCyclesLoading(false);
+    }
+  };
+
+  const openMonthlyModal = async (empId: string, empName: string, monthKey?: string) => {
+    setMonthlyEmployeeId(empId);
+    setMonthlyEmployeeName(empName);
+    setShowMonthlyModal(true);
+    setMonthlyLoading(true);
+    try {
+      const res = await api.fetchEmployeeMonthlyLeaveReport(empId, monthKey);
+      setMonthlyReport(res.report || null);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to load monthly leave report.');
+    } finally {
+      setMonthlyLoading(false);
+    }
+  };
+
+  const handleSelectMonth = async (monthKey: string) => {
+    if (!monthlyEmployeeId) return;
+    setMonthlyLoading(true);
+    try {
+      const res = await api.fetchEmployeeMonthlyLeaveReport(monthlyEmployeeId, monthKey);
+      setMonthlyReport(res.report || null);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to load monthly leave report.');
+    } finally {
+      setMonthlyLoading(false);
     }
   };
 
@@ -800,6 +836,12 @@ export function LeaveManagementPanel() {
                         <td className="px-3 py-3 align-middle text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
+                              onClick={() => openMonthlyModal(b.employeeId, b.employeeName)}
+                              className="py-1 px-2 text-[10px]"
+                            >
+                              📄 Statement
+                            </Button>
+                            <Button
                               onClick={() => openCyclesModal(b.employeeId, b.employeeName)}
                               className="py-1 px-2 text-[10px]"
                             >
@@ -944,6 +986,12 @@ export function LeaveManagementPanel() {
                         </td>
                         <td className="px-3 py-3 align-middle text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              onClick={() => openMonthlyModal(emp.employeeId, emp.name)}
+                              className="py-1 px-2 text-[10px]"
+                            >
+                              📄 Statement
+                            </Button>
                             <Button
                               onClick={() => openCarryModal(emp)}
                               variant="primary"
@@ -1770,6 +1818,191 @@ export function LeaveManagementPanel() {
             <div className="flex justify-end border-t border-line pt-3">
               <Button onClick={() => setShowCyclesModal(false)}>
                 Close Audit Record
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly Leave Entitlement Statement Modal */}
+      {showMonthlyModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-6">
+          <div className="w-full max-w-2xl rounded-2xl border border-line bg-surface p-6 shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div>
+                <h2 className="text-base font-bold text-text flex items-center gap-2">
+                  <span>📄</span> Monthly Leave Entitlement Statement
+                </h2>
+                <p className="text-xs text-muted">
+                  Employee: <strong>{monthlyEmployeeName}</strong>
+                  {monthlyReport?.role ? ` · ${monthlyReport.role}` : ''}
+                  {monthlyReport?.employeeNumber ? ` · ID: ${monthlyReport.employeeNumber}` : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMonthlyModal(false)}
+                className="text-muted hover:text-text text-sm font-bold p-1 rounded"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="my-4 overflow-y-auto pr-1 flex-1 space-y-4">
+              {monthlyLoading ? (
+                <div className="py-12 text-center text-xs text-muted">
+                  Loading monthly entitlement statement…
+                </div>
+              ) : !monthlyReport ? (
+                <Empty>No monthly report available for this employee.</Empty>
+              ) : (
+                <>
+                  {/* Month Selection Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-raised/60 p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-text">Statement Period:</span>
+                      <select
+                        value={monthlyReport.monthKey}
+                        onChange={(e) => handleSelectMonth(e.target.value)}
+                        className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-text focus:outline-none focus:ring-1 focus:ring-brand"
+                      >
+                        {monthlyReport.monthOptions.map((opt) => (
+                          <option key={opt.monthKey} value={opt.monthKey}>
+                            {opt.monthLabel} {opt.isCurrentMonth ? '(Current)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="text-[11px] text-muted font-mono">
+                      Cycle Month {monthlyReport.monthIndex} of {monthlyReport.totalMonthsInCycle}
+                    </div>
+                  </div>
+
+                  {/* Plain English Banner */}
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3.5">
+                    <div className="flex items-start gap-2.5">
+                      <span className="text-base">💡</span>
+                      <div>
+                        <div className="text-xs font-bold text-emerald-300">
+                          {monthlyReport.plainEnglishSummary}
+                        </div>
+                        <div className="text-[11px] text-muted mt-1 leading-relaxed">
+                          {monthlyReport.plainEnglishDetail}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Core Metrics Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="rounded-xl border border-line bg-surface/60 p-3 text-center">
+                      <div className="text-[10px] uppercase font-semibold tracking-wider text-muted">Annual Entitlement</div>
+                      <div className="mt-1 text-lg font-bold text-text">{monthlyReport.totalAnnualEntitlement}d</div>
+                      <div className="text-[10px] text-dim">Total holiday year</div>
+                    </div>
+                    <div className="rounded-xl border border-line bg-surface/60 p-3 text-center">
+                      <div className="text-[10px] uppercase font-semibold tracking-wider text-muted">Remaining Balance</div>
+                      <div className="mt-1 text-lg font-extrabold text-brand">{monthlyReport.remainingLeaveBalance}d</div>
+                      <div className="text-[10px] text-dim">Annual net remaining</div>
+                    </div>
+                    <div className="rounded-xl border border-line bg-surface/60 p-3 text-center">
+                      <div className="text-[10px] uppercase font-semibold tracking-wider text-muted">Accrued to Date</div>
+                      <div className="mt-1 text-lg font-bold text-indigo-400">{monthlyReport.leaveAccruedToDate}d</div>
+                      <div className="text-[10px] text-dim">Earned so far</div>
+                    </div>
+                    <div className="rounded-xl border border-line bg-surface/60 p-3 text-center">
+                      <div className="text-[10px] uppercase font-semibold tracking-wider text-muted">Currently Entitled</div>
+                      <div className="mt-1 text-lg font-extrabold text-teal-400">{monthlyReport.currentlyEntitledPaidLeave}d</div>
+                      <div className="text-[10px] text-dim">Available to take now</div>
+                    </div>
+                  </div>
+
+                  {/* Usage Breakdown Card */}
+                  <div className="rounded-xl border border-line bg-raised/40 p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-text">Leave Usage Breakdown</span>
+                      <span className="text-[11px] text-muted font-mono">{monthlyReport.cycleStartDate} &rarr; {monthlyReport.cycleEndDate}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                      <div className="rounded-lg bg-surface/80 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Total Leave Taken</div>
+                        <div className="text-sm font-bold text-text mt-0.5">{monthlyReport.leaveTakenAnnual}d</div>
+                      </div>
+                      <div className="rounded-lg bg-surface/80 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Paid Leave Used</div>
+                        <div className="text-sm font-bold text-brand mt-0.5">{monthlyReport.paidLeaveUsedAnnual}d</div>
+                      </div>
+                      <div className="rounded-lg bg-surface/80 p-2 border border-line">
+                        <div className="text-[10px] text-muted">Unpaid Leave Taken</div>
+                        <div className="text-sm font-bold text-amber-400 mt-0.5">{monthlyReport.unpaidLeaveTakenAnnual}d</div>
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-dim">
+                      Month Window: {monthlyReport.monthWindow.startDate} to {monthlyReport.monthWindow.endDate} · Taken this month: <strong>{monthlyReport.monthWindow.leaveTakenInMonth}d</strong> (Paid: {monthlyReport.monthWindow.paidLeaveInMonth}d, Unpaid: {monthlyReport.monthWindow.unpaidLeaveInMonth}d)
+                    </div>
+                  </div>
+
+                  {/* Sufficiency Status Card */}
+                  <div className="rounded-xl border border-line bg-raised/40 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-text">Requested Leave Sufficiency</span>
+                      <span
+                        className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                          monthlyReport.requestedLeaveSufficiency.status === 'SUFFICIENT'
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : monthlyReport.requestedLeaveSufficiency.status === 'INSUFFICIENT'
+                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                            : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
+                        }`}
+                      >
+                        {monthlyReport.requestedLeaveSufficiency.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted leading-relaxed">
+                      {monthlyReport.requestedLeaveSufficiency.message}
+                    </p>
+                    {monthlyReport.requestedLeaveSufficiency.pendingRequests.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {monthlyReport.requestedLeaveSufficiency.pendingRequests.map((pr) => (
+                          <div key={pr.id} className="flex items-center justify-between text-[11px] rounded bg-surface/60 px-2.5 py-1.5 border border-line">
+                            <span className="font-medium text-text">{pr.leaveType}: {pr.startDate} &rarr; {pr.endDate}</span>
+                            <span className="font-bold text-brand">{pr.totalDays}d ({pr.reducesEntitlement ? 'Paid' : 'Unpaid'})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Month Adjustments Card */}
+                  <div className="rounded-xl border border-line bg-raised/40 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-text">Adjustments in Month</span>
+                      <span className="text-[11px] text-dim">{monthlyReport.monthAdjustments.length} logged</span>
+                    </div>
+                    {monthlyReport.monthAdjustments.length === 0 ? (
+                      <div className="text-[11px] text-muted italic">No leave adjustments made during this month.</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {monthlyReport.monthAdjustments.map((adj) => (
+                          <div key={adj.id} className="flex items-center justify-between text-xs rounded-lg bg-surface/80 p-2 border border-line">
+                            <div>
+                              <span className="font-semibold text-text">{adj.reason}</span>
+                              <div className="text-[10px] text-dim">{adj.adjustmentDate}</div>
+                            </div>
+                            <span className={`font-bold ${adj.days >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {adj.days >= 0 ? `+${adj.days}d` : `${adj.days}d`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-line pt-3">
+              <Button onClick={() => setShowMonthlyModal(false)}>
+                Close Statement
               </Button>
             </div>
           </div>

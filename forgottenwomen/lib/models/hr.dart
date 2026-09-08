@@ -162,6 +162,235 @@ class LeavePreview {
       );
 }
 
+class MonthOption {
+  final String monthKey;
+  final String label;
+  final bool isCurrent;
+  final bool isSelected;
+
+  const MonthOption({
+    required this.monthKey,
+    required this.label,
+    required this.isCurrent,
+    required this.isSelected,
+  });
+
+  factory MonthOption.fromJson(Map<String, dynamic> json) => MonthOption(
+        monthKey: json['monthKey'] as String? ?? '',
+        label: json['label'] as String? ?? '',
+        isCurrent: json['isCurrent'] as bool? ?? false,
+        isSelected: json['isSelected'] as bool? ?? false,
+      );
+}
+
+class LeaveAdjustmentEntry {
+  final String id;
+  final String date;
+  final double days;
+  final String description;
+  final String? createdBy;
+
+  const LeaveAdjustmentEntry({
+    required this.id,
+    required this.date,
+    required this.days,
+    required this.description,
+    this.createdBy,
+  });
+
+  factory LeaveAdjustmentEntry.fromJson(Map<String, dynamic> json) => LeaveAdjustmentEntry(
+        id: json['id'] as String? ?? '',
+        date: json['date'] as String? ?? '',
+        days: (json['days'] as num?)?.toDouble() ?? 0,
+        description: json['description'] as String? ?? '',
+        createdBy: json['createdBy'] as String?,
+      );
+}
+
+class PendingLeaveRequestItem {
+  final String id;
+  final String startDate;
+  final String endDate;
+  final double days;
+  final String typeName;
+
+  const PendingLeaveRequestItem({
+    required this.id,
+    required this.startDate,
+    required this.endDate,
+    required this.days,
+    required this.typeName,
+  });
+
+  factory PendingLeaveRequestItem.fromJson(Map<String, dynamic> json) => PendingLeaveRequestItem(
+        id: json['id'] as String? ?? '',
+        startDate: json['startDate'] as String? ?? '',
+        endDate: json['endDate'] as String? ?? '',
+        days: (json['days'] as num?)?.toDouble() ?? 0,
+        typeName: json['typeName'] as String? ?? '',
+      );
+}
+
+class RequestedLeaveSufficiency {
+  final bool hasRequestedLeave;
+  final double pendingDays;
+  final String status;
+  final double shortfallDays;
+  final String message;
+  final List<PendingLeaveRequestItem> pendingRequests;
+
+  const RequestedLeaveSufficiency({
+    required this.hasRequestedLeave,
+    required this.pendingDays,
+    required this.status,
+    required this.shortfallDays,
+    required this.message,
+    this.pendingRequests = const [],
+  });
+
+  bool get isSufficient => status == 'SUFFICIENT';
+
+  factory RequestedLeaveSufficiency.fromJson(Map<String, dynamic> json) => RequestedLeaveSufficiency(
+        hasRequestedLeave: json['hasRequestedLeave'] as bool? ?? false,
+        pendingDays: (json['pendingDays'] as num?)?.toDouble() ?? 0,
+        status: json['status'] as String? ?? 'SUFFICIENT',
+        shortfallDays: (json['shortfallDays'] as num?)?.toDouble() ?? 0,
+        message: json['message'] as String? ?? '',
+        pendingRequests: (json['pendingRequests'] as List<dynamic>?)
+                ?.map((e) => PendingLeaveRequestItem.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+      );
+}
+
+class MonthlyLeaveReport {
+  final bool blocked;
+  final String? blockedMessage;
+  final String monthKey;
+  final String monthName;
+  final String monthStart;
+  final String monthEnd;
+  final String asOfDate;
+  final String? cycleStartDate;
+  final String? cycleEndDate;
+  final String? nextRenewalDate;
+  final String? officialJoiningDate;
+  final List<MonthOption> availableMonths;
+
+  final String summaryExplanation;
+
+  final double annualEntitlementDays;
+  final double leaveAlreadyTaken;
+  final double cyclePaidLeaveUsed;
+  final double monthPaidLeaveUsed;
+  final double cycleUnpaidLeaveTaken;
+  final double monthUnpaidLeaveTaken;
+  final double remainingAnnualLeave;
+  final double accruedUpToMonth;
+  final double currentlyEntitledPaidLeave;
+  final double approvedCarryForwardDays;
+
+  final RequestedLeaveSufficiency requestedLeaveSufficiency;
+  final double totalMonthAdjustments;
+  final int monthAdjustmentsCount;
+  final List<LeaveAdjustmentEntry> monthAdjustments;
+
+  const MonthlyLeaveReport({
+    required this.blocked,
+    this.blockedMessage,
+    this.monthKey = '',
+    this.monthName = '',
+    this.monthStart = '',
+    this.monthEnd = '',
+    this.asOfDate = '',
+    this.cycleStartDate,
+    this.cycleEndDate,
+    this.nextRenewalDate,
+    this.officialJoiningDate,
+    this.availableMonths = const [],
+    this.summaryExplanation = '',
+    this.annualEntitlementDays = 0,
+    this.leaveAlreadyTaken = 0,
+    this.cyclePaidLeaveUsed = 0,
+    this.monthPaidLeaveUsed = 0,
+    this.cycleUnpaidLeaveTaken = 0,
+    this.monthUnpaidLeaveTaken = 0,
+    this.remainingAnnualLeave = 0,
+    this.accruedUpToMonth = 0,
+    this.currentlyEntitledPaidLeave = 0,
+    this.approvedCarryForwardDays = 0,
+    this.requestedLeaveSufficiency = const RequestedLeaveSufficiency(
+      hasRequestedLeave: false,
+      pendingDays: 0,
+      status: 'SUFFICIENT',
+      shortfallDays: 0,
+      message: '',
+    ),
+    this.totalMonthAdjustments = 0,
+    this.monthAdjustmentsCount = 0,
+    this.monthAdjustments = const [],
+  });
+
+  static double _d(dynamic v) => (v as num?)?.toDouble() ?? 0;
+
+  factory MonthlyLeaveReport.fromJson(Map<String, dynamic> json) {
+    if (json['blocked'] == true) {
+      return MonthlyLeaveReport(
+        blocked: true,
+        blockedMessage: json['message'] as String?,
+      );
+    }
+
+    final paid = json['paidLeaveUsed'] as Map<String, dynamic>?;
+    final unpaid = json['unpaidLeaveTaken'] as Map<String, dynamic>?;
+    final reqSuff = json['requestedLeaveSufficiency'] as Map<String, dynamic>?;
+    final adj = json['monthAdjustments'] as Map<String, dynamic>?;
+
+    return MonthlyLeaveReport(
+      blocked: false,
+      monthKey: json['monthKey'] as String? ?? '',
+      monthName: json['monthName'] as String? ?? '',
+      monthStart: json['monthStart'] as String? ?? '',
+      monthEnd: json['monthEnd'] as String? ?? '',
+      asOfDate: json['asOfDate'] as String? ?? '',
+      cycleStartDate: json['cycleStartDate'] as String?,
+      cycleEndDate: json['cycleEndDate'] as String?,
+      nextRenewalDate: json['nextRenewalDate'] as String?,
+      officialJoiningDate: json['officialJoiningDate'] as String?,
+      availableMonths: (json['availableMonths'] as List<dynamic>?)
+              ?.map((e) => MonthOption.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      summaryExplanation: json['summaryExplanation'] as String? ?? '',
+      annualEntitlementDays: _d(json['annualEntitlementDays']),
+      leaveAlreadyTaken: _d(json['leaveAlreadyTaken']),
+      cyclePaidLeaveUsed: _d(paid?['cycleTotal']),
+      monthPaidLeaveUsed: _d(paid?['thisMonth']),
+      cycleUnpaidLeaveTaken: _d(unpaid?['cycleTotal']),
+      monthUnpaidLeaveTaken: _d(unpaid?['thisMonth']),
+      remainingAnnualLeave: _d(json['remainingAnnualLeave']),
+      accruedUpToMonth: _d(json['accruedUpToMonth']),
+      currentlyEntitledPaidLeave: _d(json['currentlyEntitledPaidLeave']),
+      approvedCarryForwardDays: _d(json['approvedCarryForwardDays']),
+      requestedLeaveSufficiency: reqSuff != null
+          ? RequestedLeaveSufficiency.fromJson(reqSuff)
+          : const RequestedLeaveSufficiency(
+              hasRequestedLeave: false,
+              pendingDays: 0,
+              status: 'SUFFICIENT',
+              shortfallDays: 0,
+              message: '',
+            ),
+      totalMonthAdjustments: _d(adj?['totalDays']),
+      monthAdjustmentsCount: (adj?['count'] as num?)?.toInt() ?? 0,
+      monthAdjustments: (adj?['items'] as List<dynamic>?)
+              ?.map((e) => LeaveAdjustmentEntry.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Warnings
 // ---------------------------------------------------------------------------
