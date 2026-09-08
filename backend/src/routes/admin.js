@@ -331,43 +331,56 @@ router.get('/devices', async (req, res) => {
 });
 
 router.get('/employees/:id/devices', async (req, res) => {
-  const employee = await db.prepare('SELECT id, name, employee_number FROM employees WHERE id = ?').get(req.params.id);
-  if (!employee) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
+  try {
+    const employee = await db.prepare('SELECT id, name, employee_number FROM employees WHERE id = ?').get(req.params.id);
+    if (!employee) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
 
-  const rows = await db.prepare(`
-    SELECT d.*, 
-           dt.last_used_at,
-           dt.created_at AS token_created_at
-    FROM devices d
-    LEFT JOIN device_tokens dt ON dt.device_id = d.id AND dt.revoked_at IS NULL
-    WHERE d.employee_id = ? AND d.revoked_at IS NULL
-    ORDER BY COALESCE(d.last_seen_at, dt.last_used_at, d.enrolled_at) DESC
-  `).all(req.params.id);
+    const rows = await db.prepare(`
+      SELECT d.*, 
+             dt.last_used_at,
+             dt.issued_at AS token_issued_at
+      FROM devices d
+      LEFT JOIN device_tokens dt ON dt.device_id = d.id AND dt.revoked_at IS NULL
+      WHERE d.employee_id = ? AND d.revoked_at IS NULL
+      ORDER BY COALESCE(d.last_seen_at, dt.last_used_at, d.enrolled_at) DESC
+    `).all(req.params.id);
 
-  const nowMs = T.now();
-  res.json({
-    status: 'SUCCESS',
-    employee: {
-      id: employee.id,
-      name: employee.name,
-      employeeNumber: employee.employee_number || null,
-    },
-    devices: rows.map(d => {
+    const nowMs = T.now();
+    const seenDeviceIds = new Set();
+    const devices = [];
+
+    for (const d of rows) {
+      if (seenDeviceIds.has(d.id)) continue;
+      seenDeviceIds.add(d.id);
+
       const lastActiveMs = d.last_seen_at || d.last_used_at || null;
       const isRecentlyActive = lastActiveMs ? (nowMs - lastActiveMs) < 24 * 60 * 60 * 1000 : false;
-      return {
+      devices.push({
         id: d.id,
         employeeId: d.employee_id,
         platform: d.platform,
         model: d.model || 'Handset',
         label: d.label || null,
-        enrolledAt: d.enrolled_at ? T.displayTime(d.enrolled_at) : 'Unknown',
+        enrolledAt: d.enrolled_at ? T.displayDate(d.enrolled_at) : 'Unknown',
         lastSeenAt: lastActiveMs,
-        lastSeen: lastActiveMs ? T.displayTime(lastActiveMs) : 'Never',
+        lastSeen: lastActiveMs ? `${T.displayDate(lastActiveMs)} at ${T.displayTime(lastActiveMs)}` : 'Never',
         isRecentlyActive,
-      };
-    }),
-  });
+      });
+    }
+
+    res.json({
+      status: 'SUCCESS',
+      employee: {
+        id: employee.id,
+        name: employee.name,
+        employeeNumber: employee.employee_number || null,
+      },
+      devices,
+    });
+  } catch (err) {
+    console.error('Error fetching employee devices:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message || 'Failed to load employee devices' });
+  }
 });
 
 router.get('/workstations', async (req, res) => {
