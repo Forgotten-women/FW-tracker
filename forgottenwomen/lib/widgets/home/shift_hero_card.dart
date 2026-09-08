@@ -8,6 +8,7 @@ class ShiftHeroCard extends StatelessWidget {
   final DateTime liveNow;
   final bool isVerified;
   final String? networkSsid;
+  final int? serverTimeMs;
 
   const ShiftHeroCard({
     super.key,
@@ -15,6 +16,7 @@ class ShiftHeroCard extends StatelessWidget {
     required this.liveNow,
     this.isVerified = false,
     this.networkSsid,
+    this.serverTimeMs,
   });
 
   @override
@@ -22,34 +24,41 @@ class ShiftHeroCard extends StatelessWidget {
     final attendance = todayDetails.attendance;
     final breakInfo = todayDetails.breakInfo;
     final bool onBreak = breakInfo.onBreak;
-    final bool isPresent = attendance.status == PresenceStatus.inOffice ||
-        attendance.status == PresenceStatus.gracePeriod;
+    final bool hasActiveSession = attendance.sessions.any((s) => s.isOpen);
+    final bool isPresent = attendance.status.isPresent || hasActiveSession;
 
     Color statusTone;
     String statusLabel;
-    IconData statusIcon;
 
     if (onBreak) {
       statusTone = AppColors.amber;
       statusLabel = 'ON BREAK';
-      statusIcon = Icons.coffee_rounded;
     } else if (isPresent) {
       statusTone = AppColors.teal;
       statusLabel = isVerified ? 'IN OFFICE' : 'ON NETWORK';
-      statusIcon = Icons.verified_rounded;
     } else if (attendance.status == PresenceStatus.away) {
       statusTone = const Color(0xFF64748B);
       statusLabel = 'OFF-SITE';
-      statusIcon = Icons.person_off_outlined;
+    } else if (attendance.status == PresenceStatus.closed) {
+      statusTone = const Color(0xFF64748B);
+      statusLabel = 'SHIFT ENDED';
     } else {
       statusTone = const Color(0xFF64748B);
       statusLabel = 'NOT CHECKED IN';
-      statusIcon = Icons.radio_button_unchecked_rounded;
     }
 
     // Daily target is 7h 30m = 450 minutes
     const int targetMinutes = 450;
-    final int workedMinutes = attendance.totalMinutes;
+
+    // Real-time live worked time: increment with local clock when employee is active
+    int extraMinutes = 0;
+    if (isPresent && !onBreak && serverTimeMs != null && serverTimeMs! > 0) {
+      final elapsedMs = liveNow.millisecondsSinceEpoch - serverTimeMs!;
+      if (elapsedMs > 0) {
+        extraMinutes = elapsedMs ~/ 60000;
+      }
+    }
+    final int workedMinutes = attendance.totalMinutes + extraMinutes;
     final double progress = (workedMinutes / targetMinutes).clamp(0.0, 1.0);
     final int percent = (progress * 100).round();
 
@@ -124,9 +133,7 @@ class ShiftHeroCard extends StatelessWidget {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 7),
-                      Icon(statusIcon, size: 14, color: statusTone),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: 8),
                       Text(
                         statusLabel,
                         style: TextStyle(

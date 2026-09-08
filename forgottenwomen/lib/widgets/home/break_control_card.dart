@@ -192,7 +192,6 @@ class BreakControlCard extends StatelessWidget {
             children: [
               // Start Break Action
               Expanded(
-                flex: 3,
                 child: SizedBox(
                   height: 46,
                   child: FilledButton.icon(
@@ -204,11 +203,16 @@ class BreakControlCard extends StatelessWidget {
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.coffee_outlined, size: 18),
-                    label: const Text(
-                      'Take Break',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'Take Break',
+                        maxLines: 1,
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
                     ),
                     style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       backgroundColor: AppColors.amber,
                       foregroundColor: Colors.black,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -216,25 +220,29 @@ class BreakControlCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
 
               // Clock Out Action
               Expanded(
-                flex: 2,
                 child: SizedBox(
                   height: 46,
                   child: OutlinedButton.icon(
                     onPressed: isSubmitting ? null : onClockOut,
                     icon: const Icon(Icons.logout_rounded, size: 16, color: AppColors.danger),
-                    label: const Text(
-                      'Clock Out',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        color: AppColors.danger,
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'Clock Out',
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: AppColors.danger,
+                        ),
                       ),
                     ),
                     style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       side: BorderSide(color: AppColors.danger.withValues(alpha: 0.5)),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),

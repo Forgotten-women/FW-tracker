@@ -39,15 +39,20 @@ class ProductivityMetricsCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'WORKING HOURS & STANDING',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.1,
-                  color: AppColors.textMuted,
+              const Expanded(
+                child: Text(
+                  'WORKING HOURS & STANDING',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                    color: AppColors.textMuted,
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
               Text(
                 'Window: ${workingHours.officeWindow}',
                 style: const TextStyle(

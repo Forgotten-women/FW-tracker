@@ -8,15 +8,25 @@ import 'home_state.dart';
 class HomeBloc extends Bloc<HomeEvent, HomeState> {
   final AttendanceRepository repository;
   Timer? _ticker;
+  Timer? _syncTimer;
 
   HomeBloc({required this.repository}) : super(const HomeInitial()) {
     on<HomeStarted>(_onStarted);
     on<HomeRefreshRequested>(_onRefreshRequested);
+    on<HomePeriodicSyncRequested>(_onPeriodicSyncRequested);
     on<HomeTimerTicked>(_onTimerTicked);
     on<HomeBreakToggleRequested>(_onBreakToggleRequested);
     on<HomeClockOutRequested>(_onClockOutRequested);
 
     _startTicker();
+    _startPeriodicSync();
+  }
+
+  void _startPeriodicSync() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      add(const HomePeriodicSyncRequested());
+    });
   }
 
   void _startTicker() {
@@ -154,9 +164,27 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
     }
   }
 
+  Future<void> _onPeriodicSyncRequested(
+      HomePeriodicSyncRequested event, Emitter<HomeState> emit) async {
+    if (state is! HomeLoaded) return;
+    try {
+      final fresh = await repository.fetchFreshHomeSummary();
+      if (state is HomeLoaded) {
+        emit((state as HomeLoaded).copyWith(
+          summary: fresh,
+          isOffline: false,
+          liveNow: DateTime.now(),
+        ));
+      }
+    } catch (_) {
+      // Periodic background sync failure is non-fatal
+    }
+  }
+
   @override
   Future<void> close() {
     _ticker?.cancel();
+    _syncTimer?.cancel();
     return super.close();
   }
 }

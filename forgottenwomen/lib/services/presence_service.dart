@@ -79,12 +79,17 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
 
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
-      service.setAsForegroundService();
+      service.setAsBackgroundService();
     });
     service.on('setAsBackground').listen((event) {
       service.setAsBackgroundService();
     });
   }
+
+  // Cancel any lingering foreground service notification
+  try {
+    await NotificationService().cancelNotification(8800);
+  } catch (_) {}
 
   Timer.periodic(heartbeatInterval, (timer) async {
     try {
@@ -92,16 +97,6 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
       final result = await sendHeartbeat(client: api, probe: probe, queue: queue);
 
       if (result != null) {
-        if (service is AndroidServiceInstance) {
-          service.setForegroundNotificationInfo(
-            title: 'Office Tracker',
-            content: result.verified
-                ? 'Office Presence Verified (${result.attendance.timeWorkedFormatted})'
-                : 'Monitoring office presence',
-          );
-        }
-
-        // Only trigger a dismissable system notification when presence status transitions to verified
         if (result.verified && !_wasVerified) {
           _wasVerified = true;
           await NotificationService().showSystemNotification(
@@ -174,12 +169,16 @@ class PresenceService {
 
   static Future<void> configure() async {
     try {
+      try {
+        await NotificationService().cancelNotification(8800);
+      } catch (_) {}
+
       await _service.configure(
         androidConfiguration: AndroidConfiguration(
           onStart: onBackgroundStart,
           autoStart: true,
           autoStartOnBoot: true,
-          isForegroundMode: true,
+          isForegroundMode: false,
           notificationChannelId: 'office_tracker_presence',
           initialNotificationTitle: 'Office Tracker',
           initialNotificationContent: 'Monitoring office presence',

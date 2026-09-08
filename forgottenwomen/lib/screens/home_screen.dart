@@ -737,6 +737,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             todayDetails: today,
                             liveNow: loaded.liveNow,
                             isVerified: true,
+                            serverTimeMs: loaded.summary.serverTimeMs,
                           ),
                           const SizedBox(height: 14),
 
@@ -773,7 +774,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            ...today.attendance.sessions.map((s) => _buildSessionTile(s)),
+                            ...today.attendance.sessions.map((s) {
+                              if (!s.open || loaded.summary.serverTimeMs <= 0) {
+                                return _buildSessionTile(s);
+                              }
+                              final elapsedMs = loaded.liveNow.millisecondsSinceEpoch - loaded.summary.serverTimeMs;
+                              final extraMins = elapsedMs > 0 ? (elapsedMs ~/ 60000) : 0;
+                              final liveMins = s.minutes + extraMins;
+                              final liveDuration = liveMins > 0 ? '${liveMins ~/ 60}h ${(liveMins % 60).toString().padLeft(2, '0')}m' : s.duration;
+                              return _buildSessionTile(s, liveDurationOverride: liveDuration);
+                            }),
                             const SizedBox(height: 20),
                           ],
 
@@ -914,7 +924,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildSessionTile(WorkSession s) {
+  Widget _buildSessionTile(WorkSession s, {String? liveDurationOverride}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -951,7 +961,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               border: Border.all(color: AppColors.border),
             ),
             child: Text(
-              s.duration,
+              liveDurationOverride ?? s.duration,
               style: const TextStyle(color: AppColors.primaryLight, fontSize: 11, fontWeight: FontWeight.bold),
             ),
           ),

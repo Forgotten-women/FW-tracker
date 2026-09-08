@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -32,15 +33,12 @@ class AttendanceRepository {
   }
 
   /// Fetches the latest home summary from the server in a single atomic network call,
-  /// caches it locally, and optionally flushes queued offline observations in parallel.
+  /// caches it locally, and flushes queued offline observations asynchronously.
   Future<HomeSummary> fetchFreshHomeSummary() async {
-    // Parallelize queue flush attempt and fetch
-    final results = await Future.wait<dynamic>([
-      apiClient.fetchHomeSummaryRaw(),
-      _tryFlushQueue(),
-    ]);
+    // Flush queued offline observations in the background without delaying the dashboard load
+    unawaited(_tryFlushQueue());
 
-    final rawJson = results[0] as Map<String, dynamic>;
+    final rawJson = await apiClient.fetchHomeSummaryRaw();
 
     // Persist to offline cache for future instant launches
     try {

@@ -29,23 +29,59 @@ router.get('/home-summary', requireDevice, async (req, res) => {
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
 
-  const [day, lateness, balance, workingHours, correctionRows, notifsResult] = await Promise.all([
-    A.deriveDay(employeeId, dateKey, nowMs),
+  // 1. Derive today's day first so it can be reused across all calculations
+  const day = await A.deriveDay(employeeId, dateKey, nowMs);
+
+  // 2. Run companion metrics in parallel reusing pre-derived `day`
+  const [lateness, balance, workingHours, correctionRows, notifsResult] = await Promise.all([
     A.latenessStatus(employeeId, dateKey),
     A.balanceFor(employeeId),
-    A.calculateWorkingHoursMetrics(employeeId, dateKey),
+    A.calculateWorkingHoursMetrics(employeeId, dateKey, day),
     db.prepare('SELECT * FROM attendance_corrections WHERE employee_id = ? ORDER BY requested_at DESC LIMIT 20').all(employeeId),
     N.listForEmployee(employeeId, { includeDismissed: false }).catch(() => ({ unreadCount: 0, notifications: [] })),
   ]);
 
-  // Fetch past 7 days history in parallel
+  // 3. Fast history: Today reuses day.presence directly. Past 6 days loaded from attendance_days cache.
   const days = 7;
   const dayKeys = [];
   for (let i = 0; i < days; i++) {
     dayKeys.push(T.dateKey(nowMs - i * 24 * 60 * 60 * 1000));
   }
+
+  const pastKeys = dayKeys.slice(1);
+  const placeholders = pastKeys.map(() => '?').join(',');
+  const cachedRows = await db.prepare(
+    `SELECT * FROM attendance_days WHERE employee_id = ? AND date_key IN (${placeholders})`
+  ).all(employeeId, ...pastKeys);
+  const cachedMap = new Map(cachedRows.map(r => [r.date_key, r]));
+
   const historyDays = await Promise.all(
-    dayKeys.map(async (key) => {
+    dayKeys.map(async (key, idx) => {
+      if (idx === 0 && day.presence) {
+        return P.presentDay(day.presence, { name: employeeName, role: employeeRole });
+      }
+      const cached = cachedMap.get(key);
+      if (cached) {
+        let sessions = [];
+        try { sessions = JSON.parse(cached.sessions_json || '[]'); } catch (_) {}
+        const d = {
+          employeeId,
+          dateKey: key,
+          firstInAt: cached.first_in_at,
+          lastActiveAt: cached.last_active_at,
+          sessions,
+          totalMinutes: cached.total_minutes,
+          status: cached.status,
+          statusLabel: cached.status === 'IN_OFFICE' ? 'Active in Office' : (cached.status === 'CLOSED' ? 'Day closed' : (cached.status || 'Not Arrived Yet')),
+          inactivityMinutes: 0,
+          graceMinutesLeft: 0,
+          eventCount: sessions.length,
+          exceededCap: false,
+          lastSource: null,
+          sensorCarried: false,
+        };
+        return P.presentDay(d, { name: employeeName, role: employeeRole });
+      }
       const d = await P.deriveDay(employeeId, key, nowMs);
       return P.presentDay(d, { name: employeeName, role: employeeRole });
     })

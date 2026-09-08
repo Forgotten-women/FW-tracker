@@ -10,12 +10,14 @@ class WorkSession {
   final String to;
   final String duration;
   final bool open;
+  final int minutes;
 
   const WorkSession({
     required this.from,
     required this.to,
     required this.duration,
     required this.open,
+    this.minutes = 0,
   });
 
   factory WorkSession.fromJson(Map<String, dynamic> json) => WorkSession(
@@ -23,7 +25,10 @@ class WorkSession {
         to: json['to'] as String? ?? '--',
         duration: json['duration'] as String? ?? '0 mins',
         open: json['open'] as bool? ?? false,
+        minutes: (json['minutes'] as num?)?.toInt() ?? 0,
       );
+
+  bool get isOpen => open;
 }
 
 /// Presence state for one employee-day, as derived by the server.
@@ -42,10 +47,14 @@ enum PresenceStatus {
       case 'IN_OFFICE':
       case 'PRESENT':
       case 'ACTIVE':
+      case 'LATE':
+      case 'RECOVERED':
         return PresenceStatus.inOffice;
       case 'GRACE_PERIOD':
         return PresenceStatus.gracePeriod;
       case 'AWAY':
+      case 'ON_BREAK':
+      case 'OFF_SITE':
         return PresenceStatus.away;
       case 'CLOSED':
         return PresenceStatus.closed;

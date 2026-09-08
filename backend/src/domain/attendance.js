@@ -170,6 +170,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     workedMinutes: shiftWorkedMinutes,
     rawPresenceMinutes: presence.totalMinutes,
     sessions: presence.sessions,
+    presence,
     breaks: breaks.map(b => ({
       startedAt: b.started_at,
       endedAt: b.ended_at,
@@ -666,7 +667,9 @@ function present(d) {
     nonWorkingReason: d.nonWorkingReason || null,
     scheduledStart: d.schedule.startTime,
     scheduledEnd: d.schedule.endTime,
-    status: d.attendanceStatus === 'PRESENT' ? 'IN_OFFICE' : d.attendanceStatus,
+    status: (d.presenceStatus === 'IN_OFFICE' || d.presenceStatus === 'GRACE_PERIOD')
+      ? 'IN_OFFICE'
+      : (d.presenceStatus || (d.attendanceStatus === 'PRESENT' ? 'IN_OFFICE' : d.attendanceStatus)),
     attendanceStatus: d.attendanceStatus,
     statusLabel: d.statusLabel || (d.attendanceStatus === 'PRESENT' ? 'Active in Office' : (d.attendanceStatus === 'CLOSED' ? 'Shift Ended' : (d.attendanceStatus || 'Not checked in'))),
     firstIn: d.firstInAt ? T.displayTime(d.firstInAt) : '--',
@@ -712,6 +715,7 @@ function present(d) {
       from: T.displayTime(s.start),
       to: s.open ? 'now' : T.displayTime(s.end),
       duration: T.formatMinutes(s.minutes),
+      minutes: s.minutes,
       open: s.open,
     })),
     needsReview: d.needsReview,
@@ -735,11 +739,11 @@ function formatHoursMinutes(minutes) {
  * Calculates working hours metrics across Daily, Weekly, and Monthly windows.
  * Based on the policy of 7h 30m (450 mins) required working time per working day.
  */
-async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey()) {
+async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), existingDay = null) {
   const sched = await schedule.resolve(employeeId, dateKey);
   const targetPerDay = sched.requiredWorkingMinutes || config.office.requiredDailyWorkingMinutes || 450; // 450 = 7h 30m
 
-  const todayDay = await deriveDay(employeeId, dateKey);
+  const todayDay = existingDay || await deriveDay(employeeId, dateKey);
   const isWorkingDay = sched.isWorkingDay;
   const dailyRequiredMinutes = isWorkingDay ? targetPerDay : 0;
   const dailyWorkedMinutes = todayDay.workedMinutes || 0;

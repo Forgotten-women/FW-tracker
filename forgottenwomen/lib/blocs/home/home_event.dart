@@ -15,6 +15,10 @@ class HomeRefreshRequested extends HomeEvent {
   const HomeRefreshRequested();
 }
 
+class HomePeriodicSyncRequested extends HomeEvent {
+  const HomePeriodicSyncRequested();
+}
+
 class HomeTimerTicked extends HomeEvent {
   final DateTime now;
   const HomeTimerTicked(this.now);
