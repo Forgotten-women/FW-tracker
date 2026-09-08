@@ -853,6 +853,24 @@ export function TeamPanel({
     }
   };
 
+  const handleToggleAppTracking = async (emp: AdminEmployee) => {
+    const nextState = emp.appTrackingEnabled === false;
+    const confirmMsg = nextState
+      ? `Enable application tracking for "${emp.name}"?\n\nWindow titles and desktop apps will be tracked during office working hours.`
+      : `Disable application tracking for "${emp.name}"?\n\nUse this for employees using personal laptops (BYOD). Office attendance time will still be tracked, but application names and window titles will NOT be recorded.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setBusy(true);
+      await api.toggleAppTracking(emp.id, nextState);
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to toggle app tracking');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <Panel
@@ -932,6 +950,18 @@ export function TeamPanel({
                           <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 border border-emerald-500/20 shrink-0">
                             {e.deviceCount} Device{e.deviceCount === 1 ? '' : 's'}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAppTracking(e)}
+                            title="Click to toggle Application/Window Title Tracking (BYOD Personal Laptop Privacy)"
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold border transition cursor-pointer shrink-0 ${
+                              e.appTrackingEnabled !== false
+                                ? 'bg-teal-500/10 text-teal-400 border-teal-500/20 hover:bg-teal-500/20'
+                                : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
+                            }`}
+                          >
+                            {e.appTrackingEnabled !== false ? '🛡️ App Tracking: ON' : '🔒 BYOD: App Tracking OFF'}
+                          </button>
                         </div>
                         <span className="text-xs text-slate-400 block truncate">{e.role}</span>
                       </div>

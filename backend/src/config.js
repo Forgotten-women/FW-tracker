@@ -93,6 +93,25 @@ function isOfficeBssid(bssid) {
 
 const OFFICE_SSIDS = new Set((office.networks || []).map(n => n.ssid).filter(Boolean));
 
+function normalizeSsid(s) {
+  return String(s || '').toLowerCase().replace(/[\s_\-.]+/g, '').trim();
+}
+
+const NORMALIZED_OFFICE_SSIDS = new Set(
+  [...OFFICE_SSIDS, 'Trans K 2.4G', 'Trans K 5G', 'Naya K 5G', 'Naya 5G', 'Naya 2.4G', 'Naya K 2.4G', 'HUAWEI-2.4G-2Jwu']
+    .map(normalizeSsid)
+);
+
+function isOfficeSsid(ssid) {
+  if (!ssid) return false;
+  const norm = normalizeSsid(ssid);
+  if (NORMALIZED_OFFICE_SSIDS.has(norm)) return true;
+  if (norm.startsWith('transk') || norm.startsWith('nayak') || norm.startsWith('naya2') || norm.startsWith('naya5')) {
+    return true;
+  }
+  return false;
+}
+
 // --- Secrets -----------------------------------------------------------
 
 /** HMAC shared secret for a hardware sensor id, or null if not configured. */
@@ -168,6 +187,7 @@ const config = {
 
   isOfficeIp,
   isOfficeBssid,
+  isOfficeSsid,
   bssidEnforced: BSSID_ENFORCED,
   bssidListed: BSSID_LISTED,
   officeSsids: OFFICE_SSIDS,
@@ -196,4 +216,4 @@ function configWarnings() {
   return w;
 }
 
-module.exports = { config, configWarnings };
+module.exports = { config, configWarnings, isOfficeSsid };

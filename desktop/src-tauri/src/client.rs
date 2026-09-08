@@ -26,6 +26,8 @@ pub struct HeartbeatPayload {
     pub lock_duration_seconds: u64,
     pub connected_bssid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_ssid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub visible_office_bssids: Option<Vec<String>>,
     pub current_wifi_mac: Option<String>,
     pub local_ip: Option<String>,
@@ -43,6 +45,10 @@ pub struct HeartbeatResponse {
     pub workstation_status: String,
     pub in_office: bool,
     pub location_verdict: Option<String>,
+    #[serde(default)]
+    pub app_tracking_enabled: Option<bool>,
+    #[serde(default)]
+    pub outside_working_hours: Option<bool>,
     pub today: SessionStats,
     pub policy: PolicySettings,
 }

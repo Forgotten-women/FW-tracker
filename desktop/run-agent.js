@@ -120,12 +120,51 @@ function getConnectedBssid() {
   return null;
 }
 
+function getConnectedSsid() {
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync('netsh wlan show interfaces', { timeout: 2500, windowsHide: true }).toString();
+      for (const line of out.split('\n')) {
+        const m = /^\s*SSID\s*:\s*(.+)$/i.exec(line.trim());
+        if (m) return m[1].trim();
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 const KNOWN_OFFICE_BSSIDS = new Set([
   'ba:9f:cc:db:52:58',
   'ba:9f:cc:db:52:5e',
   'ba:9f:cc:db:52:5c',
   'ba:9f:cc:db:52:5d',
 ]);
+
+const KNOWN_OFFICE_SSIDS = new Set([
+  'trans k 2.4g',
+  'trans k 5g',
+  'naya k 5g',
+  'naya 5g',
+  'naya 2.4g',
+  'naya k 2.4g',
+  'huawei-2.4g-2jwu',
+]);
+
+function isOfficeSsid(s) {
+  if (!s) return false;
+  const lower = s.toLowerCase().trim();
+  if (KNOWN_OFFICE_SSIDS.has(lower)) return true;
+  if (lower.startsWith('trans k') || lower.startsWith('naya')) return true;
+  return false;
+}
+
+const OFFICE_PROFILE_CANDIDATES = [
+  'Trans K 2.4G',
+  'Trans K 5G',
+  'Naya K 5G',
+  'Naya 5G',
+  'Naya 2.4G',
+];
 
 function getVisibleOfficeBssids() {
   const visible = [];
@@ -161,17 +200,23 @@ function getVisibleOfficeBssids() {
 let lastAutoConnectAttempt = 0;
 function autoConnectOfficeWifi() {
   const now = Date.now();
-  if (now - lastAutoConnectAttempt < 60000) return;
+  if (now - lastAutoConnectAttempt < 30000) return;
   lastAutoConnectAttempt = now;
 
   if (process.platform === 'win32') {
-    try {
-      exec('netsh wlan connect name="Trans K 2.4G"', { windowsHide: true }, (err) => {
+    let idx = 0;
+    function tryNext() {
+      if (idx >= OFFICE_PROFILE_CANDIDATES.length) return;
+      const profile = OFFICE_PROFILE_CANDIDATES[idx++];
+      exec(`netsh wlan connect name="${profile}"`, { windowsHide: true }, (err) => {
         if (!err) {
-          console.log('[Office Tracker Desktop] Auto-connected to office Wi-Fi ("Trans K 2.4G").');
+          console.log(`[Office Tracker Desktop] Auto-connected to office Wi-Fi ("${profile}").`);
+        } else {
+          tryNext();
         }
       });
-    } catch (_) {}
+    }
+    tryNext();
   }
 }
 
@@ -181,8 +226,8 @@ function alertOutOfOffice() {
   if (now - lastAlertAt < 300000) return; // Alert at most once every 5 minutes
   lastAlertAt = now;
 
-  console.warn('\n⚠️ [Office Tracker] ATTENDANCE PAUSED: You are not connected to Office Wi-Fi ("Trans K 2.4G").');
-  console.warn('   Please connect to "Trans K 2.4G" to record your attendance.\n');
+  console.warn('\n⚠️ [Office Tracker] ATTENDANCE PAUSED: You are not connected to Office Wi-Fi.');
+  console.warn('   Please connect to Trans K 2.4G, Trans K 5G, Naya 2.4G, or Naya 5G to record attendance.\n');
 }
 
 // Virtual adapters installed by WSL, Hyper-V, Docker and the VM tools. They
@@ -341,6 +386,8 @@ let todayLiveStats = { activeSeconds: 0, breakSeconds: 0, idleSeconds: 0 };
 let currentWorkstationStatus = 'ACTIVE';
 let isManualBreak = false;
 let latestContinuousIdle = 0;
+let appTrackingEnabled = true;
+let outsideWorkingHours = false;
 
 function launchMiniAppWindow(port = MINI_APP_PORT) {
   const url = `http://127.0.0.1:${port}`;
@@ -384,8 +431,9 @@ function startMiniAppServer(port = MINI_APP_PORT) {
     if (parsedUrl.pathname === '/api/status' && req.method === 'GET') {
       const cfgNow = loadConfig();
       const bssid = getConnectedBssid();
+      const ssid = getConnectedSsid();
       const visibleOfficeBssids = getVisibleOfficeBssids();
-      const isOfficeConnected = bssid && KNOWN_OFFICE_BSSIDS.has(bssid);
+      const isOfficeConnected = (bssid && KNOWN_OFFICE_BSSIDS.has(bssid)) || isOfficeSsid(ssid);
       const isOfficeVisible = visibleOfficeBssids.some(v => KNOWN_OFFICE_BSSIDS.has(v.bssid));
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -394,12 +442,15 @@ function startMiniAppServer(port = MINI_APP_PORT) {
         employeeName: cfgNow ? cfgNow.employeeName : null,
         employeeRole: cfgNow ? cfgNow.employeeRole : null,
         isManualBreak,
+        appTrackingEnabled,
+        outsideWorkingHours,
         latest: {
-          workstationStatus: isManualBreak ? 'ON_BREAK' : currentWorkstationStatus,
+          workstationStatus: isManualBreak ? 'ON_BREAK' : (outsideWorkingHours ? 'STANDBY' : currentWorkstationStatus),
           inOffice: isOfficeConnected || isOfficeVisible,
           isOfficeConnected,
           isOfficeVisible,
           connectedBssid: bssid,
+          connectedSsid: ssid,
           visibleOfficeBssids,
           today: todayLiveStats,
         }
@@ -610,12 +661,62 @@ async function startAgent() {
     if (isSyncing) return;
     isSyncing = true;
     try {
-      let events = [];
-      if (localDb) {
-        events = localDb.prepare('SELECT * FROM local_events WHERE synced_at IS NULL ORDER BY created_at ASC LIMIT 10').all();
-      }
+      if (!localDb) return;
+      const unsynced = localDb.prepare('SELECT * FROM local_events WHERE synced_at IS NULL ORDER BY created_at ASC LIMIT 50').all();
+      if (!unsynced || unsynced.length === 0) return;
 
-      for (const ev of events) {
+      if (unsynced.length > 1) {
+        // Multi-event offline buffer: flush in high-efficiency atomic batch to /api/desktop/sync-batch
+        try {
+          const eventsPayload = unsynced.map(ev => {
+            const p = JSON.parse(ev.payload);
+            return {
+              ...p,
+              eventId: ev.event_id,
+              createdAt: ev.created_at,
+              observedAt: p.observedAt || ev.created_at,
+            };
+          });
+
+          const res = await fetch(`${cfg.serverUrl}/api/desktop/sync-batch`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${cfg.token}`,
+            },
+            body: JSON.stringify({ events: eventsPayload }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const syncedIds = new Set(data.syncedEventIds || []);
+            const now = Date.now();
+            const updateStmt = localDb.prepare('UPDATE local_events SET synced_at = ? WHERE event_id = ?');
+            for (const ev of unsynced) {
+              if (syncedIds.has(ev.event_id)) {
+                updateStmt.run(now, ev.event_id);
+              }
+            }
+            if (data.today) todayLiveStats = data.today;
+            if (data.appTrackingEnabled !== undefined) appTrackingEnabled = Boolean(data.appTrackingEnabled);
+            if (data.outsideWorkingHours !== undefined) outsideWorkingHours = Boolean(data.outsideWorkingHours);
+            console.log(`[${new Date().toLocaleTimeString()}] Batch synced ${syncedIds.size} offline heartbeats to cloud successfully.`);
+          } else if (res.status === 401) {
+            console.error('[Office Tracker Desktop] Token expired or revoked. Re-enroll required.');
+            try { fs.unlinkSync(CONFIG_FILE); } catch (_) {}
+            process.exit(1);
+          } else {
+            const incStmt = localDb.prepare('UPDATE local_events SET retry_count = retry_count + 1 WHERE event_id = ?');
+            for (const ev of unsynced) {
+              incStmt.run(ev.event_id);
+            }
+          }
+        } catch (err) {
+          console.warn(`[${new Date().toLocaleTimeString()}] Batch sync paused: ${err.message}`);
+        }
+      } else {
+        // Single real-time heartbeat via /api/desktop/heartbeat
+        const ev = unsynced[0];
         try {
           const payload = JSON.parse(ev.payload);
           const res = await fetch(`${cfg.serverUrl}/api/desktop/heartbeat`, {
@@ -629,41 +730,34 @@ async function startAgent() {
 
           if (res.ok) {
             const data = await res.json();
-            if (data.today) {
-              todayLiveStats = data.today;
-            }
-            if (data.workstationStatus) {
-              currentWorkstationStatus = data.workstationStatus;
-            }
-            if (localDb) {
-              localDb.prepare('UPDATE local_events SET synced_at = ? WHERE event_id = ?').run(Date.now(), ev.event_id);
-            }
+            if (data.today) todayLiveStats = data.today;
+            if (data.workstationStatus) currentWorkstationStatus = data.workstationStatus;
+            if (data.appTrackingEnabled !== undefined) appTrackingEnabled = Boolean(data.appTrackingEnabled);
+            if (data.outsideWorkingHours !== undefined) outsideWorkingHours = Boolean(data.outsideWorkingHours);
+
+            localDb.prepare('UPDATE local_events SET synced_at = ? WHERE event_id = ?').run(Date.now(), ev.event_id);
+
             const activeMins = Math.round((data.today?.activeSeconds || 0) / 60);
             const statusIcon = data.inOffice ? '🟢 [IN OFFICE]' : '🟡 [REMOTE / OUTSIDE]';
-            console.log(`[${new Date().toLocaleTimeString()}] Heartbeat synced (${ev.event_id.slice(0, 8)}) | ${statusIcon} Status: ${data.workstationStatus} | App: ${payload.currentApp} | Today: ${activeMins}m active`);
+            const hoursNote = data.outsideWorkingHours ? ' | 🌙 [STANDBY: Outside Working Hours]' : '';
+            const privacyNote = !appTrackingEnabled ? ' | 🔒 [BYOD: App Tracking OFF]' : '';
+            console.log(`[${new Date().toLocaleTimeString()}] Heartbeat synced (${ev.event_id.slice(0, 8)}) | ${statusIcon} Status: ${data.workstationStatus}${hoursNote}${privacyNote} | App: ${payload.currentApp} | Today: ${activeMins}m active`);
           } else if (res.status === 401) {
             console.error('[Office Tracker Desktop] Token expired or revoked. Re-enroll required.');
             try { fs.unlinkSync(CONFIG_FILE); } catch (_) {}
             process.exit(1);
           } else {
-            if (localDb) {
-              localDb.prepare('UPDATE local_events SET retry_count = retry_count + 1 WHERE event_id = ?').run(ev.event_id);
-            }
-          }
-        } catch (err) {
-          if (localDb) {
             localDb.prepare('UPDATE local_events SET retry_count = retry_count + 1 WHERE event_id = ?').run(ev.event_id);
           }
+        } catch (err) {
+          localDb.prepare('UPDATE local_events SET retry_count = retry_count + 1 WHERE event_id = ?').run(ev.event_id);
           console.warn(`[${new Date().toLocaleTimeString()}] Sync paused for ${ev.event_id.slice(0, 8)}: ${err.message}`);
-          break; // Stop batch on connection drop
         }
       }
 
       // Cleanup synced events older than 24 hours
-      if (localDb) {
-        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-        localDb.prepare('DELETE FROM local_events WHERE synced_at IS NOT NULL AND synced_at < ?').run(oneDayAgo);
-      }
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      localDb.prepare('DELETE FROM local_events WHERE synced_at IS NOT NULL AND synced_at < ?').run(oneDayAgo);
     } finally {
       isSyncing = false;
     }
@@ -682,9 +776,15 @@ async function startAgent() {
       accumulatedIdle++;
     } else {
       accumulatedActive++;
-      const app = parseActiveApplication(procName, title);
-      currentApp = app;
-      appBreakdown[app] = (appBreakdown[app] || 0) + 1;
+      // If HR disabled app tracking for personal laptop (BYOD privacy), do NOT inspect window title or process
+      if (appTrackingEnabled) {
+        const app = parseActiveApplication(procName, title);
+        currentApp = app;
+        appBreakdown[app] = (appBreakdown[app] || 0) + 1;
+      } else {
+        currentApp = 'Active Workstation';
+        appBreakdown = {};
+      }
     }
 
     if (secondsElapsed >= 60) {
@@ -697,10 +797,11 @@ async function startAgent() {
       appBreakdown = {};
 
       const bssid = getConnectedBssid();
+      const ssid = getConnectedSsid();
       const visibleOfficeBssids = getVisibleOfficeBssids();
       const localIp = getLocalIp();
 
-      const isOfficeConnected = bssid && KNOWN_OFFICE_BSSIDS.has(bssid);
+      const isOfficeConnected = (bssid && KNOWN_OFFICE_BSSIDS.has(bssid)) || isOfficeSsid(ssid);
       const isOfficeVisible = visibleOfficeBssids.some(v => KNOWN_OFFICE_BSSIDS.has(v.bssid));
 
       // Auto-connect to office Wi-Fi if available in the air
@@ -720,13 +821,16 @@ async function startAgent() {
         idleSeconds: sendIdle,
         currentIdleSeconds: latestContinuousIdle,
         currentApp,
-        appBreakdown: sendBreakdown,
+        appBreakdown: appTrackingEnabled ? sendBreakdown : {},
         lockState: 'UNLOCKED',
         lockDurationSeconds: 0,
         connectedBssid: bssid,
+        connectedSsid: ssid,
+        ssid,
         visibleOfficeBssids,
         localIp,
         isManualBreak,
+        observedAt: Date.now(),
       };
 
       if (localDb) {

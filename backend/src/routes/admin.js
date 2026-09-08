@@ -59,6 +59,7 @@ router.get('/employees', async (req, res) => {
       currency: r.salary_currency || null,
       dailyRate: r.salary_daily_rate !== null && r.salary_daily_rate !== undefined ? Number(r.salary_daily_rate) : null,
       startDate: r.employment_start_date || null,
+      appTrackingEnabled: r.app_tracking_enabled !== 0,
       createdAt: T.displayTime(r.created_at),
     })),
   });
@@ -165,6 +166,31 @@ router.patch('/employees/:id', async (req, res) => {
   res.json({
     status: 'SUCCESS',
     employee: { id: req.params.id, name, role, employeeNumber: before.employee_number, active: !!active },
+  });
+});
+
+router.patch('/employees/:id/app-tracking', async (req, res) => {
+  const before = await db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
+  if (!before) return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
+
+  const enabled = req.body?.enabled !== undefined
+    ? (req.body.enabled ? 1 : 0)
+    : (req.body?.appTrackingEnabled !== undefined ? (req.body.appTrackingEnabled ? 1 : 0) : 1);
+
+  await db.prepare('UPDATE employees SET app_tracking_enabled = ?, updated_at = ? WHERE id = ?')
+    .run(enabled, T.now(), req.params.id);
+
+  await audit({
+    actor: 'admin', action: 'EMPLOYEE_APP_TRACKING_TOGGLED', targetType: 'employee', targetId: req.params.id,
+    before: { appTrackingEnabled: before.app_tracking_enabled !== 0 },
+    after: { appTrackingEnabled: enabled === 1 },
+  });
+
+  res.json({
+    status: 'SUCCESS',
+    employeeId: req.params.id,
+    appTrackingEnabled: enabled === 1,
+    message: `Application tracking for ${before.name} has been ${enabled === 1 ? 'enabled' : 'disabled'}.`,
   });
 });
 

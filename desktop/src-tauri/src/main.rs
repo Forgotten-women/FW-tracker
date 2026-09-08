@@ -120,6 +120,7 @@ fn main() {
                     if !cfg.token.is_empty() && first_run {
                         first_run = false;
                         let bssid = tracker::network::get_connected_bssid();
+                        let ssid = tracker::network::get_connected_ssid();
                         let visible = tracker::network::get_visible_office_bssids();
                         let local_ip = tracker::network::get_local_ip();
                         let payload = HeartbeatPayload {
@@ -128,6 +129,7 @@ fn main() {
                             lock_state: "UNLOCKED".to_string(),
                             lock_duration_seconds: 0,
                             connected_bssid: bssid,
+                            connected_ssid: ssid,
                             visible_office_bssids: if visible.is_empty() { None } else { Some(visible) },
                             current_wifi_mac: None,
                             local_ip,
@@ -153,17 +155,29 @@ fn main() {
                     let bssid = tracker::network::get_connected_bssid();
                     let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
 
+                    let app_tracking_allowed = {
+                        let resp = state.latest_response.lock().unwrap();
+                        resp.as_ref()
+                            .and_then(|r| r.app_tracking_enabled)
+                            .unwrap_or(true)
+                    };
+
                     // Track active vs idle seconds in 10s slice
                     if is_break || lock_duration > 300 || idle_secs >= 300 {
                         accumulated_idle += 10;
                     } else {
                         accumulated_active += 10;
-                        if let Some((proc_name, title)) = tracker::process::get_foreground_window_info() {
-                            let app_name = tracker::process::parse_active_application(&proc_name, &title);
-                            latest_app = Some(app_name.clone());
-                            *app_breakdown.entry(app_name).or_insert(0) += 10;
+                        if app_tracking_allowed {
+                            if let Some((proc_name, title)) = tracker::process::get_foreground_window_info() {
+                                let app_name = tracker::process::parse_active_application(&proc_name, &title);
+                                latest_app = Some(app_name.clone());
+                                *app_breakdown.entry(app_name).or_insert(0) += 10;
+                            } else {
+                                *app_breakdown.entry("Desktop Active".to_string()).or_insert(0) += 10;
+                            }
                         } else {
-                            *app_breakdown.entry("Desktop Active".to_string()).or_insert(0) += 10;
+                            latest_app = Some("Active Workstation".to_string());
+                            app_breakdown.clear();
                         }
                     }
 
@@ -182,6 +196,7 @@ fn main() {
                     if sample_count >= 6 {
                         sample_count = 0;
                         let local_ip = tracker::network::get_local_ip();
+                        let ssid = tracker::network::get_connected_ssid();
                         let visible = tracker::network::get_visible_office_bssids();
                         let payload = HeartbeatPayload {
                             active_seconds: accumulated_active,
@@ -189,6 +204,7 @@ fn main() {
                             lock_state,
                             lock_duration_seconds: lock_duration,
                             connected_bssid: bssid,
+                            connected_ssid: ssid,
                             visible_office_bssids: if visible.is_empty() { None } else { Some(visible.clone()) },
                             current_wifi_mac: None,
                             local_ip,

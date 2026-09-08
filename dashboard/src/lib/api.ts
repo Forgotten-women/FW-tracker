@@ -158,6 +158,15 @@ export const api = {
       { method: 'DELETE' },
     ),
 
+  toggleAppTracking: (employeeId: string, enabled: boolean) =>
+    request<{ status: string; employeeId: string; appTrackingEnabled: boolean; message: string }>(
+      `/api/admin/employees/${encodeURIComponent(employeeId)}/app-tracking`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      },
+    ),
+
   getEmployeeProfile: (employeeId: string) =>
     request<{ status: string; profile: any }>(
       `/api/people/mine/profile?employeeId=${encodeURIComponent(employeeId)}`,

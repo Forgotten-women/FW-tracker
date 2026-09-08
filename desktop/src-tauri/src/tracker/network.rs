@@ -134,13 +134,57 @@ pub fn get_visible_office_bssids() -> Vec<String> {
     }
 }
 
+pub fn get_connected_ssid() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let output = Command::new("netsh")
+            .args(["wlan", "show", "interfaces"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.to_lowercase().starts_with("ssid") && trimmed.contains(':') {
+                let parts: Vec<&str> = trimmed.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    let s = parts[1].trim();
+                    if !s.is_empty() && !s.to_lowercase().starts_with("bssid") {
+                        return Some(s.to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+const OFFICE_SSID_CANDIDATES: &[&str] = &[
+    "Trans K 2.4G",
+    "Trans K 5G",
+    "Naya K 5G",
+    "Naya 5G",
+    "Naya 2.4G",
+];
+
 pub fn auto_connect_office_wifi() {
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("netsh")
-            .args(["wlan", "connect", "name=Trans K 2.4G"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+        for name in OFFICE_SSID_CANDIDATES {
+            let status = Command::new("netsh")
+                .args(["wlan", "connect", &format!("name={}", name)])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+            if let Ok(output) = status {
+                if output.status.success() {
+                    break;
+                }
+            }
+        }
     }
 }
 

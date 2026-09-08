@@ -117,6 +117,7 @@ export interface AdminEmployee {
   currency?: string | null;
   dailyRate?: number | null;
   startDate?: string | null;
+  appTrackingEnabled?: boolean;
 }
 
 export interface EnrollmentCode {

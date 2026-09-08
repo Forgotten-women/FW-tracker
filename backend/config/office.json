@@ -47,7 +47,6 @@
       ]
     },
     {
-      "_comment": "The router's un-renamed factory SSID, on the same physical AP. Listed so that anyone who happens to join it is still counted. It had zero connected stations when surveyed - if nobody needs it, disable it on the router and delete this entry.",
       "name": "Router default SSID (disable if unused)",
       "ssid": "HUAWEI-2.4G-2Jwu",
       "band": "5",
@@ -57,6 +56,50 @@
       ],
       "subnets": [
         "192.168.18.0/24"
+      ]
+    },
+    {
+      "name": "Naya K 5G",
+      "ssid": "Naya K 5G",
+      "band": "5",
+      "bssids": [],
+      "subnets": [
+        "192.168.18.0/24",
+        "192.168.1.0/24",
+        "192.168.100.0/24"
+      ]
+    },
+    {
+      "name": "Naya 5G",
+      "ssid": "Naya 5G",
+      "band": "5",
+      "bssids": [],
+      "subnets": [
+        "192.168.18.0/24",
+        "192.168.1.0/24",
+        "192.168.100.0/24"
+      ]
+    },
+    {
+      "name": "Naya K 2.4G",
+      "ssid": "Naya K 2.4G",
+      "band": "2.4",
+      "bssids": [],
+      "subnets": [
+        "192.168.18.0/24",
+        "192.168.1.0/24",
+        "192.168.100.0/24"
+      ]
+    },
+    {
+      "name": "Naya 2.4G",
+      "ssid": "Naya 2.4G",
+      "band": "2.4",
+      "bssids": [],
+      "subnets": [
+        "192.168.18.0/24",
+        "192.168.1.0/24",
+        "192.168.100.0/24"
       ]
     }
   ],
