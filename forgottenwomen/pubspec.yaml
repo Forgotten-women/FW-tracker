@@ -2,7 +2,7 @@ name: office_tracker
 description: "Office presence and attendance tracking - employee app."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.13.1
@@ -13,6 +13,8 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   http: ^1.2.1
+  flutter_bloc: ^8.1.6
+  equatable: ^2.0.7
 
   # Non-secret preferences only. The device token goes in secure storage.
   shared_preferences: ^2.2.3

@@ -27,7 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String _model = '';
   String _deviceId = '';
-  String _appVersion = 'v1.0.0+1';
+  String _appVersion = 'v1.0.1+2';
   NetworkFacts _network = const NetworkFacts();
   int _pending = 0;
   String? _reachable;

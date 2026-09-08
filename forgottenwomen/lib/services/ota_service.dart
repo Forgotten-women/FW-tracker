@@ -61,8 +61,8 @@ class OtaService {
       return PackageInfo(
         appName: 'Office Tracker',
         packageName: 'com.rethink.officetracker',
-        version: '1.0.0',
-        buildNumber: '1',
+        version: '1.0.1',
+        buildNumber: '2',
       );
     }
   }

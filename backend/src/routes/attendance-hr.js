@@ -14,12 +14,69 @@ const A = require('../domain/attendance');
 const schedule = require('../domain/schedule');
 const importer = require('../domain/import');
 const rbac = require('../domain/rbac');
+const P = require('../domain/presence');
 const N = require('../domain/notifications');
 const T = require('../util/time');
 
 // ---------------------------------------------------------------------------
 // Employee self-service (phone app, device token)
 // ---------------------------------------------------------------------------
+
+// GET /api/attendance/home-summary - consolidated fast batch for the mobile dashboard.
+// Delivers today's details, past 7 days history, dispute corrections, and notification counts in ONE call.
+router.get('/home-summary', requireDevice, async (req, res) => {
+  const { employeeId, employeeName, employeeRole } = req.auth;
+  const nowMs = T.now();
+  const dateKey = T.dateKey(nowMs);
+
+  const [day, lateness, balance, workingHours, correctionRows, notifsResult] = await Promise.all([
+    A.deriveDay(employeeId, dateKey, nowMs),
+    A.latenessStatus(employeeId, dateKey),
+    A.balanceFor(employeeId),
+    A.calculateWorkingHoursMetrics(employeeId, dateKey),
+    db.prepare('SELECT * FROM attendance_corrections WHERE employee_id = ? ORDER BY requested_at DESC LIMIT 20').all(employeeId),
+    N.listForEmployee(employeeId, { includeDismissed: false }).catch(() => ({ unreadCount: 0, notifications: [] })),
+  ]);
+
+  // Fetch past 7 days history in parallel
+  const days = 7;
+  const dayKeys = [];
+  for (let i = 0; i < days; i++) {
+    dayKeys.push(T.dateKey(nowMs - i * 24 * 60 * 60 * 1000));
+  }
+  const historyDays = await Promise.all(
+    dayKeys.map(async (key) => {
+      const d = await P.deriveDay(employeeId, key, nowMs);
+      return P.presentDay(d, { name: employeeName, role: employeeRole });
+    })
+  );
+
+  const corrections = correctionRows.map(r => ({
+    id: r.id, date: r.date_key, reason: r.reason, status: r.status,
+    requestedAt: T.displayTime(r.requested_at),
+    reviewedAt: r.reviewed_at ? T.displayTime(r.reviewed_at) : null,
+    reviewNotes: r.review_notes,
+  }));
+
+  res.json({
+    status: 'SUCCESS',
+    employee: { id: employeeId, name: employeeName, role: employeeRole },
+    today: A.present(day),
+    workingHours,
+    lateness,
+    deficitBalance: {
+      minutes: balance.balanceMinutes,
+      formatted: T.formatMinutes(balance.balanceMinutes),
+      wholeDayEquivalents: balance.wholeDayEquivalents,
+      carryForwardMinutes: balance.carryForwardMinutes,
+      dayEquivalentMinutes: balance.dayEquivalentMinutes,
+    },
+    history: historyDays,
+    corrections,
+    unreadNotificationsCount: notifsResult.unreadCount || 0,
+    serverTimeMs: nowMs,
+  });
+});
 
 // GET /api/attendance/today - everything the employee home screen needs.
 router.get('/today', requireDevice, async (req, res) => {

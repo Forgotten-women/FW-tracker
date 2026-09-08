@@ -153,6 +153,22 @@ class ApiClient {
         return TodayAttendanceDetails.fromJson(_decode(res));
       });
 
+  /// Fetches consolidated home screen summary in one single network round-trip.
+  Future<HomeSummary> fetchHomeSummary() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/attendance/home-summary'), headers: await _authHeaders())
+            .timeout(timeout);
+        return HomeSummary.fromJson(_decode(res));
+      });
+
+  /// Fetches consolidated home screen summary and returns decoded raw JSON for caching.
+  Future<Map<String, dynamic>> fetchHomeSummaryRaw() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/attendance/home-summary'), headers: await _authHeaders())
+            .timeout(timeout);
+        return _decode(res);
+      });
+
   /// Starts a break for the employee (Spec 12).
   Future<BreakStartResult> startBreak() => _guard(() async {
         final res = await _http

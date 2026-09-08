@@ -77,12 +77,30 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
 
   service.on('stop').listen((_) => service.stopSelf());
 
+  if (service is AndroidServiceInstance) {
+    service.on('setAsForeground').listen((event) {
+      service.setAsForegroundService();
+    });
+    service.on('setAsBackground').listen((event) {
+      service.setAsBackgroundService();
+    });
+  }
+
   Timer.periodic(heartbeatInterval, (timer) async {
     try {
       if (!await store.isEnrolled) return;
       final result = await sendHeartbeat(client: api, probe: probe, queue: queue);
 
       if (result != null) {
+        if (service is AndroidServiceInstance) {
+          service.setForegroundNotificationInfo(
+            title: 'Office Tracker',
+            content: result.verified
+                ? 'Office Presence Verified (${result.attendance.timeWorkedFormatted})'
+                : 'Monitoring office presence',
+          );
+        }
+
         // Only trigger a dismissable system notification when presence status transitions to verified
         if (result.verified && !_wasVerified) {
           _wasVerified = true;
@@ -100,7 +118,9 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
       // Check for incoming HR notifications in background
       try {
         await NotificationService().checkAndDispatchUnseenNotifications(store: store);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Background notification dispatch error: $e');
+      }
 
       // Local, offline break monitoring (works 100% offline without internet or Wi-Fi)
       try {
@@ -157,15 +177,16 @@ class PresenceService {
       await _service.configure(
         androidConfiguration: AndroidConfiguration(
           onStart: onBackgroundStart,
-          autoStart: false,
-          isForegroundMode: false,
+          autoStart: true,
+          autoStartOnBoot: true,
+          isForegroundMode: true,
           notificationChannelId: 'office_tracker_presence',
           initialNotificationTitle: 'Office Tracker',
-          initialNotificationContent: 'Presence reporting active',
-          foregroundServiceNotificationId: 8801,
+          initialNotificationContent: 'Monitoring office presence',
+          foregroundServiceNotificationId: 8800,
         ),
         iosConfiguration: IosConfiguration(
-          autoStart: false,
+          autoStart: true,
           onForeground: onBackgroundStart,
           onBackground: onIosBackground,
         ),

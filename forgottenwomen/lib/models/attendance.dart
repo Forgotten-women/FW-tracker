@@ -552,3 +552,39 @@ class WorkingHoursMetrics {
     );
   }
 }
+
+/// Consolidated fast summary returned by /api/attendance/home-summary.
+class HomeSummary {
+  final TodayAttendanceDetails todayDetails;
+  final List<Attendance> history;
+  final List<CorrectionRequest> corrections;
+  final int unreadNotificationsCount;
+  final int serverTimeMs;
+
+  const HomeSummary({
+    required this.todayDetails,
+    required this.history,
+    required this.corrections,
+    this.unreadNotificationsCount = 0,
+    required this.serverTimeMs,
+  });
+
+  factory HomeSummary.fromJson(Map<String, dynamic> json) {
+    final today = TodayAttendanceDetails.fromJson(json);
+    final historyList = (json['history'] as List<dynamic>? ?? [])
+        .map((d) => Attendance.fromJson(d as Map<String, dynamic>))
+        .toList();
+    final correctionsList = (json['corrections'] as List<dynamic>? ?? [])
+        .map((c) => CorrectionRequest.fromJson(c as Map<String, dynamic>))
+        .toList();
+
+    return HomeSummary(
+      todayDetails: today,
+      history: historyList,
+      corrections: correctionsList,
+      unreadNotificationsCount: (json['unreadNotificationsCount'] as num?)?.toInt() ?? 0,
+      serverTimeMs: (json['serverTimeMs'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+}
+
