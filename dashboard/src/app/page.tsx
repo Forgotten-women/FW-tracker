@@ -22,12 +22,13 @@ import { NotificationDrawer } from '@/components/NotificationDrawer';
 import { PayrollPanel } from '@/components/PayrollPanel';
 import { OtaPanel } from '@/components/OtaPanel';
 import { WorkstationsPanel } from '@/components/WorkstationsPanel';
+import { ComplaintsManagementPanel } from '@/components/ComplaintsManagementPanel';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, AttendanceCorrection, EnrollmentCode, NotificationItem } from '@/lib/types';
 
-type DashboardTab = 'overview' | 'attendance' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'workforce' | 'payroll' | 'ota';
+type DashboardTab = 'overview' | 'attendance' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -38,6 +39,7 @@ export default function DashboardPage() {
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
   const [notificationDrawerOpen, setNotificationDrawerOpen] = useState<boolean>(false);
   const [toastNotification, setToastNotification] = useState<NotificationItem | null>(null);
+  const [pendingComplaintsCount, setPendingComplaintsCount] = useState<number>(0);
 
   // The admin key lives in sessionStorage
   const unlocked = useSyncExternalStore(subscribeToKey, () => Boolean(getKey()), () => false);
@@ -53,6 +55,13 @@ export default function DashboardPage() {
       const res = await api.notifications();
       setNotifications(res.notifications || []);
       setUnreadNotificationsCount(res.unreadCount || 0);
+    } catch (_) {}
+  }, []);
+
+  const loadComplaintsCount = useCallback(async () => {
+    try {
+      const res = await api.fetchComplaints({ status: 'SUBMITTED' });
+      setPendingComplaintsCount(res.count || 0);
     } catch (_) {}
   }, []);
 
@@ -87,10 +96,12 @@ export default function DashboardPage() {
 
     loadCorrections();
     loadNotifications();
+    loadComplaintsCount();
 
     const handleSse = () => {
       loadCorrections();
       loadNotifications();
+      loadComplaintsCount();
     };
 
     if (typeof window !== 'undefined') {
@@ -100,6 +111,7 @@ export default function DashboardPage() {
     const interval = setInterval(() => {
       loadCorrections();
       loadNotifications();
+      loadComplaintsCount();
     }, 4000);
 
     return () => {
@@ -108,7 +120,7 @@ export default function DashboardPage() {
       }
       clearInterval(interval);
     };
-  }, [unlocked, loadCorrections, loadNotifications]);
+  }, [unlocked, loadCorrections, loadNotifications, loadComplaintsCount]);
 
   const decideCorrection = async (
     id: string,
@@ -227,6 +239,16 @@ export default function DashboardPage() {
       icon: (
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      ),
+    },
+    {
+      id: 'complaints',
+      label: 'Employee Concerns',
+      badge: pendingComplaintsCount,
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
         </svg>
       ),
     },
@@ -391,6 +413,13 @@ export default function DashboardPage() {
             {activeTab === 'documents' && (
               <div className="flex flex-col gap-6">
                 <DocumentVaultPanel />
+              </div>
+            )}
+
+            {/* 6. EMPLOYEE CONCERNS & COMPLAINTS TAB */}
+            {activeTab === 'complaints' && (
+              <div className="flex flex-col gap-6">
+                <ComplaintsManagementPanel />
               </div>
             )}
 

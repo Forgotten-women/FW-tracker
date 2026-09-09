@@ -44,6 +44,8 @@ import type {
   EmployeeAppBacklog,
   MonthlyLeaveReport,
   BankHolidayItem,
+  ComplaintRecord,
+  ComplaintStatus,
 } from './types';
 
 
@@ -749,6 +751,46 @@ export const api = {
     request<{ status: string }>(`/api/admin/anomalies/${encodeURIComponent(id)}/resolve`, {
       method: 'POST',
     }),
+
+  fetchComplaints: (params?: { status?: string; category?: string; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.status && params.status !== 'ALL') q.set('status', params.status);
+    if (params?.category && params.category !== 'ALL') q.set('category', params.category);
+    if (params?.search) q.set('search', params.search);
+    const qs = q.toString();
+    return request<{ status: string; count: number; complaints: ComplaintRecord[] }>(
+      `/api/complaints${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  fetchComplaintDetails: (id: string) =>
+    request<{ status: string; complaint: ComplaintRecord }>(
+      `/api/complaints/${encodeURIComponent(id)}`
+    ),
+
+  updateComplaintStatus: (
+    id: string,
+    data: { status?: ComplaintStatus; hrNotes?: string; resolutionNotes?: string }
+  ) =>
+    request<{
+      status: string;
+      id: string;
+      referenceNumber: string;
+      complaintStatus: ComplaintStatus;
+      hrNotes?: string;
+      resolutionNotes?: string;
+      resolvedAt?: number | null;
+      resolvedAtFormatted?: string | null;
+      resolvedBy?: string | null;
+    }>(`/api/complaints/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  fetchComplaintCategories: () =>
+    request<{ status: string; categories: string[]; statuses: ComplaintStatus[] }>(
+      '/api/complaints/categories'
+    ),
 };
 
 

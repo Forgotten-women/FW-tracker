@@ -19,6 +19,7 @@ import '../widgets/home/productivity_metrics_card.dart';
 import '../widgets/home/shift_hero_card.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
+import 'complaints_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final VoidCallback onSignedOut;
@@ -760,6 +761,55 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             deficit: today.deficitBalance,
                             onDeficitTapped: () => _showDeficitDialog(context, today.deficitBalance),
                           ),
+                          const SizedBox(height: 14),
+
+                          // Confidential Concerns Quick Action Banner
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
+                              );
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceDark,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary.withOpacity(0.15),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Confidential Concerns & HR Issues',
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                                        ),
+                                        SizedBox(height: 2),
+                                        Text(
+                                          'Submit payroll, hours, or workplace concerns to HR',
+                                          style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
+                                ],
+                              ),
+                            ),
+                          ),
                           const SizedBox(height: 20),
 
                           // 4. Today's Working Sessions (if any recorded)
@@ -888,6 +938,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
           ],
+        ),
+
+        // Confidential Concerns Button
+        IconButton(
+          icon: const Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
+          tooltip: 'Confidential Concerns & Complaints',
+          onPressed: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
+            );
+          },
         ),
 
         // Settings Button

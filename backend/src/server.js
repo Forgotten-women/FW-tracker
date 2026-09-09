@@ -127,6 +127,7 @@ app.use('/api/payroll', require('./routes/payroll'));          // payroll prepar
 app.use('/api/hr', require('./routes/hr'));                    // advanced HR alerts & reviews
 app.use('/api/people', require('./routes/people'));            // master record & org structure
 app.use('/api/documents', require('./routes/documents'));       // document vault
+app.use('/api/complaints', require('./routes/complaints'));     // employee complaints & concerns
 app.use('/api/notifications', require('./routes/notifications')); // notifications
 app.use('/api/desktop', require('./routes/desktop'));             // desktop workstation agent
 app.use('/api/app', require('./routes/ota'));                   // OTA app version & releases

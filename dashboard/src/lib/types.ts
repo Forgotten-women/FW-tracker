@@ -849,3 +849,36 @@ export interface MonthlyLeaveReport {
   monthAdjustments: LeaveAdjustmentEntry[];
   monthOptions: MonthOption[];
 }
+
+export interface ComplaintAttachment {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+}
+
+export type ComplaintStatus = 'SUBMITTED' | 'UNDER_REVIEW' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+
+export interface ComplaintRecord {
+  id: string;
+  referenceNumber: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  employeeRole?: string | null;
+  category: string;
+  subject: string;
+  description: string;
+  status: ComplaintStatus;
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  hrNotes?: string | null;
+  resolutionNotes?: string | null;
+  resolvedAt?: number | null;
+  resolvedAtFormatted?: string | null;
+  resolvedBy?: string | null;
+  createdAt: number;
+  createdAtFormatted: string;
+  updatedAt: number;
+  attachments: ComplaintAttachment[];
+}
+

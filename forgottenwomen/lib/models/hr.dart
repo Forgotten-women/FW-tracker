@@ -1067,5 +1067,131 @@ class EmployeePayrollStatement {
   }
 }
 
+class ComplaintAttachment {
+  final String id;
+  final String fileName;
+  final int fileSize;
+  final String mimeType;
+
+  const ComplaintAttachment({
+    required this.id,
+    required this.fileName,
+    required this.fileSize,
+    required this.mimeType,
+  });
+
+  factory ComplaintAttachment.fromJson(Map<String, dynamic> json) => ComplaintAttachment(
+        id: json['id'] as String? ?? '',
+        fileName: json['fileName'] as String? ?? 'attachment',
+        fileSize: (json['fileSize'] as num?)?.toInt() ?? 0,
+        mimeType: json['mimeType'] as String? ?? 'application/octet-stream',
+      );
+}
+
+class ComplaintItem {
+  final String id;
+  final String referenceNumber;
+  final String employeeId;
+  final String employeeName;
+  final String? employeeNumber;
+  final String category;
+  final String subject;
+  final String description;
+  final String status;
+  final String priority;
+  final String? hrNotes;
+  final String? resolutionNotes;
+  final int? resolvedAt;
+  final String? resolvedAtFormatted;
+  final String? resolvedBy;
+  final int createdAt;
+  final String createdAtFormatted;
+  final List<ComplaintAttachment> attachments;
+
+  const ComplaintItem({
+    required this.id,
+    required this.referenceNumber,
+    required this.employeeId,
+    required this.employeeName,
+    this.employeeNumber,
+    required this.category,
+    required this.subject,
+    required this.description,
+    required this.status,
+    this.priority = 'NORMAL',
+    this.hrNotes,
+    this.resolutionNotes,
+    this.resolvedAt,
+    this.resolvedAtFormatted,
+    this.resolvedBy,
+    required this.createdAt,
+    required this.createdAtFormatted,
+    this.attachments = const [],
+  });
+
+  factory ComplaintItem.fromJson(Map<String, dynamic> json) => ComplaintItem(
+        id: json['id'] as String? ?? '',
+        referenceNumber: json['referenceNumber'] as String? ?? '',
+        employeeId: json['employeeId'] as String? ?? '',
+        employeeName: json['employeeName'] as String? ?? '',
+        employeeNumber: json['employeeNumber'] as String?,
+        category: json['category'] as String? ?? '',
+        subject: json['subject'] as String? ?? '',
+        description: json['description'] as String? ?? '',
+        status: json['status'] as String? ?? 'SUBMITTED',
+        priority: json['priority'] as String? ?? 'NORMAL',
+        hrNotes: json['hrNotes'] as String?,
+        resolutionNotes: json['resolutionNotes'] as String?,
+        resolvedAt: (json['resolvedAt'] as num?)?.toInt(),
+        resolvedAtFormatted: json['resolvedAtFormatted'] as String?,
+        resolvedBy: json['resolvedBy'] as String?,
+        createdAt: (json['createdAt'] as num?)?.toInt() ?? 0,
+        createdAtFormatted: json['createdAtFormatted'] as String? ?? '',
+        attachments: (json['attachments'] as List<dynamic>? ?? [])
+            .map((a) => ComplaintAttachment.fromJson(a as Map<String, dynamic>))
+            .toList(),
+      );
+
+  bool get isResolved => status == 'RESOLVED';
+  bool get isClosed => status == 'CLOSED';
+  bool get isUnderReview => status == 'UNDER_REVIEW';
+  bool get isInProgress => status == 'IN_PROGRESS';
+  bool get isSubmitted => status == 'SUBMITTED';
+}
+
+class ComplaintSubmitResult {
+  final String id;
+  final String referenceNumber;
+  final String message;
+  final String status;
+  final String category;
+  final String subject;
+  final int submittedAt;
+  final String submittedAtFormatted;
+
+  const ComplaintSubmitResult({
+    required this.id,
+    required this.referenceNumber,
+    required this.message,
+    required this.status,
+    required this.category,
+    required this.subject,
+    required this.submittedAt,
+    required this.submittedAtFormatted,
+  });
+
+  factory ComplaintSubmitResult.fromJson(Map<String, dynamic> json) => ComplaintSubmitResult(
+        id: json['id'] as String? ?? '',
+        referenceNumber: json['referenceNumber'] as String? ?? '',
+        message: json['message'] as String? ?? 'Complaint submitted successfully.',
+        status: json['complaintStatus'] as String? ?? json['status'] as String? ?? 'SUBMITTED',
+        category: json['category'] as String? ?? '',
+        subject: json['subject'] as String? ?? '',
+        submittedAt: (json['submittedAt'] as num?)?.toInt() ?? 0,
+        submittedAtFormatted: json['submittedAtFormatted'] as String? ?? '',
+      );
+}
+
+
 
 

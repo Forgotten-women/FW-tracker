@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/hr.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
+import 'complaints_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final ApiClient? apiClient;
@@ -120,10 +121,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       _buildEmergencyContactsCard(_profile!.emergencyContacts),
                       const SizedBox(height: 16),
                       _buildKycStatusCard(_profile!),
+                      const SizedBox(height: 16),
+                      _buildComplaintsCard(),
                       const SizedBox(height: 32),
                     ],
                   ),
                 ),
+    );
+  }
+
+  Widget _buildComplaintsCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Employee Concerns & Grievances',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Submit and track confidential HR, payroll, or conduct issues.',
+                  style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                ),
+              ],
+            ),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
+              );
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              visualDensity: VisualDensity.compact,
+            ),
+            child: const Text('Open', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 

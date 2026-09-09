@@ -585,6 +585,76 @@ class ApiClient {
         return EmployeePayrollStatement.fromJson(_decode(res));
       });
 
+  /// Fetches complaint categories and statuses.
+  Future<List<String>> fetchComplaintCategories() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/complaints/categories'), headers: await _authHeaders())
+            .timeout(timeout);
+        final data = _decode(res);
+        return (data['categories'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+      });
+
+  /// Lists all complaints submitted by this employee.
+  Future<List<ComplaintItem>> myComplaints() => _guard(() async {
+        final res = await _http
+            .get(await _uri('/api/complaints/mine'), headers: await _authHeaders())
+            .timeout(timeout);
+        final data = _decode(res);
+        final list = (data['complaints'] as List<dynamic>? ?? [])
+            .map((c) => ComplaintItem.fromJson(c as Map<String, dynamic>))
+            .toList();
+        return list;
+      });
+
+  /// Submits a confidential employee complaint with optional attachments.
+  Future<ComplaintSubmitResult> submitComplaint({
+    required String category,
+    required String subject,
+    required String description,
+    String priority = 'NORMAL',
+    List<String> filePaths = const [],
+  }) => _guard(() async {
+        final token = await _store.readToken();
+        if (token == null || token.isEmpty) {
+          throw ApiException('This device is not enrolled.', code: 'NO_TOKEN');
+        }
+        final uri = await _uri('/api/complaints');
+
+        if (filePaths.isEmpty) {
+          final res = await _http
+              .post(
+                uri,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $token',
+                },
+                body: jsonEncode({
+                  'category': category,
+                  'subject': subject,
+                  'description': description,
+                  'priority': priority,
+                }),
+              )
+              .timeout(timeout);
+          return ComplaintSubmitResult.fromJson(_decode(res));
+        }
+
+        final req = http.MultipartRequest('POST', uri);
+        req.headers['Authorization'] = 'Bearer $token';
+        req.fields['category'] = category;
+        req.fields['subject'] = subject;
+        req.fields['description'] = description;
+        req.fields['priority'] = priority;
+
+        for (final path in filePaths) {
+          req.files.add(await http.MultipartFile.fromPath('files', path));
+        }
+
+        final streamed = await req.send().timeout(timeout);
+        final res = await http.Response.fromStream(streamed);
+        return ComplaintSubmitResult.fromJson(_decode(res));
+      });
+
   /// Unauthenticated reachability check, used by the settings screen so the
   /// user can tell a wrong address apart from a rejected credential.
   Future<bool> health() async {
@@ -600,4 +670,5 @@ class ApiClient {
 
   void dispose() => _http.close();
 }
+
 
