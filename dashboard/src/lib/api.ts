@@ -43,6 +43,7 @@ import type {
   HistoricalLeaveCycle,
   EmployeeAppBacklog,
   MonthlyLeaveReport,
+  BankHolidayItem,
 } from './types';
 
 
@@ -390,8 +391,39 @@ export const api = {
     ),
 
   teamLeaveCalendar: (from?: string, to?: string) =>
-    request<{ status: string; from: string; to: string; leaves: TeamCalendarLeave[] }>(
+    request<{ status: string; from: string; to: string; leaves: TeamCalendarLeave[]; bankHolidays?: BankHolidayItem[] }>(
       `/api/leave/calendar${from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : ''}`,
+    ),
+
+  fetchBankHolidays: (year?: number) =>
+    request<{ status: string; year: number; count: number; holidays: BankHolidayItem[] }>(
+      `/api/leave/bank-holidays${year ? `?year=${year}` : ''}`,
+    ),
+
+  saveYearBankHolidays: (year: number, holidays: Array<{ id?: string; date: string; name: string; notes?: string | null }>) =>
+    request<{ status: string; message: string; holidays: BankHolidayItem[] }>(
+      `/api/leave/bank-holidays/year/${year}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ holidays }),
+      },
+    ),
+
+  saveBankHoliday: (holiday: { id?: string; year?: number; date: string; name: string; notes?: string | null; isActive?: number }) =>
+    request<{ status: string; holiday: BankHolidayItem }>(
+      '/api/leave/bank-holidays',
+      {
+        method: 'POST',
+        body: JSON.stringify(holiday),
+      },
+    ),
+
+  deleteBankHoliday: (id: string) =>
+    request<{ status: string; id: string; deleted: boolean }>(
+      `/api/leave/bank-holidays/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+      },
     ),
 
   adjustLeaveBalance: (

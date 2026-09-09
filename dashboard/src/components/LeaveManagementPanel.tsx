@@ -11,6 +11,7 @@ import type {
   HistoricalLeaveCycle,
   LeaveBalanceDetails,
   MonthlyLeaveReport,
+  BankHolidayItem,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
 
@@ -24,8 +25,8 @@ export function LeaveManagementPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Tabs: 'pending' | 'absences' | 'calendar' | 'all' | 'balances' | 'carry_forward'
-  const [activeTab, setActiveTab] = useState<'pending' | 'absences' | 'calendar' | 'all' | 'balances' | 'carry_forward'>('pending');
+  // Tabs: 'pending' | 'absences' | 'calendar' | 'all' | 'balances' | 'carry_forward' | 'holidays'
+  const [activeTab, setActiveTab] = useState<'pending' | 'absences' | 'calendar' | 'all' | 'balances' | 'carry_forward' | 'holidays'>('pending');
 
   // Filters
   const [historyFilter, setHistoryFilter] = useState<'ALL' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('ALL');
@@ -76,24 +77,37 @@ export function LeaveManagementPanel() {
   const [monthlyReport, setMonthlyReport] = useState<MonthlyLeaveReport | null>(null);
   const [monthlyLoading, setMonthlyLoading] = useState<boolean>(false);
 
+  // Bank Holidays State (5 Designated Annual Days - Configurable only by HR)
+  const [bankHolidays, setBankHolidays] = useState<BankHolidayItem[]>([]);
+  const [calendarBankHolidays, setCalendarBankHolidays] = useState<BankHolidayItem[]>([]);
+  const [holidayYear, setHolidayYear] = useState<number>(new Date().getFullYear());
+  const [showHolidayModal, setShowHolidayModal] = useState<boolean>(false);
+  const [editingHolidays, setEditingHolidays] = useState<Array<{ id?: string; date: string; name: string; notes?: string }>>([]);
+  const [holidaySaving, setHolidaySaving] = useState<boolean>(false);
+  const [holidayModalError, setHolidayModalError] = useState<string | null>(null);
+  const [holidaySuccessMsg, setHolidaySuccessMsg] = useState<string | null>(null);
+
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [pData, rData, bData, cData, aData, appData] = await Promise.all([
+      const [pData, rData, bData, cData, aData, appData, hData] = await Promise.all([
         api.pendingLeaveRequests(),
         api.leaveRequests(historyFilter),
         api.leaveBalances(),
         api.teamLeaveCalendar(),
         api.absences('ALL'),
         api.fetchApproachingAnniversaries().catch(() => ({ employees: [] })),
+        api.fetchBankHolidays(holidayYear).catch(() => ({ holidays: [] })),
       ]);
       setPendingRequests(pData.requests || []);
       setAllRequests(rData.requests || []);
       setBalances(bData.employees || []);
       setCalendarLeaves(cData.leaves || []);
+      setCalendarBankHolidays(cData.bankHolidays || []);
       setAbsences(aData.absences || []);
       setApproachingEmployees(appData.employees || []);
+      setBankHolidays(hData.holidays || []);
     } catch (err: unknown) {
       if (!silent) setError(err instanceof Error ? err.message : 'Failed to load leave data.');
     } finally {
@@ -353,6 +367,63 @@ export function LeaveManagementPanel() {
     );
   });
 
+  const loadYearHolidays = async (year: number) => {
+    setHolidayYear(year);
+    try {
+      const res = await api.fetchBankHolidays(year);
+      setBankHolidays(res.holidays || []);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch bank holidays.');
+    }
+  };
+
+  const openHolidayConfigModal = () => {
+    if (bankHolidays.length > 0) {
+      setEditingHolidays(bankHolidays.map((h) => ({ id: h.id, date: h.date, name: h.name, notes: h.notes || '' })));
+    } else {
+      setEditingHolidays([
+        { date: `${holidayYear}-01-01`, name: "New Year's Day", notes: 'Designated Organisation Bank Holiday' },
+        { date: `${holidayYear}-05-04`, name: 'Early May Bank Holiday', notes: 'Designated Organisation Bank Holiday' },
+        { date: `${holidayYear}-05-25`, name: 'Spring Bank Holiday', notes: 'Designated Organisation Bank Holiday' },
+        { date: `${holidayYear}-08-31`, name: 'Summer Bank Holiday', notes: 'Designated Organisation Bank Holiday' },
+        { date: `${holidayYear}-12-25`, name: 'Christmas Day', notes: 'Designated Organisation Bank Holiday' },
+      ]);
+    }
+    setHolidayModalError(null);
+    setShowHolidayModal(true);
+  };
+
+  const handleSaveHolidays = async () => {
+    setHolidayModalError(null);
+    if (editingHolidays.length === 0) {
+      setHolidayModalError('At least 1 holiday must be provided.');
+      return;
+    }
+    for (const h of editingHolidays) {
+      if (!h.date || !/^\d{4}-\d{2}-\d{2}$/.test(h.date)) {
+        setHolidayModalError(`Invalid date format for "${h.name || 'unnamed'}". Must be YYYY-MM-DD.`);
+        return;
+      }
+      if (!h.name.trim()) {
+        setHolidayModalError(`Holiday title cannot be empty for date ${h.date}.`);
+        return;
+      }
+    }
+    setHolidaySaving(true);
+    try {
+      const res = await api.saveYearBankHolidays(holidayYear, editingHolidays);
+      setBankHolidays(res.holidays || []);
+      setHolidaySuccessMsg(`Successfully saved ${res.holidays.length} approved bank holidays for ${holidayYear}.`);
+      setShowHolidayModal(false);
+      setTimeout(() => setHolidaySuccessMsg(null), 5000);
+      refresh(true);
+    } catch (err: unknown) {
+      setHolidayModalError(err instanceof Error ? err.message : 'Failed to save bank holidays.');
+    } finally {
+      setHolidaySaving(false);
+    }
+  };
+
   return (
     <Panel
       title="Annual Leave & Leave Management (Spec 13, 14 & 15)"
@@ -379,6 +450,16 @@ export function LeaveManagementPanel() {
             className="py-1 px-3 text-xs"
           >
             Team Calendar ({calendarLeaves.length})
+          </Button>
+          <Button
+            variant={activeTab === 'holidays' ? 'primary' : 'ghost'}
+            onClick={() => setActiveTab('holidays')}
+            className="py-1 px-3 text-xs flex items-center gap-1.5"
+          >
+            Public Holidays
+            <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.2 text-[10px] font-bold text-indigo-400 border border-indigo-500/30">
+              5 Days
+            </span>
           </Button>
           <Button
             variant={activeTab === 'balances' ? 'primary' : 'ghost'}
@@ -639,8 +720,48 @@ export function LeaveManagementPanel() {
 
       {/* Tab 2: Team Holiday Calendar & Coverage View (Spec 15.3) */}
       {activeTab === 'calendar' && (
-        <div>
-          <div className="mb-3 flex items-center justify-between">
+        <div className="space-y-4">
+          {/* Designated Bank Holidays in Range */}
+          {calendarBankHolidays.length > 0 && (
+            <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/30 to-surface/80 p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-indigo-300">
+                    Designated Public Holidays in Calendar Range
+                  </span>
+                  <span className="rounded bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold text-indigo-300 border border-indigo-500/30">
+                    Paid Non-Working Day
+                  </span>
+                  <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30">
+                    0 Annual Leave Deduction
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  onClick={() => setActiveTab('holidays')}
+                  className="py-1 px-2.5 text-xs text-indigo-300 hover:text-indigo-200"
+                >
+                  Manage Annual Bank Holidays &rarr;
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
+                {calendarBankHolidays.map((bh) => (
+                  <div key={bh.id} className="rounded-xl bg-surface/90 border border-indigo-500/20 p-3 shadow-sm hover:border-indigo-500/40 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono font-bold text-indigo-400">{bh.date}</span>
+                      <span className="text-[10px] text-emerald-400 font-semibold">Paid Off</span>
+                    </div>
+                    <div className="text-xs font-bold text-text truncate mt-1">{bh.name}</div>
+                    <div className="text-[10px] text-dim mt-1">
+                      {bh.weekday || 'Designated Bank Holiday'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
             <span className="text-xs text-muted">
               Scheduled and active approved leaves across the workforce.
             </span>
@@ -687,6 +808,155 @@ export function LeaveManagementPanel() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tab: Designated Bank Holidays / Public Holidays (Organisation Policy) */}
+      {activeTab === 'holidays' && (
+        <div className="space-y-4">
+          {/* Policy Banner */}
+          <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-background p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-extrabold text-text tracking-tight">
+                    Designated Organisation Bank Holidays
+                  </h3>
+                  <span className="rounded-full bg-indigo-500/20 px-2.5 py-0.5 text-xs font-bold text-indigo-300 border border-indigo-500/40">
+                    5 Approved Days / Year
+                  </span>
+                  <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-bold text-amber-300 border border-amber-500/40">
+                    HR Managed Only
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted leading-relaxed max-w-3xl">
+                  Under the organisation's annual entitlement policy, exactly 5 designated bank holidays are approved per calendar year.
+                  These days appear automatically in the company calendar, are <strong>not counted as employee annual leave</strong>,
+                  do <strong>not reduce paid leave entitlement</strong>, are <strong>excluded from normal absence calculations</strong>, and
+                  are <strong>included in monthly required working hours</strong> as paid non-working days (7.5h credit).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center rounded-lg bg-surface border border-line p-1">
+                  {[holidayYear - 1, holidayYear, holidayYear + 1].map((y) => (
+                    <button
+                      key={y}
+                      onClick={() => loadYearHolidays(y)}
+                      className={`px-3 py-1 text-xs font-bold rounded transition-colors ${
+                        holidayYear === y
+                          ? 'bg-brand text-brand-contrast'
+                          : 'text-muted hover:text-text'
+                      }`}
+                    >
+                      {y}
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  variant="primary"
+                  onClick={openHolidayConfigModal}
+                  className="py-1.5 px-3.5 text-xs font-bold flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                  </svg>
+                  Configure Holidays (HR)
+                </Button>
+              </div>
+            </div>
+
+            {holidaySuccessMsg && (
+              <div className="mt-3 rounded-lg bg-emerald-500/20 border border-emerald-500/40 p-2.5 text-xs font-semibold text-emerald-300 flex items-center gap-2">
+                <span>✓</span>
+                <span>{holidaySuccessMsg}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 5 Designated Holidays List */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-muted">
+              <span>Showing {bankHolidays.length} designated bank holidays for calendar year <strong>{holidayYear}</strong></span>
+              <span className="text-[11px] text-dim">Visible to all employees in advance on mobile & web</span>
+            </div>
+
+            {bankHolidays.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-line p-8 text-center">
+                <p className="text-sm font-semibold text-muted">No bank holidays configured for {holidayYear}.</p>
+                <p className="text-xs text-dim mt-1">Configure the 5 approved organisation holidays for this year.</p>
+                <Button
+                  variant="primary"
+                  onClick={openHolidayConfigModal}
+                  className="mt-3 py-1.5 px-3 text-xs"
+                >
+                  Configure {holidayYear} Holidays
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {bankHolidays.map((h, idx) => (
+                  <div
+                    key={h.id}
+                    className="relative rounded-2xl border border-indigo-500/20 bg-surface/90 hover:bg-raised p-4 transition-all shadow-sm flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="rounded bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold text-indigo-300 border border-indigo-500/30">
+                          Holiday #{idx + 1}
+                        </span>
+                        <span className="text-[10px] font-semibold text-emerald-400">
+                          Approved Paid
+                        </span>
+                      </div>
+
+                      <div className="mt-3">
+                        <span className="text-lg font-extrabold text-text block tracking-tight">
+                          {h.name}
+                        </span>
+                        <div className="mt-1 flex items-center gap-2 text-xs font-mono font-semibold text-indigo-400">
+                          <span>{h.date}</span>
+                          <span>·</span>
+                          <span className="text-dim font-sans">{h.weekday}</span>
+                        </div>
+                      </div>
+
+                      {h.notes && (
+                        <p className="mt-2 text-[11px] text-muted line-clamp-2">
+                          {h.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-line/60 flex items-center justify-between text-[10px] text-dim">
+                      <span>No Leave Deduction</span>
+                      <span className="text-indigo-300 font-medium">7.5h Target Met</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Policy Rules Quick Summary */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 pt-2">
+            <div className="rounded-xl border border-line bg-surface/60 p-3">
+              <div className="text-xs font-bold text-text">📅 Company Calendar</div>
+              <div className="text-[11px] text-muted mt-1">Appears automatically on the team schedule and calendar views.</div>
+            </div>
+            <div className="rounded-xl border border-line bg-surface/60 p-3">
+              <div className="text-xs font-bold text-emerald-400">🛡️ 0 Annual Leave Loss</div>
+              <div className="text-[11px] text-muted mt-1">Leave requests overlapping this date skip it—balance is preserved.</div>
+            </div>
+            <div className="rounded-xl border border-line bg-surface/60 p-3">
+              <div className="text-xs font-bold text-indigo-400">⏱️ Working Hours Credit</div>
+              <div className="text-[11px] text-muted mt-1">Monthly target is reduced by 7.5h per holiday to prevent deficit.</div>
+            </div>
+            <div className="rounded-xl border border-line bg-surface/60 p-3">
+              <div className="text-xs font-bold text-amber-400">🔒 HR Exclusive Edit</div>
+              <div className="text-[11px] text-muted mt-1">Only HR administrators hold permission to alter approved holiday dates.</div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2004,6 +2274,148 @@ export function LeaveManagementPanel() {
               <Button onClick={() => setShowMonthlyModal(false)}>
                 Close Statement
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: HR Configure Designated Bank Holidays */}
+      {showHolidayModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-line bg-surface p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-text flex items-center gap-2">
+                  Configure Designated Bank Holidays ({holidayYear})
+                  <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30">
+                    HR Only
+                  </span>
+                </h3>
+                <p className="text-xs text-muted mt-0.5">
+                  Configure the 5 approved annual bank holiday dates and titles according to company policy.
+                </p>
+              </div>
+              <Button variant="ghost" onClick={() => setShowHolidayModal(false)} className="text-muted hover:text-text py-1 px-2 text-xs">
+                ✕
+              </Button>
+            </div>
+
+            {holidayModalError && (
+              <div className="rounded-lg bg-rose-500/20 border border-rose-500/40 p-2.5 text-xs text-rose-300">
+                {holidayModalError}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>Designated Holidays ({editingHolidays.length} / 5 recommended)</span>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    if (editingHolidays.length >= 5) return;
+                    setEditingHolidays([
+                      ...editingHolidays,
+                      { date: `${holidayYear}-01-01`, name: '', notes: 'Designated Organisation Bank Holiday' },
+                    ]);
+                  }}
+                  disabled={editingHolidays.length >= 5}
+                  className="py-0.5 px-2 text-[11px]"
+                >
+                  + Add Holiday
+                </Button>
+              </div>
+
+              <div className="space-y-2.5">
+                {editingHolidays.map((h, index) => (
+                  <div key={index} className="flex items-center gap-2 rounded-xl border border-line bg-raised/50 p-3">
+                    <span className="text-xs font-bold text-dim w-6 text-center">#{index + 1}</span>
+                    <div className="w-40 shrink-0">
+                      <label className="text-[10px] font-bold text-dim block mb-1">Holiday Date</label>
+                      <Input
+                        type="date"
+                        value={h.date}
+                        onChange={(e) => {
+                          const updated = [...editingHolidays];
+                          updated[index] = { ...updated[index], date: e.target.value };
+                          setEditingHolidays(updated);
+                        }}
+                        className="w-full text-xs py-1"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold text-dim block mb-1">Holiday Title / Name</label>
+                      <Input
+                        type="text"
+                        placeholder="e.g. New Year's Day"
+                        value={h.name}
+                        onChange={(e) => {
+                          const updated = [...editingHolidays];
+                          updated[index] = { ...updated[index], name: e.target.value };
+                          setEditingHolidays(updated);
+                        }}
+                        className="w-full text-xs py-1"
+                      />
+                    </div>
+                    <div className="w-48 hidden sm:block">
+                      <label className="text-[10px] font-bold text-dim block mb-1">Notes (Optional)</label>
+                      <Input
+                        type="text"
+                        placeholder="Notes"
+                        value={h.notes || ''}
+                        onChange={(e) => {
+                          const updated = [...editingHolidays];
+                          updated[index] = { ...updated[index], notes: e.target.value };
+                          setEditingHolidays(updated);
+                        }}
+                        className="w-full text-xs py-1"
+                      />
+                    </div>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        const updated = editingHolidays.filter((_, i) => i !== index);
+                        setEditingHolidays(updated);
+                      }}
+                      className="text-rose-400 hover:text-rose-300 py-1 px-2 text-xs mt-4"
+                      title="Remove Holiday"
+                    >
+                      ✕
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-line pt-3">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setEditingHolidays([
+                    { date: `${holidayYear}-01-01`, name: "New Year's Day", notes: 'Designated Organisation Bank Holiday' },
+                    { date: `${holidayYear}-05-04`, name: 'Early May Bank Holiday', notes: 'Designated Organisation Bank Holiday' },
+                    { date: `${holidayYear}-05-25`, name: 'Spring Bank Holiday', notes: 'Designated Organisation Bank Holiday' },
+                    { date: `${holidayYear}-08-31`, name: 'Summer Bank Holiday', notes: 'Designated Organisation Bank Holiday' },
+                    { date: `${holidayYear}-12-25`, name: 'Christmas Day', notes: 'Designated Organisation Bank Holiday' },
+                  ]);
+                }}
+                className="text-xs text-muted"
+              >
+                Reset to Standard 5
+              </Button>
+
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" onClick={() => setShowHolidayModal(false)} className="text-xs">
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleSaveHolidays}
+                  disabled={holidaySaving}
+                  className="text-xs font-bold bg-indigo-600 hover:bg-indigo-500"
+                >
+                  {holidaySaving ? 'Saving…' : 'Save Changes (HR Only)'}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

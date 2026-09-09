@@ -162,6 +162,36 @@ class LeavePreview {
       );
 }
 
+class BankHoliday {
+  final String id;
+  final int year;
+  final String date;
+  final String name;
+  final String? notes;
+  final String weekday;
+  final bool isPaid;
+
+  const BankHoliday({
+    required this.id,
+    required this.year,
+    required this.date,
+    required this.name,
+    this.notes,
+    required this.weekday,
+    this.isPaid = true,
+  });
+
+  factory BankHoliday.fromJson(Map<String, dynamic> json) => BankHoliday(
+        id: json['id'] as String? ?? '',
+        year: (json['year'] as num?)?.toInt() ?? DateTime.now().year,
+        date: json['date'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        notes: json['notes'] as String?,
+        weekday: json['weekday'] as String? ?? '',
+        isPaid: json['isPaid'] as bool? ?? true,
+      );
+}
+
 class MonthOption {
   final String monthKey;
   final String label;

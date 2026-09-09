@@ -268,6 +268,17 @@ class ApiClient {
         return MonthlyLeaveReport.fromJson(body['report'] as Map<String, dynamic>);
       });
 
+  Future<List<BankHoliday>> fetchBankHolidays({int? year}) => _guard(() async {
+        final query = year != null ? {'year': year.toString()} : null;
+        final res = await _http
+            .get(await _uri('/api/leave/bank-holidays', query), headers: await _authHeaders())
+            .timeout(timeout);
+        final body = _decode(res);
+        return (body['holidays'] as List<dynamic>? ?? [])
+            .map((h) => BankHoliday.fromJson(h as Map<String, dynamic>))
+            .toList();
+      });
+
   Future<List<LeaveType>> leaveTypes() => _guard(() async {
         final res = await _http
             .get(await _uri('/api/leave/types'), headers: await _authHeaders())

@@ -23,7 +23,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
   List<LeaveRequest> _requests = const [];
   List<EmployeeAbsenceRecord> _absences = const [];
   MonthlyLeaveReport? _monthlyReport;
-  int _selectedTab = 0; // 0: Overview, 1: Monthly Statement
+  List<BankHoliday> _bankHolidays = const [];
+  int _selectedTab = 0; // 0: Overview, 1: Monthly Statement, 2: Public Holidays
   bool _loading = true;
   bool _loadingMonthly = false;
   String? _selectedMonthKey;
@@ -49,17 +50,20 @@ class _LeaveScreenState extends State<LeaveScreen> {
         _api.myLeave(),
         _api.myAbsences(),
         _api.fetchMonthlyLeaveReport(month: _selectedMonthKey),
+        _api.fetchBankHolidays(),
       ]);
       if (!mounted) return;
       final leaveData = results[0] as Map<String, dynamic>;
       final absList = results[1] as List<EmployeeAbsenceRecord>;
       final report = results[2] as MonthlyLeaveReport;
+      final holidays = results[3] as List<BankHoliday>;
 
       setState(() {
         _balance = leaveData['balance'] as LeaveBalance;
         _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
         _absences = absList;
         _monthlyReport = report;
+        _bankHolidays = holidays;
         _selectedMonthKey ??= report.monthKey;
         _error = null;
       });
@@ -76,17 +80,20 @@ class _LeaveScreenState extends State<LeaveScreen> {
         _api.myLeave(),
         _api.myAbsences(),
         _api.fetchMonthlyLeaveReport(month: _selectedMonthKey),
+        _api.fetchBankHolidays(),
       ]);
       if (!mounted) return;
       final leaveData = results[0] as Map<String, dynamic>;
       final absList = results[1] as List<EmployeeAbsenceRecord>;
       final report = results[2] as MonthlyLeaveReport;
+      final holidays = results[3] as List<BankHoliday>;
 
       setState(() {
         _balance = leaveData['balance'] as LeaveBalance;
         _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
         _absences = absList;
         _monthlyReport = report;
+        _bankHolidays = holidays;
         _selectedMonthKey ??= report.monthKey;
         _error = null;
         _loading = false;
@@ -207,7 +214,9 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 : RefreshIndicator(
                     color: AppColors.primary,
                     onRefresh: _load,
-                    child: _selectedTab == 0 ? _overviewTab() : _monthlyStatementTab(),
+                    child: _selectedTab == 0
+                        ? _overviewTab()
+                        : (_selectedTab == 1 ? _monthlyStatementTab() : _bankHolidaysTab()),
                   ),
           ),
         ],
@@ -238,14 +247,14 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.dashboard_outlined, size: 15, color: _selectedTab == 0 ? Colors.white : AppColors.textMuted),
-                        const SizedBox(width: 6),
+                        Icon(Icons.dashboard_outlined, size: 14, color: _selectedTab == 0 ? Colors.white : AppColors.textMuted),
+                        const SizedBox(width: 4),
                         Text(
                           'Overview',
                           style: TextStyle(
                             color: _selectedTab == 0 ? Colors.white : AppColors.textMuted,
                             fontWeight: _selectedTab == 0 ? FontWeight.bold : FontWeight.normal,
-                            fontSize: 13,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -267,14 +276,43 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.calendar_month_outlined, size: 15, color: _selectedTab == 1 ? Colors.white : AppColors.textMuted),
-                        const SizedBox(width: 6),
+                        Icon(Icons.calendar_month_outlined, size: 14, color: _selectedTab == 1 ? Colors.white : AppColors.textMuted),
+                        const SizedBox(width: 4),
                         Text(
-                          'Monthly Statement',
+                          'Statement',
                           style: TextStyle(
                             color: _selectedTab == 1 ? Colors.white : AppColors.textMuted,
                             fontWeight: _selectedTab == 1 ? FontWeight.bold : FontWeight.normal,
-                            fontSize: 13,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _selectedTab = 2),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    color: _selectedTab == 2 ? AppColors.primary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.beach_access_outlined, size: 14, color: _selectedTab == 2 ? Colors.white : AppColors.textMuted),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Holidays (${_bankHolidays.length})',
+                          style: TextStyle(
+                            color: _selectedTab == 2 ? Colors.white : AppColors.textMuted,
+                            fontWeight: _selectedTab == 2 ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -1307,6 +1345,284 @@ class _LeaveScreenState extends State<LeaveScreen> {
               style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _bankHolidaysTab() {
+    final year = DateTime.now().year;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      children: [
+        // Organisation Policy Card
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                const Color(0xFF4F46E5).withOpacity(0.25),
+                AppColors.surfaceDark,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.4)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withOpacity(0.25),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.beach_access, size: 20, color: Color(0xFFA5B4FC)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Annual Bank Holidays Policy',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '5 Designated Organisation Public Holidays ($year)',
+                          style: const TextStyle(
+                            color: Color(0xFFA5B4FC),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                    ),
+                    child: const Text(
+                      'HR Set',
+                      style: TextStyle(
+                        color: Colors.amberAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Our organisation designates exactly 5 approved public holidays each year. These dates are approved in advance and have special entitlement rules:',
+                style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+              _policyBullet(Icons.check_circle_outline, 'Paid Day Off: 7.5h credited to your monthly required working hours target.'),
+              const SizedBox(height: 5),
+              _policyBullet(Icons.shield_outlined, 'No Leave Deduction: Never reduces or deducts from your 20-day annual leave balance.'),
+              const SizedBox(height: 5),
+              _policyBullet(Icons.alarm_off_outlined, 'No Absence Trigger: Automatically excluded from morning absence monitoring.'),
+              const SizedBox(height: 5),
+              _policyBullet(Icons.lock_outline, 'HR Configured: Exact approved dates & titles are managed strictly by HR each year.'),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 18),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'DESIGNATED HOLIDAYS (${_bankHolidays.length})',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.1,
+                color: AppColors.textMuted,
+              ),
+            ),
+            const Text(
+              'Visible in Advance',
+              style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        if (_bankHolidays.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceDark,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Center(
+              child: Text(
+                'No bank holidays found for this year.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+              ),
+            ),
+          )
+        else
+          ..._bankHolidays.asMap().entries.map((entry) {
+            final idx = entry.key;
+            final h = entry.value;
+            return _bankHolidayCard(idx + 1, h);
+          }),
+      ],
+    );
+  }
+
+  Widget _policyBullet(IconData icon, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 14, color: const Color(0xFFA5B4FC)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.3),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bankHolidayCard(int index, BankHoliday h) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '#$index',
+                  style: const TextStyle(
+                    color: Color(0xFFA5B4FC),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  h.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.teal.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.teal.withOpacity(0.3)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check, size: 11, color: AppColors.teal),
+                    SizedBox(width: 3),
+                    Text(
+                      'Paid Off',
+                      style: TextStyle(
+                        color: AppColors.teal,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.calendar_today_outlined, size: 13, color: AppColors.textMuted),
+              const SizedBox(width: 6),
+              Text(
+                h.date,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '·  ${h.weekday}',
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+              ),
+            ],
+          ),
+          if (h.notes != null && h.notes!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              h.notes!,
+              style: const TextStyle(color: Colors.white60, fontSize: 11),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.star_outline, size: 12, color: Color(0xFFA5B4FC)),
+                SizedBox(width: 5),
+                Text(
+                  '0 Annual Leave Deducted · 7.5h Monthly Target Credit',
+                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

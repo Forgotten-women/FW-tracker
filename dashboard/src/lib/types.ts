@@ -358,6 +358,20 @@ export interface TeamCalendarLeave {
   days: number;
 }
 
+export interface BankHolidayItem {
+  id: string;
+  year: number;
+  date: string;
+  name: string;
+  notes?: string | null;
+  isActive?: boolean;
+  weekday?: string;
+  isPaid?: boolean;
+  dayType?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 export interface LeaveTypeItem {
   id: string;
   name: string;

@@ -10,6 +10,7 @@ const {
 const L = require('../domain/leave');
 const rbac = require('../domain/rbac');
 const T = require('../util/time');
+const holidays = require('../domain/holidays');
 
 function presentBalance(b) {
   if (!b || b.blocked) {
@@ -308,6 +309,8 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) =>
     ORDER BY r.start_date ASC
   `).all(to, from)).filter(r => visible.has(r.employee_id));
 
+  const bankHolidays = await holidays.getBankHolidaysBetween(from, to);
+
   res.json({
     status: 'SUCCESS',
     from,
@@ -322,6 +325,7 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) =>
       to: r.end_date,
       days: r.total_days,
     })),
+    bankHolidays,
   });
 });
 
@@ -498,5 +502,75 @@ router.get('/employee/:employeeId/monthly-report',
       res.status(500).json({ status: 'ERROR', message: err.message });
     }
   });
+
+// ---------------------------------------------------------------------------
+// Designated Bank Holidays / Public Holidays
+// ---------------------------------------------------------------------------
+
+// Accessible to employees (mobile app) & HR/Admin
+router.get('/bank-holidays', async (req, res, next) => {
+  if (req.headers['x-device-token']) {
+    return requireDevice(req, res, next);
+  }
+  return requireUserOrAdminKey('leave.read')(req, res, next);
+}, async (req, res) => {
+  try {
+    const year = req.query.year ? Number(req.query.year) : null;
+    const list = await holidays.listBankHolidays(year);
+    res.json({
+      status: 'SUCCESS',
+      year: year || new Date().getFullYear(),
+      count: list.length,
+      holidays: list,
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// Strictly HR / Admin only: update/configure the 5 designated bank holidays for a year
+router.post('/bank-holidays/year/:year', requireUserOrAdminKey('leave.write'), async (req, res) => {
+  try {
+    const year = Number(req.params.year);
+    const { holidays: holidayList } = req.body;
+    if (!Array.isArray(holidayList)) {
+      return res.status(400).json({ status: 'ERROR', message: 'Holidays array is required.' });
+    }
+    const updated = await holidays.setYearBankHolidays(year, holidayList);
+    res.json({
+      status: 'SUCCESS',
+      message: `Successfully configured ${updated.length} bank holidays for ${year}.`,
+      holidays: updated,
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// Strictly HR / Admin only: save/upsert a single bank holiday
+router.post('/bank-holidays', requireUserOrAdminKey('leave.write'), async (req, res) => {
+  try {
+    const holiday = await holidays.saveBankHoliday(req.body);
+    res.json({
+      status: 'SUCCESS',
+      holiday,
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// Strictly HR / Admin only: delete a bank holiday
+router.delete('/bank-holidays/:id', requireUserOrAdminKey('leave.write'), async (req, res) => {
+  try {
+    const result = await holidays.deleteBankHoliday(req.params.id);
+    res.json({
+      status: 'SUCCESS',
+      ...result,
+    });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
 
 module.exports = router;

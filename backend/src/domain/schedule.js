@@ -17,6 +17,7 @@
 const { db } = require('../db');
 const { config } = require('../config');
 const T = require('../util/time');
+const holidays = require('./holidays');
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
@@ -76,6 +77,33 @@ async function resolve(employeeId, dateKey = T.dateKey()) {
   const day = weekdayKey(dateKey);
   let isWorkingDay = workingDays.includes(day);
   let nonWorkingReason = isWorkingDay ? null : 'Rest day';
+
+  // 1. Designated Bank / Public Holidays (Organisation-wide policy: 5 approved days)
+  const bankHoliday = await holidays.isBankHoliday(dateKey);
+  if (bankHoliday && bankHoliday.isActive) {
+    isWorkingDay = false;
+    nonWorkingReason = bankHoliday.name;
+    return {
+      employeeId,
+      dateKey,
+      patternId: pattern?.id || null,
+      patternName: pattern?.name || 'Organisation default',
+      isWorkingDay: false,
+      nonWorkingReason: bankHoliday.name,
+      calendarDayType: 'PUBLIC_HOLIDAY',
+      isPaidNonWorkingDay: true,
+      startTime,
+      endTime,
+      permittedBreakMinutes,
+      dayEquivalentMinutes,
+      graceMinutes,
+      officeId: row?.office_id || null,
+      scheduledStartAt: T.wallClockToEpoch(dateKey, startTime),
+      scheduledEndAt: T.wallClockToEpoch(dateKey, endTime),
+      latestOnTimeAt: T.wallClockToEpoch(dateKey, startTime) + graceMinutes * 60000 + 59999,
+      bankHoliday,
+    };
+  }
 
   // Office calendar. Spec 16: an employee must not lose annual leave for a day
   // configured as a paid office closure.
