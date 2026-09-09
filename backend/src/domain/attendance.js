@@ -144,13 +144,15 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const firstIn = manualIn ? manualIn.occurred_at : presence.firstInAt;
   const lastSeen = manualOut ? manualOut.occurred_at : presence.lastActiveAt;
 
-  // Active shift worked minutes strictly count from scheduled start time onwards (e.g. 11:00 AM).
+  // Active shift worked minutes strictly count within the scheduled window (e.g. 11:00 AM to 7:00 PM).
   // Check-in before scheduled start is recorded in firstInAt but does not accumulate worked shift minutes.
+  // Staying past scheduled end is recorded in lastSeenAt and overtimeMinutes, but does not inflate standard shift worked minutes.
   let shiftWorkedMinutes = 0;
   if (s.isWorkingDay && s.scheduledStartAt) {
     shiftWorkedMinutes = (presence.sessions || []).reduce((acc, sess) => {
       const start = Math.max(sess.start, s.scheduledStartAt);
-      const end = Math.max(sess.end, s.scheduledStartAt);
+      const end = s.scheduledEndAt ? Math.min(sess.end, s.scheduledEndAt) : sess.end;
+      if (end <= start) return acc;
       return acc + Math.max(0, Math.round((end - start) / MIN));
     }, 0);
   } else {
@@ -737,11 +739,11 @@ function formatHoursMinutes(minutes) {
 
 /**
  * Calculates working hours metrics across Daily, Weekly, and Monthly windows.
- * Based on the policy of 7h 30m (450 mins) required working time per working day.
+ * Based on the policy of 8h 00m (480 mins) required working time per working day (11:00 AM - 7:00 PM, including 30m break).
  */
 async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), existingDay = null) {
   const sched = await schedule.resolve(employeeId, dateKey);
-  const targetPerDay = sched.requiredWorkingMinutes || config.office.requiredDailyWorkingMinutes || 450; // 450 = 7h 30m
+  const targetPerDay = sched.requiredWorkingMinutes || config.office.requiredDailyWorkingMinutes || 480; // 480 = 8h 00m
 
   const todayDay = existingDay || await deriveDay(employeeId, dateKey);
   const isWorkingDay = sched.isWorkingDay;

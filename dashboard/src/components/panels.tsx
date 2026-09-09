@@ -603,7 +603,7 @@ export function AttendanceTable({
               <th className="px-3 py-3.5">First In</th>
               <th className="px-3 py-3.5">Last Seen</th>
               <th className="px-3 py-3.5">Sessions</th>
-              <th className="px-3 py-3.5">Worked (7h 30m Target)</th>
+              <th className="px-3 py-3.5">Worked (8h 00m Target)</th>
               <th className="px-3 py-3.5">Break Taken</th>
               <th className="px-3 py-3.5">Deficit</th>
               <th className="px-4 py-3.5 text-right">Status</th>
@@ -665,11 +665,11 @@ export function AttendanceTable({
                         <div className="mt-1">
                           {isTargetMet ? (
                             <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/20">
-                              ✓ 7h 30m met {extraMins > 0 ? `(+${Math.floor(extraMins / 60)}h ${extraMins % 60}m)` : ''}
+                              ✓ 8h 00m met {extraMins > 0 ? `(+${Math.floor(extraMins / 60)}h ${extraMins % 60}m)` : ''}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 border border-amber-500/20">
-                              ⏳ Short: {Math.floor(shortMins / 60)}h {shortMins % 60}m of 7h 30m
+                              ⏳ Short: {Math.floor(shortMins / 60)}h {shortMins % 60}m of 8h 00m
                             </span>
                           )}
                         </div>
@@ -771,13 +771,13 @@ export function AttendanceTable({
                       {h.adjustmentNote ? h.adjustmentNote : '—'}
                     </td>
                     <td className="px-3 py-3.5">
-                      {h.totalMinutes >= 450 ? (
+                      {h.totalMinutes >= 480 ? (
                         <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/20">
-                          ✓ 7h 30m met {h.totalMinutes > 450 ? `(+${Math.floor((h.totalMinutes - 450) / 60)}h ${(h.totalMinutes - 450) % 60}m)` : ''}
+                          ✓ 8h 00m met {h.totalMinutes > 480 ? `(+${Math.floor((h.totalMinutes - 480) / 60)}h ${(h.totalMinutes - 480) % 60}m)` : ''}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 border border-amber-500/20">
-                          ⏳ Short: {Math.floor((450 - h.totalMinutes) / 60)}h {(450 - h.totalMinutes) % 60}m
+                          ⏳ Short: {Math.floor((480 - h.totalMinutes) / 60)}h {(480 - h.totalMinutes) % 60}m
                         </span>
                       )}
                     </td>
@@ -1733,7 +1733,7 @@ export function EmployeeProfileModal({
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[11px]">Required Working Time</span>
-                    <span className="font-semibold text-teal-300">7h 30m / day (37.5h / wk)</span>
+                    <span className="font-semibold text-teal-300">8h 00m / day (40h / wk)</span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[11px]">Paid Break</span>

@@ -20,11 +20,9 @@ class ProductivityMetricsCard extends StatelessWidget {
     final bool hasDeficit = deficit.minutes > 0;
     final Color deficitTone = hasDeficit ? AppColors.amber : AppColors.teal;
 
-    final weeklyTarget = workingHours.weekly.formattedRequiredToDate != '0h 00m'
-        ? workingHours.weekly.formattedRequiredToDate
-        : (workingHours.weekly.formattedRequired != '0h 00m'
-            ? workingHours.weekly.formattedRequired
-            : '37h 30m');
+    final weeklyTarget = workingHours.weekly.formattedRequired != '0h 00m'
+        ? workingHours.weekly.formattedRequired
+        : '40h 00m';
 
     return Container(
       padding: const EdgeInsets.all(16),

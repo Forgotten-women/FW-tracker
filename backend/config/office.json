@@ -126,7 +126,7 @@
     "fri"
   ],
   "permittedBreakMinutes": 30,
-  "requiredDailyWorkingMinutes": 450,
+  "requiredDailyWorkingMinutes": 480,
   "dayEquivalentMinutes": 480,
   "latenessGraceMinutes": 10,
   "_comment_grace": "CONFIRMED by Forgotten Women: 10 minute grace period. With an 11:00 start that means arrivals up to 11:10 (such as 11:01 or 11:10) are on time (0 late minutes, 0 deficit). Arrivals from 11:11 onwards are late with deficit measured beyond grace (at 11:11, deficit is 1 min).",

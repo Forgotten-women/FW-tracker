@@ -47,8 +47,8 @@ class ShiftHeroCard extends StatelessWidget {
       statusLabel = 'NOT CHECKED IN';
     }
 
-    // Daily target is 7h 30m = 450 minutes
-    const int targetMinutes = 450;
+    // Daily target is 8h 00m = 480 minutes
+    const int targetMinutes = 480;
 
     // Real-time live worked time: increment with local clock when employee is active
     int extraMinutes = 0;
@@ -194,7 +194,7 @@ class ShiftHeroCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Target: 7h 30m • $remainingFormatted',
+              'Target: 8h 00m • $remainingFormatted',
               style: const TextStyle(
                 fontSize: 12,
                 color: AppColors.textMuted,

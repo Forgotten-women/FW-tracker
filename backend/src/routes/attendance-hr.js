@@ -55,6 +55,11 @@ router.get('/home-summary', requireDevice, async (req, res) => {
   ).all(employeeId, ...pastKeys);
   const cachedMap = new Map(cachedRows.map(r => [r.date_key, r]));
 
+  const summaryRows = await db.prepare(
+    `SELECT * FROM attendance_daily_summary WHERE employee_id = ? AND date_key IN (${placeholders})`
+  ).all(employeeId, ...pastKeys);
+  const summaryMap = new Map(summaryRows.map(r => [r.date_key, r]));
+
   const historyDays = await Promise.all(
     dayKeys.map(async (key, idx) => {
       if (idx === 0 && day.presence) {
@@ -64,13 +69,15 @@ router.get('/home-summary', requireDevice, async (req, res) => {
       if (cached) {
         let sessions = [];
         try { sessions = JSON.parse(cached.sessions_json || '[]'); } catch (_) {}
+        const summ = summaryMap.get(key);
+        const workedMins = (summ && summ.worked_minutes != null) ? summ.worked_minutes : cached.total_minutes;
         const d = {
           employeeId,
           dateKey: key,
           firstInAt: cached.first_in_at,
           lastActiveAt: cached.last_active_at,
           sessions,
-          totalMinutes: cached.total_minutes,
+          totalMinutes: workedMins,
           status: cached.status,
           statusLabel: cached.status === 'IN_OFFICE' ? 'Active in Office' : (cached.status === 'CLOSED' ? 'Day closed' : (cached.status || 'Not Arrived Yet')),
           inactivityMinutes: 0,

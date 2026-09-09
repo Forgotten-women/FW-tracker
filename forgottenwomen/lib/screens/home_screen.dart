@@ -115,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _buildDeficitRow('HR Approved Adjustments', '-${b.approvedAdjustmentMinutes} mins', isPositive: true),
             const Divider(height: 20, color: AppColors.border),
             const Text(
-              'Deficit time accumulates when working less than 7h 30m or overstaying the 30-minute break. Submit a dispute if this is inaccurate.',
+              'Deficit time accumulates when working less than 8h 00m or overstaying the 30-minute break. Submit a dispute if this is inaccurate.',
               style: TextStyle(fontSize: 11, color: AppColors.textMuted, height: 1.4),
             ),
           ],

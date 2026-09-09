@@ -46,25 +46,27 @@ class _LeaveScreenState extends State<LeaveScreen> {
 
   Future<void> _loadSilently() async {
     try {
-      final results = await Future.wait([
-        _api.myLeave(),
-        _api.myAbsences(),
-        _api.fetchMonthlyLeaveReport(month: _selectedMonthKey),
-        _api.fetchBankHolidays(),
-      ]);
+      final leaveFuture = _api.myLeave();
+      final absFuture = _api.myAbsences().catchError((_) => <EmployeeAbsenceRecord>[]);
+      final reportFuture = _api.fetchMonthlyLeaveReport(month: _selectedMonthKey).catchError((_) => null);
+      final holidaysFuture = _api.fetchBankHolidays().catchError((_) => <BankHoliday>[]);
+
+      final leaveData = await leaveFuture;
+      final absList = await absFuture;
+      final report = await reportFuture;
+      final holidays = await holidaysFuture;
+
       if (!mounted) return;
-      final leaveData = results[0] as Map<String, dynamic>;
-      final absList = results[1] as List<EmployeeAbsenceRecord>;
-      final report = results[2] as MonthlyLeaveReport;
-      final holidays = results[3] as List<BankHoliday>;
 
       setState(() {
         _balance = leaveData['balance'] as LeaveBalance;
         _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
         _absences = absList;
-        _monthlyReport = report;
+        if (report != null) {
+          _monthlyReport = report;
+          _selectedMonthKey ??= report.monthKey;
+        }
         _bankHolidays = holidays;
-        _selectedMonthKey ??= report.monthKey;
         _error = null;
       });
 
@@ -76,25 +78,27 @@ class _LeaveScreenState extends State<LeaveScreen> {
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait([
-        _api.myLeave(),
-        _api.myAbsences(),
-        _api.fetchMonthlyLeaveReport(month: _selectedMonthKey),
-        _api.fetchBankHolidays(),
-      ]);
+      final leaveFuture = _api.myLeave();
+      final absFuture = _api.myAbsences().catchError((_) => <EmployeeAbsenceRecord>[]);
+      final reportFuture = _api.fetchMonthlyLeaveReport(month: _selectedMonthKey).catchError((_) => null);
+      final holidaysFuture = _api.fetchBankHolidays().catchError((_) => <BankHoliday>[]);
+
+      final leaveData = await leaveFuture;
+      final absList = await absFuture;
+      final report = await reportFuture;
+      final holidays = await holidaysFuture;
+
       if (!mounted) return;
-      final leaveData = results[0] as Map<String, dynamic>;
-      final absList = results[1] as List<EmployeeAbsenceRecord>;
-      final report = results[2] as MonthlyLeaveReport;
-      final holidays = results[3] as List<BankHoliday>;
 
       setState(() {
         _balance = leaveData['balance'] as LeaveBalance;
         _requests = (leaveData['requests'] as List).cast<LeaveRequest>();
         _absences = absList;
-        _monthlyReport = report;
+        if (report != null) {
+          _monthlyReport = report;
+          _selectedMonthKey ??= report.monthKey;
+        }
         _bankHolidays = holidays;
-        _selectedMonthKey ??= report.monthKey;
         _error = null;
         _loading = false;
         _loadingMonthly = false;
@@ -103,6 +107,13 @@ class _LeaveScreenState extends State<LeaveScreen> {
       if (!mounted) return;
       setState(() {
         _error = e.message;
+        _loading = false;
+        _loadingMonthly = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not load leave data: $e';
         _loading = false;
         _loadingMonthly = false;
       });

@@ -76,8 +76,8 @@ router.get('/summary', async (req, res) => {
       officeName: config.office.officeName,
       networks: (config.office.networks || []).map(n => `${n.ssid} (${n.band}GHz)`),
       workHours: `${config.workStartTime} - ${config.workEndTime}`,
-      requiredDailyWorkingHours: '7h 30m',
-      requiredDailyWorkingMinutes: 450,
+      requiredDailyWorkingHours: '8h 00m',
+      requiredDailyWorkingMinutes: 480,
       activeThreshold: `${config.activeThresholdMinutes} mins`,
       gracePeriod: `${config.gracePeriodMinutes} mins`,
       // Three states, not two. "4 listed but not enforced" is a genuinely

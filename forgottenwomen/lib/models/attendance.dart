@@ -545,7 +545,7 @@ class WorkingHoursMetrics {
     this.daily = const WorkingHoursPeriod(),
     this.weekly = const WorkingHoursPeriod(),
     this.monthly = const WorkingHoursPeriod(),
-    this.targetDailyHours = '7h 30m',
+    this.targetDailyHours = '8h 00m',
     this.officeWindow = '11:00 – 19:00',
   });
 
@@ -556,7 +556,7 @@ class WorkingHoursMetrics {
       daily: WorkingHoursPeriod.fromJson(json['daily'] as Map<String, dynamic>?),
       weekly: WorkingHoursPeriod.fromJson(json['weekly'] as Map<String, dynamic>?),
       monthly: WorkingHoursPeriod.fromJson(json['monthly'] as Map<String, dynamic>?),
-      targetDailyHours: policy?['targetDailyHoursFormatted'] as String? ?? '7h 30m',
+      targetDailyHours: policy?['targetDailyHoursFormatted'] as String? ?? '8h 00m',
       officeWindow: policy?['officeWindow'] as String? ?? '11:00 – 19:00',
     );
   }

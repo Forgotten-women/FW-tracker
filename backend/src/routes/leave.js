@@ -3,9 +3,11 @@
 const express = require('express');
 const router = express.Router();
 
+const { config } = require('../config');
 const { db } = require('../db');
 const {
   requireDevice, requireUser, requirePermission, requireEmployeeAccess, requireUserOrAdminKey,
+  sha256, safeEqual,
 } = require('../middleware/auth');
 const L = require('../domain/leave');
 const rbac = require('../domain/rbac');
@@ -509,9 +511,28 @@ router.get('/employee/:employeeId/monthly-report',
 
 // Accessible to employees (mobile app) & HR/Admin
 router.get('/bank-holidays', async (req, res, next) => {
-  if (req.headers['x-device-token']) {
+  const supplied = req.headers['x-admin-key'];
+  if (supplied && config.adminApiKey && safeEqual(supplied, config.adminApiKey)) {
+    return next();
+  }
+
+  const authHeader = req.headers.authorization || '';
+  const token = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null)
+    || req.headers['x-device-token']
+    || req.headers['x-session-token'];
+
+  if (!token) {
+    return res.status(401).json({ status: 'ERROR', code: 'NO_TOKEN', message: 'Authentication required.' });
+  }
+
+  // 1. Check if token belongs to an enrolled mobile device
+  const tokenHash = sha256(token);
+  const isDevice = await db.prepare('SELECT 1 FROM device_tokens WHERE token_hash = ?').get(tokenHash);
+  if (isDevice) {
     return requireDevice(req, res, next);
   }
+
+  // 2. Otherwise authenticate as dashboard user session
   return requireUserOrAdminKey('leave.read')(req, res, next);
 }, async (req, res) => {
   try {

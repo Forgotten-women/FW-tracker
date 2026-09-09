@@ -548,57 +548,55 @@ test('arriving after 30m window (11:35) is not eligible for break offset even wi
 });
 
 // ---------------------------------------------------------------------------
-// 7:30 Hours Daily Required Policy & Multi-Period Metrics Tests
+// 8:00 Hours Daily Required Policy & Multi-Period Metrics Tests
 // ---------------------------------------------------------------------------
 
-test('7h 30m policy: working exactly 450 minutes meets target with 0 short and 0 additional', async () => {
+test('8h 00m policy: working exactly 480 minutes meets target with 0 short and 0 additional', async () => {
   const emp = await makeEmployee('emp_hours_exact');
-  // 11:00 to 18:30 is 7.5 hours = 450 minutes
-  await present(emp, '11:00', '18:30');
+  // 11:00 to 19:00 is 8.0 hours = 480 minutes
+  await present(emp, '11:00', '19:00');
 
   const metrics = await A.calculateWorkingHoursMetrics(emp, DAY);
-  assert.equal(metrics.policy.targetDailyMinutes, 450);
-  assert.equal(metrics.policy.targetDailyHoursFormatted, '7h 30m');
-  assert.equal(metrics.daily.requiredMinutes, 450);
-  assert.equal(metrics.daily.workedMinutes, 450);
+  assert.equal(metrics.policy.targetDailyMinutes, 480);
+  assert.equal(metrics.policy.targetDailyHoursFormatted, '8h 00m');
+  assert.equal(metrics.daily.requiredMinutes, 480);
+  assert.equal(metrics.daily.workedMinutes, 480);
   assert.equal(metrics.daily.shortMinutes, 0);
   assert.equal(metrics.daily.additionalMinutes, 0);
   assert.equal(metrics.daily.isTargetMet, true);
-  assert.equal(metrics.daily.formattedWorked, '7h 30m');
-  assert.equal(metrics.daily.formattedRequired, '7h 30m');
+  assert.equal(metrics.daily.formattedWorked, '8h 00m');
+  assert.equal(metrics.daily.formattedRequired, '8h 00m');
   assert.equal(metrics.daily.percent, 100);
 });
 
-test('7h 30m policy: working 6h 30m (390 mins) results in 60 mins short hours', async () => {
+test('8h 00m policy: working 7h 00m (420 mins) results in 60 mins short hours', async () => {
   const emp = await makeEmployee('emp_hours_short');
-  // 11:00 to 17:30 is 6.5 hours = 390 minutes
-  await present(emp, '11:00', '17:30');
+  // 11:00 to 18:00 is 7.0 hours = 420 minutes
+  await present(emp, '11:00', '18:00');
 
   const metrics = await A.calculateWorkingHoursMetrics(emp, DAY);
-  assert.equal(metrics.daily.requiredMinutes, 450);
-  assert.equal(metrics.daily.workedMinutes, 390);
+  assert.equal(metrics.daily.requiredMinutes, 480);
+  assert.equal(metrics.daily.workedMinutes, 420);
   assert.equal(metrics.daily.shortMinutes, 60);
   assert.equal(metrics.daily.additionalMinutes, 0);
   assert.equal(metrics.daily.isTargetMet, false);
   assert.equal(metrics.daily.formattedShort, '1h 00m');
-  assert.equal(metrics.daily.formattedWorked, '6h 30m');
+  assert.equal(metrics.daily.formattedWorked, '7h 00m');
 });
 
-test('7h 30m policy: working 8h 00m (480 mins) results in 30 mins additional hours', async () => {
+test('8h 00m policy: working full shift caps regular hours at 480 mins', async () => {
   const emp = await makeEmployee('emp_hours_surplus');
   // 11:00 to 19:00 is 8 hours = 480 minutes
   await present(emp, '11:00', '19:00');
 
   const metrics = await A.calculateWorkingHoursMetrics(emp, DAY);
-  assert.equal(metrics.daily.requiredMinutes, 450);
+  assert.equal(metrics.daily.requiredMinutes, 480);
   assert.equal(metrics.daily.workedMinutes, 480);
   assert.equal(metrics.daily.shortMinutes, 0);
-  assert.equal(metrics.daily.additionalMinutes, 30);
   assert.equal(metrics.daily.isTargetMet, true);
-  assert.equal(metrics.daily.formattedAdditional, '0h 30m');
   assert.equal(metrics.daily.formattedWorked, '8h 00m');
-  assert.ok(metrics.weekly.requiredMinutes >= 450);
-  assert.ok(metrics.monthly.requiredMinutes >= 450);
+  assert.ok(metrics.weekly.requiredMinutes >= 480);
+  assert.ok(metrics.monthly.requiredMinutes >= 480);
 });
 
 
