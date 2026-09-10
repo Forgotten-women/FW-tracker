@@ -193,6 +193,22 @@ router.post('/break/end', requireDevice, async (req, res) => {
   const result = await A.endBreak(req.auth.employeeId, nowMs);
 
   if (!result.ok) {
+    if (result.reason === 'NOT_ON_BREAK') {
+      try {
+        await db.prepare(`
+          UPDATE workstation_sessions
+          SET status = 'ACTIVE', updated_at = ?
+          WHERE employee_id = ? AND session_date = ?
+        `).run(nowMs, req.auth.employeeId, T.dateKey(nowMs));
+      } catch (_) {}
+      return res.json({
+        status: 'SUCCESS',
+        actualMinutes: 0,
+        permittedMinutes: 30,
+        excessMinutes: 0,
+        message: 'No break was running. Active work session resumed.',
+      });
+    }
     return res.status(409).json({
       status: 'ERROR', code: result.reason, message: 'No break is currently running.',
     });

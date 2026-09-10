@@ -56,6 +56,19 @@ const statusBanner = document.getElementById('status-banner');
 const statusText = document.getElementById('status-text');
 const networkText = document.getElementById('network-text');
 const wifiConnectBtn = document.getElementById('wifi-connect-btn');
+const statusFeedback = document.getElementById('status-feedback');
+let feedbackTimeout = null;
+
+function showFeedback(msg, isError = true) {
+  if (!statusFeedback) return;
+  clearTimeout(feedbackTimeout);
+  statusFeedback.textContent = msg;
+  statusFeedback.style.color = isError ? '#f87171' : '#34d399';
+  statusFeedback.classList.remove('hidden');
+  feedbackTimeout = setTimeout(() => {
+    statusFeedback.classList.add('hidden');
+  }, 4000);
+}
 
 if (wifiConnectBtn) {
   wifiConnectBtn.addEventListener('click', async () => {
@@ -130,8 +143,9 @@ async function refreshStatus() {
         statBreak.textContent = `${breakMins}m`;
         statIdle.textContent = `${Math.floor((data.latest.today.idleSeconds || 0) / 60)}m`;
 
-        const isOnBreak = data.isManualBreak || (data.latest.today && data.latest.today.onBreak);
-        const isBreakUsed = Boolean(data.latest.today && data.latest.today.breakAlreadyTaken);
+        const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
+        const isBreakUsed = Boolean(data.latest && data.latest.today && data.latest.today.breakAlreadyTaken);
+        const isOnBreak = serverOnBreak || (data.isManualBreak && !isBreakUsed);
 
         if (isOnBreak) {
           statusBanner.className = 'status-banner away';
@@ -284,8 +298,13 @@ if (breakToggleBtn) {
       await refreshStatus();
     } catch (err) {
       console.error('Break toggle failed:', err);
-      alert(err || 'Could not change break status. Only one break is permitted per working day.');
-      await refreshStatus();
+      const errMsg = (typeof err === 'string' ? err : (err && err.message) || '').toLowerCase();
+      if (errMsg.includes('no break') || errMsg.includes('not_on_break')) {
+        await refreshStatus();
+      } else {
+        showFeedback(typeof err === 'string' ? err : (err && err.message) || 'Could not change break status.');
+        await refreshStatus();
+      }
     } finally {
       // refreshStatus() sets the correct disabled/enabled state
     }

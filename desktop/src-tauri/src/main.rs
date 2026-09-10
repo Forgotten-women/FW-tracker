@@ -31,7 +31,15 @@ async fn get_app_status(state: State<'_, AppState>) -> Result<serde_json::Value,
     let cfg = state.config.lock().unwrap().clone();
     let resp = state.latest_response.lock().unwrap().clone();
     let server_on_break = resp.as_ref().map(|r| r.today.on_break).unwrap_or(false);
-    let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst) || server_on_break;
+    let server_break_taken = resp.as_ref().map(|r| r.today.break_already_taken).unwrap_or(false);
+
+    // If server reports break was already taken and no break is running, reconcile local state to false
+    let is_break = if server_break_taken && !server_on_break {
+        IS_MANUAL_BREAK.store(false, Ordering::SeqCst);
+        false
+    } else {
+        IS_MANUAL_BREAK.load(Ordering::SeqCst) || server_on_break
+    };
     let (lock_state, _) = tracker::session::get_lock_state();
     let idle_secs = tracker::idle::get_idle_seconds();
 
@@ -63,11 +71,27 @@ async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String>
     let cfg = state.config.lock().unwrap().clone();
     let resp = state.latest_response.lock().unwrap().clone();
     let server_on_break = resp.as_ref().map(|r| r.today.on_break).unwrap_or(false);
-    let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst) || server_on_break;
+    let server_break_taken = resp.as_ref().map(|r| r.today.break_already_taken).unwrap_or(false);
+
+    let is_break = if server_break_taken && !server_on_break {
+        IS_MANUAL_BREAK.store(false, Ordering::SeqCst);
+        false
+    } else {
+        IS_MANUAL_BREAK.load(Ordering::SeqCst) || server_on_break
+    };
     let target = !is_break;
 
     if !cfg.token.is_empty() {
-        client::send_break(&cfg, target).await?;
+        if let Err(err) = client::send_break(&cfg, target).await {
+            let err_lower = err.to_lowercase();
+            // If trying to end break, but server reports no break is currently active,
+            // recover cleanly by reconciling local break flag to false
+            if !target && (err_lower.contains("no break") || err_lower.contains("not_on_break")) {
+                IS_MANUAL_BREAK.store(false, Ordering::SeqCst);
+                return Ok(false);
+            }
+            return Err(err);
+        }
     }
 
     IS_MANUAL_BREAK.store(target, Ordering::SeqCst);

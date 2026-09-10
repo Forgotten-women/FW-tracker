@@ -105,12 +105,15 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const activeBreak = await db.prepare(
     'SELECT * FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
   ).get(employeeId);
+  const breakRecordTaken = await db.prepare(
+    'SELECT id FROM break_records WHERE employee_id = ? AND date_key = ? AND ended_at IS NOT NULL LIMIT 1'
+  ).get(employeeId, dateKey);
 
   // 5. Determine current status
   let status = 'ACTIVE';
   if (outsideWorkingHours) {
     status = 'OUTSIDE_HOURS';
-  } else if (isManualBreak || activeBreak) {
+  } else if (activeBreak || (isManualBreak && !breakRecordTaken)) {
     status = 'ON_BREAK';
   } else if (lockState === 'LOCKED' || lockState === 'SLEEPING') {
     // If locked longer than the 5-minute grace period, switch to AWAY
@@ -360,7 +363,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
       idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
       breakSeconds: effectiveBreakSeconds,
-      onBreak: hasOpenBreak || status === 'ON_BREAK',
+      onBreak: Boolean(hasOpenBreak),
       breakAlreadyTaken: breakAlreadyTaken && !hasOpenBreak,
     },
     policy: {
@@ -538,11 +541,11 @@ router.post('/break', requireDevice, async (req, res) => {
       }
     } else {
       const result = await A.endBreak(employeeId, nowMs);
-      if (!result.ok) {
+      if (!result.ok && result.reason !== 'NOT_ON_BREAK') {
         return res.status(400).json({
           status: 'ERROR',
           code: result.reason,
-          message: 'No break is currently running.',
+          message: 'Could not resume work.',
         });
       }
     }

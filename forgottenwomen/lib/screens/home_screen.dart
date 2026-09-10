@@ -594,26 +594,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return BlocConsumer<HomeBloc, HomeState>(
       listener: (context, state) {
         if (state is HomeLoaded) {
-          if (state.errorMessage != null) {
+          if (state.errorMessage != null && state.errorMessage!.isNotEmpty) {
+            ScaffoldMessenger.of(context).clearSnackBars();
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(state.errorMessage!),
                 backgroundColor: AppColors.danger,
+                duration: const Duration(seconds: 3),
               ),
             );
-          } else if (state.actionMessage != null) {
+          } else if (state.actionMessage != null && state.actionMessage!.isNotEmpty) {
+            ScaffoldMessenger.of(context).clearSnackBars();
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(state.actionMessage!),
                 backgroundColor: AppColors.teal,
+                duration: const Duration(seconds: 3),
               ),
             );
           }
         } else if (state is HomeFailure) {
+          ScaffoldMessenger.of(context).clearSnackBars();
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(state.message),
               backgroundColor: AppColors.danger,
+              duration: const Duration(seconds: 4),
             ),
           );
         }

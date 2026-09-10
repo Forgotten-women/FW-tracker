@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../repositories/attendance_repository.dart';
+import '../../services/notification_service.dart';
 import 'home_event.dart';
 import 'home_state.dart';
 
@@ -93,7 +94,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
         emit((state as HomeLoaded).copyWith(
           isRefreshing: false,
           isOffline: true,
-          errorMessage: 'Unable to refresh: offline or server unavailable',
+          clearMessages: true,
         ));
       } else {
         emit(HomeFailure(e.toString()));
@@ -103,7 +104,11 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
 
   void _onTimerTicked(HomeTimerTicked event, Emitter<HomeState> emit) {
     if (state is HomeLoaded) {
-      emit((state as HomeLoaded).copyWith(liveNow: event.now));
+      // Clear transient messages on ticker so 1-second ticks don't re-trigger SnackBars
+      emit((state as HomeLoaded).copyWith(
+        liveNow: event.now,
+        clearMessages: true,
+      ));
     }
   }
 
@@ -120,9 +125,23 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
         msg = res.message.isNotEmpty
             ? res.message
             : 'Break ended (${res.actualMinutes}m taken)';
+        try {
+          await NotificationService().showBreakNotification(
+            id: 9903,
+            title: 'Break Ended',
+            body: msg,
+          );
+        } catch (_) {}
       } else {
         final res = await repository.startBreak();
         msg = 'Break started. Due back at ${res.dueBackAt}';
+        try {
+          await NotificationService().showBreakNotification(
+            id: 9900,
+            title: 'Break Started',
+            body: msg,
+          );
+        } catch (_) {}
       }
 
       // Re-fetch latest summary to sync server-calculated values
@@ -149,6 +168,14 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
 
     try {
       await repository.clockOut();
+      try {
+        await NotificationService().showSystemNotification(
+          id: 9904,
+          title: 'Shift Completed',
+          body: 'You have clocked out for today. See you tomorrow!',
+          category: 'ATTENDANCE',
+        );
+      } catch (_) {}
       final fresh = await repository.fetchFreshHomeSummary();
       emit(HomeLoaded(
         summary: fresh,
