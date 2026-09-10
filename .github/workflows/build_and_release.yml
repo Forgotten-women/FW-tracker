@@ -33,6 +33,16 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: 📝 Configure Environment (.env)
+        run: |
+          if [ -n "${{ secrets.BACKEND_URL }}" ]; then
+            echo "BACKEND_URL=${{ secrets.BACKEND_URL }}" > forgottenwomen/.env
+          elif [ -f forgottenwomen/.env.example ]; then
+            cp forgottenwomen/.env.example forgottenwomen/.env
+          else
+            echo "BACKEND_URL=https://backend-ten-lyart-57.vercel.app" > forgottenwomen/.env
+          fi
+
       - name: 📦 Install Flutter Dependencies
         run: flutter pub get
         working-directory: forgottenwomen
@@ -42,7 +52,7 @@ jobs:
         working-directory: forgottenwomen
 
       - name: 🔨 Build Release APK
-        run: flutter build apk --release --split-per-abi=false
+        run: flutter build apk --release --split-per-abi=false --dart-define-from-file=.env
         working-directory: forgottenwomen
 
       - name: 📝 Determine Tag & Version

@@ -1,6 +1,7 @@
 // Credential and preference storage.
 
 import 'dart:developer';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,10 +22,18 @@ class TokenStore {
   static const _kEmployeeRole = 'employee_role';
   static const _kEmployeeId = 'employee_id';
 
-  static const defaultServerUrl = String.fromEnvironment(
-    'BACKEND_URL',
-    defaultValue: 'https://backend-ten-lyart-57.vercel.app',
-  );
+  /// Dynamically resolved default server URL from .env file or environment defines.
+  static String get defaultServerUrl {
+    final fromDotenv = dotenv.maybeGet('BACKEND_URL');
+    if (fromDotenv != null && fromDotenv.trim().isNotEmpty) {
+      return fromDotenv.trim();
+    }
+    const fromEnv = String.fromEnvironment('BACKEND_URL');
+    if (fromEnv.isNotEmpty) {
+      return fromEnv;
+    }
+    return '';
+  }
 
   Future<String?> readToken() async {
     try {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'screens/enroll_screen.dart';
 import 'screens/main_shell.dart';
@@ -9,6 +10,11 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint('dotenv.load notice: $e');
+  }
   try {
     await NotificationService().initialize();
   } catch (e) {
