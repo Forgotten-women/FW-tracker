@@ -136,7 +136,7 @@ function classifyLocation({ bssid, ssid, visibleOfficeBssids, srcIp, localIp, so
     DYNAMIC_OFFICE_BSSIDS.add(String(bssid).toLowerCase().replace(/-/g, ':').trim());
   }
 
-  if (bssidOk || airProximityOk || (ssidOk && ipOk)) {
+  if (bssidOk || airProximityOk || (ssidOk && ipOk) || (localIp && config.isOfficeIp(localIp))) {
     // If the BSSID matches an office Wi-Fi, air proximity confirmed physical presence,
     // or connected to office SSID from office subnet:
     if (!airProximityOk && localIp && !config.isOfficeIp(localIp) && !config.isOfficeIp(srcIp)) {

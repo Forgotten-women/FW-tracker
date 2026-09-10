@@ -74,6 +74,12 @@ async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String>
     Ok(target)
 }
 
+#[tauri::command]
+async fn connect_office_wifi() -> Result<(), String> {
+    tracker::network::auto_connect_office_wifi();
+    Ok(())
+}
+
 fn main() {
     let instance_role = single_instance::check_single_instance();
     let single_instance_listener = match instance_role {
@@ -97,7 +103,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_app_status,
             enroll_device,
-            toggle_manual_break
+            toggle_manual_break,
+            connect_office_wifi
         ])
         .setup(move |app| {
             let app_handle = app.handle();

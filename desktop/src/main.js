@@ -62,7 +62,11 @@ if (wifiConnectBtn) {
     wifiConnectBtn.disabled = true;
     wifiConnectBtn.textContent = 'Connecting...';
     try {
-      await fetch('/api/connect-office-wifi', { method: 'POST' });
+      if (isTauri && tauriInvoke) {
+        await tauriInvoke('connect_office_wifi');
+      } else {
+        await fetch('/api/connect-office-wifi', { method: 'POST' });
+      }
       setTimeout(refreshStatus, 2000);
     } catch (_) {}
     setTimeout(() => {

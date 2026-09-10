@@ -74,17 +74,32 @@ pub fn get_connected_bssid() -> Option<String> {
 
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport")
-            .arg("-I")
+        // 1. Try system_profiler SPAirPortDataType
+        if let Ok(output) = Command::new("system_profiler")
+            .arg("SPAirPortDataType")
             .output()
-            .ok()?;
-
-        let text = String::from_utf8_lossy(&output.stdout);
-        for line in text.lines() {
-            if let Some(mac) = extract_mac(line) {
-                return Some(mac);
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if let Some(mac) = extract_mac(line) {
+                    return Some(mac);
+                }
             }
         }
+
+        // 2. Fallback to airport tool if present
+        if let Ok(output) = Command::new("/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport")
+            .arg("-I")
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if let Some(mac) = extract_mac(line) {
+                    return Some(mac);
+                }
+            }
+        }
+
         None
     }
 
@@ -157,7 +172,25 @@ pub fn get_connected_ssid() -> Option<String> {
         }
         None
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        for iface in &["en0", "en1", "en2"] {
+            if let Ok(output) = Command::new("/usr/sbin/networksetup")
+                .args(["-getairportnetwork", iface])
+                .output()
+            {
+                let text = String::from_utf8_lossy(&output.stdout);
+                if let Some(idx) = text.find("Current Wi-Fi Network:") {
+                    let name = text[idx + "Current Wi-Fi Network:".len()..].trim();
+                    if !name.is_empty() && !name.contains("not associated") && !name.contains("Error") {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         None
     }
@@ -182,6 +215,21 @@ pub fn auto_connect_office_wifi() {
             if let Ok(output) = status {
                 if output.status.success() {
                     break;
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        for iface in &["en0", "en1"] {
+            for name in OFFICE_SSID_CANDIDATES {
+                let status = Command::new("/usr/sbin/networksetup")
+                    .args(["-setairportnetwork", iface, name])
+                    .output();
+                if let Ok(output) = status {
+                    if output.status.success() {
+                        return;
+                    }
                 }
             }
         }
