@@ -108,6 +108,7 @@ fn main() {
             {
                 if let Some(window) = app.get_window("main") {
                     let _ = window.show();
+                    let _ = window.center();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
@@ -116,6 +117,7 @@ fn main() {
             if initial_config.token.is_empty() {
                 if let Some(window) = app.get_window("main") {
                     let _ = window.show();
+                    let _ = window.center();
                     let _ = window.set_focus();
                 }
             }
@@ -253,17 +255,12 @@ fn main() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application");
-
-    app.run(|app_handle, event| {
-        #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { .. } = event {
-            if let Some(window) = app_handle.get_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+        .on_window_event(|event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
+                let _ = event.window().hide();
+                api.prevent_close();
             }
-        }
-    });
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
