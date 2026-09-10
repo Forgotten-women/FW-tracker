@@ -112,7 +112,16 @@ class TokenStore {
   Future<String> readServerUrl() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_kServerUrl) ?? defaultServerUrl;
+      final saved = prefs.getString(_kServerUrl);
+      if (saved == null ||
+          saved.isEmpty ||
+          saved.contains('192.168.18.68') ||
+          saved.contains('localhost') ||
+          saved.contains('127.0.0.1')) {
+        await prefs.setString(_kServerUrl, defaultServerUrl);
+        return defaultServerUrl;
+      }
+      return saved;
     } catch (_) {
       return defaultServerUrl;
     }

@@ -31,7 +31,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
   void initState() {
     super.initState();
     _store.readServerUrl().then((url) {
-      if (mounted) _serverController.text = url;
+      if (mounted) setState(() => _serverController.text = url);
     });
   }
 
@@ -105,6 +105,80 @@ class _EnrollScreenState extends State<EnrollScreen> {
     }
   }
 
+  Future<void> _showServerDialog() async {
+    final tempController = TextEditingController(
+      text: _serverController.text.isNotEmpty
+          ? _serverController.text
+          : TokenStore.defaultServerUrl,
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceDark,
+        title: const Text(
+          'Backend Server URL',
+          style: TextStyle(color: AppColors.textLight, fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Specify the office attendance backend address.',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: tempController,
+              autocorrect: false,
+              style: const TextStyle(color: AppColors.textLight, fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'Server URL',
+                labelStyle: const TextStyle(color: AppColors.textMuted),
+                hintText: TokenStore.defaultServerUrl,
+                filled: true,
+                fillColor: AppColors.bgDark,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () {
+                tempController.text = TokenStore.defaultServerUrl;
+              },
+              icon: const Icon(Icons.restore, size: 16, color: AppColors.teal),
+              label: const Text(
+                'Reset to Production Cloud',
+                style: TextStyle(color: AppColors.teal, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
+            onPressed: () async {
+              final newUrl = tempController.text.trim();
+              if (newUrl.isNotEmpty) {
+                _serverController.text = newUrl;
+                await _store.saveServerUrl(newUrl);
+                if (mounted) setState(() {});
+              }
+              if (ctx.mounted) Navigator.of(ctx).pop();
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -113,6 +187,13 @@ class _EnrollScreenState extends State<EnrollScreen> {
           'Pair this device',
           style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textLight),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: AppColors.textMuted),
+            tooltip: 'Server settings',
+            onPressed: _showServerDialog,
+          ),
+        ],
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -243,6 +324,34 @@ class _EnrollScreenState extends State<EnrollScreen> {
                           )
                         : const Icon(Icons.link),
                     label: Text(_busy ? 'Pairing...' : 'Pair device'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: InkWell(
+                    onTap: _showServerDialog,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _serverController.text.isNotEmpty
+                                  ? _serverController.text
+                                  : TokenStore.defaultServerUrl,
+                              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.edit_outlined, size: 12, color: AppColors.teal),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ],
