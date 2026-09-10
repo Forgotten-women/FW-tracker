@@ -103,7 +103,16 @@ fn main() {
             let app_handle = app.handle();
             single_instance::start_listener(single_instance_listener, app_handle.clone());
 
-            // Auto-show window on launch if not yet enrolled so employee can enter pairing code
+            // On macOS: always show window on launch! On Windows: show if not enrolled
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
             if initial_config.token.is_empty() {
                 if let Some(window) = app.get_window("main") {
                     let _ = window.show();
@@ -249,13 +258,11 @@ fn main() {
 
     app.run(|app_handle, event| {
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
-            if !has_visible_windows {
-                if let Some(window) = app_handle.get_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+        if let tauri::RunEvent::Reopen { .. } = event {
+            if let Some(window) = app_handle.get_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
             }
         }
     });
