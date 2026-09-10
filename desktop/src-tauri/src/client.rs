@@ -64,6 +64,12 @@ pub struct SessionStats {
     pub on_break: bool,
     #[serde(default)]
     pub break_already_taken: bool,
+    #[serde(default)]
+    pub break_permitted_minutes: Option<u32>,
+    #[serde(default)]
+    pub break_started_at: Option<u64>,
+    #[serde(default)]
+    pub break_remaining_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

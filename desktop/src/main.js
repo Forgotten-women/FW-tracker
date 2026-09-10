@@ -59,6 +59,16 @@ const wifiConnectBtn = document.getElementById('wifi-connect-btn');
 const statusFeedback = document.getElementById('status-feedback');
 let feedbackTimeout = null;
 
+const breakCountdownWrap = document.getElementById('break-countdown-wrap');
+const breakCountdownTimer = document.getElementById('break-countdown-timer');
+const breakProgressBar = document.getElementById('break-progress-bar');
+const breakCountdownFooter = document.getElementById('break-countdown-footer');
+const breakPermittedPill = document.getElementById('break-permitted-pill');
+
+let isOnBreakState = false;
+let breakStartedAtMs = null;
+let breakPermittedMins = 30;
+
 function showFeedback(msg, isError = true) {
   if (!statusFeedback) return;
   clearTimeout(feedbackTimeout);
@@ -101,6 +111,61 @@ function formatHMS(seconds) {
   const m = Math.floor((total % 3600) / 60).toString().padStart(2, '0');
   const s = (total % 60).toString().padStart(2, '0');
   return `${h}:${m}:${s}`;
+}
+
+function formatMS(seconds) {
+  const isNegative = seconds < 0;
+  const abs = Math.abs(seconds);
+  const m = Math.floor(abs / 60).toString().padStart(2, '0');
+  const s = (abs % 60).toString().padStart(2, '0');
+  return isNegative ? `+${m}:${s}` : `${m}:${s}`;
+}
+
+function updateBreakCountdown() {
+  if (!isOnBreakState || !breakStartedAtMs || !breakCountdownTimer) return;
+  const elapsedSecs = Math.max(0, Math.floor((Date.now() - breakStartedAtMs) / 1000));
+  const totalPermittedSecs = breakPermittedMins * 60;
+  const remainingSecs = totalPermittedSecs - elapsedSecs;
+
+  const pct = Math.max(0, Math.min(100, Math.round((remainingSecs / totalPermittedSecs) * 100)));
+  if (breakProgressBar) {
+    breakProgressBar.style.width = `${pct}%`;
+  }
+
+  if (remainingSecs > 0) {
+    const formatted = formatMS(remainingSecs);
+    breakCountdownTimer.textContent = formatted;
+    breakToggleBtn.textContent = `▶ Resume Work (${Math.ceil(remainingSecs / 60)}m left)`;
+
+    if (remainingSecs <= 300) {
+      if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap warning';
+      if (breakProgressBar) breakProgressBar.style.background = '#f59e0b';
+      if (breakCountdownFooter) {
+        breakCountdownFooter.textContent = '⚠️ Under 5 minutes remaining! Resume work soon.';
+        breakCountdownFooter.style.color = '#facc15';
+      }
+    } else {
+      if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap';
+      if (breakProgressBar) breakProgressBar.style.background = '#38bdf8';
+      if (breakCountdownFooter) {
+        breakCountdownFooter.textContent = 'Permitted daily break · Resume work before 00:00';
+        breakCountdownFooter.style.color = '#94a3b8';
+      }
+    }
+  } else {
+    const overdueSecs = Math.abs(remainingSecs);
+    breakCountdownTimer.textContent = `+${formatMS(overdueSecs)} OVERDUE`;
+    breakToggleBtn.textContent = '▶ Resume Work (Break Overdue)';
+    if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap overdue';
+    if (breakProgressBar) {
+      breakProgressBar.style.width = '100%';
+      breakProgressBar.style.background = '#ef4444';
+    }
+    if (breakCountdownFooter) {
+      breakCountdownFooter.textContent = '⚠️ Break exceeded! Excess time counts toward daily deficit.';
+      breakCountdownFooter.style.color = '#f87171';
+    }
+  }
 }
 
 async function refreshStatus() {
@@ -148,43 +213,66 @@ async function refreshStatus() {
         const isOnBreak = serverOnBreak || (data.isManualBreak && !isBreakUsed);
 
         if (isOnBreak) {
+          isOnBreakState = true;
+          breakPermittedMins = (data.latest && data.latest.today && data.latest.today.breakPermittedMinutes) || 30;
+          if (data.latest && data.latest.today && data.latest.today.breakStartedAt) {
+            breakStartedAtMs = data.latest.today.breakStartedAt;
+          } else if (!breakStartedAtMs) {
+            const pastBreakSecs = (data.latest && data.latest.today && data.latest.today.breakSeconds) || 0;
+            breakStartedAtMs = Date.now() - (pastBreakSecs * 1000);
+          }
+          if (breakPermittedPill) {
+            breakPermittedPill.textContent = `${breakPermittedMins}m max`;
+          }
+          if (breakCountdownWrap) {
+            breakCountdownWrap.classList.remove('hidden');
+          }
+          updateBreakCountdown();
+
           statusBanner.className = 'status-banner away';
           statusText.textContent = '☕ On Break';
-          breakToggleBtn.textContent = '▶ Resume Work';
-          breakToggleBtn.disabled = false;
-          breakToggleBtn.classList.remove('disabled');
-        } else if (isBreakUsed) {
-          if (data.latest.workstationStatus === 'AWAY') {
-            statusBanner.className = 'status-banner away';
-            statusText.textContent = '🔒 Screen Locked (Away)';
-          } else if (data.latest.workstationStatus === 'IDLE') {
-            statusBanner.className = 'status-banner away';
-            statusText.textContent = '⏳ Idle Inactivity';
-          } else {
-            statusBanner.className = 'status-banner';
-            statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
-          }
-          breakToggleBtn.textContent = `☕ Break Taken (${breakMins}m used)`;
-          breakToggleBtn.disabled = true;
-          breakToggleBtn.classList.add('disabled');
-        } else if (data.latest.workstationStatus === 'AWAY') {
-          statusBanner.className = 'status-banner away';
-          statusText.textContent = '🔒 Screen Locked (Away)';
-          breakToggleBtn.textContent = '☕ Take Break';
-          breakToggleBtn.disabled = false;
-          breakToggleBtn.classList.remove('disabled');
-        } else if (data.latest.workstationStatus === 'IDLE') {
-          statusBanner.className = 'status-banner away';
-          statusText.textContent = '⏳ Idle Inactivity';
-          breakToggleBtn.textContent = '☕ Take Break';
           breakToggleBtn.disabled = false;
           breakToggleBtn.classList.remove('disabled');
         } else {
-          statusBanner.className = 'status-banner';
-          statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
-          breakToggleBtn.textContent = '☕ Take Break';
-          breakToggleBtn.disabled = false;
-          breakToggleBtn.classList.remove('disabled');
+          isOnBreakState = false;
+          breakStartedAtMs = null;
+          if (breakCountdownWrap) {
+            breakCountdownWrap.classList.add('hidden');
+          }
+
+          if (isBreakUsed) {
+            if (data.latest.workstationStatus === 'AWAY') {
+              statusBanner.className = 'status-banner away';
+              statusText.textContent = '🔒 Screen Locked (Away)';
+            } else if (data.latest.workstationStatus === 'IDLE') {
+              statusBanner.className = 'status-banner away';
+              statusText.textContent = '⏳ Idle Inactivity';
+            } else {
+              statusBanner.className = 'status-banner';
+              statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
+            }
+            breakToggleBtn.textContent = `☕ Break Taken (${breakMins}m used)`;
+            breakToggleBtn.disabled = true;
+            breakToggleBtn.classList.add('disabled');
+          } else if (data.latest.workstationStatus === 'AWAY') {
+            statusBanner.className = 'status-banner away';
+            statusText.textContent = '🔒 Screen Locked (Away)';
+            breakToggleBtn.textContent = '☕ Take Break';
+            breakToggleBtn.disabled = false;
+            breakToggleBtn.classList.remove('disabled');
+          } else if (data.latest.workstationStatus === 'IDLE') {
+            statusBanner.className = 'status-banner away';
+            statusText.textContent = '⏳ Idle Inactivity';
+            breakToggleBtn.textContent = '☕ Take Break';
+            breakToggleBtn.disabled = false;
+            breakToggleBtn.classList.remove('disabled');
+          } else {
+            statusBanner.className = 'status-banner';
+            statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
+            breakToggleBtn.textContent = '☕ Take Break';
+            breakToggleBtn.disabled = false;
+            breakToggleBtn.classList.remove('disabled');
+          }
         }
 
         if (data.latest.inOffice) {
@@ -220,7 +308,9 @@ timerInterval = setInterval(() => {
     return;
   }
 
-  if (statusBanner && !statusBanner.classList.contains('away') && !statusBanner.classList.contains('offline')) {
+  if (isOnBreakState) {
+    updateBreakCountdown();
+  } else if (statusBanner && !statusBanner.classList.contains('away') && !statusBanner.classList.contains('offline')) {
     currentActiveSecs++;
     if (activeTimer) {
       activeTimer.textContent = formatHMS(currentActiveSecs);
@@ -294,6 +384,18 @@ if (breakToggleBtn) {
     if (breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
     try {
       breakToggleBtn.disabled = true;
+      const targetIsBreak = !isOnBreakState;
+      if (targetIsBreak) {
+        isOnBreakState = true;
+        breakStartedAtMs = Date.now();
+        if (breakCountdownWrap) breakCountdownWrap.classList.remove('hidden');
+        updateBreakCountdown();
+      } else {
+        isOnBreakState = false;
+        breakStartedAtMs = null;
+        if (breakCountdownWrap) breakCountdownWrap.classList.add('hidden');
+      }
+
       await callBackend('toggle_manual_break');
       await refreshStatus();
     } catch (err) {

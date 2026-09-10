@@ -54,9 +54,22 @@
       </div>
 
       <!-- Live Active Timer -->
-      <div class="timer-container">
-        <div class="timer-label">TODAY'S ACTIVE TIME</div>
+      <div class="timer-container" id="timer-container">
+        <div class="timer-label" id="timer-label">TODAY'S ACTIVE TIME</div>
         <div class="timer-display" id="active-timer">00:00:00</div>
+
+        <!-- Live Break Remaining Countdown (appears when on break) -->
+        <div id="break-countdown-wrap" class="break-countdown-wrap hidden">
+          <div class="break-countdown-header">
+            <span class="break-badge-title">☕ REMAINING BREAK TIME</span>
+            <span class="break-badge-pill" id="break-permitted-pill">30m max</span>
+          </div>
+          <div class="break-countdown-timer" id="break-countdown-timer">30:00</div>
+          <div class="break-progress-wrap">
+            <div class="break-progress-bar" id="break-progress-bar" style="width: 100%;"></div>
+          </div>
+          <div class="break-countdown-footer" id="break-countdown-footer">Permitted daily break · Resume work before 00:00</div>
+        </div>
       </div>
 
       <!-- Stats Grid -->

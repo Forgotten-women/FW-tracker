@@ -324,6 +324,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   let totalBreakSecondsFromRecords = 0;
   let hasOpenBreak = false;
   let breakAlreadyTaken = false;
+  let openBreakRecord = null;
 
   for (const br of breakRecords) {
     if (br.ended_at) {
@@ -332,6 +333,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       breakAlreadyTaken = true;
     } else {
       hasOpenBreak = true;
+      openBreakRecord = br;
       const elapsedSecs = Math.max(0, Math.round((nowMs - br.started_at) / 1000));
       totalBreakSecondsFromRecords += elapsedSecs;
     }
@@ -344,6 +346,12 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       await db.prepare('UPDATE workstation_sessions SET break_seconds = ? WHERE id = ?').run(effectiveBreakSeconds, sessionRow.id);
     } catch (_) {}
   }
+
+  const breakPermittedMinutes = openBreakRecord ? (openBreakRecord.permitted_minutes || 30) : (sched.permittedBreakMinutes || 30);
+  const breakStartedAt = openBreakRecord ? openBreakRecord.started_at : null;
+  const breakRemainingSeconds = openBreakRecord
+    ? Math.max(0, (breakPermittedMinutes * 60) - Math.round((nowMs - openBreakRecord.started_at) / 1000))
+    : 0;
 
   res.json({
     status: 'SUCCESS',
@@ -365,6 +373,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       breakSeconds: effectiveBreakSeconds,
       onBreak: Boolean(hasOpenBreak),
       breakAlreadyTaken: breakAlreadyTaken && !hasOpenBreak,
+      breakPermittedMinutes,
+      breakStartedAt,
+      breakRemainingSeconds,
     },
     policy: {
       idleThresholdMinutes: idleThresholdMins,
@@ -528,6 +539,10 @@ router.post('/break', requireDevice, async (req, res) => {
   const dateKey = T.dateKey(nowMs);
   const newStatus = onBreak ? 'ON_BREAK' : 'ACTIVE';
 
+  let breakStartedAt = null;
+  let breakPermittedMinutes = 30;
+  let breakDueBackAt = null;
+
   const A = require('../domain/attendance');
   try {
     if (onBreak) {
@@ -539,6 +554,9 @@ router.post('/break', requireDevice, async (req, res) => {
           message: result.message || 'You have already taken your permitted 30-minute break for today. Only one break is permitted per working day.',
         });
       }
+      breakStartedAt = result.startedAt || nowMs;
+      breakPermittedMinutes = result.permittedMinutes || 30;
+      breakDueBackAt = result.dueBackAt || (nowMs + breakPermittedMinutes * 60 * 1000);
     } else {
       const result = await A.endBreak(employeeId, nowMs);
       if (!result.ok && result.reason !== 'NOT_ON_BREAK') {
@@ -564,7 +582,14 @@ router.post('/break', requireDevice, async (req, res) => {
     return res.status(500).json({ status: 'ERROR', message: err.message });
   }
 
-  res.json({ status: 'SUCCESS', workstationStatus: newStatus });
+  res.json({
+    status: 'SUCCESS',
+    workstationStatus: newStatus,
+    onBreak,
+    breakStartedAt,
+    breakPermittedMinutes,
+    breakDueBackAt,
+  });
 });
 
 // ---------------------------------------------------------------------------
