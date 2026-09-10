@@ -103,6 +103,14 @@ fn main() {
             let app_handle = app.handle();
             single_instance::start_listener(single_instance_listener, app_handle.clone());
 
+            // Auto-show window on launch if not yet enrolled so employee can enter pairing code
+            if initial_config.token.is_empty() {
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+
             // Background Monitoring & Heartbeat Task
             tauri::async_runtime::spawn(async move {
                 let mut sample_count = 0;
@@ -236,6 +244,19 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+            if !has_visible_windows {
+                if let Some(window) = app_handle.get_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        }
+    });
 }
