@@ -59,7 +59,18 @@ Future<PingResult?> sendHeartbeat({
   }
 }
 
-bool _wasVerified = false;
+/// Checks whether the given or current time falls within official office hours:
+/// Monday to Friday (weekdays only), 11:00 AM to 7:00 PM (11:00 to 19:00).
+bool isWithinOfficeHours([DateTime? dateTime]) {
+  final now = dateTime ?? DateTime.now();
+  if (now.weekday < DateTime.monday || now.weekday > DateTime.friday) {
+    return false;
+  }
+  final minuteOfDay = now.hour * 60 + now.minute;
+  const startMinute = 11 * 60; // 11:00 AM
+  const endMinute = 19 * 60;   // 7:00 PM (19:00)
+  return minuteOfDay >= startMinute && minuteOfDay < endMinute;
+}
 
 @pragma('vm:entry-point')
 Future<void> onBackgroundStart(ServiceInstance service) async {
@@ -77,36 +88,69 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
 
   service.on('stop').listen((_) => service.stopSelf());
 
-  if (service is AndroidServiceInstance) {
-    service.on('setAsForeground').listen((event) {
-      service.setAsBackgroundService();
-    });
-    service.on('setAsBackground').listen((event) {
-      service.setAsBackgroundService();
-    });
-  }
-
-  // Cancel any lingering foreground service notification
-  try {
-    await NotificationService().cancelNotification(8800);
-  } catch (_) {}
-
-  Timer.periodic(heartbeatInterval, (timer) async {
+  Future<void> runPresenceTick() async {
     try {
+      final now = DateTime.now();
+      final withinHours = isWithinOfficeHours(now);
+
+      if (!withinHours) {
+        // Outside office hours (Mon-Fri 11:00 AM - 7:00 PM):
+        // 1. Demote to background and completely hide/cancel presence notification 8800.
+        // 2. Zero updates sent to backend.
+        if (service is AndroidServiceInstance) {
+          await service.setAsBackgroundService();
+        }
+        try {
+          await NotificationService().cancelNotification(8800);
+        } catch (_) {}
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('was_in_office', false);
+        } catch (_) {}
+        return;
+      }
+
+      // Within office hours:
       if (!await store.isEnrolled) return;
+
+      if (service is AndroidServiceInstance) {
+        await service.setAsForegroundService();
+      }
+
+      // Send heartbeat to backend
       final result = await sendHeartbeat(client: api, probe: probe, queue: queue);
 
       if (result != null) {
-        if (result.verified && !_wasVerified) {
-          _wasVerified = true;
-          await NotificationService().showSystemNotification(
-            id: 8801,
-            title: 'Office Presence Verified',
-            body: 'Connected to office network. Logged ${result.attendance.timeWorkedFormatted} today.',
-            category: 'ATTENDANCE',
-          );
-        } else if (!result.verified) {
-          _wasVerified = false;
+        final prefs = await SharedPreferences.getInstance();
+        final wasInOffice = prefs.getBool('was_in_office') ?? false;
+
+        if (result.verified) {
+          if (service is AndroidServiceInstance) {
+            service.setForegroundNotificationInfo(
+              title: 'Office Tracker Active',
+              content: '🟢 In Office · Logged ${result.attendance.timeWorkedFormatted}',
+            );
+          }
+
+          if (!wasInOffice) {
+            await prefs.setBool('was_in_office', true);
+            await prefs.setString('last_presence_verified_date', DateTime.now().toIso8601String().substring(0, 10));
+            await NotificationService().showSystemNotification(
+              id: 8801,
+              title: 'Office Presence Verified',
+              body: 'Connected to office network. Logged ${result.attendance.timeWorkedFormatted} today.',
+              category: 'ATTENDANCE',
+            );
+          }
+        } else {
+          // Out of office network during office hours
+          await prefs.setBool('was_in_office', false);
+          if (service is AndroidServiceInstance) {
+            service.setForegroundNotificationInfo(
+              title: 'Office Tracker Active',
+              content: 'Monitoring office presence in background',
+            );
+          }
         }
       }
 
@@ -149,13 +193,22 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
         }
       } catch (_) {}
     } catch (_) {}
-  });
+  }
+
+  // Initial immediate tick on start
+  unawaited(runPresenceTick());
+
+  // Periodic heartbeat every 30 seconds
+  Timer.periodic(heartbeatInterval, (_) => runPresenceTick());
 }
 
 @pragma('vm:entry-point')
 Future<bool> onIosBackground(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
   try {
+    if (!isWithinOfficeHours()) {
+      return true;
+    }
     await NotificationService().initialize();
     await sendHeartbeat();
     final store = TokenStore();
@@ -169,19 +222,22 @@ class PresenceService {
 
   static Future<void> configure() async {
     try {
-      try {
-        await NotificationService().cancelNotification(8800);
-      } catch (_) {}
+      final withinHours = isWithinOfficeHours();
+      if (!withinHours) {
+        try {
+          await NotificationService().cancelNotification(8800);
+        } catch (_) {}
+      }
 
       await _service.configure(
         androidConfiguration: AndroidConfiguration(
           onStart: onBackgroundStart,
           autoStart: true,
           autoStartOnBoot: true,
-          isForegroundMode: false,
+          isForegroundMode: withinHours,
           notificationChannelId: 'office_tracker_presence',
-          initialNotificationTitle: 'Office Tracker',
-          initialNotificationContent: 'Monitoring office presence',
+          initialNotificationTitle: 'Office Tracker Active',
+          initialNotificationContent: 'Monitoring office presence in background',
           foregroundServiceNotificationId: 8800,
         ),
         iosConfiguration: IosConfiguration(

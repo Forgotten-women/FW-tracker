@@ -385,9 +385,19 @@ let currentEnrollResolve = null;
 let todayLiveStats = { activeSeconds: 0, breakSeconds: 0, idleSeconds: 0 };
 let currentWorkstationStatus = 'ACTIVE';
 let isManualBreak = false;
+let isOnBreak = false;
 let latestContinuousIdle = 0;
 let appTrackingEnabled = true;
 let outsideWorkingHours = false;
+
+function isWithinOfficeHours(date = new Date()) {
+  const day = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
+  if (day === 0 || day === 6) return false;
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  const startMinutes = 11 * 60; // 11:00 AM
+  const endMinutes = 19 * 60;   // 7:00 PM (19:00)
+  return minutes >= startMinutes && minutes < endMinutes;
+}
 
 function launchMiniAppWindow(port = MINI_APP_PORT) {
   const url = `http://127.0.0.1:${port}`;
@@ -436,16 +446,20 @@ function startMiniAppServer(port = MINI_APP_PORT) {
       const isOfficeConnected = (bssid && KNOWN_OFFICE_BSSIDS.has(bssid)) || isOfficeSsid(ssid);
       const isOfficeVisible = visibleOfficeBssids.some(v => KNOWN_OFFICE_BSSIDS.has(v.bssid));
 
+      const onBreakNow = isManualBreak || isOnBreak;
+      const withinHours = isWithinOfficeHours();
+      outsideWorkingHours = !withinHours;
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
         enrolled: !!(cfgNow && cfgNow.token),
         employeeName: cfgNow ? cfgNow.employeeName : null,
         employeeRole: cfgNow ? cfgNow.employeeRole : null,
-        isManualBreak,
+        isManualBreak: onBreakNow,
         appTrackingEnabled,
         outsideWorkingHours,
         latest: {
-          workstationStatus: isManualBreak ? 'ON_BREAK' : (outsideWorkingHours ? 'STANDBY' : currentWorkstationStatus),
+          workstationStatus: onBreakNow ? 'ON_BREAK' : (outsideWorkingHours ? 'STANDBY' : currentWorkstationStatus),
           inOffice: isOfficeConnected || isOfficeVisible,
           isOfficeConnected,
           isOfficeVisible,
@@ -659,6 +673,12 @@ async function startAgent() {
 
   async function syncLocalQueue() {
     if (isSyncing) return;
+    if (!isWithinOfficeHours()) {
+      // Outside office hours (Mon-Fri 11:00 AM - 7:00 PM):
+      // Zero updates sent to backend outside office timings.
+      return;
+    }
+
     isSyncing = true;
     try {
       if (!localDb) return;
@@ -697,7 +717,12 @@ async function startAgent() {
                 updateStmt.run(now, ev.event_id);
               }
             }
-            if (data.today) todayLiveStats = data.today;
+            if (data.today) {
+              todayLiveStats = data.today;
+              if (data.today.onBreak !== undefined) {
+                isOnBreak = Boolean(data.today.onBreak);
+              }
+            }
             if (data.appTrackingEnabled !== undefined) appTrackingEnabled = Boolean(data.appTrackingEnabled);
             if (data.outsideWorkingHours !== undefined) outsideWorkingHours = Boolean(data.outsideWorkingHours);
             console.log(`[${new Date().toLocaleTimeString()}] Batch synced ${syncedIds.size} offline heartbeats to cloud successfully.`);
@@ -730,7 +755,12 @@ async function startAgent() {
 
           if (res.ok) {
             const data = await res.json();
-            if (data.today) todayLiveStats = data.today;
+            if (data.today) {
+              todayLiveStats = data.today;
+              if (data.today.onBreak !== undefined) {
+                isOnBreak = Boolean(data.today.onBreak);
+              }
+            }
             if (data.workstationStatus) currentWorkstationStatus = data.workstationStatus;
             if (data.appTrackingEnabled !== undefined) appTrackingEnabled = Boolean(data.appTrackingEnabled);
             if (data.outsideWorkingHours !== undefined) outsideWorkingHours = Boolean(data.outsideWorkingHours);
@@ -766,24 +796,49 @@ async function startAgent() {
   let latestContinuousIdle = 0;
 
   function onSecondSample(idleSecs, procName, title) {
+    const withinHours = isWithinOfficeHours();
+    outsideWorkingHours = !withinHours;
+
+    if (!withinHours) {
+      // Outside office hours (Mon-Fri 11:00 AM - 7:00 PM):
+      // Pause all app monitoring and accumulation; zero updates sent to backend
+      currentApp = 'Outside Office Hours';
+      appBreakdown = {};
+      secondsElapsed = 0;
+      accumulatedActive = 0;
+      accumulatedIdle = 0;
+      return;
+    }
+
     secondsElapsed++;
     latestContinuousIdle = Math.max(0, parseInt(idleSecs, 10) || 0);
 
-    // If there has been no physical input for at least 60 seconds (or manual break),
-    // this 1-second interval counts as idle rather than active typing/clicking
-    const isIdle = isManualBreak || latestContinuousIdle >= 60;
-    if (isIdle) {
+    const onBreakNow = isManualBreak || isOnBreak;
+
+    if (onBreakNow) {
+      // On break:
+      // PAUSE app monitoring (what employee is using during their break period)
+      // Privacy protection: do NOT inspect or record processes/window titles
+      currentApp = 'On Break';
+      appBreakdown = {};
       accumulatedIdle++;
     } else {
-      accumulatedActive++;
-      // If HR disabled app tracking for personal laptop (BYOD privacy), do NOT inspect window title or process
-      if (appTrackingEnabled) {
-        const app = parseActiveApplication(procName, title);
-        currentApp = app;
-        appBreakdown[app] = (appBreakdown[app] || 0) + 1;
+      // If there has been no physical input for at least 60 seconds,
+      // this 1-second interval counts as idle rather than active typing/clicking
+      const isIdle = latestContinuousIdle >= 60;
+      if (isIdle) {
+        accumulatedIdle++;
       } else {
-        currentApp = 'Active Workstation';
-        appBreakdown = {};
+        accumulatedActive++;
+        // If HR disabled app tracking for personal laptop (BYOD privacy), do NOT inspect window title or process
+        if (appTrackingEnabled) {
+          const app = parseActiveApplication(procName, title);
+          currentApp = app;
+          appBreakdown[app] = (appBreakdown[app] || 0) + 1;
+        } else {
+          currentApp = 'Active Workstation';
+          appBreakdown = {};
+        }
       }
     }
 
@@ -810,7 +865,7 @@ async function startAgent() {
       }
 
       // Proactively alert employee if working while completely off office network
-      if (!isOfficeConnected && !isOfficeVisible && sendActive > 30) {
+      if (!isOfficeConnected && !isOfficeVisible && sendActive > 30 && !onBreakNow) {
         alertOutOfOffice();
       }
 
@@ -821,7 +876,7 @@ async function startAgent() {
         idleSeconds: sendIdle,
         currentIdleSeconds: latestContinuousIdle,
         currentApp,
-        appBreakdown: appTrackingEnabled ? sendBreakdown : {},
+        appBreakdown: (appTrackingEnabled && !onBreakNow) ? sendBreakdown : {},
         lockState: 'UNLOCKED',
         lockDurationSeconds: 0,
         connectedBssid: bssid,
@@ -829,7 +884,7 @@ async function startAgent() {
         ssid,
         visibleOfficeBssids,
         localIp,
-        isManualBreak,
+        isManualBreak: onBreakNow,
         observedAt: Date.now(),
       };
 
