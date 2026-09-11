@@ -322,10 +322,10 @@ export function PresenceGrid({
   ];
 
   const inOfficeCount = summary.inOffice.length;
-  const breakCount = all.filter((e) => e.onBreak || e.status === 'ON_BREAK').length;
+  const breakCount = all.filter((e) => e.onBreak).length;
   const lateCount = all.filter((e) => (e.lateMinutes ?? 0) > 0 || e.isLate).length;
   const awayCount = all.filter(
-    (e) => e.status === 'AWAY' || e.status === 'GRACE' || e.status === 'NOT_CHECKED_IN'
+    (e) => e.status === 'AWAY' || e.status === 'GRACE_PERIOD' || e.status === 'NOT_CHECKED_IN'
   ).length;
 
   const filtered = all.filter((e) => {
@@ -339,16 +339,16 @@ export function PresenceGrid({
     }
 
     if (statusFilter === 'IN_OFFICE') {
-      return e.status === 'IN_OFFICE' || e.status === 'ACTIVE';
+      return e.status === 'IN_OFFICE';
     }
     if (statusFilter === 'ON_BREAK') {
-      return e.onBreak || e.status === 'ON_BREAK';
+      return e.onBreak;
     }
     if (statusFilter === 'LATE') {
       return (e.lateMinutes ?? 0) > 0 || e.isLate;
     }
     if (statusFilter === 'AWAY') {
-      return e.status === 'AWAY' || e.status === 'GRACE' || e.status === 'NOT_CHECKED_IN';
+      return e.status === 'AWAY' || e.status === 'GRACE_PERIOD' || e.status === 'NOT_CHECKED_IN';
     }
     return true;
   });
@@ -961,7 +961,7 @@ export function AttendanceTable({
                           timeWorkedFormatted: h.timeWorked || '0h 00m',
                           dailyDeficitMinutes: h.dailyDeficitMinutes || 0,
                           onBreak: false,
-                        } as EmployeeDay);
+                        } as unknown as EmployeeDay);
                       }
                     }}
                     className="hover:bg-cyan-500/[0.04] transition-colors cursor-pointer group"
@@ -1028,7 +1028,7 @@ export function AttendanceTable({
                               timeWorkedFormatted: h.timeWorked || '0h 00m',
                               dailyDeficitMinutes: h.dailyDeficitMinutes || 0,
                               onBreak: false,
-                            } as EmployeeDay);
+                            } as unknown as EmployeeDay);
                           }
                         }}
                         className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20 hover:border-cyan-400 transition"

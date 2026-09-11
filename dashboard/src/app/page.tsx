@@ -413,7 +413,7 @@ export default function DashboardPage() {
                           breakMinutes: 0,
                           timeWorkedFormatted: '0h 00m',
                           onBreak: false,
-                        } as EmployeeDay);
+                        } as unknown as EmployeeDay);
                       }
                     }
                   }}
