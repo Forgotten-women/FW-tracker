@@ -35,7 +35,11 @@ function getAppCategory(appName: string) {
   return { label: 'Application', icon: '💻', badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
 }
 
-export function WorkstationsPanel() {
+export function WorkstationsPanel({
+  onSelectEmployee,
+}: {
+  onSelectEmployee?: (employeeId: string) => void;
+} = {}) {
   const [workstations, setWorkstations] = useState<WorkstationItem[]>([]);
   const [appUsage, setAppUsage] = useState<AppUsageItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -322,20 +326,26 @@ export function WorkstationsPanel() {
                   <th className="py-3 px-4">Break / Idle</th>
                   <th className="py-3 px-4">Network & BSSID</th>
                   <th className="py-3 px-4">Last Seen</th>
+                  <th className="py-3 px-4 text-right">Telemetry</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {workstations.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-500">
+                    <td colSpan={8} className="py-8 text-center text-slate-500">
                       No desktop workstation sessions recorded today. Enrol a laptop using the Desktop Agent!
                     </td>
                   </tr>
                 ) : (
                   workstations.map(ws => (
-                    <tr key={ws.id} className="hover:bg-slate-800/30 transition-colors">
+                    <tr
+                      key={ws.id}
+                      onClick={() => ws.employeeId && onSelectEmployee?.(ws.employeeId)}
+                      className="hover:bg-slate-800/40 transition-colors cursor-pointer group"
+                      title="Click to view comprehensive telemetry profile"
+                    >
                       <td className="py-3.5 px-4 font-medium text-slate-100">
-                        {ws.employeeName}
+                        <span className="group-hover:text-cyan-300 transition">{ws.employeeName}</span>
                         <div className="text-xs text-slate-400">{ws.employeeRole}</div>
                       </td>
                       <td className="py-3.5 px-4">
@@ -388,6 +398,21 @@ export function WorkstationsPanel() {
                       </td>
                       <td className="py-3.5 px-4 text-xs text-slate-400">
                         {ws.lastHeartbeat}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        {onSelectEmployee && ws.employeeId && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectEmployee(ws.employeeId);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20 hover:border-cyan-400 transition"
+                          >
+                            <span>Profile</span>
+                            <span>→</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -527,7 +552,20 @@ export function WorkstationsPanel() {
                           </div>
                         </div>
 
-                        <div className="hidden sm:block">
+                        <div className="hidden sm:flex items-center gap-2">
+                          {onSelectEmployee && group.employeeId && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectEmployee(group.employeeId);
+                              }}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 font-medium transition cursor-pointer"
+                              title="Open employee profile drawer"
+                            >
+                              Profile Drawer →
+                            </button>
+                          )}
                           <span
                             className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
                               open

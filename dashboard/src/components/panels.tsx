@@ -304,7 +304,16 @@ export function Stats({ summary }: { summary: DashboardSummary }) {
 
 // --- presence --------------------------------------------------------------
 
-export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
+export function PresenceGrid({
+  summary,
+  onSelectEmployee,
+}: {
+  summary: DashboardSummary;
+  onSelectEmployee?: (employee: EmployeeDay) => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'IN_OFFICE' | 'ON_BREAK' | 'LATE' | 'AWAY'>('ALL');
+
   const all = [
     ...summary.inOffice,
     ...summary.grace,
@@ -312,24 +321,162 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
     ...summary.notArrived,
   ];
 
+  const inOfficeCount = summary.inOffice.length;
+  const breakCount = all.filter((e) => e.onBreak || e.status === 'ON_BREAK').length;
+  const lateCount = all.filter((e) => (e.lateMinutes ?? 0) > 0 || e.isLate).length;
+  const awayCount = all.filter(
+    (e) => e.status === 'AWAY' || e.status === 'GRACE' || e.status === 'NOT_CHECKED_IN'
+  ).length;
+
+  const filtered = all.filter((e) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const match =
+        e.employeeName.toLowerCase().includes(q) ||
+        e.role.toLowerCase().includes(q) ||
+        (e.employeeNumber && e.employeeNumber.toLowerCase().includes(q));
+      if (!match) return false;
+    }
+
+    if (statusFilter === 'IN_OFFICE') {
+      return e.status === 'IN_OFFICE' || e.status === 'ACTIVE';
+    }
+    if (statusFilter === 'ON_BREAK') {
+      return e.onBreak || e.status === 'ON_BREAK';
+    }
+    if (statusFilter === 'LATE') {
+      return (e.lateMinutes ?? 0) > 0 || e.isLate;
+    }
+    if (statusFilter === 'AWAY') {
+      return e.status === 'AWAY' || e.status === 'GRACE' || e.status === 'NOT_CHECKED_IN';
+    }
+    return true;
+  });
+
   return (
     <Panel
       title="Live Office Presence"
-      subtitle={`${all.length} enrolled workforce members`}
+      subtitle={`${all.length} enrolled workforce members · Click any person to inspect complete telemetry`}
       icon={
         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
         </svg>
       }
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search Input */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search employee..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-48 sm:w-56 rounded-xl border border-white/10 bg-slate-900/90 pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500 focus:outline-none transition"
+            />
+            <svg
+              className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2 text-xs text-slate-500 hover:text-slate-300"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+      }
     >
+      {/* Filter Tabs */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-white/8 pb-3">
+        <button
+          type="button"
+          onClick={() => setStatusFilter('ALL')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+            statusFilter === 'ALL'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+              : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+          }`}
+        >
+          All ({all.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter('IN_OFFICE')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+            statusFilter === 'IN_OFFICE'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
+              : 'bg-slate-900/80 text-emerald-400 hover:bg-slate-800'
+          }`}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          In Office ({inOfficeCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter('ON_BREAK')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+            statusFilter === 'ON_BREAK'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-500/20'
+              : 'bg-slate-900/80 text-amber-400 hover:bg-slate-800'
+          }`}
+        >
+          <span>☕</span>
+          On Break ({breakCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter('LATE')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+            statusFilter === 'LATE'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20'
+              : 'bg-slate-900/80 text-rose-400 hover:bg-slate-800'
+          }`}
+        >
+          <span>⚠️</span>
+          Late ({lateCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter('AWAY')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+            statusFilter === 'AWAY'
+              ? 'bg-slate-700 text-white shadow-md'
+              : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+          }`}
+        >
+          Away / Out ({awayCount})
+        </button>
+      </div>
+
       {all.length === 0 ? (
         <Empty
           title="No Workforce Members Enrolled"
           description="Register employees and pair mobile devices to start monitoring real-time presence."
         />
+      ) : filtered.length === 0 ? (
+        <div className="py-12 text-center text-slate-400">
+          <p className="text-sm font-semibold text-slate-300">No employees match your filter</p>
+          <p className="text-xs text-slate-500 mt-1">Try changing your search term or clearing the filter.</p>
+          <button
+            onClick={() => {
+              setSearchQuery('');
+              setStatusFilter('ALL');
+            }}
+            className="mt-3 text-xs text-cyan-400 hover:underline"
+          >
+            Reset filters
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
-          {all.map((e) => {
+          {filtered.map((e) => {
             const meta = STATUS_META[e.status] ?? STATUS_META.NOT_CHECKED_IN;
             const initials = e.employeeName
               .split(' ')
@@ -341,17 +488,19 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
             return (
               <div
                 key={e.employeeId}
-                className="glass-panel-elevated rounded-2xl p-4 transition-all duration-200 hover:border-white/20 hover:shadow-2xl relative overflow-hidden"
+                onClick={() => onSelectEmployee?.(e)}
+                className="glass-panel-elevated rounded-2xl p-4 transition-all duration-200 hover:border-cyan-500/50 hover:shadow-cyan-500/10 hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.99] relative overflow-hidden cursor-pointer group"
+                title={`Click to open full telemetry drawer for ${e.employeeName}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   {/* Avatar & Name */}
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 border border-white/10 text-xs font-bold text-white shadow-inner">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 border border-white/10 text-xs font-bold text-white shadow-inner group-hover:border-cyan-500/40 transition">
                       {initials}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <h4 className="truncate text-sm font-bold text-white">
+                        <h4 className="truncate text-sm font-bold text-white group-hover:text-cyan-300 transition">
                           {e.employeeName}
                         </h4>
                         {e.employeeNumber && (
@@ -402,7 +551,7 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
                 )}
 
                 {/* Stats Row */}
-                <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-xl bg-slate-900/60 p-2.5 text-center text-[11px] border border-white/5">
+                <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-xl bg-slate-900/60 p-2.5 text-center text-[11px] border border-white/5 group-hover:border-white/10 transition">
                   <div>
                     <span className="text-slate-400 block text-[10px]">First In</span>
                     <span className={`font-semibold ${((e.lateMinutes ?? 0) > 0 || e.isLate) ? 'text-rose-400 font-bold' : 'text-slate-200'}`}>
@@ -424,28 +573,20 @@ export function PresenceGrid({ summary }: { summary: DashboardSummary }) {
                   </div>
                 </div>
 
-                {/* Facilitator Posture */}
-                {e.presenceSource && (
-                  <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-white/5">
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${
-                          e.sensorCarried ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-teal-400'
-                        }`}
-                      />
-                      <span>via {e.presenceSource}</span>
-                    </span>
-                    {e.sensorCarried ? (
-                      <span className="text-emerald-400 font-medium text-[10px]">
-                        Sensor Verified
-                      </span>
-                    ) : (
-                      <span className="text-teal-400 font-medium text-[10px]">
-                        App / Workstation
-                      </span>
-                    )}
-                  </div>
-                )}
+                {/* Facilitator Posture & Click Affordance */}
+                <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-white/5">
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        e.sensorCarried ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-teal-400'
+                      }`}
+                    />
+                    <span>{e.sensorCarried ? 'Beacon Verified' : e.presenceSource ? `via ${e.presenceSource}` : 'Enrolled'}</span>
+                  </span>
+                  <span className="text-[10px] text-cyan-400 font-semibold flex items-center gap-1 opacity-80 group-hover:opacity-100 group-hover:translate-x-0.5 transition">
+                    Details <span>→</span>
+                  </span>
+                </div>
               </div>
             );
           })}
@@ -461,16 +602,19 @@ export function AttendanceTable({
   rows,
   dateKey,
   onExport,
+  onSelectEmployee,
 }: {
   rows: EmployeeDay[];
   dateKey: string;
   onExport: (from: string, to: string) => void;
+  onSelectEmployee?: (employee: EmployeeDay) => void;
 }) {
   const [selectedDate, setSelectedDate] = useState(dateKey);
   const [historyRows, setHistoryRows] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [from, setFrom] = useState(dateKey);
   const [to, setTo] = useState(dateKey);
+  const [tableSearch, setTableSearch] = useState('');
 
   const isToday = selectedDate === dateKey;
 
@@ -504,10 +648,30 @@ export function AttendanceTable({
     setSelectedDate(newKey);
   };
 
+  const filteredTodayRows = rows.filter((r) => {
+    if (!tableSearch.trim()) return true;
+    const q = tableSearch.toLowerCase();
+    return (
+      r.employeeName.toLowerCase().includes(q) ||
+      r.role.toLowerCase().includes(q) ||
+      (r.employeeNumber && r.employeeNumber.toLowerCase().includes(q))
+    );
+  });
+
+  const filteredHistoryRows = historyRows.filter((h) => {
+    if (!tableSearch.trim()) return true;
+    const q = tableSearch.toLowerCase();
+    return (
+      h.employeeName?.toLowerCase().includes(q) ||
+      h.role?.toLowerCase().includes(q) ||
+      (h.employeeNumber && h.employeeNumber.toLowerCase().includes(q))
+    );
+  });
+
   return (
     <Panel
       title="Timesheets & Daily Ledger"
-      subtitle={isToday ? 'Live real-time observations' : `Historical log for ${selectedDate}`}
+      subtitle={isToday ? 'Live real-time observations · Click any row to view employee profile & telemetry' : `Historical log for ${selectedDate}`}
       icon={
         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -515,6 +679,25 @@ export function AttendanceTable({
       }
       actions={
         <div className="flex flex-wrap items-center gap-3">
+          {/* Table Search */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search table..."
+              value={tableSearch}
+              onChange={(e) => setTableSearch(e.target.value)}
+              className="w-40 sm:w-48 rounded-xl border border-white/10 bg-slate-900/90 pl-8 pr-3 py-1 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500 focus:outline-none transition"
+            />
+            <svg
+              className="absolute left-2.5 top-1.5 h-3.5 w-3.5 text-slate-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+
           {/* Historical Date Picker Navigation */}
           <div className="flex items-center rounded-xl border border-white/10 bg-slate-900/90 p-1 shadow-inner">
             <button
@@ -606,19 +789,20 @@ export function AttendanceTable({
               <th className="px-3 py-3.5">Worked (8h 00m Target)</th>
               <th className="px-3 py-3.5">Break Taken</th>
               <th className="px-3 py-3.5">Deficit</th>
-              <th className="px-4 py-3.5 text-right">Status</th>
+              <th className="px-3 py-3.5 text-center">Status</th>
+              <th className="px-4 py-3.5 text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 bg-slate-950/40">
             {isToday ? (
-              rows.length === 0 ? (
+              filteredTodayRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>
-                    <Empty title="No Check-Ins Recorded Today" description="Staff will appear here as they clock in or connect to the office beacon." />
+                  <td colSpan={9}>
+                    <Empty title="No Check-Ins Recorded" description="Staff will appear here as they clock in or connect to the office beacon." />
                   </td>
                 </tr>
               ) : (
-                rows.map((a) => {
+                filteredTodayRows.map((a) => {
                   const meta = STATUS_META[a.status] ?? STATUS_META.NOT_CHECKED_IN;
                   const hasExcessBreak = (a.excessBreakMinutes ?? 0) > 0;
                   const hasDeficit = (a.dailyDeficitMinutes ?? 0) > 0;
@@ -628,9 +812,14 @@ export function AttendanceTable({
                   const extraMins = Math.max(0, netWorkedMinutes - 450);
 
                   return (
-                    <tr key={a.employeeId} className="hover:bg-white/[0.02] transition-colors">
+                    <tr
+                      key={a.employeeId}
+                      onClick={() => onSelectEmployee?.(a)}
+                      className="hover:bg-cyan-500/[0.04] transition-colors cursor-pointer group"
+                      title="Click to view comprehensive employee telemetry"
+                    >
                       <td className="px-4 py-3.5">
-                        <span className="font-bold text-white block">{a.employeeName}</span>
+                        <span className="font-bold text-white group-hover:text-cyan-300 transition block">{a.employeeName}</span>
                         <span className="text-[11px] text-slate-400">{a.role}</span>
                       </td>
                       <td className="px-3 py-3.5 font-mono">
@@ -707,8 +896,8 @@ export function AttendanceTable({
                           <div className="text-[10px] text-rose-400 font-semibold">⚠️ Late arrival</div>
                         )}
                       </td>
-                      <td className="px-4 py-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                      <td className="px-3 py-3.5 text-center">
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           {((a.lateMinutes ?? 0) > 0 || (a as any).isLate) && (
                             <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
                               LATE
@@ -719,32 +908,66 @@ export function AttendanceTable({
                           </Badge>
                         </div>
                       </td>
+                      <td className="px-4 py-3.5 text-right">
+                        <button
+                          type="button"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            onSelectEmployee?.(a);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20 hover:border-cyan-400 transition"
+                        >
+                          <span>Profile</span>
+                          <span>→</span>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
               )
             ) : loadingHistory ? (
               <tr>
-                <td colSpan={8} className="py-12 text-center text-slate-400">
+                <td colSpan={9} className="py-12 text-center text-slate-400">
                   <div className="flex items-center justify-center gap-3">
                     <div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
                     <span>Loading historical records for {selectedDate}…</span>
                   </div>
                 </td>
               </tr>
-            ) : historyRows.length === 0 ? (
+            ) : filteredHistoryRows.length === 0 ? (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <Empty title={`No records for ${selectedDate}`} description="There were no active working sessions logged on this date." />
                 </td>
               </tr>
             ) : (
-              historyRows.map((h) => {
+              filteredHistoryRows.map((h) => {
                 const meta = STATUS_META[h.status as PresenceStatus] ?? STATUS_META.NOT_CHECKED_IN;
                 return (
-                  <tr key={h.employeeId} className="hover:bg-white/[0.02] transition-colors">
+                  <tr
+                    key={h.employeeId}
+                    onClick={() => {
+                      if (onSelectEmployee) {
+                        onSelectEmployee({
+                          employeeId: h.employeeId,
+                          employeeName: h.employeeName,
+                          role: h.role,
+                          status: h.status,
+                          firstCheckIn: h.firstCheckIn,
+                          lastActiveTime: h.lastActive,
+                          sessions: h.sessions || [],
+                          totalMinutes: h.totalMinutes || 0,
+                          breakMinutes: h.breakMinutes || 0,
+                          timeWorkedFormatted: h.timeWorked || '0h 00m',
+                          dailyDeficitMinutes: h.dailyDeficitMinutes || 0,
+                          onBreak: false,
+                        } as EmployeeDay);
+                      }
+                    }}
+                    className="hover:bg-cyan-500/[0.04] transition-colors cursor-pointer group"
+                  >
                     <td className="px-4 py-3.5">
-                      <span className="font-bold text-white block">{h.employeeName}</span>
+                      <span className="font-bold text-white group-hover:text-cyan-300 transition block">{h.employeeName}</span>
                       <span className="text-[11px] text-slate-400">{h.role}</span>
                     </td>
                     <td className="px-3 py-3.5 font-mono text-slate-300">{h.firstCheckIn}</td>
@@ -781,10 +1004,38 @@ export function AttendanceTable({
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-right">
+                    <td className="px-3 py-3.5 text-center">
                       <Badge tone={meta.tone} dot size="sm">
                         {meta.label}
                       </Badge>
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <button
+                        type="button"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          if (onSelectEmployee) {
+                            onSelectEmployee({
+                              employeeId: h.employeeId,
+                              employeeName: h.employeeName,
+                              role: h.role,
+                              status: h.status,
+                              firstCheckIn: h.firstCheckIn,
+                              lastActiveTime: h.lastActive,
+                              sessions: h.sessions || [],
+                              totalMinutes: h.totalMinutes || 0,
+                              breakMinutes: h.breakMinutes || 0,
+                              timeWorkedFormatted: h.timeWorked || '0h 00m',
+                              dailyDeficitMinutes: h.dailyDeficitMinutes || 0,
+                              onBreak: false,
+                            } as EmployeeDay);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20 hover:border-cyan-400 transition"
+                      >
+                        <span>Profile</span>
+                        <span>→</span>
+                      </button>
                     </td>
                   </tr>
                 );

@@ -23,10 +23,11 @@ import { PayrollPanel } from '@/components/PayrollPanel';
 import { OtaPanel } from '@/components/OtaPanel';
 import { WorkstationsPanel } from '@/components/WorkstationsPanel';
 import { ComplaintsManagementPanel } from '@/components/ComplaintsManagementPanel';
+import { EmployeeDetailDrawer } from '@/components/EmployeeDetailDrawer';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
-import type { AdminEmployee, AttendanceCorrection, EnrollmentCode, NotificationItem } from '@/lib/types';
+import type { AdminEmployee, AttendanceCorrection, EmployeeDay, EnrollmentCode, NotificationItem } from '@/lib/types';
 
 type DashboardTab = 'overview' | 'attendance' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
 
@@ -34,6 +35,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [gateError, setGateError] = useState<string>('');
   const [pairing, setPairing] = useState<(EnrollmentCode & { name: string }) | null>(null);
+  const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDay | null>(null);
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
@@ -356,11 +358,9 @@ export default function DashboardPage() {
 
                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
                   <div className="flex min-w-0 flex-col gap-6">
-                    <PresenceGrid summary={summary} />
-                    <AttendanceTable
-                      rows={summary.todayAttendance}
-                      dateKey={summary.currentDateKey}
-                      onExport={exportCsv}
+                    <PresenceGrid
+                      summary={summary}
+                      onSelectEmployee={setSelectedEmployee}
                     />
                   </div>
 
@@ -379,6 +379,7 @@ export default function DashboardPage() {
                   rows={summary.todayAttendance}
                   dateKey={summary.currentDateKey}
                   onExport={exportCsv}
+                  onSelectEmployee={setSelectedEmployee}
                 />
                 <AttendanceCorrectionsPanel
                   corrections={corrections}
@@ -391,7 +392,32 @@ export default function DashboardPage() {
             {/* 3. WORKSTATIONS & LAPTOPS TAB */}
             {activeTab === 'workstations' && (
               <div className="flex flex-col gap-6">
-                <WorkstationsPanel />
+                <WorkstationsPanel
+                  onSelectEmployee={(empId) => {
+                    const match = summary?.todayAttendance.find((e) => e.employeeId === empId);
+                    if (match) {
+                      setSelectedEmployee(match);
+                    } else {
+                      const emp = employees.find((e) => e.id === empId);
+                      if (emp) {
+                        setSelectedEmployee({
+                          employeeId: emp.id,
+                          employeeName: emp.name,
+                          employeeNumber: emp.employeeNumber,
+                          role: emp.role,
+                          status: 'IN_OFFICE',
+                          firstCheckIn: '—',
+                          lastActiveTime: '—',
+                          sessions: [],
+                          totalMinutes: 0,
+                          breakMinutes: 0,
+                          timeWorkedFormatted: '0h 00m',
+                          onBreak: false,
+                        } as EmployeeDay);
+                      }
+                    }
+                  }}
+                />
               </div>
             )}
 
@@ -481,6 +507,15 @@ export default function DashboardPage() {
           onClose={() => setPairing(null)}
         />
       )}
+
+      {/* Slide-out Employee Detail Drawer */}
+      <EmployeeDetailDrawer
+        employee={selectedEmployee}
+        onClose={() => setSelectedEmployee(null)}
+        onOpenPairing={(emp) => {
+          pairDevice({ id: emp.id, name: emp.name } as any);
+        }}
+      />
 
       {/* Slide-out HR Notifications Drawer */}
       <NotificationDrawer
