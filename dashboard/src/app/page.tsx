@@ -5,12 +5,8 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Gate } from '@/components/Gate';
 import {
   ActivityFeed,
-  AttendanceCorrectionsPanel,
-  AttendanceTable,
   CodeModal,
   Header,
-  PresenceGrid,
-  Stats,
   TeamPanel,
   WarningBar,
 } from '@/components/panels';
@@ -21,15 +17,15 @@ import { WarningBoard } from '@/components/WarningBoard';
 import { NotificationDrawer } from '@/components/NotificationDrawer';
 import { PayrollPanel } from '@/components/PayrollPanel';
 import { OtaPanel } from '@/components/OtaPanel';
-import { WorkstationsPanel } from '@/components/WorkstationsPanel';
 import { ComplaintsManagementPanel } from '@/components/ComplaintsManagementPanel';
 import { EmployeeDetailDrawer } from '@/components/EmployeeDetailDrawer';
+import { UnifiedWorkforcePanel } from '@/components/UnifiedWorkforcePanel';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, AttendanceCorrection, EmployeeDay, EnrollmentCode, NotificationItem } from '@/lib/types';
 
-type DashboardTab = 'overview' | 'attendance' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
+type DashboardTab = 'overview' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -191,29 +187,11 @@ export default function DashboardPage() {
   const navTabs: { id: DashboardTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     {
       id: 'overview',
-      label: 'Overview',
+      label: 'Live Workforce',
+      badge: pendingCorrectionsCount > 0 ? pendingCorrectionsCount : undefined,
       icon: (
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-        </svg>
-      ),
-    },
-    {
-      id: 'attendance',
-      label: 'Time & Attendance',
-      badge: pendingCorrectionsCount,
-      icon: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ),
-    },
-    {
-      id: 'workstations',
-      label: 'Workstations & Laptops',
-      icon: (
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
         </svg>
       ),
     },
@@ -351,73 +329,25 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {/* 1. OVERVIEW TAB */}
+            {/* 1. CONSOLIDATED LIVE WORKFORCE COMMAND CENTER */}
             {activeTab === 'overview' && (
-              <div className="flex flex-col gap-6">
-                <Stats summary={summary} />
-
-                <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
-                  <div className="flex min-w-0 flex-col gap-6">
-                    <PresenceGrid
-                      summary={summary}
-                      onSelectEmployee={setSelectedEmployee}
-                    />
-                  </div>
-
-                  <div className="flex min-w-0 flex-col gap-6">
-                    <HrAlertsPanel />
-                    <ActivityFeed movements={summary.recentMovements} />
-                  </div>
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2.2fr_1fr]">
+                <div className="flex min-w-0 flex-col gap-6">
+                  <UnifiedWorkforcePanel
+                    summary={summary}
+                    employees={employees}
+                    corrections={corrections}
+                    onDecideCorrection={decideCorrection}
+                    onRefreshCorrections={loadCorrections}
+                    onExportCsv={exportCsv}
+                    onSelectEmployee={setSelectedEmployee}
+                  />
                 </div>
-              </div>
-            )}
 
-            {/* 2. TIME & ATTENDANCE TAB */}
-            {activeTab === 'attendance' && (
-              <div className="flex flex-col gap-6">
-                <AttendanceTable
-                  rows={summary.todayAttendance}
-                  dateKey={summary.currentDateKey}
-                  onExport={exportCsv}
-                  onSelectEmployee={setSelectedEmployee}
-                />
-                <AttendanceCorrectionsPanel
-                  corrections={corrections}
-                  onDecide={decideCorrection}
-                  onRefresh={loadCorrections}
-                />
-              </div>
-            )}
-
-            {/* 3. WORKSTATIONS & LAPTOPS TAB */}
-            {activeTab === 'workstations' && (
-              <div className="flex flex-col gap-6">
-                <WorkstationsPanel
-                  onSelectEmployee={(empId) => {
-                    const match = summary?.todayAttendance.find((e) => e.employeeId === empId);
-                    if (match) {
-                      setSelectedEmployee(match);
-                    } else {
-                      const emp = employees.find((e) => e.id === empId);
-                      if (emp) {
-                        setSelectedEmployee({
-                          employeeId: emp.id,
-                          employeeName: emp.name,
-                          employeeNumber: emp.employeeNumber,
-                          role: emp.role,
-                          status: 'IN_OFFICE',
-                          firstCheckIn: '—',
-                          lastActiveTime: '—',
-                          sessions: [],
-                          totalMinutes: 0,
-                          breakMinutes: 0,
-                          timeWorkedFormatted: '0h 00m',
-                          onBreak: false,
-                        } as unknown as EmployeeDay);
-                      }
-                    }
-                  }}
-                />
+                <div className="flex min-w-0 flex-col gap-6">
+                  <HrAlertsPanel />
+                  <ActivityFeed movements={summary.recentMovements} />
+                </div>
               </div>
             )}
 
@@ -526,7 +456,7 @@ export default function DashboardPage() {
         onRefresh={loadNotifications}
         onNavigateTab={(tab) => {
           if (tab === 'leave') setActiveTab('leave');
-          else if (tab === 'history') setActiveTab('attendance');
+          else if (tab === 'history') setActiveTab('overview');
           else if (tab === 'warnings') setActiveTab('disciplinary');
           else if (tab === 'documents') setActiveTab('documents');
           else setActiveTab('overview');
