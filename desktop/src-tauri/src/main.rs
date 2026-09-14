@@ -331,18 +331,6 @@ fn main() {
                 api.prevent_close();
             }
         })
-        .build(tauri::generate_context!())
-        .expect("error while running tauri application")
-        .run(|app_handle, event| match event {
-            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
-                if !has_visible_windows {
-                    if let Some(window) = app_handle.get_window("main") {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
-                    }
-                }
-            }
-            _ => {}
-        });
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

@@ -145,6 +145,8 @@ pub async fn enroll(server_url: &str, code: &str) -> Result<AppConfig, String> {
         device_id: data["deviceId"].as_str().unwrap_or_default().to_string(),
         employee_name: data["employee"]["name"].as_str().unwrap_or("Employee").to_string(),
         employee_role: data["employee"]["role"].as_str().unwrap_or("Team Member").to_string(),
+        cached_active_seconds: 0,
+        cached_date_key: String::new(),
     };
 
     save_config(&cfg);
