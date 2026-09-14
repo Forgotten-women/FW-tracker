@@ -23,6 +23,7 @@ pub fn handle_tray_event(app: &AppHandle, event: SystemTrayEvent) {
         SystemTrayEvent::LeftClick { .. } => {
             if let Some(window) = app.get_window("main") {
                 let _ = window.show();
+                let _ = window.unminimize();
                 let _ = window.set_focus();
             }
         }
@@ -30,6 +31,7 @@ pub fn handle_tray_event(app: &AppHandle, event: SystemTrayEvent) {
             "show_widget" => {
                 if let Some(window) = app.get_window("main") {
                     let _ = window.show();
+                    let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
             }

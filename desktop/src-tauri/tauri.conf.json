@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Office Tracker",
-    "version": "1.0.10"
+    "version": "1.0.11"
   },
   "tauri": {
     "allowlist": {
@@ -62,7 +62,7 @@
         "transparent": true,
         "alwaysOnTop": true,
         "visible": false,
-        "skipTaskbar": true
+        "skipTaskbar": false
       }
     ]
   }

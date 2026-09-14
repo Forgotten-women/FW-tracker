@@ -117,10 +117,39 @@ fn main() {
     autostart::ensure_autostart_registered();
     let initial_config = client::load_config();
 
+    let now_date_key = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let initial_latest_response = if !initial_config.cached_date_key.is_empty()
+        && initial_config.cached_date_key == now_date_key
+        && initial_config.cached_active_seconds > 0
+    {
+        Some(client::HeartbeatResponse {
+            status: "SUCCESS".to_string(),
+            workstation_status: "ACTIVE".to_string(),
+            in_office: true,
+            location_verdict: Some("OFFICE".to_string()),
+            app_tracking_enabled: Some(true),
+            outside_working_hours: Some(false),
+            today: client::SessionStats {
+                date_key: initial_config.cached_date_key.clone(),
+                active_seconds: initial_config.cached_active_seconds,
+                idle_seconds: 0,
+                break_seconds: 0,
+                on_break: false,
+                break_already_taken: false,
+                break_permitted_minutes: Some(30),
+                break_started_at: None,
+                break_remaining_seconds: None,
+            },
+            policy: client::PolicySettings::default(),
+        })
+    } else {
+        None
+    };
+
     tauri::Builder::default()
         .manage(AppState {
             config: Mutex::new(initial_config.clone()),
-            latest_response: Mutex::new(None),
+            latest_response: Mutex::new(initial_latest_response),
         })
         .system_tray(tray::create_tray())
         .on_system_tray_event(tray::handle_tray_event)
@@ -189,6 +218,11 @@ fn main() {
                         };
                         if let Ok(resp) = client::send_heartbeat(&cfg, payload).await {
                             *state.latest_response.lock().unwrap() = Some(resp.clone());
+                            let mut cfg_to_save = cfg.clone();
+                            cfg_to_save.cached_active_seconds = resp.today.active_seconds;
+                            cfg_to_save.cached_date_key = resp.today.date_key.clone();
+                            client::save_config(&cfg_to_save);
+                            *state.config.lock().unwrap() = cfg_to_save;
                             let _ = app_handle.emit_all("heartbeat-updated", resp);
                         }
                     }
@@ -269,6 +303,11 @@ fn main() {
                                 app_breakdown.clear();
                                 IS_MANUAL_BREAK.store(resp.today.on_break, Ordering::SeqCst);
                                 *state.latest_response.lock().unwrap() = Some(resp.clone());
+                                let mut cfg_to_save = cfg.clone();
+                                cfg_to_save.cached_active_seconds = resp.today.active_seconds;
+                                cfg_to_save.cached_date_key = resp.today.date_key.clone();
+                                client::save_config(&cfg_to_save);
+                                *state.config.lock().unwrap() = cfg_to_save;
                                 let _ = app_handle.emit_all("heartbeat-updated", resp.clone());
 
                                 // If server determined we are outside office, but office Wi-Fi is visible in the air, auto-connect
@@ -292,6 +331,18 @@ fn main() {
                 api.prevent_close();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+                if !has_visible_windows {
+                    if let Some(window) = app_handle.get_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+            _ => {}
+        });
 }

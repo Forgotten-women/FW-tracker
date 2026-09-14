@@ -68,6 +68,13 @@ button, input, select, textarea, a, .icon-btn, .action-btn, .primary-btn {
   color: #94a3b8;
 }
 
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+
 .icon-btn {
   background: transparent;
   border: none;

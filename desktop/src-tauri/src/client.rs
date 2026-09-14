@@ -15,6 +15,10 @@ pub struct AppConfig {
     pub device_id: String,
     pub employee_name: String,
     pub employee_role: String,
+    #[serde(default)]
+    pub cached_active_seconds: u64,
+    #[serde(default)]
+    pub cached_date_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

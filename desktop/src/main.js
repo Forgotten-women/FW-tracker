@@ -47,6 +47,7 @@ const enrollBtn = document.getElementById('enroll-btn');
 const enrollError = document.getElementById('enroll-error');
 const serverUrlInput = document.getElementById('server-url-input');
 const enrollCodeInput = document.getElementById('enroll-code-input');
+const minimizeBtn = document.getElementById('minimize-btn');
 const closeBtn = document.getElementById('close-btn');
 const breakToggleBtn = document.getElementById('break-toggle-btn');
 const activeTimer = document.getElementById('active-timer');
@@ -99,11 +100,36 @@ if (wifiConnectBtn) {
   });
 }
 
-let currentActiveSecs = 0;
+const CACHE_KEY_ACTIVE = 'officetracker_active_secs';
+const CACHE_KEY_DATE = 'officetracker_date_key';
+
+function getTodayDateKey() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Restore saved active seconds from localStorage on startup so it never resets to 00:00:00
+const todayDateStr = getTodayDateKey();
+const savedDateStr = typeof localStorage !== 'undefined' ? localStorage.getItem(CACHE_KEY_DATE) : null;
+const savedSecsVal = typeof localStorage !== 'undefined' ? parseInt(localStorage.getItem(CACHE_KEY_ACTIVE) || '0', 10) : 0;
+
+let currentActiveSecs = (savedDateStr === todayDateStr && savedSecsVal > 0) ? savedSecsVal : 0;
 let lastSyncedServerSecs = -1;
-let lastSyncedDateKey = '';
+let lastSyncedDateKey = savedDateStr === todayDateStr ? todayDateStr : '';
 let timerInterval = null;
 let lastLocalDay = new Date().toDateString();
+
+function saveLocalProgress(secs, dateKey = getTodayDateKey()) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CACHE_KEY_ACTIVE, String(secs));
+      localStorage.setItem(CACHE_KEY_DATE, dateKey);
+    }
+  } catch (_) {}
+}
 
 function formatHMS(seconds) {
   const total = Math.max(0, parseInt(seconds, 10) || 0);
@@ -186,21 +212,25 @@ async function refreshStatus() {
           currentActiveSecs = serverActive;
           lastSyncedServerSecs = serverActive;
           lastSyncedDateKey = serverDateKey;
+          saveLocalProgress(currentActiveSecs, serverDateKey);
         } else if (lastSyncedServerSecs === -1) {
-          currentActiveSecs = serverActive;
+          currentActiveSecs = Math.max(currentActiveSecs, serverActive);
           lastSyncedServerSecs = serverActive;
-          lastSyncedDateKey = serverDateKey;
+          lastSyncedDateKey = serverDateKey || todayDateStr;
+          saveLocalProgress(currentActiveSecs, lastSyncedDateKey);
         } else if (serverActive > lastSyncedServerSecs) {
           currentActiveSecs = Math.max(currentActiveSecs, serverActive);
           lastSyncedServerSecs = serverActive;
-        } else if (serverActive < lastSyncedServerSecs) {
-          // If server reports fewer seconds (e.g. day roll over or correction)
+          saveLocalProgress(currentActiveSecs, serverDateKey);
+        } else if (serverActive < lastSyncedServerSecs && serverActive > 0) {
           currentActiveSecs = serverActive;
           lastSyncedServerSecs = serverActive;
+          saveLocalProgress(currentActiveSecs, serverDateKey);
         } else {
           // If local timer drifted ahead of server by >90s, pull back to server active time
-          if (currentActiveSecs > serverActive + 90) {
+          if (serverActive > 0 && currentActiveSecs > serverActive + 90) {
             currentActiveSecs = serverActive;
+            saveLocalProgress(currentActiveSecs, serverDateKey);
           }
         }
 
@@ -315,6 +345,9 @@ timerInterval = setInterval(() => {
     if (activeTimer) {
       activeTimer.textContent = formatHMS(currentActiveSecs);
     }
+    if (currentActiveSecs % 5 === 0) {
+      saveLocalProgress(currentActiveSecs);
+    }
   }
 }, 1000);
 
@@ -369,6 +402,16 @@ if (enrollBtn) {
   });
 }
 
+if (minimizeBtn) {
+  minimizeBtn.addEventListener('click', () => {
+    if (isTauri && tauriWindow && typeof tauriWindow.minimize === 'function') {
+      tauriWindow.minimize();
+    } else {
+      window.blur();
+    }
+  });
+}
+
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {
     if (isTauri && tauriWindow) {
@@ -418,6 +461,10 @@ if (isTauri && window.__TAURI__.event) {
   window.__TAURI__.event.listen('heartbeat-updated', () => {
     refreshStatus();
   });
+}
+
+if (activeTimer && currentActiveSecs > 0) {
+  activeTimer.textContent = formatHMS(currentActiveSecs);
 }
 
 refreshStatus();

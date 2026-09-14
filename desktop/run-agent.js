@@ -381,8 +381,14 @@ function getActiveWindowInfo() {
 
 const MINI_APP_PORT = 48712;
 let miniAppServer = null;
-let currentEnrollResolve = null;
-let todayLiveStats = { activeSeconds: 0, breakSeconds: 0, idleSeconds: 0 };
+const initCfg = loadConfig();
+const initialTodayStr = new Date().toISOString().slice(0, 10);
+let todayLiveStats = {
+  activeSeconds: (initCfg && initCfg.cachedDateKey === initialTodayStr && initCfg.cachedActiveSeconds > 0) ? initCfg.cachedActiveSeconds : 0,
+  breakSeconds: 0,
+  idleSeconds: 0,
+  dateKey: initialTodayStr,
+};
 let currentWorkstationStatus = 'ACTIVE';
 let isManualBreak = false;
 let isOnBreak = false;
@@ -759,6 +765,11 @@ async function startAgent() {
               todayLiveStats = data.today;
               if (data.today.onBreak !== undefined) {
                 isOnBreak = Boolean(data.today.onBreak);
+              }
+              if (cfg && data.today.activeSeconds) {
+                cfg.cachedActiveSeconds = data.today.activeSeconds;
+                cfg.cachedDateKey = data.today.dateKey || initialTodayStr;
+                saveConfig(cfg);
               }
             }
             if (data.workstationStatus) currentWorkstationStatus = data.workstationStatus;
