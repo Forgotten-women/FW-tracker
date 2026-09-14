@@ -38,7 +38,7 @@ app.use(cors({
 // The raw body is captured for HMAC verification of hardware sensor requests,
 // which sign "<timestamp>.<raw body>".
 app.use(express.json({
-  limit: '256kb',
+  limit: '2mb',
   verify: (req, res, buf) => { req.rawBody = buf; },
 }));
 

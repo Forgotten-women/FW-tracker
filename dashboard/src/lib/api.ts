@@ -46,6 +46,7 @@ import type {
   BankHolidayItem,
   ComplaintRecord,
   ComplaintStatus,
+  LiveFrameResponse,
 } from './types';
 
 
@@ -730,6 +731,19 @@ export const api = {
 
   fetchWorkstations: () =>
     request<{ status: string; dateKey: string; workstations: WorkstationItem[] }>('/api/admin/workstations'),
+
+  requestLiveStream: (deviceId: string) =>
+    request<{ status: string; message: string }>(`/api/admin/workstations/${encodeURIComponent(deviceId)}/request-stream`, {
+      method: 'POST',
+    }),
+
+  fetchLiveFrame: (deviceId: string) =>
+    request<LiveFrameResponse>(`/api/admin/workstations/${encodeURIComponent(deviceId)}/live-frame`),
+
+  stopLiveStream: (deviceId: string) =>
+    request<{ status: string; message: string }>(`/api/admin/workstations/${encodeURIComponent(deviceId)}/stop-stream`, {
+      method: 'POST',
+    }),
 
   fetchAnomalies: () =>
     request<{ status: string; anomalies: ProcessAnomalyItem[] }>('/api/admin/anomalies'),

@@ -15,13 +15,38 @@ function formatAppDuration(seconds: number) {
   return `${s}s`;
 }
 
-function getAppCategory(appName: string) {
+function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICATION') {
   const lower = (appName || '').toLowerCase();
+  if (lower.includes('youtube')) {
+    return { label: 'Streaming (Web)', icon: '🎬', badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
+  }
+  if (lower.includes('whatsapp') || lower.includes('web.whatsapp')) {
+    return { label: 'WhatsApp Web', icon: '💬', badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+  }
+  if (lower.includes('github') || lower.includes('gitlab')) {
+    return { label: 'Code Repository', icon: '🐙', badgeClass: 'text-purple-400 bg-purple-500/10 border-purple-500/20' };
+  }
+  if (lower.includes('chatgpt') || lower.includes('openai') || lower.includes('claude') || lower.includes('gemini')) {
+    return { label: 'AI Assistant', icon: '🤖', badgeClass: 'text-teal-400 bg-teal-500/10 border-teal-500/20' };
+  }
+  if (
+    explicitCategory === 'WEBSITE' ||
+    lower.includes('.com') ||
+    lower.includes('.org') ||
+    lower.includes('.net') ||
+    lower.includes('.io') ||
+    lower.includes('.app') ||
+    lower.includes('.dev') ||
+    lower.includes('.ai') ||
+    lower.includes('.co')
+  ) {
+    return { label: 'Website / Portal', icon: '🌐', badgeClass: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20' };
+  }
   if (lower.includes('code') || lower.includes('antigravity') || lower.includes('ide') || lower.includes('studio') || lower.includes('terminal') || lower.includes('git') || lower.includes('dbeaver') || lower.includes('postman')) {
     return { label: 'Development', icon: '⚡', badgeClass: 'text-sky-400 bg-sky-500/10 border-sky-500/20' };
   }
   if (lower.includes('chrome') || lower.includes('edge') || lower.includes('firefox') || lower.includes('browser') || lower.includes('safari') || lower.includes('brave')) {
-    return { label: 'Web / Cloud', icon: '🌐', badgeClass: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
+    return { label: 'Web Browser', icon: '🌍', badgeClass: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
   }
   if (lower.includes('teams') || lower.includes('slack') || lower.includes('zoom') || lower.includes('meet') || lower.includes('outlook') || lower.includes('discord')) {
     return { label: 'Communication', icon: '💬', badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
@@ -29,7 +54,7 @@ function getAppCategory(appName: string) {
   if (lower.includes('excel') || lower.includes('word') || lower.includes('docs') || lower.includes('sheets') || lower.includes('notion') || lower.includes('figma')) {
     return { label: 'Productivity', icon: '📊', badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
   }
-  if (lower.includes('youtube') || lower.includes('spotify') || lower.includes('netflix')) {
+  if (lower.includes('spotify') || lower.includes('netflix')) {
     return { label: 'Media', icon: '🎬', badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
   }
   return { label: 'Application', icon: '💻', badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
@@ -602,7 +627,7 @@ export function WorkstationsPanel({
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
                               {group.apps.map(app => {
-                                const cat = getAppCategory(app.appName);
+                                const cat = getAppCategory(app.appName, app.category);
                                 const formatted = formatAppDuration(app.activeSeconds);
                                 const sharePct = group.totalSeconds > 0
                                   ? Math.min(100, Math.round((app.activeSeconds / group.totalSeconds) * 100))

@@ -514,6 +514,119 @@ router.get('/anomalies', async (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Workstation Live Screen Telemetry (Admin On-Demand)
+// ---------------------------------------------------------------------------
+
+router.post('/workstations/:deviceId/request-stream', async (req, res) => {
+  const { deviceId } = req.params;
+  const nowMs = T.now();
+
+  try {
+    const dev = await db.prepare('SELECT employee_id FROM devices WHERE id = ? AND revoked_at IS NULL').get(deviceId);
+    if (!dev) {
+      return res.status(404).json({ status: 'ERROR', message: 'Workstation device not found or revoked.' });
+    }
+
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS workstation_live_streams (
+        device_id           TEXT PRIMARY KEY,
+        employee_id         TEXT NOT NULL,
+        requested_at        BIGINT NOT NULL,
+        last_frame_at       BIGINT,
+        frame_base64        TEXT,
+        status              TEXT NOT NULL DEFAULT 'ACTIVE',
+        updated_at          BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_live_stream_updated ON workstation_live_streams (updated_at);
+      CREATE INDEX IF NOT EXISTS idx_live_stream_requested ON workstation_live_streams (requested_at);
+    `);
+
+    await db.prepare(`
+      INSERT INTO workstation_live_streams (device_id, employee_id, requested_at, last_frame_at, frame_base64, status, updated_at)
+      VALUES (?, ?, ?, NULL, NULL, 'ACTIVE', ?)
+      ON CONFLICT (device_id) DO UPDATE SET
+        requested_at = EXCLUDED.requested_at,
+        status = 'ACTIVE',
+        updated_at = EXCLUDED.updated_at
+    `).run(deviceId, dev.employee_id, nowMs, nowMs);
+
+    res.json({ status: 'SUCCESS', message: 'Live screen stream requested successfully.' });
+  } catch (err) {
+    console.error('[admin/request-stream] error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.get('/workstations/:deviceId/live-frame', async (req, res) => {
+  const { deviceId } = req.params;
+  const nowMs = T.now();
+
+  try {
+    const dev = await db.prepare('SELECT employee_id FROM devices WHERE id = ?').get(deviceId);
+    if (!dev) {
+      return res.status(404).json({ status: 'ERROR', message: 'Workstation device not found.' });
+    }
+
+    const employeeId = dev.employee_id;
+
+    // Check if employee is on break or outside hours
+    const activeBreak = await db.prepare(
+      'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
+    ).get(employeeId);
+
+    const streamRow = await db.prepare(
+      'SELECT * FROM workstation_live_streams WHERE device_id = ?'
+    ).get(deviceId);
+
+    // Keep requested_at renewed while admin is actively polling
+    if (streamRow && streamRow.status === 'ACTIVE') {
+      await db.prepare('UPDATE workstation_live_streams SET requested_at = ?, updated_at = ? WHERE device_id = ?')
+        .run(nowMs, nowMs, deviceId);
+    }
+
+    const hasRecentFrame = streamRow && streamRow.last_frame_at && (nowMs - Number(streamRow.last_frame_at) < 15000);
+
+    res.json({
+      status: 'SUCCESS',
+      active: Boolean(hasRecentFrame && !activeBreak),
+      frameBase64: hasRecentFrame && !activeBreak ? streamRow.frame_base64 : null,
+      lastFrameAt: streamRow ? streamRow.last_frame_at : null,
+      requestedAt: streamRow ? streamRow.requested_at : null,
+      streamStatus: streamRow ? streamRow.status : 'OFFLINE',
+      isBreak: Boolean(activeBreak),
+      breakMessage: activeBreak ? 'Employee is currently on break. Screen monitoring is paused for privacy.' : null,
+    });
+  } catch (err) {
+    console.error('[admin/live-frame] error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/workstations/:deviceId/stop-stream', async (req, res) => {
+  const { deviceId } = req.params;
+  const nowMs = T.now();
+
+  try {
+    await db.prepare(`
+      UPDATE workstation_live_streams
+      SET status = 'STOPPED', requested_at = 0, frame_base64 = NULL, updated_at = ?
+      WHERE device_id = ?
+    `).run(nowMs, deviceId);
+
+    res.json({ status: 'SUCCESS', message: 'Stream stopped.' });
+  } catch (err) {
+    console.error('[admin/stop-stream] error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+function categorizeApp(name) {
+  const n = String(name || '').toLowerCase().trim();
+  const isWeb = n.includes('.com') || n.includes('.org') || n.includes('.net') || n.includes('.io') || n.includes('.app') || n.includes('.co') || n.includes('.ai') || n.includes('.dev') || n.includes('(chrome)') || n.includes('(edge)') || n.includes('(firefox)') || n.includes('(browser)') || n.includes('(safari)') || n.includes('web browsing') || n.includes('http');
+  return isWeb ? 'WEBSITE' : 'APPLICATION';
+}
+
 router.get('/app-usage', async (req, res) => {
   const nowMs = T.now();
   const dateKey = String(req.query.date || T.dateKey(nowMs));
@@ -543,6 +656,7 @@ router.get('/app-usage', async (req, res) => {
       deviceModel: r.model,
       platform: r.platform,
       appName: r.app_name,
+      category: categorizeApp(r.app_name),
       activeSeconds: r.active_seconds,
       activeMinutes: Math.round(r.active_seconds / 60),
       workstationActiveSeconds: wsByEmp.get(r.employee_id) || 0,

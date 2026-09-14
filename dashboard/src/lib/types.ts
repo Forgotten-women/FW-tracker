@@ -692,10 +692,23 @@ export interface AppUsageItem {
   deviceModel: string;
   platform: string;
   appName: string;
+  category?: 'WEBSITE' | 'APPLICATION';
   activeSeconds: number;
   activeMinutes: number;
   workstationActiveSeconds?: number;
   lastUsedAt: string;
+}
+
+export interface LiveFrameResponse {
+  status: string;
+  active: boolean;
+  frameBase64: string | null;
+  lastFrameAt: number | null;
+  requestedAt: number | null;
+  streamStatus: string;
+  isBreak: boolean;
+  breakMessage?: string | null;
+  message?: string;
 }
 
 export interface ApproachingAnniversaryEmployee {

@@ -24,6 +24,30 @@ async function getOrgSetting(key, defaultValue) {
   }
 }
 
+let liveStreamTableEnsured = false;
+async function ensureLiveStreamTable() {
+  if (liveStreamTableEnsured) return;
+  try {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS workstation_live_streams (
+        device_id           TEXT PRIMARY KEY,
+        employee_id         TEXT NOT NULL,
+        requested_at        BIGINT NOT NULL,
+        last_frame_at       BIGINT,
+        frame_base64        TEXT,
+        status              TEXT NOT NULL DEFAULT 'ACTIVE',
+        updated_at          BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_live_stream_updated ON workstation_live_streams (updated_at);
+      CREATE INDEX IF NOT EXISTS idx_live_stream_requested ON workstation_live_streams (requested_at);
+    `);
+    liveStreamTableEnsured = true;
+  } catch (err) {
+    // Non-blocking: table might already exist
+    liveStreamTableEnsured = true;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/desktop/heartbeat
 // ---------------------------------------------------------------------------
@@ -353,6 +377,18 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     ? Math.max(0, (breakPermittedMinutes * 60) - Math.round((nowMs - openBreakRecord.started_at) / 1000))
     : 0;
 
+  // Check if an authorized HR stream request is active (requested within last 25s)
+  let liveStreamRequested = false;
+  try {
+    await ensureLiveStreamTable();
+    const streamReq = await db.prepare(
+      "SELECT requested_at FROM workstation_live_streams WHERE device_id = ? AND status = 'ACTIVE' AND requested_at > ?"
+    ).get(deviceId, nowMs - 25000);
+    if (streamReq && status === 'ACTIVE' && inOffice && !outsideWorkingHours && !hasOpenBreak && !isManualBreak) {
+      liveStreamRequested = true;
+    }
+  } catch (_) {}
+
   res.json({
     status: 'SUCCESS',
     workstationStatus: status,
@@ -360,6 +396,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     locationVerdict,
     appTrackingEnabled,
     outsideWorkingHours,
+    liveStreamRequested,
     shiftWindow: {
       isWorkingDay: sched.isWorkingDay,
       startTime: sched.startTime,
@@ -662,6 +699,97 @@ router.get('/status', requireDevice, async (req, res) => {
       approvedWorkProcesses: approvedProcesses,
     },
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/desktop/stream-status
+// Fast polling endpoint (every 3-5s) to detect HR screen streaming requests
+// ---------------------------------------------------------------------------
+router.get('/stream-status', requireDevice, async (req, res) => {
+  const { employeeId, deviceId } = req.auth;
+  const nowMs = T.now();
+
+  try {
+    await ensureLiveStreamTable();
+    const row = await db.prepare(
+      "SELECT requested_at FROM workstation_live_streams WHERE device_id = ? AND status = 'ACTIVE' AND requested_at > ?"
+    ).get(deviceId, nowMs - 25000);
+
+    // Check if employee is on break or outside office hours
+    const activeBreak = await db.prepare(
+      'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
+    ).get(employeeId);
+
+    const dateKey = T.dateKey(nowMs);
+    const sched = await schedule.resolve(employeeId, dateKey);
+    const shiftStartThreshold = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
+    const shiftEndThreshold = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
+    const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
+
+    const isPermitted = !activeBreak && isWithinWorkingHours;
+    const liveStreamRequested = Boolean(row && isPermitted);
+
+    res.json({
+      status: 'SUCCESS',
+      liveStreamRequested,
+      isPermitted,
+      onBreak: Boolean(activeBreak),
+      outsideWorkingHours: !isWithinWorkingHours,
+    });
+  } catch (err) {
+    res.json({ status: 'SUCCESS', liveStreamRequested: false });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/desktop/stream-frame
+// Ingests real-time transient screen frames from the workstation agent
+// ---------------------------------------------------------------------------
+router.post('/stream-frame', requireDevice, async (req, res) => {
+  const { employeeId, deviceId } = req.auth;
+  const { frameBase64 } = req.body || {};
+  const nowMs = T.now();
+
+  if (!frameBase64 || typeof frameBase64 !== 'string') {
+    return res.status(400).json({ status: 'ERROR', message: 'frameBase64 string is required.' });
+  }
+
+  // Privacy Safeguard: reject frames immediately if employee is on break or outside office hours
+  const activeBreak = await db.prepare(
+    'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
+  ).get(employeeId);
+
+  const dateKey = T.dateKey(nowMs);
+  const sched = await schedule.resolve(employeeId, dateKey);
+  const shiftStartThreshold = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
+  const shiftEndThreshold = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
+  const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
+
+  if (activeBreak || !isWithinWorkingHours) {
+    return res.json({
+      status: 'PAUSED',
+      reason: activeBreak ? 'ON_BREAK' : 'OUTSIDE_HOURS',
+      message: 'Workstation screen telemetry paused for privacy.'
+    });
+  }
+
+  try {
+    await ensureLiveStreamTable();
+    await db.prepare(`
+      INSERT INTO workstation_live_streams (device_id, employee_id, requested_at, last_frame_at, frame_base64, status, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
+      ON CONFLICT (device_id) DO UPDATE SET
+        last_frame_at = EXCLUDED.last_frame_at,
+        frame_base64 = EXCLUDED.frame_base64,
+        status = 'ACTIVE',
+        updated_at = EXCLUDED.updated_at
+    `).run(deviceId, employeeId, nowMs, nowMs, frameBase64, nowMs);
+
+    res.json({ status: 'SUCCESS' });
+  } catch (err) {
+    console.error('[desktop/stream-frame] error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 module.exports = router;

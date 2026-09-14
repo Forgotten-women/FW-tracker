@@ -53,6 +53,8 @@ pub struct HeartbeatResponse {
     pub app_tracking_enabled: Option<bool>,
     #[serde(default)]
     pub outside_working_hours: Option<bool>,
+    #[serde(default)]
+    pub live_stream_requested: Option<bool>,
     pub today: SessionStats,
     pub policy: PolicySettings,
 }
@@ -228,3 +230,26 @@ pub async fn send_break(cfg: &AppConfig, on_break: bool) -> Result<serde_json::V
 
     res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
 }
+
+pub async fn send_stream_frame(cfg: &AppConfig, frame_base64: &str) -> Result<(), String> {
+    if cfg.token.is_empty() || frame_base64.is_empty() {
+        return Ok(());
+    }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/desktop/stream-frame", cfg.server_url.trim_end_matches('/'));
+
+    let body = serde_json::json!({
+        "frameBase64": frame_base64,
+    });
+
+    let _ = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .json(&body)
+        .send()
+        .await;
+
+    Ok(())
+}
+

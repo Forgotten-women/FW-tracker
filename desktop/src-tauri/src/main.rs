@@ -276,6 +276,31 @@ fn main() {
                         let _ = client::report_anomaly(&cfg, &proc_name, dur).await;
                     }
 
+                    // Live screen stream transmission when requested by authorized HR admin
+                    let stream_active = {
+                        let resp = state.latest_response.lock().unwrap();
+                        resp.as_ref()
+                            .and_then(|r| r.live_stream_requested)
+                            .unwrap_or(false)
+                    };
+
+                    if stream_active && !is_break {
+                        #[cfg(target_os = "windows")]
+                        {
+                            use std::os::windows::process::CommandExt;
+                            if let Ok(out) = std::process::Command::new("powershell")
+                                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "capture-screen.ps1"])
+                                .creation_flags(0x08000000)
+                                .output()
+                            {
+                                let frame = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                                if !frame.is_empty() {
+                                    let _ = client::send_stream_frame(&cfg, &frame).await;
+                                }
+                            }
+                        }
+                    }
+
                     // Send heartbeat every 60 seconds (6 samples x 10s)
                     if sample_count >= 6 {
                         sample_count = 0;

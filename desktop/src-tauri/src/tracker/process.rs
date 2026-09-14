@@ -104,14 +104,31 @@ pub fn get_foreground_process_name() -> Option<String> {
     get_foreground_window_info().map(|(proc, _)| proc)
 }
 
+fn extract_domain_from_url(raw: &str) -> Option<String> {
+    let clean = raw.trim();
+    let without_proto = if let Some(stripped) = clean.strip_prefix("https://") {
+        stripped
+    } else if let Some(stripped) = clean.strip_prefix("http://") {
+        stripped
+    } else {
+        clean
+    };
+    let host = without_proto.split('/').next()?.split(':').next()?.trim().to_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
+    if host.contains('.') {
+        Some(host.to_string())
+    } else {
+        None
+    }
+}
+
 pub fn parse_active_application(proc_name: &str, title: &str) -> String {
     let p = proc_name.to_lowercase();
     let p_clean = p.trim_end_matches(".exe");
     let t = title.trim();
 
     let is_browser = ["chrome", "msedge", "edge", "firefox", "brave", "opera", "safari"].iter().any(|&b| p_clean == b);
-    if is_browser && !t.is_empty() {
-        let lower = t.to_lowercase();
+    if is_browser {
         let b = if p_clean == "chrome" {
             "Chrome"
         } else if p_clean.contains("edge") {
@@ -122,35 +139,50 @@ pub fn parse_active_application(proc_name: &str, title: &str) -> String {
             "Browser"
         };
 
-        if lower.contains("youtube") { return format!("YouTube ({})", b); }
-        if lower.contains("figma") { return format!("Figma ({})", b); }
-        if lower.contains("github") { return format!("GitHub ({})", b); }
-        if lower.contains("gitlab") { return format!("GitLab ({})", b); }
-        if lower.contains("jira") || lower.contains("atlassian") { return format!("Jira ({})", b); }
-        if lower.contains("chatgpt") || lower.contains("openai") { return format!("ChatGPT ({})", b); }
-        if lower.contains("claude") { return format!("Claude AI ({})", b); }
-        if lower.contains("google meet") || lower.contains("meet.google") { return format!("Google Meet ({})", b); }
-        if lower.contains("google docs") { return format!("Google Docs ({})", b); }
-        if lower.contains("google sheets") { return format!("Google Sheets ({})", b); }
-        if lower.contains("google slides") { return format!("Google Slides ({})", b); }
-        if lower.contains("google drive") { return format!("Google Drive ({})", b); }
-        if lower.contains("notion") { return format!("Notion ({})", b); }
-        if lower.contains("canva") { return format!("Canva ({})", b); }
-        if lower.contains("stack overflow") { return format!("Stack Overflow ({})", b); }
-        if lower.contains("linkedin") { return format!("LinkedIn ({})", b); }
-        if lower.contains("whatsapp") { return format!("WhatsApp Web ({})", b); }
-        if lower.contains("netflix") { return format!("Netflix ({})", b); }
-        if lower.contains("reddit") { return format!("Reddit ({})", b); }
-        if lower.contains("twitter") || lower.contains("x.com") { return format!("X / Twitter ({})", b); }
-        if lower.contains("facebook") { return format!("Facebook ({})", b); }
-        if lower.contains("instagram") { return format!("Instagram ({})", b); }
-
-        let parts: Vec<&str> = t.split(" - ").collect();
-        if parts.len() >= 2 {
-            let site = parts[parts.len() - 2].trim();
-            if !site.is_empty() && site.len() < 28 && !site.to_lowercase().contains("google") && !site.to_lowercase().contains("microsoft") {
-                return format!("{} ({})", site, b);
+        // Check if title has URL embedded from macOS AppleScript or Windows inspector
+        if let Some(idx) = t.find("[URL:") {
+            if let Some(end_idx) = t[idx..].find(']') {
+                let raw_url = &t[idx + 5..idx + end_idx];
+                if let Some(domain) = extract_domain_from_url(raw_url) {
+                    return format!("{} ({})", domain, b);
+                }
             }
+        }
+
+        if !t.is_empty() {
+            let lower = t.to_lowercase();
+            if lower.contains("youtube") { return format!("youtube.com ({})", b); }
+            if lower.contains("figma") { return format!("figma.com ({})", b); }
+            if lower.contains("github") { return format!("github.com ({})", b); }
+            if lower.contains("gitlab") { return format!("gitlab.com ({})", b); }
+            if lower.contains("jira") || lower.contains("atlassian") { return format!("atlassian.net ({})", b); }
+            if lower.contains("chatgpt") || lower.contains("openai") { return format!("chatgpt.com ({})", b); }
+            if lower.contains("claude") { return format!("claude.ai ({})", b); }
+            if lower.contains("google meet") || lower.contains("meet.google") { return format!("meet.google.com ({})", b); }
+            if lower.contains("google docs") { return format!("docs.google.com ({})", b); }
+            if lower.contains("google sheets") { return format!("sheets.google.com ({})", b); }
+            if lower.contains("google slides") { return format!("slides.google.com ({})", b); }
+            if lower.contains("google drive") { return format!("drive.google.com ({})", b); }
+            if lower.contains("notion") { return format!("notion.so ({})", b); }
+            if lower.contains("canva") { return format!("canva.com ({})", b); }
+            if lower.contains("stack overflow") { return format!("stackoverflow.com ({})", b); }
+            if lower.contains("linkedin") { return format!("linkedin.com ({})", b); }
+            if lower.contains("whatsapp") { return format!("web.whatsapp.com ({})", b); }
+            if lower.contains("netflix") { return format!("netflix.com ({})", b); }
+            if lower.contains("reddit") { return format!("reddit.com ({})", b); }
+            if lower.contains("twitter") || lower.contains("x.com") { return format!("x.com ({})", b); }
+            if lower.contains("facebook") { return format!("facebook.com ({})", b); }
+            if lower.contains("instagram") { return format!("instagram.com ({})", b); }
+
+            let parts: Vec<&str> = t.split(" - ").collect();
+            if parts.len() >= 2 {
+                let site = parts[parts.len() - 2].trim();
+                if !site.is_empty() && site.len() < 28 && !site.to_lowercase().contains("google") && !site.to_lowercase().contains("microsoft") {
+                    let clean = site.to_lowercase().replace(' ', "");
+                    return format!("{} ({})", clean, b);
+                }
+            }
+            return format!("Web Browsing ({})", b);
         }
         return format!("Web Browsing ({})", b);
     }

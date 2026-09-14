@@ -66,6 +66,64 @@ function saveConfig(cfg) {
   }
 }
 
+function ensureAutoStart() {
+  try {
+    if (process.platform === 'win32') {
+      const vbsPath = path.join(__dirname, 'Start Office Tracker (Silent).vbs');
+      const batPath = path.join(__dirname, 'Start Office Tracker (Windows).bat');
+      const targetLauncher = fs.existsSync(vbsPath)
+        ? `wscript.exe "${vbsPath}"`
+        : (fs.existsSync(batPath) ? `"${batPath}"` : `node "${path.join(__dirname, 'run-agent.js')}"`);
+      exec(`reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "OfficeTracker" /t REG_SZ /d "${targetLauncher.replace(/"/g, '\\"')}" /f`, { windowsHide: true }, () => {});
+    } else if (process.platform === 'darwin') {
+      const home = os.homedir();
+      const agentsDir = path.join(home, 'Library', 'LaunchAgents');
+      if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
+      const plistPath = path.join(agentsDir, 'com.officetracker.desktop.plist');
+      const scriptPath = path.join(__dirname, 'Start Office Tracker (Mac).command');
+      const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.officetracker.desktop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${fs.existsSync(scriptPath) ? scriptPath : '/usr/local/bin/node'}</string>
+        ${fs.existsSync(scriptPath) ? '' : `<string>${path.join(__dirname, 'run-agent.js')}</string>`}
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>`;
+      fs.writeFileSync(plistPath, plist);
+    }
+  } catch (_) {}
+}
+
+function captureScreenBase64() {
+  if (process.platform === 'win32') {
+    try {
+      const scriptPath = path.join(__dirname, 'capture-screen.ps1');
+      if (fs.existsSync(scriptPath)) {
+        const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000, windowsHide: true }).toString().trim();
+        return out || null;
+      }
+    } catch (_) {}
+  } else if (process.platform === 'darwin') {
+    try {
+      const tmpFile = path.join(os.tmpdir(), `ot_stream_${process.pid}.jpg`);
+      execSync(`/usr/sbin/screencapture -x -t jpg "${tmpFile}" 2>/dev/null`, { timeout: 2500 });
+      if (fs.existsSync(tmpFile)) {
+        const buf = fs.readFileSync(tmpFile);
+        try { fs.unlinkSync(tmpFile); } catch (_) {}
+        return buf.toString('base64');
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 function getIdleSeconds() {
   if (process.platform === 'win32') {
     try {
@@ -269,46 +327,123 @@ function getLocalIp() {
   return null;
 }
 
+let lastUrlCheck = 0;
+let cachedBrowserUrl = null;
+let lastBrowserProc = '';
+
+function getBrowserUrl(procName) {
+  const now = Date.now();
+  if (procName === lastBrowserProc && (now - lastUrlCheck < 3000)) {
+    return cachedBrowserUrl;
+  }
+  lastUrlCheck = now;
+  lastBrowserProc = procName;
+
+  if (process.platform === 'win32') {
+    try {
+      const scriptPath = path.join(__dirname, 'get-browser-url.ps1');
+      if (fs.existsSync(scriptPath)) {
+        const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 2500, windowsHide: true }).toString().trim();
+        if (out) {
+          cachedBrowserUrl = out;
+          return out;
+        }
+      }
+    } catch (_) {}
+  } else if (process.platform === 'darwin') {
+    try {
+      const p = (procName || '').toLowerCase();
+      let appleScript = '';
+      if (p.includes('chrome')) {
+        appleScript = 'tell application "Google Chrome" to return URL of active tab of front window';
+      } else if (p.includes('edge')) {
+        appleScript = 'tell application "Microsoft Edge" to return URL of active tab of front window';
+      } else if (p.includes('safari')) {
+        appleScript = 'tell application "Safari" to return URL of front document';
+      } else if (p.includes('brave')) {
+        appleScript = 'tell application "Brave Browser" to return URL of active tab of front window';
+      }
+      if (appleScript) {
+        const out = execSync(`osascript -e '${appleScript}' 2>/dev/null`, { timeout: 2000 }).toString().trim();
+        if (out) {
+          cachedBrowserUrl = out;
+          return out;
+        }
+      }
+    } catch (_) {}
+  }
+  cachedBrowserUrl = null;
+  return null;
+}
+
+function extractDomain(rawUrl) {
+  if (!rawUrl) return null;
+  try {
+    let toParse = rawUrl.trim();
+    if (!toParse.startsWith('http://') && !toParse.startsWith('https://')) {
+      toParse = 'https://' + toParse;
+    }
+    const parsed = new URL(toParse);
+    let host = parsed.hostname.toLowerCase();
+    if (host.startsWith('www.')) host = host.slice(4);
+    if (host && host.includes('.')) return host;
+  } catch (_) {}
+
+  const match = /([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)/.exec(rawUrl);
+  return match ? match[1].toLowerCase().replace(/^www\./, '') : null;
+}
+
 function parseActiveApplication(procName, title) {
   const p = (procName || '').toLowerCase().replace(/\.exe$/, '');
   const t = (title || '').trim();
 
-  // 1. Browsers: Parse specific website / web application from window title
+  // 1. Browsers: Direct address bar URL inspection (UIA / AppleScript) + title fallback
   const isBrowser = ['chrome', 'msedge', 'edge', 'firefox', 'brave', 'opera', 'safari'].includes(p);
-  if (isBrowser && t) {
-    const lower = t.toLowerCase();
+  if (isBrowser) {
     const b = p === 'chrome' ? 'Chrome' : p.includes('edge') ? 'Edge' : p === 'firefox' ? 'Firefox' : 'Browser';
 
-    if (lower.includes('youtube')) return `YouTube (${b})`;
-    if (lower.includes('figma')) return `Figma (${b})`;
-    if (lower.includes('github')) return `GitHub (${b})`;
-    if (lower.includes('gitlab')) return `GitLab (${b})`;
-    if (lower.includes('jira') || lower.includes('atlassian')) return `Jira (${b})`;
-    if (lower.includes('chatgpt') || lower.includes('openai')) return `ChatGPT (${b})`;
-    if (lower.includes('claude')) return `Claude AI (${b})`;
-    if (lower.includes('google meet') || lower.includes('meet.google')) return `Google Meet (${b})`;
-    if (lower.includes('google docs')) return `Google Docs (${b})`;
-    if (lower.includes('google sheets')) return `Google Sheets (${b})`;
-    if (lower.includes('google slides')) return `Google Slides (${b})`;
-    if (lower.includes('google drive')) return `Google Drive (${b})`;
-    if (lower.includes('notion')) return `Notion (${b})`;
-    if (lower.includes('canva')) return `Canva (${b})`;
-    if (lower.includes('stack overflow')) return `Stack Overflow (${b})`;
-    if (lower.includes('linkedin')) return `LinkedIn (${b})`;
-    if (lower.includes('whatsapp')) return `WhatsApp Web (${b})`;
-    if (lower.includes('netflix')) return `Netflix (${b})`;
-    if (lower.includes('reddit')) return `Reddit (${b})`;
-    if (lower.includes('twitter') || lower.includes('x.com')) return `X / Twitter (${b})`;
-    if (lower.includes('facebook')) return `Facebook (${b})`;
-    if (lower.includes('instagram')) return `Instagram (${b})`;
+    // Native Address Bar Domain Extraction (handles ALL sites, internal portals & unknown domains)
+    const rawUrl = getBrowserUrl(procName);
+    const domain = extractDomain(rawUrl);
+    if (domain && domain !== 'newtab' && domain !== 'extensions' && domain !== 'settings') {
+      return `${domain} (${b})`;
+    }
 
-    // General web site name
-    const parts = t.split(' - ');
-    if (parts.length >= 2) {
-      const site = parts[parts.length - 2].trim();
-      if (site && site.length < 28 && !site.toLowerCase().includes('google') && !site.toLowerCase().includes('microsoft')) {
-        return `${site} (${b})`;
+    if (t) {
+      const lower = t.toLowerCase();
+      if (lower.includes('youtube')) return `youtube.com (${b})`;
+      if (lower.includes('figma')) return `figma.com (${b})`;
+      if (lower.includes('github')) return `github.com (${b})`;
+      if (lower.includes('gitlab')) return `gitlab.com (${b})`;
+      if (lower.includes('jira') || lower.includes('atlassian')) return `atlassian.net (${b})`;
+      if (lower.includes('chatgpt') || lower.includes('openai')) return `chatgpt.com (${b})`;
+      if (lower.includes('claude')) return `claude.ai (${b})`;
+      if (lower.includes('google meet') || lower.includes('meet.google')) return `meet.google.com (${b})`;
+      if (lower.includes('google docs')) return `docs.google.com (${b})`;
+      if (lower.includes('google sheets')) return `sheets.google.com (${b})`;
+      if (lower.includes('google slides')) return `slides.google.com (${b})`;
+      if (lower.includes('google drive')) return `drive.google.com (${b})`;
+      if (lower.includes('notion')) return `notion.so (${b})`;
+      if (lower.includes('canva')) return `canva.com (${b})`;
+      if (lower.includes('stack overflow')) return `stackoverflow.com (${b})`;
+      if (lower.includes('linkedin')) return `linkedin.com (${b})`;
+      if (lower.includes('whatsapp')) return `web.whatsapp.com (${b})`;
+      if (lower.includes('netflix')) return `netflix.com (${b})`;
+      if (lower.includes('reddit')) return `reddit.com (${b})`;
+      if (lower.includes('twitter') || lower.includes('x.com')) return `x.com (${b})`;
+      if (lower.includes('facebook')) return `facebook.com (${b})`;
+      if (lower.includes('instagram')) return `instagram.com (${b})`;
+
+      // Extract general website name from title if available
+      const parts = t.split(' - ');
+      if (parts.length >= 2) {
+        const site = parts[parts.length - 2].trim();
+        if (site && site.length < 28 && !site.toLowerCase().includes('google') && !site.toLowerCase().includes('microsoft')) {
+          const cleanSite = site.toLowerCase().replace(/\s+/g, '');
+          return `${cleanSite.includes('.') ? cleanSite : site} (${b})`;
+        }
       }
+      return `Web Browsing (${b})`;
     }
     return `Web Browsing (${b})`;
   }
@@ -676,6 +811,67 @@ async function startAgent() {
   let isSyncing = false;
 
   console.log('[Office Tracker Desktop] High-Precision 1-Second Monitoring Active (Heartbeat sync every 60s)...');
+  ensureAutoStart();
+
+  let liveStreamActive = false;
+  let isSendingFrame = false;
+
+  async function pollStreamStatus() {
+    const cfgNow = loadConfig();
+    if (!cfgNow || !cfgNow.token || !cfgNow.serverUrl) return;
+
+    try {
+      const resp = await fetch(`${cfgNow.serverUrl}/api/desktop/stream-status`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${cfgNow.token}`,
+          'X-Device-Id': cfgNow.deviceId || '',
+        },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        liveStreamActive = Boolean(data.liveStreamRequested && data.isPermitted);
+        if (data.onBreak != null) {
+          isOnBreak = Boolean(data.onBreak);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Fast polling check for stream requests (every 3 seconds)
+  setInterval(() => {
+    void pollStreamStatus();
+  }, 3000);
+
+  // Live screen frame capture loop (~1.5s interval when active)
+  setInterval(async () => {
+    if (!liveStreamActive || isSendingFrame) return;
+    const onBreakNow = isManualBreak || isOnBreak;
+    const withinHours = isWithinOfficeHours();
+    if (onBreakNow || !withinHours) return;
+
+    const cfgNow = loadConfig();
+    if (!cfgNow || !cfgNow.token || !cfgNow.serverUrl) return;
+
+    isSendingFrame = true;
+    try {
+      const frameBase64 = captureScreenBase64();
+      if (frameBase64) {
+        await fetch(`${cfgNow.serverUrl}/api/desktop/stream-frame`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${cfgNow.token}`,
+            'X-Device-Id': cfgNow.deviceId || '',
+          },
+          body: JSON.stringify({ frameBase64 }),
+        });
+      }
+    } catch (_) {
+    } finally {
+      isSendingFrame = false;
+    }
+  }, 1500);
 
   async function syncLocalQueue() {
     if (isSyncing) return;
