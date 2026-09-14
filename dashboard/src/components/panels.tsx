@@ -1408,8 +1408,14 @@ export function CodeModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6 backdrop-blur-md">
-      <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900 p-8 text-center shadow-2xl">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[100] grid place-items-center bg-black/80 p-6 backdrop-blur-md cursor-pointer"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900 p-8 text-center shadow-2xl cursor-default"
+      >
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
           <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />

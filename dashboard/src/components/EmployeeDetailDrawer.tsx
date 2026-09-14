@@ -8,7 +8,7 @@ import { Badge, Button } from './primitives';
 interface EmployeeDetailDrawerProps {
   employee: EmployeeDay | null;
   onClose: () => void;
-  onOpenPairing?: (employee: { id: string; name: string }) => void;
+  onOpenPairing?: (employee: { id: string; name: string }) => Promise<void> | void;
 }
 
 type DrawerTab = 'sessions' | 'workstation' | 'apps' | 'policy';
@@ -76,6 +76,17 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
   const [workstation, setWorkstation] = useState<WorkstationItem | null>(null);
   const [apps, setApps] = useState<AppUsageItem[]>([]);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
+  const [generatingPairing, setGeneratingPairing] = useState(false);
+
+  const handlePairDevice = async () => {
+    if (!onOpenPairing || !employee || generatingPairing) return;
+    setGeneratingPairing(true);
+    try {
+      await onOpenPairing({ id: employee.employeeId, name: employee.employeeName });
+    } finally {
+      setGeneratingPairing(false);
+    }
+  };
 
   // Close on Escape key press
   useEffect(() => {
@@ -661,9 +672,17 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => onOpenPairing({ id: employee.employeeId, name: employee.employeeName })}
+                  disabled={generatingPairing}
+                  onClick={handlePairDevice}
                 >
-                  Pair Device
+                  {generatingPairing ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-transparent" />
+                      <span>Generating Key…</span>
+                    </span>
+                  ) : (
+                    'Pair Device'
+                  )}
                 </Button>
               )}
               <Button size="sm" variant="accent" onClick={onClose}>

@@ -142,9 +142,13 @@ export default function DashboardPage() {
   };
 
   const pairDevice = async (employee: AdminEmployee) => {
-    const result = await api.enrollmentCode(employee.id);
-    setPairing({ ...result, name: employee.name });
-    await refresh();
+    try {
+      const result = await api.enrollmentCode(employee.id);
+      setPairing({ ...result, name: employee.name });
+      refresh().catch(() => {});
+    } catch (err: any) {
+      alert(err?.message || 'Failed to generate pairing code');
+    }
   };
 
   const exportCsv = async (from: string, to: string) => {
@@ -429,21 +433,12 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {pairing && (
-        <CodeModal
-          code={pairing.code}
-          employeeName={pairing.name}
-          expires={pairing.expiresAtDisplay}
-          onClose={() => setPairing(null)}
-        />
-      )}
-
       {/* Slide-out Employee Detail Drawer */}
       <EmployeeDetailDrawer
         employee={selectedEmployee}
         onClose={() => setSelectedEmployee(null)}
-        onOpenPairing={(emp) => {
-          pairDevice({ id: emp.id, name: emp.name } as any);
+        onOpenPairing={async (emp) => {
+          await pairDevice({ id: emp.id, name: emp.name } as any);
         }}
       />
 
@@ -462,6 +457,16 @@ export default function DashboardPage() {
           else setActiveTab('overview');
         }}
       />
+
+      {/* Single-Use Enrollment Code Modal (Always in front of drawers) */}
+      {pairing && (
+        <CodeModal
+          code={pairing.code}
+          employeeName={pairing.name}
+          expires={pairing.expiresAtDisplay}
+          onClose={() => setPairing(null)}
+        />
+      )}
 
       {/* Real-Time Toast Notification Banner for Incoming Requests */}
       {toastNotification && (
