@@ -129,6 +129,7 @@ fn main() {
             location_verdict: Some("OFFICE".to_string()),
             app_tracking_enabled: Some(true),
             outside_working_hours: Some(false),
+            live_stream_requested: Some(false),
             today: client::SessionStats {
                 date_key: initial_config.cached_date_key.clone(),
                 active_seconds: initial_config.cached_active_seconds,

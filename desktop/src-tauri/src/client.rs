@@ -42,7 +42,7 @@ pub struct HeartbeatPayload {
     pub app_breakdown: Option<HashMap<String, u64>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatResponse {
     pub status: String,
