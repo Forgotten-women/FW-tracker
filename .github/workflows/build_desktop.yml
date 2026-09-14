@@ -49,6 +49,10 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      - name: 🍎 Ensure macOS dual compilation targets (Intel x86_64 + Apple Silicon ARM64)
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
       # ── 4. Cache Rust build artifacts ────────────────────────────────────────
       - name: 🗂️ Cache Cargo registry + build
         uses: Swatinem/rust-cache@v2
@@ -89,6 +93,7 @@ jobs:
         with:
           projectPath: desktop
           tauriScript: npx @tauri-apps/cli
+          args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }}
           includeDebug: false
           includeRelease: true
           includeUpdaterJson: false
@@ -99,13 +104,13 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "windows-latest" ]; then
-            MSI=$(find desktop/src-tauri/target/release/bundle/msi -name "*.msi" 2>/dev/null | head -1)
-            NSIS=$(find desktop/src-tauri/target/release/bundle/nsis -name "*.exe" 2>/dev/null | head -1)
+            MSI=$(find desktop/src-tauri/target -name "*.msi" 2>/dev/null | head -1)
+            NSIS=$(find desktop/src-tauri/target -name "*.exe" 2>/dev/null | head -1)
             echo "paths=$MSI $NSIS" >> $GITHUB_OUTPUT
             echo "Found Windows: $MSI | $NSIS"
           else
-            DMG=$(find desktop/src-tauri/target/release/bundle/dmg -name "*.dmg" 2>/dev/null | head -1)
-            APP=$(find desktop/src-tauri/target/release/bundle/macos -name "*.app.tar.gz" 2>/dev/null | head -1)
+            DMG=$(find desktop/src-tauri/target -name "*.dmg" 2>/dev/null | head -1)
+            APP=$(find desktop/src-tauri/target -name "*.app.tar.gz" 2>/dev/null | head -1)
             echo "paths=$DMG $APP" >> $GITHUB_OUTPUT
             echo "Found macOS: $DMG | $APP"
           fi
@@ -123,10 +128,20 @@ jobs:
             | Platform | Installer | Notes |
             |----------|-----------|-------|
             | **Windows 10/11** | `.msi` file below | Double-click to install. No Node.js needed. |
-            | **macOS 11+** | `.dmg` file below | Open → drag to Applications. No Node.js needed. |
+            | **macOS (Universal)** | `.dmg` file below | Built for **Intel (x86_64)** + **Apple Silicon (M1/M2/M3/M4)**. |
+
+            ### 🍎 macOS First-Time Launch (Intel & Apple Silicon)
+            Because this application is distributed directly within your organization:
+            1. Drag **Office Tracker.app** to your **/Applications** folder.
+            2. If macOS reports *"developer cannot be verified"* or blocks opening on first run:
+               - **Option A**: Right-click (or Control-click) `Office Tracker.app` in Applications and choose **Open**, then click **Open**.
+               - **Option B**: Open Terminal and run:
+                 ```bash
+                 xattr -cr "/Applications/Office Tracker.app"
+                 ```
 
             ### 🔐 First-time setup
-            On first launch, a **beautiful registration window** opens automatically.
+            On first launch, the registration window opens automatically.
             Enter the 8-character pairing code provided by HR to link your workstation.
 
             ### ℹ️ What it does
@@ -142,9 +157,9 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: false
           files: |
-            desktop/src-tauri/target/release/bundle/msi/*.msi
-            desktop/src-tauri/target/release/bundle/nsis/*.exe
-            desktop/src-tauri/target/release/bundle/dmg/*.dmg
-            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+            desktop/src-tauri/target/**/bundle/msi/*.msi
+            desktop/src-tauri/target/**/bundle/nsis/*.exe
+            desktop/src-tauri/target/**/bundle/dmg/*.dmg
+            desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
