@@ -21,6 +21,9 @@ public class NativeScreenCapture {
     public static extern bool BitBlt(IntPtr hObject, int nXDest, int nYDest, int nWidth, int nHeight, IntPtr hObjectSource, int nXSrc, int nYSrc, int dwRop);
 
     [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
     public static extern int GetSystemMetrics(int nIndex);
 
     private const int SRCCOPY = 0x00CC0020;
@@ -28,6 +31,7 @@ public class NativeScreenCapture {
     private const int SM_CYSCREEN = 1;
 
     public static string CaptureBase64(int maxDim, int quality) {
+        try { SetProcessDPIAware(); } catch {}
         int w = GetSystemMetrics(SM_CXSCREEN);
         int h = GetSystemMetrics(SM_CYSCREEN);
         if (w <= 0 || h <= 0) {
