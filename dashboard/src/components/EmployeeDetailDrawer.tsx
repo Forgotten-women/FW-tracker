@@ -668,9 +668,15 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                           <span className="text-base font-extrabold text-emerald-400 font-mono">
                             {workstation.activeMinutes}m
                           </span>
-                          <span className="text-[10px] text-slate-400 block mt-0.5">
-                            {Math.round(((workstation.activeMinutes || 0) / Math.max(1, (workstation.activeMinutes || 0) + (workstation.idleMinutes || 0))) * 100)}% efficiency
-                          </span>
+                          {(workstation.unverifiedMinutes || 0) > 0 ? (
+                            <span className="text-[10px] text-amber-300 block mt-1 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-medium">
+                              Verified Office: {workstation.verifiedActiveMinutes || 0}m • Remote/Hotspot: {workstation.unverifiedMinutes}m
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 block mt-0.5">
+                              {Math.round(((workstation.activeMinutes || 0) / Math.max(1, (workstation.activeMinutes || 0) + (workstation.idleMinutes || 0))) * 100)}% efficiency (Verified Office)
+                            </span>
+                          )}
                         </div>
 
                         <div className="bg-slate-900/60 p-3 rounded-xl border border-white/5">

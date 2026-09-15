@@ -254,10 +254,15 @@ fn main() {
                 }
             }
 
-            // Dedicated Fast Live Screen Stream Worker (polls every 2.5s, streams every 1.5s when active)
+            // Dedicated Fast Live Screen Stream Worker (sub-second 3-4 FPS real-time streaming)
             let app_handle_stream = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 let mut is_streaming = false;
+                let mut last_status_check = std::time::Instant::now() - Duration::from_secs(10);
+
+                #[cfg(target_os = "windows")]
+                let mut ps_child: Option<(std::process::Child, std::io::BufReader<std::process::ChildStdout>, std::io::LineWriter<std::process::ChildStdin>)> = None;
+
                 loop {
                     let state = app_handle_stream.state::<AppState>();
                     let cfg = state.config.lock().unwrap().clone();
@@ -267,19 +272,88 @@ fn main() {
                         continue;
                     }
 
-                    if let Ok(status) = client::check_stream_status(&cfg).await {
-                        is_streaming = status.live_stream_requested && status.is_permitted && !status.on_break && !status.outside_working_hours;
+                    let check_interval = if is_streaming { Duration::from_secs(2) } else { Duration::from_secs(1) };
+                    if last_status_check.elapsed() >= check_interval {
+                        last_status_check = std::time::Instant::now();
+                        if let Ok(status) = client::check_stream_status(&cfg).await {
+                            is_streaming = status.live_stream_requested && status.is_permitted && !status.on_break && !status.outside_working_hours;
+                        }
                     }
 
                     if is_streaming {
                         let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
                         if !is_break {
-                            if let Some(frame) = capture_screen_frame() {
+                            let mut frame_opt = None;
+
+                            #[cfg(target_os = "windows")]
+                            {
+                                use std::io::{BufRead, Write};
+                                use std::os::windows::process::CommandExt;
+
+                                if ps_child.is_none() {
+                                    let script_path = std::env::current_exe()
+                                        .ok()
+                                        .and_then(|p| p.parent().map(|d| d.join("capture-screen.ps1")))
+                                        .filter(|p| p.exists())
+                                        .unwrap_or_else(|| {
+                                            let temp_script = std::env::temp_dir().join("ot_capture_screen.ps1");
+                                            let _ = std::fs::write(&temp_script, CAPTURE_SCRIPT);
+                                            temp_script
+                                        });
+
+                                    if let Ok(mut cmd) = std::process::Command::new("powershell")
+                                        .args([
+                                            "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                                            "-File", script_path.to_str().unwrap_or("capture-screen.ps1"),
+                                            "-Loop"
+                                        ])
+                                        .stdin(std::process::Stdio::piped())
+                                        .stdout(std::process::Stdio::piped())
+                                        .creation_flags(0x08000000)
+                                        .spawn()
+                                    {
+                                        let stdin = cmd.stdin.take().map(std::io::LineWriter::new);
+                                        let stdout = cmd.stdout.take().map(std::io::BufReader::new);
+                                        if let (Some(in_writer), Some(out_reader)) = (stdin, stdout) {
+                                            ps_child = Some((cmd, out_reader, in_writer));
+                                        }
+                                    }
+                                }
+
+                                if let Some((_, ref mut reader, ref mut writer)) = ps_child {
+                                    if writeln!(writer, "CAPTURE").is_ok() && writer.flush().is_ok() {
+                                        let mut line = String::new();
+                                        if reader.read_line(&mut line).is_ok() {
+                                            let trimmed = line.trim().to_string();
+                                            if (trimmed.starts_with("/9j/") || trimmed.starts_with("iVBOR")) && trimmed.len() > 100 {
+                                                frame_opt = Some(trimmed);
+                                            }
+                                        }
+                                    } else {
+                                        ps_child = None;
+                                    }
+                                }
+                            }
+
+                            if frame_opt.is_none() {
+                                frame_opt = capture_screen_frame();
+                            }
+
+                            if let Some(frame) = frame_opt {
                                 let _ = client::send_stream_frame(&cfg, &frame).await;
                             }
                         }
-                        sleep(Duration::from_millis(300)).await;
+                        sleep(Duration::from_millis(250)).await;
                     } else {
+                        #[cfg(target_os = "windows")]
+                        {
+                            if let Some((mut child, _, mut writer)) = ps_child.take() {
+                                use std::io::Write;
+                                let _ = writeln!(writer, "QUIT");
+                                let _ = writer.flush();
+                                let _ = child.kill();
+                            }
+                        }
                         sleep(Duration::from_millis(1000)).await;
                     }
                 }

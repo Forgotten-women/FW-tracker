@@ -661,6 +661,8 @@ export interface WorkstationItem {
   label: string;
   status: 'ACTIVE' | 'IDLE' | 'ON_BREAK' | 'AWAY' | 'OFFLINE';
   activeMinutes: number;
+  verifiedActiveMinutes?: number;
+  unverifiedMinutes?: number;
   idleMinutes: number;
   breakMinutes: number;
   presenceMinutes?: number;

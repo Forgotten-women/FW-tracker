@@ -137,7 +137,26 @@ public class NativeScreenCapture {
     # If type is already defined in this PowerShell session, ignore error
 }
 
-$frame = [NativeScreenCapture]::CaptureBase64(800, 35)
-if ($frame) {
-    [Console]::WriteLine($frame)
+if ($args -contains "-Loop") {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    while ($true) {
+        $line = [Console]::ReadLine()
+        if ($null -eq $line -or $line -eq "QUIT") { break }
+        try {
+            $frame = [NativeScreenCapture]::CaptureBase64(800, 35)
+            if ($frame) {
+                [Console]::WriteLine($frame)
+            } else {
+                [Console]::WriteLine("ERROR")
+            }
+        } catch {
+            [Console]::WriteLine("ERROR")
+        }
+    }
+} else {
+    $frame = [NativeScreenCapture]::CaptureBase64(800, 35)
+    if ($frame) {
+        [Console]::WriteLine($frame)
+    }
 }
+

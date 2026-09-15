@@ -820,6 +820,59 @@ async function startAgent() {
 
   let liveStreamActive = false;
   let isSendingFrame = false;
+  let persistentStreamProc = null;
+
+  function getPersistentStreamProc() {
+    if (persistentStreamProc && !persistentStreamProc.killed) return persistentStreamProc;
+    const scriptPath = path.join(__dirname, 'capture-screen.ps1');
+    if (fs.existsSync(scriptPath)) {
+      persistentStreamProc = spawn('powershell.exe', [
+        '-NoProfile', '-NoLogo', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', scriptPath, '-Loop'
+      ], { windowsHide: true });
+      persistentStreamProc.rl = readline.createInterface({ input: persistentStreamProc.stdout });
+      persistentStreamProc.on('exit', () => { persistentStreamProc = null; });
+    }
+    return persistentStreamProc;
+  }
+
+  function killPersistentStreamProc() {
+    if (persistentStreamProc && !persistentStreamProc.killed) {
+      try {
+        persistentStreamProc.stdin.write('QUIT\n');
+        persistentStreamProc.kill();
+      } catch (_) {}
+      persistentStreamProc = null;
+    }
+  }
+
+  async function captureScreenBase64Fast() {
+    if (process.platform === 'win32') {
+      const proc = getPersistentStreamProc();
+      if (proc && proc.rl) {
+        return new Promise((resolve) => {
+          let timeout = setTimeout(() => { resolve(null); }, 1500);
+          const onLine = (line) => {
+            clearTimeout(timeout);
+            const trimmed = (line || '').trim();
+            if ((trimmed.startsWith('/9j/') || trimmed.startsWith('iVBOR')) && trimmed.length > 200) {
+              resolve(trimmed);
+            } else {
+              resolve(null);
+            }
+          };
+          proc.rl.once('line', onLine);
+          try {
+            proc.stdin.write('CAPTURE\n');
+          } catch (_) {
+            clearTimeout(timeout);
+            resolve(null);
+          }
+        });
+      }
+    }
+    return captureScreenBase64();
+  }
 
   async function pollStreamStatus() {
     const cfgNow = loadConfig();
@@ -835,7 +888,11 @@ async function startAgent() {
       });
       if (resp.ok) {
         const data = await resp.json();
+        const wasStreaming = liveStreamActive;
         liveStreamActive = Boolean(data.liveStreamRequested && data.isPermitted);
+        if (wasStreaming && !liveStreamActive) {
+          killPersistentStreamProc();
+        }
         if (data.onBreak != null) {
           isOnBreak = Boolean(data.onBreak);
         }
@@ -843,24 +900,27 @@ async function startAgent() {
     } catch (_) {}
   }
 
-  // Fast polling check for stream requests (every 1 second)
+  // Fast polling check for stream requests (every 1.5 seconds)
   setInterval(() => {
     void pollStreamStatus();
-  }, 1000);
+  }, 1500);
 
-  // Live screen frame capture loop (~300ms interval when active)
+  // Live screen frame capture loop (~250ms interval when active, sub-second real-time streaming)
   setInterval(async () => {
     if (!liveStreamActive || isSendingFrame) return;
     const onBreakNow = isManualBreak || isOnBreak;
     const withinHours = isWithinOfficeHours();
-    if (onBreakNow || !withinHours) return;
+    if (onBreakNow || !withinHours) {
+      killPersistentStreamProc();
+      return;
+    }
 
     const cfgNow = loadConfig();
     if (!cfgNow || !cfgNow.token || !cfgNow.serverUrl) return;
 
     isSendingFrame = true;
     try {
-      const frameBase64 = captureScreenBase64();
+      const frameBase64 = await captureScreenBase64Fast();
       if (frameBase64) {
         await fetch(`${cfgNow.serverUrl}/api/desktop/stream-frame`, {
           method: 'POST',
@@ -876,7 +936,7 @@ async function startAgent() {
     } finally {
       isSendingFrame = false;
     }
-  }, 300);
+  }, 250);
 
   async function syncLocalQueue() {
     if (isSyncing) return;

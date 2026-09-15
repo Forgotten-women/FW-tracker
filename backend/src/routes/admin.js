@@ -462,6 +462,10 @@ router.get('/workstations', async (req, res) => {
         effectiveStatus = 'AWAY';
       }
 
+      const verifiedMins = Math.round((r.active_seconds || 0) / 60);
+      const unverifiedMins = Math.round((r.unverified_seconds || 0) / 60);
+      const totalActiveMins = verifiedMins + unverifiedMins;
+
       return {
         id: r.id,
         employeeId: r.employee_id,
@@ -472,7 +476,9 @@ router.get('/workstations', async (req, res) => {
         model: r.model,
         label: r.label,
         status: effectiveStatus,
-        activeMinutes: Math.round(r.active_seconds / 60),
+        activeMinutes: totalActiveMins,
+        verifiedActiveMinutes: verifiedMins,
+        unverifiedMinutes: unverifiedMins,
         idleMinutes: Math.floor((r.idle_seconds || 0) / 60),
         breakMinutes: totalBreakMins,
         presenceMinutes: presenceMins,
