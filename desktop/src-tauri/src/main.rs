@@ -21,6 +21,77 @@ use tokio::time::{sleep, Duration};
 
 static IS_MANUAL_BREAK: AtomicBool = AtomicBool::new(false);
 
+const CAPTURE_SCRIPT: &str = include_str!("../../capture-screen.ps1");
+
+fn capture_screen_frame() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::path::PathBuf;
+
+        let script_path = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("capture-screen.ps1")))
+            .filter(|p| p.exists())
+            .or_else(|| {
+                let cwd = PathBuf::from("capture-screen.ps1");
+                if cwd.exists() {
+                    Some(cwd)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                let temp_script = std::env::temp_dir().join("ot_capture_screen.ps1");
+                let _ = std::fs::write(&temp_script, CAPTURE_SCRIPT);
+                temp_script
+            });
+
+        if let Ok(out) = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NoLogo",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                script_path.to_str().unwrap_or("capture-screen.ps1"),
+            ])
+            .creation_flags(0x08000000)
+            .output()
+        {
+            let frame = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if (frame.starts_with("/9j/") || frame.starts_with("iVBOR")) && frame.len() > 100 {
+                return Some(frame);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let tmp_file = std::env::temp_dir().join(format!("ot_stream_{}.jpg", std::process::id()));
+        let tmp_str = tmp_file.to_str().unwrap_or("/tmp/ot_stream.jpg");
+        let _ = std::process::Command::new("/usr/sbin/screencapture")
+            .args(["-x", "-t", "jpg", tmp_str])
+            .output();
+        if tmp_file.exists() {
+            if let Ok(out) = std::process::Command::new("/usr/bin/base64")
+                .args(["-i", tmp_str])
+                .output()
+            {
+                let _ = std::fs::remove_file(&tmp_file);
+                let frame = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if (frame.starts_with("/9j/") || frame.starts_with("iVBOR")) && frame.len() > 100 {
+                    return Some(frame);
+                }
+            }
+            let _ = std::fs::remove_file(&tmp_file);
+        }
+    }
+
+    None
+}
+
 struct AppState {
     config: Mutex<AppConfig>,
     latest_response: Mutex<Option<HeartbeatResponse>>,
@@ -183,6 +254,37 @@ fn main() {
                 }
             }
 
+            // Dedicated Fast Live Screen Stream Worker (polls every 2.5s, streams every 1.5s when active)
+            let app_handle_stream = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut is_streaming = false;
+                loop {
+                    let state = app_handle_stream.state::<AppState>();
+                    let cfg = state.config.lock().unwrap().clone();
+
+                    if cfg.token.is_empty() {
+                        sleep(Duration::from_secs(3)).await;
+                        continue;
+                    }
+
+                    if let Ok(status) = client::check_stream_status(&cfg).await {
+                        is_streaming = status.live_stream_requested && status.is_permitted && !status.on_break && !status.outside_working_hours;
+                    }
+
+                    if is_streaming {
+                        let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
+                        if !is_break {
+                            if let Some(frame) = capture_screen_frame() {
+                                let _ = client::send_stream_frame(&cfg, &frame).await;
+                            }
+                        }
+                        sleep(Duration::from_millis(1500)).await;
+                    } else {
+                        sleep(Duration::from_millis(2500)).await;
+                    }
+                }
+            });
+
             // Background Monitoring & Heartbeat Task
             tauri::async_runtime::spawn(async move {
                 let mut sample_count = 0;
@@ -277,30 +379,7 @@ fn main() {
                         let _ = client::report_anomaly(&cfg, &proc_name, dur).await;
                     }
 
-                    // Live screen stream transmission when requested by authorized HR admin
-                    let stream_active = {
-                        let resp = state.latest_response.lock().unwrap();
-                        resp.as_ref()
-                            .and_then(|r| r.live_stream_requested)
-                            .unwrap_or(false)
-                    };
 
-                    if stream_active && !is_break {
-                        #[cfg(target_os = "windows")]
-                        {
-                            use std::os::windows::process::CommandExt;
-                            if let Ok(out) = std::process::Command::new("powershell")
-                                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "capture-screen.ps1"])
-                                .creation_flags(0x08000000)
-                                .output()
-                            {
-                                let frame = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                                if !frame.is_empty() {
-                                    let _ = client::send_stream_frame(&cfg, &frame).await;
-                                }
-                            }
-                        }
-                    }
 
                     // Send heartbeat every 60 seconds (6 samples x 10s)
                     if sample_count >= 6 {

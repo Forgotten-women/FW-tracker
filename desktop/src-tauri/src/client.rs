@@ -246,10 +246,45 @@ pub async fn send_stream_frame(cfg: &AppConfig, frame_base64: &str) -> Result<()
     let _ = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", cfg.token))
+        .header("X-Device-Id", &cfg.device_id)
         .json(&body)
         .send()
         .await;
 
     Ok(())
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamStatusResponse {
+    pub status: String,
+    #[serde(default)]
+    pub live_stream_requested: bool,
+    #[serde(default)]
+    pub is_permitted: bool,
+    #[serde(default)]
+    pub on_break: bool,
+    #[serde(default)]
+    pub outside_working_hours: bool,
+}
+
+pub async fn check_stream_status(cfg: &AppConfig) -> Result<StreamStatusResponse, String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/desktop/stream-status", cfg.server_url.trim_end_matches('/'));
+
+    let res = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .header("X-Device-Id", &cfg.device_id)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    res.json::<StreamStatusResponse>().await.map_err(|e| e.to_string())
+}
+
 

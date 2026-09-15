@@ -222,12 +222,17 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
     if (!isLiveScreenOpen || !workstation?.deviceId) return;
 
     let isMounted = true;
+    let pollCount = 0;
     const pollFrame = async () => {
       try {
+        pollCount++;
         const frame = await api.fetchLiveFrame(workstation.deviceId);
         if (isMounted) {
           setLiveFrame(frame);
-          if (!frame.active && !frame.isBreak) {
+          if (frame.active) {
+            setLiveStreamError(null);
+          } else if (!frame.isBreak && pollCount > 10) {
+            // Only timeout after at least ~12 seconds of polling with no active frame
             setLiveStreamError('Live stream ended or timed out.');
           }
         }
@@ -1018,7 +1023,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                     <span>Stream resumes automatically once break ends</span>
                   </div>
                 </div>
-              ) : liveFrame?.frameBase64 ? (
+              ) : (liveFrame?.frameBase64 && (liveFrame.frameBase64.startsWith('data:') || liveFrame.frameBase64.startsWith('/9j/') || liveFrame.frameBase64.startsWith('iVBOR')) && liveFrame.frameBase64.length > 200) ? (
                 <div className="relative max-h-full max-w-full flex items-center justify-center">
                   <img
                     src={
@@ -1028,6 +1033,9 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                     }
                     alt={`Real-time screen of ${employee.employeeName}`}
                     className="rounded-lg shadow-2xl object-contain max-h-[72vh] w-auto max-w-full border border-white/10"
+                    onError={() => {
+                      setLiveStreamError('Workstation screen frame could not be decoded.');
+                    }}
                   />
                   <div className="absolute top-2 left-2 flex items-center gap-2 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-md text-[10px] font-mono text-slate-300 border border-white/10">
                     <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />

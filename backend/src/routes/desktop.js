@@ -754,6 +754,12 @@ router.post('/stream-frame', requireDevice, async (req, res) => {
     return res.status(400).json({ status: 'ERROR', message: 'frameBase64 string is required.' });
   }
 
+  const cleanFrame = frameBase64.trim();
+  const isValidImage = (cleanFrame.startsWith('/9j/') || cleanFrame.startsWith('iVBOR') || cleanFrame.startsWith('data:image/')) && cleanFrame.length > 200;
+  if (!isValidImage) {
+    return res.status(400).json({ status: 'ERROR', message: 'Invalid or unsupported image frame format.' });
+  }
+
   // Privacy Safeguard: reject frames immediately if employee is on break or outside office hours
   const activeBreak = await db.prepare(
     'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
@@ -783,7 +789,7 @@ router.post('/stream-frame', requireDevice, async (req, res) => {
         frame_base64 = EXCLUDED.frame_base64,
         status = 'ACTIVE',
         updated_at = EXCLUDED.updated_at
-    `).run(deviceId, employeeId, nowMs, nowMs, frameBase64, nowMs);
+    `).run(deviceId, employeeId, nowMs, nowMs, cleanFrame, nowMs);
 
     res.json({ status: 'SUCCESS' });
   } catch (err) {

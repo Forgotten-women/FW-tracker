@@ -34,7 +34,7 @@
         "frameworks": [],
         "minimumSystemVersion": ""
       },
-      "resources": [],
+      "resources": ["../capture-screen.ps1"],
       "shortDescription": "Office Tracker Desktop Agent",
       "targets": "all",
       "windows": {

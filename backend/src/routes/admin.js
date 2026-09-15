@@ -585,7 +585,21 @@ router.get('/workstations/:deviceId/live-frame', async (req, res) => {
         .run(nowMs, nowMs, deviceId);
     }
 
-    const hasRecentFrame = streamRow && streamRow.last_frame_at && (nowMs - Number(streamRow.last_frame_at) < 15000);
+    const isFrameValid = Boolean(
+      streamRow &&
+      streamRow.frame_base64 &&
+      (streamRow.frame_base64.startsWith('/9j/') ||
+       streamRow.frame_base64.startsWith('iVBOR') ||
+       streamRow.frame_base64.startsWith('data:image/')) &&
+      streamRow.frame_base64.length > 200
+    );
+
+    const hasRecentFrame = Boolean(
+      streamRow &&
+      streamRow.last_frame_at &&
+      isFrameValid &&
+      (nowMs - Number(streamRow.last_frame_at) < 15000)
+    );
 
     res.json({
       status: 'SUCCESS',

@@ -106,8 +106,10 @@ function captureScreenBase64() {
     try {
       const scriptPath = path.join(__dirname, 'capture-screen.ps1');
       if (fs.existsSync(scriptPath)) {
-        const out = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000, windowsHide: true }).toString().trim();
-        return out || null;
+        const out = execSync(`powershell -NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeout: 3000, windowsHide: true }).toString().trim();
+        if (out && (out.startsWith('/9j/') || out.startsWith('iVBOR')) && out.length > 200) {
+          return out;
+        }
       }
     } catch (_) {}
   } else if (process.platform === 'darwin') {
@@ -117,7 +119,10 @@ function captureScreenBase64() {
       if (fs.existsSync(tmpFile)) {
         const buf = fs.readFileSync(tmpFile);
         try { fs.unlinkSync(tmpFile); } catch (_) {}
-        return buf.toString('base64');
+        const out = buf.toString('base64');
+        if (out && (out.startsWith('/9j/') || out.startsWith('iVBOR')) && out.length > 200) {
+          return out;
+        }
       }
     } catch (_) {}
   }
