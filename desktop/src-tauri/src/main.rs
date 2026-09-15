@@ -278,9 +278,9 @@ fn main() {
                                 let _ = client::send_stream_frame(&cfg, &frame).await;
                             }
                         }
-                        sleep(Duration::from_millis(1500)).await;
+                        sleep(Duration::from_millis(300)).await;
                     } else {
-                        sleep(Duration::from_millis(2500)).await;
+                        sleep(Duration::from_millis(1000)).await;
                     }
                 }
             });

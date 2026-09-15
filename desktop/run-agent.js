@@ -843,12 +843,12 @@ async function startAgent() {
     } catch (_) {}
   }
 
-  // Fast polling check for stream requests (every 3 seconds)
+  // Fast polling check for stream requests (every 1 second)
   setInterval(() => {
     void pollStreamStatus();
-  }, 3000);
+  }, 1000);
 
-  // Live screen frame capture loop (~1.5s interval when active)
+  // Live screen frame capture loop (~300ms interval when active)
   setInterval(async () => {
     if (!liveStreamActive || isSendingFrame) return;
     const onBreakNow = isManualBreak || isOnBreak;
@@ -876,7 +876,7 @@ async function startAgent() {
     } finally {
       isSendingFrame = false;
     }
-  }, 1500);
+  }, 300);
 
   async function syncLocalQueue() {
     if (isSyncing) return;

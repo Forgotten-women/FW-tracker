@@ -137,7 +137,7 @@ public class NativeScreenCapture {
     # If type is already defined in this PowerShell session, ignore error
 }
 
-$frame = [NativeScreenCapture]::CaptureBase64(960, 45)
+$frame = [NativeScreenCapture]::CaptureBase64(800, 35)
 if ($frame) {
     [Console]::WriteLine($frame)
 }

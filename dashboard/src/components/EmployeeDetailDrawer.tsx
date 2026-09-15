@@ -231,8 +231,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
           setLiveFrame(frame);
           if (frame.active) {
             setLiveStreamError(null);
-          } else if (!frame.isBreak && pollCount > 10) {
-            // Only timeout after at least ~12 seconds of polling with no active frame
+          } else if (!frame.isBreak && pollCount > 35) {
+            // Only timeout after at least ~10 seconds of polling with no active frame
             setLiveStreamError('Live stream ended or timed out.');
           }
         }
@@ -244,7 +244,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
     };
 
     pollFrame();
-    const interval = setInterval(pollFrame, 1200);
+    const interval = setInterval(pollFrame, 300);
 
     return () => {
       isMounted = false;
