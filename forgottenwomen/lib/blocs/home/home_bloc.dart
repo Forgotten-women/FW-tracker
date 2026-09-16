@@ -25,7 +25,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
 
   void _startPeriodicSync() {
     _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    _syncTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       add(const HomePeriodicSyncRequested());
     });
   }
@@ -40,7 +40,12 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   Future<void> _onStarted(HomeStarted event, Emitter<HomeState> emit) async {
     // 1. Instant Cache Render (stale-while-revalidate)
     final cached = await repository.getCachedHomeSummary();
-    if (cached != null) {
+    final todayKey = DateTime.now().toIso8601String().substring(0, 10);
+    final bool isCacheValid = cached != null &&
+        cached.todayDetails.attendance.date == todayKey &&
+        (DateTime.now().millisecondsSinceEpoch - cached.serverTimeMs) < 12 * 3600 * 1000;
+
+    if (isCacheValid) {
       emit(HomeLoaded(
         summary: cached,
         isRefreshing: true,

@@ -54,7 +54,7 @@ class ShiftHeroCard extends StatelessWidget {
     int extraMinutes = 0;
     if (isPresent && !onBreak && serverTimeMs != null && serverTimeMs! > 0) {
       final elapsedMs = liveNow.millisecondsSinceEpoch - serverTimeMs!;
-      if (elapsedMs > 0) {
+      if (elapsedMs > 0 && elapsedMs < 12 * 3600 * 1000) {
         extraMinutes = elapsedMs ~/ 60000;
       }
     }

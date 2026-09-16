@@ -837,7 +837,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 return _buildSessionTile(s);
                               }
                               final elapsedMs = loaded.liveNow.millisecondsSinceEpoch - loaded.summary.serverTimeMs;
-                              final extraMins = elapsedMs > 0 ? (elapsedMs ~/ 60000) : 0;
+                              final extraMins = (elapsedMs > 0 && elapsedMs < 12 * 3600 * 1000) ? (elapsedMs ~/ 60000) : 0;
                               final liveMins = s.minutes + extraMins;
                               final liveDuration = liveMins > 0 ? '${liveMins ~/ 60}h ${(liveMins % 60).toString().padLeft(2, '0')}m' : s.duration;
                               return _buildSessionTile(s, liveDurationOverride: liveDuration);
