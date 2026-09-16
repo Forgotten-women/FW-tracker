@@ -404,6 +404,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     },
     today: {
       dateKey,
+      checkInTime: sessionRow && sessionRow.created_at ? T.displayTime(sessionRow.created_at) : null,
       activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
       unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
       idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
@@ -627,6 +628,50 @@ router.post('/break', requireDevice, async (req, res) => {
     breakPermittedMinutes,
     breakDueBackAt,
   });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/desktop/checkout
+// ---------------------------------------------------------------------------
+router.post('/checkout', requireDevice, async (req, res) => {
+  const { employeeId, employeeName, deviceId } = req.auth;
+  const nowMs = T.now();
+  const dateKey = T.dateKey(nowMs);
+
+  try {
+    const sessionRow = await db.prepare(
+      'SELECT id FROM workstation_sessions WHERE device_id = ? AND session_date = ?'
+    ).get(deviceId, dateKey);
+
+    if (sessionRow) {
+      await db.prepare(
+        "UPDATE workstation_sessions SET status = 'CHECKED_OUT', updated_at = ? WHERE id = ?"
+      ).run(nowMs, sessionRow.id);
+    }
+
+    try {
+      await presence.recordEvent({
+        employeeId,
+        deviceId,
+        source: 'APP',
+        observedAt: nowMs,
+        note: 'Desktop Agent Shift Checkout',
+      });
+      await presence.recomputeDay(employeeId, dateKey, nowMs);
+    } catch (_) {}
+
+    await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+      .run(nowMs, 'SHIFT_CHECKED_OUT', employeeId, employeeName, 'Employee completed shift via Desktop Agent');
+
+    res.json({
+      status: 'SUCCESS',
+      message: 'Checked out shift successfully.',
+      checkedOutAt: T.displayTime(nowMs),
+    });
+  } catch (err) {
+    console.error('[desktop/checkout] error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 // ---------------------------------------------------------------------------

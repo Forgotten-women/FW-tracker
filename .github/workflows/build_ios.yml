@@ -1,6 +1,9 @@
 name: Build iOS App
 
 on:
+  push:
+    tags:
+      - 'v*' # Triggers when pushing tags like v1.0.6, v1.0.7, etc.
   workflow_dispatch:
 
 jobs:

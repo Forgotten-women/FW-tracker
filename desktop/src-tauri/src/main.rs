@@ -175,6 +175,16 @@ async fn connect_office_wifi() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn checkout_shift(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    if !cfg.token.is_empty() {
+        client::send_checkout(&cfg).await
+    } else {
+        Err("Not enrolled".to_string())
+    }
+}
+
 fn main() {
     let instance_role = single_instance::check_single_instance();
     let single_instance_listener = match instance_role {
@@ -203,6 +213,7 @@ fn main() {
             live_stream_requested: Some(false),
             today: client::SessionStats {
                 date_key: initial_config.cached_date_key.clone(),
+                check_in_time: None,
                 active_seconds: initial_config.cached_active_seconds,
                 idle_seconds: 0,
                 break_seconds: 0,
@@ -229,7 +240,8 @@ fn main() {
             get_app_status,
             enroll_device,
             toggle_manual_break,
-            connect_office_wifi
+            connect_office_wifi,
+            checkout_shift
         ])
         .setup(move |app| {
             let app_handle = app.handle();

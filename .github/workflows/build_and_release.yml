@@ -51,7 +51,7 @@ jobs:
         working-directory: forgottenwomen
 
       - name: 🔨 Build Release APK
-        run: flutter build apk --release --split-per-abi=false --dart-define-from-file=.env
+        run: flutter build apk --release --dart-define-from-file=.env
         working-directory: forgottenwomen
 
       - name: 📝 Determine Tag & Version

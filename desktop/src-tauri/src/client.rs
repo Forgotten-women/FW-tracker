@@ -63,6 +63,8 @@ pub struct HeartbeatResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SessionStats {
     pub date_key: String,
+    #[serde(default)]
+    pub check_in_time: Option<String>,
     pub active_seconds: u64,
     pub idle_seconds: u64,
     pub break_seconds: u64,
@@ -285,6 +287,30 @@ pub async fn check_stream_status(cfg: &AppConfig) -> Result<StreamStatusResponse
         .map_err(|e| e.to_string())?;
 
     res.json::<StreamStatusResponse>().await.map_err(|e| e.to_string())
+}
+
+pub async fn send_checkout(cfg: &AppConfig) -> Result<serde_json::Value, String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/desktop/checkout", cfg.server_url.trim_end_matches('/'));
+
+    let res = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        let err_json: serde_json::Value = res.json().await.unwrap_or_default();
+        let msg = err_json["message"].as_str().unwrap_or("Failed to checkout shift");
+        return Err(msg.to_string());
+    }
+
+    res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
 }
 
 

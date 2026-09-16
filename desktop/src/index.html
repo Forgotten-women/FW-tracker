@@ -56,6 +56,12 @@
         <span id="status-text">Active · In Office</span>
       </div>
 
+      <!-- Check-in Time Badge -->
+      <div id="checkin-badge" class="checkin-badge">
+        <span class="checkin-icon">📌</span>
+        <span id="checkin-text">Check-in: --:--</span>
+      </div>
+
       <!-- Live Active Timer -->
       <div class="timer-container" id="timer-container">
         <div class="timer-label" id="timer-label">TODAY'S ACTIVE TIME</div>
@@ -97,7 +103,17 @@
       <!-- Quick Action Buttons -->
       <div class="action-row">
         <button id="break-toggle-btn" class="action-btn">☕ Take Break</button>
+        <button id="checkout-btn" class="action-btn checkout-btn">🚪 End Shift</button>
       </div>
+
+      <!-- Undo Checkout Banner (Hidden by default) -->
+      <div id="undo-checkout-wrap" class="undo-checkout-wrap hidden">
+        <div class="undo-content">
+          <span>⚠️ Ending shift in <strong id="undo-timer-num">5</strong>s…</span>
+          <button id="undo-checkout-btn" class="undo-btn">↩️ Cancel & Undo</button>
+        </div>
+      </div>
+
       <div id="status-feedback" class="desc hidden" style="font-size: 11px; text-align: center; margin-top: 6px; color: #f87171;"></div>
     </div>
   </div>

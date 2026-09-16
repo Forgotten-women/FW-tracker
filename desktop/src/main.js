@@ -37,12 +37,19 @@ async function callBackend(command, args = {}) {
     return res.json();
   }
 
+  if (command === 'checkout_shift') {
+    const res = await fetch('/api/checkout', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
   return {};
 }
 
 const enrollSection = document.getElementById('enroll-section');
 const statusSection = document.getElementById('status-section');
 const employeeBadge = document.getElementById('employee-badge');
+const checkinText = document.getElementById('checkin-text');
 const enrollBtn = document.getElementById('enroll-btn');
 const enrollError = document.getElementById('enroll-error');
 const serverUrlInput = document.getElementById('server-url-input');
@@ -50,6 +57,10 @@ const enrollCodeInput = document.getElementById('enroll-code-input');
 const minimizeBtn = document.getElementById('minimize-btn');
 const closeBtn = document.getElementById('close-btn');
 const breakToggleBtn = document.getElementById('break-toggle-btn');
+const checkoutBtn = document.getElementById('checkout-btn');
+const undoCheckoutWrap = document.getElementById('undo-checkout-wrap');
+const undoTimerNum = document.getElementById('undo-timer-num');
+const undoCheckoutBtn = document.getElementById('undo-checkout-btn');
 const activeTimer = document.getElementById('active-timer');
 const statBreak = document.getElementById('stat-break');
 const statIdle = document.getElementById('stat-idle');
@@ -59,6 +70,9 @@ const networkText = document.getElementById('network-text');
 const wifiConnectBtn = document.getElementById('wifi-connect-btn');
 const statusFeedback = document.getElementById('status-feedback');
 let feedbackTimeout = null;
+let isTogglingBreak = false;
+let checkoutCountdownTimer = null;
+let checkoutSecondsLeft = 5;
 
 const breakCountdownWrap = document.getElementById('break-countdown-wrap');
 const breakCountdownTimer = document.getElementById('break-countdown-timer');
@@ -238,6 +252,10 @@ async function refreshStatus() {
         statBreak.textContent = `${breakMins}m`;
         statIdle.textContent = `${Math.floor((data.latest.today.idleSeconds || 0) / 60)}m`;
 
+        if (data.latest && data.latest.today && checkinText) {
+          checkinText.textContent = `Check-in: ${data.latest.today.checkInTime || 'Not Recorded'}`;
+        }
+
         const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
         const isBreakUsed = Boolean(data.latest && data.latest.today && data.latest.today.breakAlreadyTaken);
         const isOnBreak = serverOnBreak || (data.isManualBreak && !isBreakUsed);
@@ -261,8 +279,10 @@ async function refreshStatus() {
 
           statusBanner.className = 'status-banner away';
           statusText.textContent = '☕ On Break';
-          breakToggleBtn.disabled = false;
-          breakToggleBtn.classList.remove('disabled');
+          if (!isTogglingBreak) {
+            breakToggleBtn.disabled = false;
+            breakToggleBtn.classList.remove('disabled');
+          }
         } else {
           isOnBreakState = false;
           breakStartedAtMs = null;
@@ -277,31 +297,50 @@ async function refreshStatus() {
             } else if (data.latest.workstationStatus === 'IDLE') {
               statusBanner.className = 'status-banner away';
               statusText.textContent = '⏳ Idle Inactivity';
+            } else if (data.latest.workstationStatus === 'CHECKED_OUT') {
+              statusBanner.className = 'status-banner away';
+              statusText.textContent = '🏁 Shift Ended (Checked Out)';
             } else {
               statusBanner.className = 'status-banner';
               statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
             }
-            breakToggleBtn.textContent = `☕ Break Taken (${breakMins}m used)`;
-            breakToggleBtn.disabled = true;
-            breakToggleBtn.classList.add('disabled');
+            if (!isTogglingBreak) {
+              breakToggleBtn.textContent = `☕ Break Taken (${breakMins}m used)`;
+              breakToggleBtn.disabled = true;
+              breakToggleBtn.classList.add('disabled');
+            }
           } else if (data.latest.workstationStatus === 'AWAY') {
             statusBanner.className = 'status-banner away';
             statusText.textContent = '🔒 Screen Locked (Away)';
-            breakToggleBtn.textContent = '☕ Take Break';
-            breakToggleBtn.disabled = false;
-            breakToggleBtn.classList.remove('disabled');
+            if (!isTogglingBreak) {
+              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.disabled = false;
+              breakToggleBtn.classList.remove('disabled');
+            }
           } else if (data.latest.workstationStatus === 'IDLE') {
             statusBanner.className = 'status-banner away';
             statusText.textContent = '⏳ Idle Inactivity';
-            breakToggleBtn.textContent = '☕ Take Break';
-            breakToggleBtn.disabled = false;
-            breakToggleBtn.classList.remove('disabled');
+            if (!isTogglingBreak) {
+              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.disabled = false;
+              breakToggleBtn.classList.remove('disabled');
+            }
+          } else if (data.latest.workstationStatus === 'CHECKED_OUT') {
+            statusBanner.className = 'status-banner away';
+            statusText.textContent = '🏁 Shift Ended (Checked Out)';
+            if (!isTogglingBreak) {
+              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.disabled = true;
+              breakToggleBtn.classList.add('disabled');
+            }
           } else {
             statusBanner.className = 'status-banner';
             statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
-            breakToggleBtn.textContent = '☕ Take Break';
-            breakToggleBtn.disabled = false;
-            breakToggleBtn.classList.remove('disabled');
+            if (!isTogglingBreak) {
+              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.disabled = false;
+              breakToggleBtn.classList.remove('disabled');
+            }
           }
         }
 
@@ -423,10 +462,14 @@ if (closeBtn) {
 }
 
 if (breakToggleBtn) {
-  breakToggleBtn.addEventListener('click', async () => {
-    if (breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
+  breakToggleBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (isTogglingBreak || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
     try {
+      isTogglingBreak = true;
       breakToggleBtn.disabled = true;
+      breakToggleBtn.textContent = '⏳ Processing…';
+
       const targetIsBreak = !isOnBreakState;
       if (targetIsBreak) {
         isOnBreakState = true;
@@ -440,19 +483,68 @@ if (breakToggleBtn) {
       }
 
       await callBackend('toggle_manual_break');
-      await refreshStatus();
     } catch (err) {
       console.error('Break toggle failed:', err);
       const errMsg = (typeof err === 'string' ? err : (err && err.message) || '').toLowerCase();
-      if (errMsg.includes('no break') || errMsg.includes('not_on_break')) {
-        await refreshStatus();
-      } else {
+      if (!errMsg.includes('no break') && !errMsg.includes('not_on_break')) {
         showFeedback(typeof err === 'string' ? err : (err && err.message) || 'Could not change break status.');
-        await refreshStatus();
       }
     } finally {
-      // refreshStatus() sets the correct disabled/enabled state
+      isTogglingBreak = false;
+      await refreshStatus();
     }
+  });
+}
+
+if (checkoutBtn) {
+  checkoutBtn.addEventListener('click', () => {
+    if (checkoutCountdownTimer) return;
+    checkoutSecondsLeft = 5;
+    if (undoTimerNum) undoTimerNum.textContent = '5';
+    if (undoCheckoutWrap) undoCheckoutWrap.classList.remove('hidden');
+    checkoutBtn.disabled = true;
+    checkoutBtn.classList.add('disabled');
+
+    checkoutCountdownTimer = setInterval(async () => {
+      checkoutSecondsLeft--;
+      if (undoTimerNum) undoTimerNum.textContent = String(checkoutSecondsLeft);
+
+      if (checkoutSecondsLeft <= 0) {
+        clearInterval(checkoutCountdownTimer);
+        checkoutCountdownTimer = null;
+        if (undoCheckoutWrap) undoCheckoutWrap.classList.add('hidden');
+
+        try {
+          if (isTauri && tauriInvoke) {
+            await tauriInvoke('checkout_shift');
+          } else {
+            await fetch('/api/checkout', { method: 'POST' });
+          }
+          showFeedback('✓ Shift checked out successfully.', false);
+          refreshStatus();
+        } catch (err) {
+          showFeedback('Checkout failed. Please try again.');
+        } finally {
+          checkoutBtn.disabled = false;
+          checkoutBtn.classList.remove('disabled');
+        }
+      }
+    }, 1000);
+  });
+}
+
+if (undoCheckoutBtn) {
+  undoCheckoutBtn.addEventListener('click', () => {
+    if (checkoutCountdownTimer) {
+      clearInterval(checkoutCountdownTimer);
+      checkoutCountdownTimer = null;
+    }
+    if (undoCheckoutWrap) undoCheckoutWrap.classList.add('hidden');
+    if (checkoutBtn) {
+      checkoutBtn.disabled = false;
+      checkoutBtn.classList.remove('disabled');
+    }
+    showFeedback('✓ Checkout cancelled. Session continues.', false);
   });
 }
 

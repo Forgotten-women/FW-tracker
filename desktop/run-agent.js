@@ -693,6 +693,25 @@ function startMiniAppServer(port = MINI_APP_PORT) {
       return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak }));
     }
 
+    // POST /api/checkout
+    if (parsedUrl.pathname === '/api/checkout' && req.method === 'POST') {
+      currentWorkstationStatus = 'CHECKED_OUT';
+      const cfgNow = loadConfig();
+      if (cfgNow && cfgNow.token && cfgNow.serverUrl) {
+        try {
+          await fetch(`${cfgNow.serverUrl}/api/desktop/checkout`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${cfgNow.token}`,
+            },
+          });
+        } catch (_) {}
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'SUCCESS', message: 'Shift checked out.' }));
+    }
+
     // Static Assets
     const safePath = parsedUrl.pathname === '/' ? 'index.html' : parsedUrl.pathname.replace(/^\/+/, '');
     const localFile = path.join(__dirname, 'src', safePath);
