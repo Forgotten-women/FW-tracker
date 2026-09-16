@@ -268,6 +268,20 @@ export const api = {
       },
     ),
 
+  addManualAttendanceTime: (
+    employeeId: string,
+    minutes: number,
+    reason: string,
+    dateKey?: string,
+  ) =>
+    request<{ status: string; message: string; balance?: number }>(
+      `/api/attendance/employee/${encodeURIComponent(employeeId)}/adjust`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ minutes, reason, dateKey }),
+      },
+    ),
+
   warningBoard: (date?: string) =>
     request<WarningBoardSummary>(
       `/api/warnings/board${date ? `?date=${encodeURIComponent(date)}` : ''}`,

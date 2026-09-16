@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
 import type { EmployeeDay, WorkstationItem, AppUsageItem, LiveFrameResponse } from '../lib/types';
 import { Badge, Button } from './primitives';
+import { ManualTimeModal } from './ManualTimeModal';
 
 interface EmployeeDetailDrawerProps {
   employee: EmployeeDay | null;
@@ -109,6 +110,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
   const [apps, setApps] = useState<AppUsageItem[]>([]);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
   const [generatingPairing, setGeneratingPairing] = useState(false);
+  const [isManualTimeModalOpen, setIsManualTimeModalOpen] = useState(false);
 
   // Live Screen View State
   const [isLiveScreenOpen, setIsLiveScreenOpen] = useState(false);
@@ -399,6 +401,16 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                         <span>📹 Live Screen</span>
                       </button>
                     )}
+
+                    {/* HR Direct Manual Time Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsManualTimeModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 px-3 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95"
+                      title="HR Direct Attendance & Time Adjustment"
+                    >
+                      <span>⏱️ Add Manual Time</span>
+                    </button>
                   </div>
 
                   {isLate && (
@@ -1093,6 +1105,20 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
           </div>
         </div>
       )}
+
+      {/* Manual Time Entry Modal */}
+      <ManualTimeModal
+        isOpen={isManualTimeModalOpen}
+        onClose={() => setIsManualTimeModalOpen(false)}
+        employees={[{ id: employee.employeeId, name: employee.employeeName }]}
+        defaultEmployeeId={employee.employeeId}
+        defaultDate={employee.date}
+        onSuccess={() => {
+          if (employee?.employeeId) {
+            loadTelemetry(employee.employeeId);
+          }
+        }}
+      />
     </div>
   );
 }

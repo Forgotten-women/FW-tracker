@@ -441,9 +441,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             itemCount: corrections.length,
                             separatorBuilder: (_, _) => const SizedBox(height: 10),
                             itemBuilder: (_, i) {
-                              final c = corrections[i];
                               final Color statusTone;
-                              if (c.isApproved) {
+                              if (c.isHRDirectEntry) {
+                                statusTone = AppColors.primaryLight;
+                              } else if (c.isApproved) {
                                 statusTone = AppColors.teal;
                               } else if (c.isAmended) {
                                 statusTone = AppColors.primaryLight;
@@ -478,7 +479,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                             border: Border.all(color: statusTone.withValues(alpha: 0.5)),
                                           ),
                                           child: Text(
-                                            c.status,
+                                            c.isHRDirectEntry ? 'HR Added Adjustment' : c.status,
                                             style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusTone),
                                           ),
                                         ),

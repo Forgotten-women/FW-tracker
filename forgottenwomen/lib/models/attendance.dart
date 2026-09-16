@@ -447,6 +447,7 @@ class CorrectionRequest {
   final String requestedAt;
   final String? reviewedAt;
   final String? reviewNotes;
+  final String? requestedBy;
 
   const CorrectionRequest({
     required this.id,
@@ -458,6 +459,7 @@ class CorrectionRequest {
     required this.requestedAt,
     this.reviewedAt,
     this.reviewNotes,
+    this.requestedBy,
   });
 
   factory CorrectionRequest.fromJson(Map<String, dynamic> json) =>
@@ -473,7 +475,13 @@ class CorrectionRequest {
         requestedAt: json['requestedAt'] as String? ?? '',
         reviewedAt: json['reviewedAt'] as String?,
         reviewNotes: json['reviewNotes'] as String?,
+        requestedBy: (json['requestedBy'] ?? json['requested_by']) as String?,
       );
+
+  bool get isHRDirectEntry =>
+      (requestedBy != null && requestedBy!.toLowerCase().contains('hr')) ||
+      reason.toLowerCase().contains('hr direct') ||
+      reason.toLowerCase().contains('hr added');
 
   bool get isPending => status == 'PENDING';
   bool get isApproved => status == 'APPROVED';

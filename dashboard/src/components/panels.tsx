@@ -13,6 +13,7 @@ import type {
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel, STATUS_META } from './primitives';
 import { SetSalaryModal } from './PayrollPanel';
+import { ManualTimeModal } from './ManualTimeModal';
 
 // --- header ----------------------------------------------------------------
 
@@ -615,6 +616,7 @@ export function AttendanceTable({
   const [from, setFrom] = useState(dateKey);
   const [to, setTo] = useState(dateKey);
   const [tableSearch, setTableSearch] = useState('');
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
 
   const isToday = selectedDate === dateKey;
 
@@ -758,6 +760,15 @@ export function AttendanceTable({
               }
             >
               Export CSV
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsManualModalOpen(true)}
+              className="border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20"
+              icon={<span>⏱️</span>}
+            >
+              Add Manual Time
             </Button>
           </div>
         </div>
@@ -1044,6 +1055,17 @@ export function AttendanceTable({
           </tbody>
         </table>
       </div>
+
+      {isManualModalOpen && (
+        <ManualTimeModal
+          isOpen={isManualModalOpen}
+          onClose={() => setIsManualModalOpen(false)}
+          employees={rows.map((r) => ({ id: r.employeeId, name: r.employeeName, role: r.role }))}
+          onSuccess={() => {
+            // Re-fetch logic if needed
+          }}
+        />
+      )}
     </Panel>
   );
 }

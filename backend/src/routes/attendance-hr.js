@@ -561,35 +561,93 @@ router.post('/corrections/:id/decide',
   requireUserOrAdminKey('attendance.correction.review'),
   handleCorrectionDecision);
 
-// POST /api/attendance/employee/:employeeId/adjust - direct HR adjustment.
+// POST /api/attendance/employee/:employeeId/adjust - direct HR manual adjustment.
 router.post('/employee/:employeeId/adjust',
-  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  requireUserOrAdminKey('attendance.write'),
   async (req, res) => {
     const { minutes, reason, dateKey } = req.body || {};
-    if (!Number.isFinite(Number(minutes))) {
-      return res.status(400).json({ status: 'ERROR', message: 'minutes must be a number.' });
+    const employeeId = req.params.employeeId;
+    if (!Number.isFinite(Number(minutes)) || Number(minutes) === 0) {
+      return res.status(400).json({ status: 'ERROR', message: 'minutes must be a non-zero number.' });
     }
     if (!reason || !String(reason).trim()) {
       return res.status(400).json({ status: 'ERROR', message: 'A reason is required.' });
     }
 
-    const actor = `user:${req.auth.id}`;
-    const entry = await A.adjustBalance({
-      employeeId: req.params.employeeId,
-      dateKey: dateKey || T.dateKey(),
-      minutes: Number(minutes),
-      reason: String(reason).trim(),
-      actor,
-    });
+    const nowMs = T.now();
+    const targetDateKey = dateKey || T.dateKey(nowMs);
+    const actor = req.auth.kind === 'user' ? `user:${req.auth.id}` : (req.auth.actor || 'admin');
 
-    await audit({
-      actor, action: 'DEFICIT_ADJUSTED',
-      targetType: 'employee', targetId: req.params.employeeId,
-      after: { minutes: Number(minutes), balanceAfter: entry.balance_after },
-      note: String(reason).trim(),
-    });
+    const corrId = 'corr_hr_' + crypto.randomBytes(6).toString('hex');
+    const addedMinutes = Number(minutes);
 
-    res.json({ status: 'SUCCESS', balance: await A.balanceFor(req.params.employeeId) });
+    try {
+      await tx(async () => {
+        // 1. Record approved correction entry so it appears in employee disputes/corrections as HR Added Adjustment
+        await db.prepare(`
+          INSERT INTO attendance_corrections
+            (id, employee_id, date_key, requested_by, requested_at, requested_change, applied_change, reason, status, reviewed_by, reviewed_at, review_notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?)
+        `).run(
+          corrId, employeeId, targetDateKey, 'HR Admin (Direct Entry)', nowMs,
+          JSON.stringify({ adjustmentMinutes: addedMinutes }),
+          JSON.stringify({ adjustmentMinutes: addedMinutes }),
+          String(reason).trim(),
+          actor, nowMs, 'HR Manual Time Entry'
+        );
+
+        // 2. Adjust deficit/worked balance
+        await A.adjustBalance({
+          employeeId,
+          dateKey: targetDateKey,
+          minutes: -Math.abs(addedMinutes),
+          reason: `HR Manual Entry: ${String(reason).trim()}`,
+          actor,
+        });
+
+        // 3. Update active_seconds in workstation_sessions for targetDateKey if present
+        const wsRow = await db.prepare(
+          'SELECT id FROM workstation_sessions WHERE employee_id = ? AND session_date = ?'
+        ).get(employeeId, targetDateKey);
+        if (wsRow) {
+          const addedSecs = Math.max(0, addedMinutes * 60);
+          await db.prepare(
+            'UPDATE workstation_sessions SET active_seconds = active_seconds + ?, updated_at = ? WHERE id = ?'
+          ).run(addedSecs, nowMs, wsRow.id);
+        }
+
+        await audit({
+          actor, action: 'HR_ATTENDANCE_MANUAL_ADJUSTMENT',
+          targetType: 'employee', targetId: employeeId,
+          after: { minutes: addedMinutes, dateKey: targetDateKey },
+          note: String(reason).trim(),
+        });
+      });
+
+      // 4. Recompute day & send notification to employee mobile app
+      await A.recomputeDay(employeeId, targetDateKey, nowMs);
+
+      try {
+        await N.notify({
+          employeeId,
+          category: 'CORRECTION',
+          title: 'HR Attendance Adjustment',
+          body: `HR added +${addedMinutes} mins to your record for ${targetDateKey}. Reason: ${String(reason).trim()}`,
+          severity: 'info',
+          link: '/attendance',
+          nowMs,
+        });
+      } catch (_) {}
+
+      res.json({
+        status: 'SUCCESS',
+        message: `Successfully added ${addedMinutes} mins to ${targetDateKey}.`,
+        balance: await A.balanceFor(employeeId),
+      });
+    } catch (err) {
+      console.error('[attendance-hr/adjust] error:', err);
+      res.status(500).json({ status: 'ERROR', message: err.message });
+    }
   });
 
 // GET /api/attendance/employee/:employeeId/ledger
