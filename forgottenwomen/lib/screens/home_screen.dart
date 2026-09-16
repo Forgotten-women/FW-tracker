@@ -441,6 +441,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             itemCount: corrections.length,
                             separatorBuilder: (_, _) => const SizedBox(height: 10),
                             itemBuilder: (_, i) {
+                              final c = corrections[i];
                               final Color statusTone;
                               if (c.isHRDirectEntry) {
                                 statusTone = AppColors.primaryLight;
