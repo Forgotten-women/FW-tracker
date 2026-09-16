@@ -689,6 +689,12 @@ function startMiniAppServer(port = MINI_APP_PORT) {
     // POST /api/break
     if (parsedUrl.pathname === '/api/break' && req.method === 'POST') {
       isManualBreak = !isManualBreak;
+      if (latestHeartbeatResponse && latestHeartbeatResponse.today) {
+        latestHeartbeatResponse.today.onBreak = isManualBreak;
+        if (!isManualBreak) {
+          latestHeartbeatResponse.today.breakAlreadyTaken = true;
+        }
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak }));
     }

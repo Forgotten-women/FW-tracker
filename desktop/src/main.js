@@ -480,6 +480,11 @@ if (breakToggleBtn) {
         isOnBreakState = false;
         breakStartedAtMs = null;
         if (breakCountdownWrap) breakCountdownWrap.classList.add('hidden');
+        if (statusBanner) statusBanner.className = 'status-banner';
+        if (statusText) statusText.textContent = '🟢 Active · In Office';
+        breakToggleBtn.textContent = '☕ Break Taken';
+        breakToggleBtn.disabled = true;
+        breakToggleBtn.classList.add('disabled');
       }
 
       await callBackend('toggle_manual_break');

@@ -159,6 +159,12 @@ async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String>
             // recover cleanly by reconciling local break flag to false
             if !target && (err_lower.contains("no break") || err_lower.contains("not_on_break")) {
                 IS_MANUAL_BREAK.store(false, Ordering::SeqCst);
+                if let Ok(mut resp_guard) = state.latest_response.lock() {
+                    if let Some(ref mut r) = *resp_guard {
+                        r.today.on_break = false;
+                        r.today.break_already_taken = true;
+                    }
+                }
                 return Ok(false);
             }
             return Err(err);
@@ -166,6 +172,16 @@ async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String>
     }
 
     IS_MANUAL_BREAK.store(target, Ordering::SeqCst);
+
+    if let Ok(mut resp_guard) = state.latest_response.lock() {
+        if let Some(ref mut r) = *resp_guard {
+            r.today.on_break = target;
+            if !target {
+                r.today.break_already_taken = true;
+            }
+        }
+    }
+
     Ok(target)
 }
 
