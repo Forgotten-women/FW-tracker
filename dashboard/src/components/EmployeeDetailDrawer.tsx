@@ -339,88 +339,98 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
               {/* Subtle ambient accent glow */}
               <div className="absolute top-0 right-0 -mr-16 -mt-16 h-48 w-48 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-slate-900 border border-indigo-400/30 text-lg font-black text-white shadow-xl">
+              {/* Top Section: Identity & Status Badge */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-4 min-w-0 flex-1">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-slate-900 border border-indigo-400/30 text-lg font-black text-white shadow-xl shadow-indigo-950/50">
                     {initials}
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-lg font-black text-white tracking-tight truncate">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h2 className="text-xl font-black text-white tracking-tight">
                         {employee.employeeName}
                       </h2>
                       {employee.employeeNumber && (
-                        <span className="rounded bg-indigo-500/20 px-2 py-0.5 text-xs font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                        <span className="shrink-0 rounded-lg bg-indigo-500/20 px-2 py-0.5 text-xs font-mono font-bold text-indigo-300 border border-indigo-500/30">
                           {employee.employeeNumber}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs font-medium text-slate-400 mt-0.5">{employee.role}</p>
-                    <div className="flex items-center gap-2 mt-2 text-[11px] text-slate-400">
-                      <span className="flex items-center gap-1">
+                    <div className="flex items-center gap-2 flex-wrap mt-1">
+                      <span className="text-xs font-medium text-slate-300">{employee.role}</span>
+                      <span className="text-slate-600">•</span>
+                      <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-400 whitespace-nowrap">
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                         {employee.presenceSource ? `via ${employee.presenceSource}` : 'App / Workstation'}
                       </span>
-                      <span>•</span>
-                      <span className="text-emerald-400 font-semibold">Office Wi-Fi Verified</span>
+                      <span className="text-slate-600">•</span>
+                      <span className="text-[11px] text-emerald-400 font-semibold whitespace-nowrap">
+                        Office Wi-Fi Verified
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Status Badges & Live Screen Action */}
-                <div className="flex sm:flex-col items-start sm:items-end gap-2 shrink-0">
-                  <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-                    <Badge
-                      tone={
-                        employee.status === 'IN_OFFICE'
-                          ? 'ok'
-                          : employee.status === 'GRACE_PERIOD'
-                          ? 'warn'
-                          : employee.status === 'AWAY'
-                          ? 'muted'
-                          : 'dim'
-                      }
-                      dot
-                      size="md"
-                    >
-                      {employee.statusLabel || employee.status}
-                    </Badge>
+                {/* Primary Status Badge Top Right */}
+                <div className="shrink-0">
+                  <Badge
+                    tone={
+                      employee.status === 'IN_OFFICE'
+                        ? 'ok'
+                        : employee.status === 'GRACE_PERIOD'
+                        ? 'warn'
+                        : employee.status === 'AWAY'
+                        ? 'muted'
+                        : 'dim'
+                    }
+                    dot
+                    size="md"
+                  >
+                    {employee.statusLabel || employee.status}
+                  </Badge>
+                </div>
+              </div>
 
-                    {/* Live Screen Quick Button */}
-                    {workstation?.deviceId && (
-                      <button
-                        type="button"
-                        onClick={handleOpenLiveScreen}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-rose-950/40 border border-rose-400/30 transition-all duration-200 cursor-pointer active:scale-95"
-                        title="Real-time ephemeral live screen feed"
-                      >
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-300 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-                        </span>
-                        <span>📹 Live Screen</span>
-                      </button>
-                    )}
-
-                    {/* HR Direct Manual Time Button */}
+              {/* Actions & Alerts Toolbar */}
+              <div className="mt-4 pt-3.5 border-t border-white/8 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Live Screen Quick Button */}
+                  {workstation?.deviceId && (
                     <button
                       type="button"
-                      onClick={() => setIsManualTimeModalOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 px-3 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95"
-                      title="HR Direct Attendance & Time Adjustment"
+                      onClick={handleOpenLiveScreen}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 px-3.5 py-1.5 text-xs font-bold text-white shadow-lg shadow-rose-950/40 border border-rose-400/30 transition-all duration-200 cursor-pointer active:scale-95"
+                      title="Real-time ephemeral live screen feed"
                     >
-                      <span>⏱️ Add Manual Time</span>
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-300 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+                      </span>
+                      <span>📹 Live Screen</span>
                     </button>
-                  </div>
+                  )}
 
+                  {/* HR Direct Manual Time Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsManualTimeModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/30 px-3.5 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95 shadow-sm"
+                    title="HR Direct Attendance & Time Adjustment"
+                  >
+                    <span>⏱️ Add Manual Time</span>
+                  </button>
+                </div>
+
+                {/* Contextual Badges (Late / Break) */}
+                <div className="flex items-center gap-2 flex-wrap">
                   {isLate && (
-                    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)]">
+                    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)] whitespace-nowrap">
                       <span>⚠️</span> Late (+{employee.lateMinutes}m)
                     </span>
                   )}
 
                   {employee.onBreak && (
-                    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)]">
+                    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)] whitespace-nowrap">
                       <span>☕</span> On Break ({employee.activeBreakMinutes ?? 0}m)
                     </span>
                   )}
