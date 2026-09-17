@@ -688,15 +688,45 @@ function startMiniAppServer(port = MINI_APP_PORT) {
 
     // POST /api/break
     if (parsedUrl.pathname === '/api/break' && req.method === 'POST') {
-      isManualBreak = !isManualBreak;
-      if (latestHeartbeatResponse && latestHeartbeatResponse.today) {
-        latestHeartbeatResponse.today.onBreak = isManualBreak;
-        if (!isManualBreak) {
-          latestHeartbeatResponse.today.breakAlreadyTaken = true;
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', async () => {
+        try {
+          let reqData = {};
+          try { reqData = JSON.parse(body); } catch (_) {}
+          const targetBreak = typeof reqData.onBreak === 'boolean' ? reqData.onBreak : !isManualBreak;
+          isManualBreak = targetBreak;
+
+          const cfgNow = loadConfig();
+          if (cfgNow && cfgNow.token && cfgNow.serverUrl) {
+            try {
+              await fetch(`${cfgNow.serverUrl}/api/desktop/break`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${cfgNow.token}`,
+                },
+                body: JSON.stringify({ onBreak: targetBreak }),
+              });
+            } catch (err) {
+              console.warn('[desktop] Failed to sync break to server:', err.message);
+            }
+          }
+
+          if (latestHeartbeatResponse && latestHeartbeatResponse.today) {
+            latestHeartbeatResponse.today.onBreak = isManualBreak;
+            if (!isManualBreak) {
+              latestHeartbeatResponse.today.breakAlreadyTaken = true;
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ status: 'ERROR', message: err.message }));
         }
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak }));
+      });
+      return;
     }
 
     // POST /api/checkout

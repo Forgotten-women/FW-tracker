@@ -138,19 +138,9 @@ async fn enroll_device(
 }
 
 #[tauri::command]
-async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String> {
+async fn set_manual_break(on_break: bool, state: State<'_, AppState>) -> Result<bool, String> {
     let cfg = state.config.lock().unwrap().clone();
-    let resp = state.latest_response.lock().unwrap().clone();
-    let server_on_break = resp.as_ref().map(|r| r.today.on_break).unwrap_or(false);
-    let server_break_taken = resp.as_ref().map(|r| r.today.break_already_taken).unwrap_or(false);
-
-    let is_break = if server_break_taken && !server_on_break {
-        IS_MANUAL_BREAK.store(false, Ordering::SeqCst);
-        false
-    } else {
-        IS_MANUAL_BREAK.load(Ordering::SeqCst) || server_on_break
-    };
-    let target = !is_break;
+    let target = on_break;
 
     if !cfg.token.is_empty() {
         if let Err(err) = client::send_break(&cfg, target).await {
@@ -183,6 +173,12 @@ async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String>
     }
 
     Ok(target)
+}
+
+#[tauri::command]
+async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String> {
+    let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
+    set_manual_break(!is_break, state).await
 }
 
 #[tauri::command]
@@ -255,6 +251,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_app_status,
             enroll_device,
+            set_manual_break,
             toggle_manual_break,
             connect_office_wifi,
             checkout_shift
@@ -508,17 +505,30 @@ fn main() {
                                 accumulated_active = 0;
                                 accumulated_idle = 0;
                                 app_breakdown.clear();
-                                IS_MANUAL_BREAK.store(resp.today.on_break, Ordering::SeqCst);
-                                *state.latest_response.lock().unwrap() = Some(resp.clone());
+
+                                let local_is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
+                                let mut final_resp = resp.clone();
+
+                                // If break was ended locally, do NOT let an in-flight delayed heartbeat resurrect on_break = true
+                                if !local_is_break {
+                                    final_resp.today.on_break = false;
+                                    if resp.today.break_seconds > 0 || resp.today.break_already_taken {
+                                        final_resp.today.break_already_taken = true;
+                                    }
+                                } else {
+                                    IS_MANUAL_BREAK.store(final_resp.today.on_break, Ordering::SeqCst);
+                                }
+
+                                *state.latest_response.lock().unwrap() = Some(final_resp.clone());
                                 let mut cfg_to_save = cfg.clone();
-                                cfg_to_save.cached_active_seconds = resp.today.active_seconds;
-                                cfg_to_save.cached_date_key = resp.today.date_key.clone();
+                                cfg_to_save.cached_active_seconds = final_resp.today.active_seconds;
+                                cfg_to_save.cached_date_key = final_resp.today.date_key.clone();
                                 client::save_config(&cfg_to_save);
                                 *state.config.lock().unwrap() = cfg_to_save;
-                                let _ = app_handle.emit_all("heartbeat-updated", resp.clone());
+                                let _ = app_handle.emit_all("heartbeat-updated", final_resp.clone());
 
                                 // If server determined we are outside office, but office Wi-Fi is visible in the air, auto-connect
-                                if !resp.in_office && !visible.is_empty() {
+                                if !final_resp.in_office && !visible.is_empty() {
                                     tracker::network::auto_connect_office_wifi();
                                 }
                             }

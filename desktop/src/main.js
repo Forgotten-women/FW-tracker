@@ -31,8 +31,15 @@ async function callBackend(command, args = {}) {
     return data;
   }
 
-  if (command === 'toggle_manual_break') {
-    const res = await fetch('/api/break', { method: 'POST' });
+  if (command === 'set_manual_break' || command === 'toggle_manual_break') {
+    if (isTauri && tauriInvoke) {
+      return tauriInvoke('set_manual_break', { onBreak: Boolean(args.onBreak) });
+    }
+    const res = await fetch('/api/break', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
@@ -162,6 +169,7 @@ function formatMS(seconds) {
 }
 
 function updateBreakCountdown() {
+  if (isTogglingBreak) return;
   if (!isOnBreakState || !breakStartedAtMs || !breakCountdownTimer) return;
   const elapsedSecs = Math.max(0, Math.floor((Date.now() - breakStartedAtMs) / 1000));
   const totalPermittedSecs = breakPermittedMins * 60;
@@ -258,7 +266,7 @@ async function refreshStatus() {
 
         const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
         const isBreakUsed = Boolean(data.latest && data.latest.today && data.latest.today.breakAlreadyTaken);
-        const isOnBreak = serverOnBreak || (data.isManualBreak && !isBreakUsed);
+        const isOnBreak = isBreakUsed ? false : (serverOnBreak || (Boolean(data.isManualBreak) && !isBreakUsed));
 
         if (isOnBreak) {
           isOnBreakState = true;
@@ -275,11 +283,10 @@ async function refreshStatus() {
           if (breakCountdownWrap) {
             breakCountdownWrap.classList.remove('hidden');
           }
-          updateBreakCountdown();
-
-          statusBanner.className = 'status-banner away';
-          statusText.textContent = '☕ On Break';
           if (!isTogglingBreak) {
+            updateBreakCountdown();
+            statusBanner.className = 'status-banner away';
+            statusText.textContent = '☕ On Break';
             breakToggleBtn.disabled = false;
             breakToggleBtn.classList.remove('disabled');
           }
@@ -465,29 +472,31 @@ if (breakToggleBtn) {
   breakToggleBtn.addEventListener('click', async (e) => {
     e.preventDefault();
     if (isTogglingBreak || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
+    
+    isTogglingBreak = true;
+    breakToggleBtn.disabled = true;
+    breakToggleBtn.classList.add('disabled');
+
+    const targetIsBreak = !isOnBreakState;
+    if (targetIsBreak) {
+      isOnBreakState = true;
+      breakStartedAtMs = Date.now();
+      if (breakCountdownWrap) breakCountdownWrap.classList.remove('hidden');
+      if (statusBanner) statusBanner.className = 'status-banner away';
+      if (statusText) statusText.textContent = '☕ On Break';
+      breakToggleBtn.textContent = '⏳ Starting break…';
+      updateBreakCountdown();
+    } else {
+      isOnBreakState = false;
+      breakStartedAtMs = null;
+      if (breakCountdownWrap) breakCountdownWrap.classList.add('hidden');
+      if (statusBanner) statusBanner.className = 'status-banner';
+      if (statusText) statusText.textContent = '🟢 Active · In Office';
+      breakToggleBtn.textContent = '☕ Break Taken';
+    }
+
     try {
-      isTogglingBreak = true;
-      breakToggleBtn.disabled = true;
-      breakToggleBtn.textContent = '⏳ Processing…';
-
-      const targetIsBreak = !isOnBreakState;
-      if (targetIsBreak) {
-        isOnBreakState = true;
-        breakStartedAtMs = Date.now();
-        if (breakCountdownWrap) breakCountdownWrap.classList.remove('hidden');
-        updateBreakCountdown();
-      } else {
-        isOnBreakState = false;
-        breakStartedAtMs = null;
-        if (breakCountdownWrap) breakCountdownWrap.classList.add('hidden');
-        if (statusBanner) statusBanner.className = 'status-banner';
-        if (statusText) statusText.textContent = '🟢 Active · In Office';
-        breakToggleBtn.textContent = '☕ Break Taken';
-        breakToggleBtn.disabled = true;
-        breakToggleBtn.classList.add('disabled');
-      }
-
-      await callBackend('toggle_manual_break');
+      await callBackend('set_manual_break', { onBreak: targetIsBreak });
     } catch (err) {
       console.error('Break toggle failed:', err);
       const errMsg = (typeof err === 'string' ? err : (err && err.message) || '').toLowerCase();
