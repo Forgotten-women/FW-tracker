@@ -155,6 +155,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
       if (end <= start) return acc;
       return acc + Math.max(0, Math.round((end - start) / MIN));
     }, 0);
+    shiftWorkedMinutes = Math.max(0, shiftWorkedMinutes + (presence.adjustmentMinutes || 0));
   } else {
     shiftWorkedMinutes = presence.totalMinutes;
   }
@@ -171,6 +172,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     sensorCarried: presence.sensorCarried,
     workedMinutes: shiftWorkedMinutes,
     rawPresenceMinutes: presence.totalMinutes,
+    adjustmentMinutes: presence.adjustmentMinutes || 0,
     sessions: presence.sessions,
     presence,
     breaks: breaks.map(b => ({

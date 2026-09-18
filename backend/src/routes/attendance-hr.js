@@ -16,6 +16,7 @@ const importer = require('../domain/import');
 const rbac = require('../domain/rbac');
 const P = require('../domain/presence');
 const N = require('../domain/notifications');
+const events = require('../events');
 const T = require('../util/time');
 
 // ---------------------------------------------------------------------------
@@ -516,13 +517,23 @@ const handleCorrectionDecision = async (req, res) => {
     // An approved or amended correction posts an adjustment. The original record is
     // never edited - spec 11 requires it to remain in the audit history.
     if ((decision === 'APPROVED' || decision === 'AMENDED') && Number.isFinite(Number(adjustmentMinutes))) {
+      const addedMins = Number(adjustmentMinutes);
       await A.adjustBalance({
         employeeId: corr.employee_id,
         dateKey: corr.date_key,
-        minutes: -Math.abs(Number(adjustmentMinutes)),
+        minutes: -Math.abs(addedMins),
         reason: `Correction ${corr.id} ${decision.toLowerCase()}: ${String(notes).trim()}`,
         actor,
       });
+
+      await db.prepare(`
+        INSERT INTO attendance_days (employee_id, date_key, adjustment_minutes, adjustment_note, derived_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(employee_id, date_key) DO UPDATE SET
+          adjustment_minutes = attendance_days.adjustment_minutes + excluded.adjustment_minutes,
+          adjustment_note = excluded.adjustment_note,
+          derived_at = excluded.derived_at
+      `).run(corr.employee_id, corr.date_key, addedMins, String(notes).trim(), nowMs);
     }
 
     await audit({
@@ -535,7 +546,12 @@ const handleCorrectionDecision = async (req, res) => {
   });
 
   // Recompute so the day reflects the decision immediately.
+  await P.recomputeDay(corr.employee_id, corr.date_key, nowMs);
   const day = await A.recomputeDay(corr.employee_id, corr.date_key, nowMs);
+
+  try {
+    events.broadcast('PRESENCE_UPDATED', { employeeId: corr.employee_id, dateKey: corr.date_key });
+  } catch (_) {}
 
   try {
     const decisionLabel = decision === 'APPROVED' ? 'Approved' : (decision === 'AMENDED' ? 'Amended' : 'Rejected');
@@ -605,7 +621,17 @@ router.post('/employee/:employeeId/adjust',
           actor,
         });
 
-        // 3. Update active_seconds in workstation_sessions for targetDateKey if present
+        // 3. Update attendance_days adjustment_minutes
+        await db.prepare(`
+          INSERT INTO attendance_days (employee_id, date_key, adjustment_minutes, adjustment_note, derived_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(employee_id, date_key) DO UPDATE SET
+            adjustment_minutes = attendance_days.adjustment_minutes + excluded.adjustment_minutes,
+            adjustment_note = excluded.adjustment_note,
+            derived_at = excluded.derived_at
+        `).run(employeeId, targetDateKey, addedMinutes, String(reason).trim(), nowMs);
+
+        // 4. Update active_seconds in workstation_sessions for targetDateKey if present
         const wsRow = await db.prepare(
           'SELECT id FROM workstation_sessions WHERE employee_id = ? AND session_date = ?'
         ).get(employeeId, targetDateKey);
@@ -624,8 +650,18 @@ router.post('/employee/:employeeId/adjust',
         });
       });
 
-      // 4. Recompute day & send notification to employee mobile app
+      // 5. Recompute presence day AND attendance summary & send notification to employee mobile app
+      await P.recomputeDay(employeeId, targetDateKey, nowMs);
       await A.recomputeDay(employeeId, targetDateKey, nowMs);
+
+      try {
+        events.broadcast('PRESENCE_UPDATED', { employeeId, dateKey: targetDateKey });
+      } catch (_) {}
+
+      // Re-fetch derived employee info to return
+      const empRow = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+      const derivedP = await P.deriveDay(employeeId, targetDateKey, nowMs);
+      const presented = await P.presentDay(derivedP, empRow);
 
       try {
         await N.notify({
@@ -643,6 +679,7 @@ router.post('/employee/:employeeId/adjust',
         status: 'SUCCESS',
         message: `Successfully added ${addedMinutes} mins to ${targetDateKey}.`,
         balance: await A.balanceFor(employeeId),
+        employee: presented,
       });
     } catch (err) {
       console.error('[attendance-hr/adjust] error:', err);

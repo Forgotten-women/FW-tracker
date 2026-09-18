@@ -121,6 +121,22 @@ export default function DashboardPage() {
     };
   }, [unlocked, loadCorrections, loadNotifications, loadComplaintsCount]);
 
+  // Keep selectedEmployee up to date whenever summary refreshes
+  useEffect(() => {
+    if (selectedEmployee && summary) {
+      const allEmps = [
+        ...(summary.inOffice || []),
+        ...(summary.grace || []),
+        ...(summary.away || []),
+        ...(summary.notArrived || []),
+      ];
+      const found = allEmps.find((e) => e.employeeId === selectedEmployee.employeeId);
+      if (found) {
+        setSelectedEmployee(found);
+      }
+    }
+  }, [summary]);
+
   const decideCorrection = async (
     id: string,
     decision: 'APPROVED' | 'REJECTED' | 'AMENDED',
@@ -475,6 +491,7 @@ export default function DashboardPage() {
         onOpenPairing={async (emp) => {
           await pairDevice({ id: emp.id, name: emp.name } as any);
         }}
+        onRefresh={refresh}
       />
 
       {/* Slide-out HR Notifications Drawer */}

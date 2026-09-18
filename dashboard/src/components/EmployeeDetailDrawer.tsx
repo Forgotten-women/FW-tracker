@@ -10,6 +10,7 @@ interface EmployeeDetailDrawerProps {
   employee: EmployeeDay | null;
   onClose: () => void;
   onOpenPairing?: (employee: { id: string; name: string }) => Promise<void> | void;
+  onRefresh?: () => void;
 }
 
 type DrawerTab = 'sessions' | 'workstation' | 'apps' | 'policy' | 'screenshots';
@@ -112,7 +113,7 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
   return { label: 'Application', icon: '💻', badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
 }
 
-export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: EmployeeDetailDrawerProps) {
+export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefresh }: EmployeeDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<DrawerTab>('sessions');
   const [workstation, setWorkstation] = useState<WorkstationItem | null>(null);
   const [apps, setApps] = useState<AppUsageItem[]>([]);
@@ -1688,6 +1689,9 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
         onSuccess={() => {
           if (employee?.employeeId) {
             loadTelemetry(employee.employeeId);
+          }
+          if (onRefresh) {
+            onRefresh();
           }
         }}
       />
