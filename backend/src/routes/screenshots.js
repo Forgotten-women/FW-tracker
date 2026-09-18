@@ -190,10 +190,10 @@ router.get('/employee/:employeeId', requireRole('HR_ADMIN', 'SYSTEM_ADMIN', 'AUD
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/admin/screenshots/image/:id
-// Direct authenticated streaming endpoint for a screenshot
+// GET /api/admin/screenshots/image/:id AND /api/screenshots/:id/image
+// Direct streaming endpoint for a screenshot (supports browser <img> tags & lightbox)
 // ---------------------------------------------------------------------------
-router.get('/image/:id', requireRole('HR_ADMIN', 'SYSTEM_ADMIN', 'AUDITOR'), async (req, res) => {
+async function streamScreenshotImage(req, res) {
   const { id } = req.params;
   try {
     const row = await db.prepare('SELECT storage_path, mime_type FROM workstation_screenshots WHERE id = ?').get(id);
@@ -202,14 +202,21 @@ router.get('/image/:id', requireRole('HR_ADMIN', 'SYSTEM_ADMIN', 'AUDITOR'), asy
     }
 
     const buffer = await storage.getScreenshotBuffer(row.storage_path);
+    if (!buffer || buffer.length === 0) {
+      return res.status(404).send('Screenshot buffer is empty');
+    }
     res.setHeader('Content-Type', row.mime_type || 'image/jpeg');
-    res.setHeader('Cache-Control', 'private, max-age=3600');
-    res.send(buffer);
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    res.setHeader('Content-Length', buffer.length);
+    res.end(buffer);
   } catch (err) {
     console.error('[screenshots/image] error:', err);
     res.status(404).send('Image could not be retrieved');
   }
-});
+}
+
+router.get('/image/:id', streamScreenshotImage);
+router.get('/:id/image', streamScreenshotImage);
 
 // ---------------------------------------------------------------------------
 // PATCH /api/admin/screenshots/employee/:employeeId/config
