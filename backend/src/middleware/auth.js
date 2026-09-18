@@ -319,6 +319,38 @@ function requireUserOrAdminKey(...needed) {
   };
 }
 
+function requireRole(...allowedRoles) {
+  return async (req, res, next) => {
+    const supplied = req.headers['x-admin-key'] || bearer(req);
+    if (supplied && config.adminApiKey && safeEqual(supplied, config.adminApiKey)) {
+      req.auth = {
+        kind: 'admin',
+        actor: 'admin-key',
+        roles: ['super_admin', 'SYSTEM_ADMIN', 'HR_ADMIN', 'AUDITOR'],
+        permissions: await superAdminPermissions(),
+      };
+      return next();
+    }
+    await requireUser(req, res, (err) => {
+      if (err) return next(err);
+      const userRoles = req.auth?.roles || (req.auth?.role ? [req.auth.role] : []);
+      const hasRole = allowedRoles.some(r => 
+        userRoles.includes(r) || 
+        userRoles.includes('super_admin') || 
+        userRoles.includes('SYSTEM_ADMIN')
+      );
+      if (!hasRole) {
+        return res.status(403).json({
+          status: 'ERROR',
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to do that.',
+        });
+      }
+      next();
+    });
+  };
+}
+
 // --- SSE tickets -----------------------------------------------------------
 
 // EventSource cannot send an Authorization header, so the dashboard exchanges
@@ -348,7 +380,7 @@ function consumeSseTicket(ticket) {
 
 module.exports = {
   requireDevice, requireAdmin, requireSensor,
-  requireUser, requirePermission, requireEmployeeAccess, requireUserOrAdminKey,
+  requireUser, requirePermission, requireRole, requireEmployeeAccess, requireUserOrAdminKey,
   newToken, newEnrollmentCode, sha256, safeEqual,
   issueSseTicket, consumeSseTicket,
 };
