@@ -617,7 +617,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
 // ---------------------------------------------------------------------------
 router.post('/break', requireDevice, async (req, res) => {
   const { employeeId, employeeName, deviceId } = req.auth;
-  const { onBreak = true, reason = '' } = req.body || {};
+  const { onBreak = true, reason = '', startedAt: reqStartedAt } = req.body || {};
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
   const newStatus = onBreak ? 'ON_BREAK' : 'ACTIVE';
@@ -626,10 +626,19 @@ router.post('/break', requireDevice, async (req, res) => {
   let breakPermittedMinutes = 30;
   let breakDueBackAt = null;
 
+  let atMs = nowMs;
+  if (reqStartedAt && Number.isFinite(Number(reqStartedAt))) {
+    const customAt = Number(reqStartedAt);
+    if (customAt <= nowMs && customAt >= (nowMs - 60 * 60 * 1000)) {
+      atMs = customAt;
+    }
+  }
+
   const A = require('../domain/attendance');
+  const events = require('../events');
   try {
     if (onBreak) {
-      const result = await A.startBreak(employeeId, nowMs);
+      const result = await A.startBreak(employeeId, atMs);
       if (!result.ok) {
         return res.status(400).json({
           status: 'ERROR',
@@ -637,9 +646,9 @@ router.post('/break', requireDevice, async (req, res) => {
           message: result.message || 'You have already taken your permitted 30-minute break for today. Only one break is permitted per working day.',
         });
       }
-      breakStartedAt = result.startedAt || nowMs;
+      breakStartedAt = result.startedAt || atMs;
       breakPermittedMinutes = result.permittedMinutes || 30;
-      breakDueBackAt = result.dueBackAt || (nowMs + breakPermittedMinutes * 60 * 1000);
+      breakDueBackAt = result.dueBackAt || (atMs + breakPermittedMinutes * 60 * 1000);
     } else {
       const result = await A.endBreak(employeeId, nowMs);
       if (!result.ok && result.reason !== 'NOT_ON_BREAK') {
@@ -651,6 +660,8 @@ router.post('/break', requireDevice, async (req, res) => {
       }
     }
     await A.recomputeDay(employeeId, dateKey, nowMs);
+    const P = require('../domain/presence');
+    await P.recomputeDay(employeeId, dateKey, nowMs);
 
     await db.prepare(`
       UPDATE workstation_sessions
@@ -660,6 +671,10 @@ router.post('/break', requireDevice, async (req, res) => {
 
     await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
       .run(nowMs, onBreak ? 'MANUAL_BREAK_STARTED' : 'MANUAL_BREAK_ENDED', employeeId, employeeName, reason || (onBreak ? 'Employee paused work session' : 'Employee resumed work session'));
+
+    try {
+      events.broadcast('PRESENCE_UPDATED', { employeeId, dateKey });
+    } catch (_) {}
   } catch (err) {
     console.warn('[desktop/break] break state sync note:', err.message);
     return res.status(500).json({ status: 'ERROR', message: err.message });

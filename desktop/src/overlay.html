@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workstation Inactivity · Office Tracker</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: rgba(7, 9, 14, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      color: #f8fafc;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .overlay-card {
+      width: 90%;
+      max-width: 520px;
+      background: linear-gradient(145deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95));
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 28px;
+      padding: 36px 32px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(99, 102, 241, 0.15);
+      text-align: center;
+      position: relative;
+      animation: fadeInScale 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes fadeInScale {
+      0% { opacity: 0; transform: scale(0.94); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    .icon-badge {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 20px;
+      border-radius: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+
+    .icon-warning {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.3));
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .icon-break {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(79, 70, 229, 0.3));
+      border: 1px solid rgba(99, 102, 241, 0.4);
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    p.subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    /* Countdown Circle Wrap */
+    .countdown-wrap {
+      margin: 20px auto 26px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .countdown-number {
+      font-size: 48px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      color: #fbbf24;
+      text-shadow: 0 0 20px rgba(251, 191, 36, 0.4);
+      line-height: 1;
+    }
+
+    .countdown-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+    }
+
+    /* Break Info Box */
+    .break-info-box {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+
+    .break-timer {
+      font-size: 38px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      color: #38bdf8;
+      margin-bottom: 4px;
+      text-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+    }
+
+    .allowance-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      margin-top: 6px;
+    }
+
+    .allowance-ok {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .allowance-excess {
+      background: rgba(244, 63, 94, 0.15);
+      color: #fb7185;
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      animation: pulseAlert 2s infinite;
+    }
+
+    @keyframes pulseAlert {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    /* Actions */
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    button {
+      flex: 1;
+      padding: 14px 20px;
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #4f46e5, #6366f1);
+      color: #ffffff;
+      box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.5);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 15px 25px -5px rgba(79, 70, 229, 0.6);
+      background: linear-gradient(135deg, #4338ca, #4f46e5);
+    }
+
+    .btn-primary:active {
+      transform: scale(0.98);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.14);
+      color: #ffffff;
+    }
+
+    .btn-amber {
+      background: linear-gradient(135deg, #d97706, #f59e0b);
+      color: #ffffff;
+      box-shadow: 0 10px 20px -5px rgba(217, 119, 6, 0.4);
+    }
+
+    .btn-amber:hover {
+      background: linear-gradient(135deg, #b45309, #d97706);
+    }
+
+    .footer-hint {
+      margin-top: 18px;
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Phase 1: Inactivity Prompt (60s grace countdown) -->
+  <div class="overlay-card" id="card-prompt">
+    <div class="icon-badge icon-warning">⏳</div>
+    <h1>Are You Still Working?</h1>
+    <p class="subtitle">
+      No activity detected for <strong>5 minutes</strong>.<br />
+      If no action is taken, <strong>Break Mode</strong> will start automatically and backdate to when you stepped away.
+    </p>
+
+    <div class="countdown-wrap">
+      <div class="countdown-number" id="grace-timer-num">60</div>
+      <div class="countdown-label">Seconds until Auto-Break</div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" id="btn-still-working">
+        <span>🚀</span> I'm Still Working
+      </button>
+      <button class="btn-secondary" id="btn-start-break">
+        <span>☕</span> Start Break Now
+      </button>
+    </div>
+
+    <p class="footer-hint">Moving your mouse or pressing any key will also dismiss this prompt.</p>
+  </div>
+
+  <!-- Phase 2: Active Break Mode -->
+  <div class="overlay-card hidden" id="card-break">
+    <div class="icon-badge icon-break">☕</div>
+    <h1 id="break-title">You Are on Break</h1>
+    <p class="subtitle" id="break-subtitle">
+      Workstation tracking is paused. Return and resume work whenever you're ready.
+    </p>
+
+    <div class="break-info-box">
+      <div class="break-timer" id="break-elapsed-timer">00:00</div>
+      <div class="allowance-badge allowance-ok" id="break-allowance-badge">
+        <span>⏱️</span> <span id="break-allowance-text">30m daily permitted break</span>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" id="btn-resume-work" style="padding: 16px;">
+        <span>🚀</span> Resume Shift & Back to Work
+      </button>
+    </div>
+
+    <p class="footer-hint">Click resume when you return to reactivate work tracking.</p>
+  </div>
+
+  <script>
+    const cardPrompt = document.getElementById('card-prompt');
+    const cardBreak = document.getElementById('card-break');
+    const graceTimerNum = document.getElementById('grace-timer-num');
+    const breakElapsedTimer = document.getElementById('break-elapsed-timer');
+    const breakAllowanceBadge = document.getElementById('break-allowance-badge');
+    const breakAllowanceText = document.getElementById('break-allowance-text');
+    const breakSubtitle = document.getElementById('break-subtitle');
+
+    const btnStillWorking = document.getElementById('btn-still-working');
+    const btnStartBreak = document.getElementById('btn-start-break');
+    const btnResumeWork = document.getElementById('btn-resume-work');
+
+    let currentPhase = 'PROMPT'; // 'PROMPT' | 'BREAK'
+    let graceSeconds = 60;
+    let graceInterval = null;
+    let breakInterval = null;
+    let breakStartTimestamp = null;
+    const PERMITTED_BREAK_MINS = 30;
+
+    // 1. Dismiss / I'm still working
+    async function dismissPrompt() {
+      if (currentPhase === 'BREAK') return;
+      try {
+        await fetch('/api/dismiss-overlay', { method: 'POST' });
+      } catch (_) {}
+      window.close();
+    }
+
+    // 2. Start Break (Immediate or Auto)
+    async function triggerBreak(retroactiveMinutes = 0) {
+      currentPhase = 'BREAK';
+      if (graceInterval) clearInterval(graceInterval);
+
+      cardPrompt.classList.add('hidden');
+      cardBreak.classList.remove('hidden');
+
+      const now = Date.now();
+      breakStartTimestamp = retroactiveMinutes > 0 ? now - (retroactiveMinutes * 60 * 1000) : now;
+
+      if (retroactiveMinutes > 0) {
+        breakSubtitle.innerHTML = `Auto-break activated after 5m of inactivity (<strong>backdated ${retroactiveMinutes}m</strong>).`;
+      } else {
+        breakSubtitle.textContent = 'Break session active. Workstation tracking is currently paused.';
+      }
+
+      startBreakTicker();
+
+      try {
+        await fetch('/api/break', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            onBreak: true,
+            reason: retroactiveMinutes > 0 ? 'AUTO_IDLE_CONVERSION' : 'EMPLOYEE_MANUAL',
+            startedAt: breakStartTimestamp
+          })
+        });
+      } catch (_) {}
+    }
+
+    // 3. Resume Work
+    async function resumeWork() {
+      if (breakInterval) clearInterval(breakInterval);
+      try {
+        await fetch('/api/break', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ onBreak: false, reason: 'EMPLOYEE_RESUMED' })
+        });
+        await fetch('/api/dismiss-overlay', { method: 'POST' });
+      } catch (_) {}
+      window.close();
+    }
+
+    // Format seconds into MM:SS
+    function formatTime(totalSecs) {
+      const m = Math.floor(totalSecs / 60);
+      const s = totalSecs % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    // Grace Countdown Ticker
+    function startGraceCountdown() {
+      graceSeconds = 60;
+      graceTimerNum.textContent = graceSeconds;
+      graceInterval = setInterval(() => {
+        graceSeconds--;
+        graceTimerNum.textContent = Math.max(0, graceSeconds);
+
+        if (graceSeconds <= 0) {
+          clearInterval(graceInterval);
+          // 60s expired -> Convert to break retroactively (5 minutes idle)
+          triggerBreak(5);
+        }
+      }, 1000);
+    }
+
+    // Break Elapsed Ticker
+    function startBreakTicker() {
+      if (breakInterval) clearInterval(breakInterval);
+      const update = () => {
+        if (!breakStartTimestamp) return;
+        const elapsedSecs = Math.max(0, Math.floor((Date.now() - breakStartTimestamp) / 1000));
+        const elapsedMins = Math.floor(elapsedSecs / 60);
+        breakElapsedTimer.textContent = formatTime(elapsedSecs);
+
+        if (elapsedMins > PERMITTED_BREAK_MINS) {
+          const excess = elapsedMins - PERMITTED_BREAK_MINS;
+          breakAllowanceBadge.className = 'allowance-badge allowance-excess';
+          breakAllowanceText.textContent = `⚠️ Excess Break: +${excess}m deficit accumulating`;
+        } else {
+          const remaining = PERMITTED_BREAK_MINS - elapsedMins;
+          breakAllowanceBadge.className = 'allowance-badge allowance-ok';
+          breakAllowanceText.textContent = `${remaining}m of 30m permitted allowance left`;
+        }
+      };
+      update();
+      breakInterval = setInterval(update, 1000);
+    }
+
+    // Check initial state from agent
+    async function checkState() {
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isManualBreak || data.latest?.workstationStatus === 'ON_BREAK') {
+            currentPhase = 'BREAK';
+            cardPrompt.classList.add('hidden');
+            cardBreak.classList.remove('hidden');
+            breakStartTimestamp = Date.now() - ((data.latest?.today?.breakSeconds || 0) * 1000);
+            startBreakTicker();
+            return;
+          }
+        }
+      } catch (_) {}
+      startGraceCountdown();
+    }
+
+    // Button event handlers
+    btnStillWorking.addEventListener('click', dismissPrompt);
+    btnStartBreak.addEventListener('click', () => triggerBreak(0));
+    btnResumeWork.addEventListener('click', resumeWork);
+
+    // Auto dismiss prompt on physical input
+    let initialMoveIgnored = false;
+    window.addEventListener('mousemove', () => {
+      if (!initialMoveIgnored) {
+        initialMoveIgnored = true;
+        return;
+      }
+      if (currentPhase === 'PROMPT') {
+        dismissPrompt();
+      }
+    });
+
+    window.addEventListener('keydown', () => {
+      if (currentPhase === 'PROMPT') {
+        dismissPrompt();
+      }
+    });
+
+    checkState();
+  </script>
+</body>
+</html>

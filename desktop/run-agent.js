@@ -535,6 +535,8 @@ let isOnBreak = false;
 let latestContinuousIdle = 0;
 let appTrackingEnabled = true;
 let outsideWorkingHours = false;
+let isOverlayOpen = false;
+let lastDismissedAt = 0;
 
 function isWithinOfficeHours(date = new Date()) {
   const day = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
@@ -559,6 +561,31 @@ function launchMiniAppWindow(port = MINI_APP_PORT) {
     });
   } else if (process.platform === 'darwin') {
     exec(`open -a "Google Chrome" --args --app="${url}"`, (err) => {
+      if (err) {
+        exec(`open "${url}"`);
+      }
+    });
+  } else {
+    exec(`xdg-open "${url}"`);
+  }
+}
+
+function launchIdleOverlayWindow(port = MINI_APP_PORT) {
+  if (isOverlayOpen) return;
+  isOverlayOpen = true;
+  const url = `http://127.0.0.1:${port}/overlay`;
+  if (process.platform === 'win32') {
+    exec(`msedge --app="${url}" --start-fullscreen`, (err) => {
+      if (err) {
+        exec(`chrome --app="${url}" --start-fullscreen`, (err2) => {
+          if (err2) {
+            exec(`start "" "${url}"`);
+          }
+        });
+      }
+    });
+  } else if (process.platform === 'darwin') {
+    exec(`open -a "Google Chrome" --args --app="${url}" --start-fullscreen`, (err) => {
       if (err) {
         exec(`open "${url}"`);
       }
@@ -696,6 +723,8 @@ function startMiniAppServer(port = MINI_APP_PORT) {
           try { reqData = JSON.parse(body); } catch (_) {}
           const targetBreak = typeof reqData.onBreak === 'boolean' ? reqData.onBreak : !isManualBreak;
           isManualBreak = targetBreak;
+          isOnBreak = targetBreak;
+          currentWorkstationStatus = targetBreak ? 'ON_BREAK' : 'ACTIVE';
 
           const cfgNow = loadConfig();
           if (cfgNow && cfgNow.token && cfgNow.serverUrl) {
@@ -706,7 +735,11 @@ function startMiniAppServer(port = MINI_APP_PORT) {
                   'Content-Type': 'application/json',
                   'Authorization': `Bearer ${cfgNow.token}`,
                 },
-                body: JSON.stringify({ onBreak: targetBreak }),
+                body: JSON.stringify({
+                  onBreak: targetBreak,
+                  reason: reqData.reason || (targetBreak ? 'Employee manual break' : 'Employee resumed work'),
+                  startedAt: reqData.startedAt || undefined,
+                }),
               });
             } catch (err) {
               console.warn('[desktop] Failed to sync break to server:', err.message);
@@ -729,6 +762,14 @@ function startMiniAppServer(port = MINI_APP_PORT) {
       return;
     }
 
+    // POST /api/dismiss-overlay
+    if (parsedUrl.pathname === '/api/dismiss-overlay' && req.method === 'POST') {
+      isOverlayOpen = false;
+      lastDismissedAt = Date.now();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'SUCCESS', message: 'Overlay dismissed' }));
+    }
+
     // POST /api/checkout
     if (parsedUrl.pathname === '/api/checkout' && req.method === 'POST') {
       currentWorkstationStatus = 'CHECKED_OUT';
@@ -748,14 +789,14 @@ function startMiniAppServer(port = MINI_APP_PORT) {
       return res.end(JSON.stringify({ status: 'SUCCESS', message: 'Shift checked out.' }));
     }
 
-    // Static Assets
-    const safePath = parsedUrl.pathname === '/' ? 'index.html' : parsedUrl.pathname.replace(/^\/+/, '');
-    const localFile = path.join(__dirname, 'src', safePath);
+    // Static Assets & Overlay Route
+    const cleanPath = parsedUrl.pathname === '/' ? 'index.html' : (parsedUrl.pathname === '/overlay' ? 'overlay.html' : parsedUrl.pathname.replace(/^\/+/, ''));
+    const localFile = path.join(__dirname, 'src', cleanPath);
     let contentType = 'text/html';
-    if (safePath.endsWith('.css')) contentType = 'text/css';
-    if (safePath.endsWith('.js')) contentType = 'application/javascript';
-    if (safePath.endsWith('.png')) contentType = 'image/png';
-    if (safePath.endsWith('.json')) contentType = 'application/json';
+    if (cleanPath.endsWith('.css')) contentType = 'text/css';
+    if (cleanPath.endsWith('.js')) contentType = 'application/javascript';
+    if (cleanPath.endsWith('.png')) contentType = 'image/png';
+    if (cleanPath.endsWith('.json')) contentType = 'application/json';
 
     try {
       if (fs.existsSync(localFile) && fs.statSync(localFile).isFile()) {
@@ -1213,6 +1254,46 @@ async function startAgent() {
         } else {
           currentApp = 'Active Workstation';
           appBreakdown = {};
+        }
+      }
+
+      // Idle Focus Overlay & Auto-Break Conversion
+      const IDLE_PROMPT_SECONDS = 300; // 5 minutes
+      const GRACE_SECONDS = 60; // 60 seconds grace window
+      const AUTO_BREAK_SECONDS = IDLE_PROMPT_SECONDS + GRACE_SECONDS; // 360 seconds (6 minutes total)
+
+      // 1. Trigger Full-screen Inactivity Prompt at 5 minutes idle
+      if (latestContinuousIdle >= IDLE_PROMPT_SECONDS && latestContinuousIdle < AUTO_BREAK_SECONDS) {
+        if (!isOverlayOpen && (Date.now() - lastDismissedAt) > 60000) {
+          launchIdleOverlayWindow(MINI_APP_PORT);
+        }
+      }
+
+      // 2. Continuous Idle > 6 minutes (5m + 60s grace) -> Auto-convert to Break retroactively (5m backdated)
+      if (latestContinuousIdle >= AUTO_BREAK_SECONDS) {
+        const retroactiveStartMs = Date.now() - (latestContinuousIdle * 1000);
+        isManualBreak = true;
+        isOnBreak = true;
+        currentWorkstationStatus = 'ON_BREAK';
+
+        const cfgNow = loadConfig();
+        if (cfgNow && cfgNow.token && cfgNow.serverUrl) {
+          fetch(`${cfgNow.serverUrl}/api/desktop/break`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${cfgNow.token}`,
+            },
+            body: JSON.stringify({
+              onBreak: true,
+              reason: 'AUTO_IDLE_CONVERSION',
+              startedAt: retroactiveStartMs,
+            }),
+          }).catch((err) => console.warn('[desktop/auto-break] Sync note:', err.message));
+        }
+
+        if (!isOverlayOpen) {
+          launchIdleOverlayWindow(MINI_APP_PORT);
         }
       }
     }
