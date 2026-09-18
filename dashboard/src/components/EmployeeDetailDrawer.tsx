@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
-import type { EmployeeDay, WorkstationItem, AppUsageItem, LiveFrameResponse } from '../lib/types';
+import type { EmployeeDay, WorkstationItem, AppUsageItem, LiveFrameResponse, ScreenshotItem, EmployeeScreenshotsResponse } from '../lib/types';
 import { Badge, Button } from './primitives';
 import { ManualTimeModal } from './ManualTimeModal';
 
@@ -12,7 +12,15 @@ interface EmployeeDetailDrawerProps {
   onOpenPairing?: (employee: { id: string; name: string }) => Promise<void> | void;
 }
 
-type DrawerTab = 'sessions' | 'workstation' | 'apps' | 'policy';
+type DrawerTab = 'sessions' | 'workstation' | 'apps' | 'policy' | 'screenshots';
+
+function formatBytes(bytes: number) {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
 
 function formatSeconds(secs: number) {
   if (!secs || secs <= 0) return '0m';
@@ -187,11 +195,119 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
     }
   }, []);
 
+  // Screenshots & Surveillance State
+  const [shotsData, setShotsData] = useState<EmployeeScreenshotsResponse | null>(null);
+  const [shotsLoading, setShotsLoading] = useState(false);
+  const [shotsError, setShotsError] = useState<string | null>(null);
+  const [selectedShotDate, setSelectedShotDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [shotEnabled, setShotEnabled] = useState<boolean>(false);
+  const [shotInterval, setShotInterval] = useState<number>(5);
+  const [shotMode, setShotMode] = useState<'ACTIVE_ONLY' | 'CONTINUOUS'>('ACTIVE_ONLY');
+  const [savingShotConfig, setSavingShotConfig] = useState<boolean>(false);
+  const [shotConfigSuccess, setShotConfigSuccess] = useState<string | null>(null);
+  const [lightboxShot, setLightboxShot] = useState<ScreenshotItem | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number>(0);
+  const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(new Set());
+  const [isDeletingShots, setIsDeletingShots] = useState<boolean>(false);
+
+  const loadEmployeeScreenshots = useCallback(async (empId: string, dateStr: string) => {
+    setShotsLoading(true);
+    setShotsError(null);
+    try {
+      const res = await api.fetchEmployeeScreenshots(empId, dateStr);
+      setShotsData(res);
+      if (res.employee) {
+        setShotEnabled(res.employee.screenshotEnabled);
+        setShotInterval(res.employee.intervalMinutes || 5);
+        setShotMode(res.employee.mode || 'ACTIVE_ONLY');
+      }
+    } catch (err: any) {
+      setShotsError(err?.message || 'Failed to load screenshots');
+    } finally {
+      setShotsLoading(false);
+    }
+  }, []);
+
+  const handleSaveScreenshotConfig = async () => {
+    if (!employee?.employeeId) return;
+    setSavingShotConfig(true);
+    setShotConfigSuccess(null);
+    try {
+      await api.updateScreenshotConfig(employee.employeeId, {
+        enabled: shotEnabled,
+        intervalMinutes: shotInterval,
+        mode: shotMode,
+      });
+      setShotConfigSuccess(
+        shotEnabled
+          ? `Screen surveillance activated! Capturing every ${shotInterval}m in ${shotMode === 'ACTIVE_ONLY' ? 'Active Work' : 'Continuous'} mode.`
+          : 'Screenshot surveillance disabled for this employee.'
+      );
+      setTimeout(() => setShotConfigSuccess(null), 5000);
+      loadEmployeeScreenshots(employee.employeeId, selectedShotDate);
+    } catch (err: any) {
+      alert('Failed to update screenshot config: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setSavingShotConfig(false);
+    }
+  };
+
+  const handleDeleteSingleShot = async (shotId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this screenshot from Supabase S3?')) return;
+    try {
+      await api.deleteScreenshots([shotId]);
+      if (employee?.employeeId) {
+        loadEmployeeScreenshots(employee.employeeId, selectedShotDate);
+      }
+      if (lightboxShot?.id === shotId) {
+        setLightboxShot(null);
+      }
+    } catch (err: any) {
+      alert('Failed to delete screenshot: ' + (err?.message || 'Unknown error'));
+    }
+  };
+
+  const handleDeleteSelectedShots = async () => {
+    if (selectedShotIds.size === 0) return;
+    if (!confirm(`Permanently delete ${selectedShotIds.size} selected screenshot(s) from Supabase S3?`)) return;
+    setIsDeletingShots(true);
+    try {
+      await api.deleteScreenshots(Array.from(selectedShotIds));
+      setSelectedShotIds(new Set());
+      if (employee?.employeeId) {
+        loadEmployeeScreenshots(employee.employeeId, selectedShotDate);
+      }
+    } catch (err: any) {
+      alert('Failed to delete screenshots: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsDeletingShots(false);
+    }
+  };
+
+  const handleToggleSelectShot = (shotId: string) => {
+    setSelectedShotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(shotId)) next.delete(shotId);
+      else next.add(shotId);
+      return next;
+    });
+  };
+
+  const handleSelectAllShots = () => {
+    if (!shotsData?.screenshots) return;
+    if (selectedShotIds.size === shotsData.screenshots.length) {
+      setSelectedShotIds(new Set());
+    } else {
+      setSelectedShotIds(new Set(shotsData.screenshots.map((s) => s.id)));
+    }
+  };
+
   useEffect(() => {
     if (employee?.employeeId) {
       loadTelemetry(employee.employeeId);
+      loadEmployeeScreenshots(employee.employeeId, selectedShotDate);
     }
-  }, [employee?.employeeId, loadTelemetry]);
+  }, [employee?.employeeId, selectedShotDate, loadTelemetry, loadEmployeeScreenshots]);
 
   // Live Screen Handlers
   const handleOpenLiveScreen = async () => {
@@ -419,6 +535,23 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                   >
                     <span>⏱️ Add Manual Time</span>
                   </button>
+
+                  {/* Screenshots Quick Button */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('screenshots')}
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95 shadow-sm ${
+                      activeTab === 'screenshots'
+                        ? 'bg-sky-500 text-white shadow-sky-500/30'
+                        : 'bg-sky-600/20 hover:bg-sky-600/40 text-sky-200 border border-sky-500/30'
+                    }`}
+                    title="Configure screenshots & view capture gallery"
+                  >
+                    <span>📸 Screenshots</span>
+                    {shotEnabled && (
+                      <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
+                    )}
+                  </button>
                 </div>
 
                 {/* Contextual Badges (Late / Break) */}
@@ -531,11 +664,11 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
             </div>
 
             {/* Navigation Tabs within Drawer */}
-            <div className="flex border-b border-white/10 gap-2">
+            <div className="flex border-b border-white/10 gap-2 overflow-x-auto pb-0.5">
               <button
                 type="button"
                 onClick={() => setActiveTab('sessions')}
-                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
                   activeTab === 'sessions'
                     ? 'border-indigo-500 text-white'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -547,7 +680,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
               <button
                 type="button"
                 onClick={() => setActiveTab('workstation')}
-                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === 'workstation'
                     ? 'border-indigo-500 text-white'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -560,7 +693,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
               <button
                 type="button"
                 onClick={() => setActiveTab('apps')}
-                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === 'apps'
                     ? 'border-indigo-500 text-white'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -572,13 +705,32 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
               <button
                 type="button"
                 onClick={() => setActiveTab('policy')}
-                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
                   activeTab === 'policy'
                     ? 'border-indigo-500 text-white'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
                 ⚖️ Policy & Deficit
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('screenshots')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTab === 'screenshots'
+                    ? 'border-sky-400 text-white'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                📸 Screenshots
+                {shotEnabled ? (
+                  <span className="rounded-full bg-sky-500/20 px-1.5 py-0.2 text-[9px] font-bold text-sky-300 border border-sky-500/30">
+                    Active ({shotsData?.screenshots?.length || 0})
+                  </span>
+                ) : (
+                  <span className="text-slate-500 text-[10px]">Off</span>
+                )}
               </button>
             </div>
 
@@ -949,6 +1101,289 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                 </div>
               </div>
             )}
+
+            {/* Tab 5: Screenshots & Surveillance Gallery */}
+            {activeTab === 'screenshots' && (
+              <div className="space-y-6">
+                {/* 1. Surveillance Settings & Policy Card */}
+                <div className="glass-panel rounded-2xl p-4.5 border border-white/10 space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/8 flex-wrap gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span>📸</span> Screen Surveillance Policy
+                      </h4>
+                      <p className="text-xs text-slate-400">
+                        Periodic background screen capture configured for {employee.employeeName}.
+                      </p>
+                    </div>
+
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={shotEnabled}
+                        onChange={(e) => setShotEnabled(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500 shadow-inner" />
+                      <span className="ml-2 text-xs font-bold text-slate-300">
+                        {shotEnabled ? (
+                          <span className="text-sky-400 font-bold">Enabled</span>
+                        ) : (
+                          <span className="text-slate-500">Disabled</span>
+                        )}
+                      </span>
+                    </label>
+                  </div>
+
+                  {shotConfigSuccess && (
+                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold animate-fade-in flex items-center gap-2">
+                      <span>✅</span> {shotConfigSuccess}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Capture Interval
+                      </label>
+                      <select
+                        value={shotInterval}
+                        onChange={(e) => setShotInterval(Number(e.target.value))}
+                        disabled={!shotEnabled}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-sky-500 disabled:opacity-50 cursor-pointer"
+                      >
+                        <option value="1">Every 1 Minute (High Frequency)</option>
+                        <option value="2">Every 2 Minutes</option>
+                        <option value="3">Every 3 Minutes</option>
+                        <option value="5">Every 5 Minutes (Standard Recommended)</option>
+                        <option value="10">Every 10 Minutes</option>
+                        <option value="15">Every 15 Minutes</option>
+                        <option value="30">Every 30 Minutes</option>
+                        <option value="60">Every 1 Hour (Light Storage Footprint)</option>
+                      </select>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        How frequently the agent captures the workstation screen.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Operating Mode
+                      </label>
+                      <div className="space-y-1.5">
+                        <label className={`flex items-start gap-2.5 p-2 rounded-xl border cursor-pointer transition text-xs ${
+                          shotMode === 'ACTIVE_ONLY'
+                            ? 'bg-sky-500/10 border-sky-500/40 text-white'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="drawerShotMode"
+                            checked={shotMode === 'ACTIVE_ONLY'}
+                            onChange={() => setShotMode('ACTIVE_ONLY')}
+                            disabled={!shotEnabled}
+                            className="mt-0.5 text-sky-500 focus:ring-0"
+                          />
+                          <div>
+                            <span className="font-bold block text-white text-xs">Active Work Only (Recommended)</span>
+                            <span className="text-[10px] text-slate-400">Pauses on breaks, idle lock, and outside office hours</span>
+                          </div>
+                        </label>
+
+                        <label className={`flex items-start gap-2.5 p-2 rounded-xl border cursor-pointer transition text-xs ${
+                          shotMode === 'CONTINUOUS'
+                            ? 'bg-sky-500/10 border-sky-500/40 text-white'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="drawerShotMode"
+                            checked={shotMode === 'CONTINUOUS'}
+                            onChange={() => setShotMode('CONTINUOUS')}
+                            disabled={!shotEnabled}
+                            className="mt-0.5 text-sky-500 focus:ring-0"
+                          />
+                          <div>
+                            <span className="font-bold block text-white text-xs">Continuous During Shift</span>
+                            <span className="text-[10px] text-slate-400">Captures on fixed interval throughout shift</span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2 border-t border-white/5">
+                    <button
+                      type="button"
+                      disabled={savingShotConfig}
+                      onClick={handleSaveScreenshotConfig}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-xs font-bold text-white shadow-lg shadow-sky-950/40 border border-sky-400/30 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    >
+                      {savingShotConfig ? 'Saving Policy…' : 'Save Screenshot Settings'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Gallery Header & Date Filter */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900/60 p-3.5 rounded-2xl border border-white/5">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                      <span>📅 Date:</span>
+                      <input
+                        type="date"
+                        value={selectedShotDate}
+                        onChange={(e) => {
+                          setSelectedShotDate(e.target.value);
+                          if (employee?.employeeId) {
+                            loadEmployeeScreenshots(employee.employeeId, e.target.value);
+                          }
+                        }}
+                        className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-white focus:outline-none focus:border-sky-500 cursor-pointer"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (employee?.employeeId) {
+                          loadEmployeeScreenshots(employee.employeeId, selectedShotDate);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer text-xs"
+                      title="Refresh Gallery"
+                    >
+                      🔄
+                    </button>
+
+                    {shotsData && (
+                      <span className="text-xs text-slate-400 font-mono">
+                        {shotsData.screenshots?.length || 0} Captures ({formatBytes(
+                          (shotsData.screenshots || []).reduce((acc, s) => acc + (s.fileSizeBytes || 0), 0)
+                        )})
+                      </span>
+                    )}
+                  </div>
+
+                  {shotsData?.screenshots && shotsData.screenshots.length > 0 && (
+                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllShots}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-300 hover:text-white transition cursor-pointer border border-white/5"
+                      >
+                        {selectedShotIds.size === shotsData.screenshots.length ? 'Deselect All' : 'Select All'}
+                      </button>
+
+                      {selectedShotIds.size > 0 && (
+                        <button
+                          type="button"
+                          disabled={isDeletingShots}
+                          onClick={handleDeleteSelectedShots}
+                          className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-[11px] font-bold text-rose-300 border border-rose-500/30 transition cursor-pointer active:scale-95"
+                        >
+                          {isDeletingShots ? 'Deleting…' : `Delete (${selectedShotIds.size})`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Screenshots Grid */}
+                {shotsLoading ? (
+                  <div className="py-16 text-center space-y-3">
+                    <div className="h-7 w-7 animate-spin rounded-full border-2 border-sky-400 border-t-transparent mx-auto" />
+                    <p className="text-xs text-slate-400">Loading workstation captures from Supabase S3…</p>
+                  </div>
+                ) : shotsError ? (
+                  <div className="p-4 bg-rose-950/40 border border-rose-800/60 rounded-xl text-rose-300 text-xs">
+                    {shotsError}
+                  </div>
+                ) : !shotsData?.screenshots || shotsData.screenshots.length === 0 ? (
+                  <div className="py-16 text-center space-y-2 border border-dashed border-white/10 rounded-2xl glass-panel">
+                    <div className="text-3xl">📷</div>
+                    <h4 className="text-sm font-bold text-white">No Screenshots for {selectedShotDate}</h4>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      {shotEnabled
+                        ? 'Captures will appear here automatically as the desktop agent uploads periodic frames.'
+                        : 'Screen surveillance is currently turned OFF. Toggle it ON above to begin capturing.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {shotsData.screenshots.map((shot, idx) => {
+                      const isSelected = selectedShotIds.has(shot.id);
+                      return (
+                        <div
+                          key={shot.id}
+                          className={`group relative rounded-xl border overflow-hidden transition-all bg-slate-900/60 flex flex-col ${
+                            isSelected
+                              ? 'border-sky-400 ring-2 ring-sky-400/40'
+                              : 'border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          {/* Selection Checkbox */}
+                          <div className="absolute top-2 left-2 z-10">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectShot(shot.id)}
+                              className="h-4 w-4 rounded border-slate-700 bg-slate-900/90 text-sky-500 focus:ring-0 cursor-pointer"
+                            />
+                          </div>
+
+                          {/* Quick Delete Single Button */}
+                          <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSingleShot(shot.id);
+                              }}
+                              className="p-1 rounded-md bg-black/75 hover:bg-rose-900/90 text-slate-400 hover:text-rose-200 text-xs transition cursor-pointer"
+                              title="Delete from S3"
+                            >
+                              🗑
+                            </button>
+                          </div>
+
+                          {/* Thumbnail */}
+                          <div
+                            onClick={() => {
+                              setLightboxShot(shot);
+                              setLightboxIndex(idx);
+                            }}
+                            className="aspect-video w-full bg-black cursor-pointer relative overflow-hidden flex items-center justify-center"
+                          >
+                            <img
+                              src={shot.imageUrl}
+                              alt={`Capture at ${shot.displayTime}`}
+                              loading="lazy"
+                              className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
+                            />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                              <span className="p-1 rounded-lg bg-black/75 text-white text-[11px] font-semibold backdrop-blur-sm">
+                                🔍 Expand
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Meta footer */}
+                          <div className="p-2 flex-1 flex flex-col justify-between text-[11px] bg-slate-950/80">
+                            <div className="flex items-center justify-between font-mono font-bold text-white">
+                              <span>{shot.displayTime}</span>
+                              <span className="text-[10px] text-slate-400 font-normal">{formatBytes(shot.fileSizeBytes)}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate mt-1" title={shot.windowTitle || shot.activeApp}>
+                              <span className="truncate block font-mono">{shot.activeApp || 'Active Screen'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Drawer Footer Actions */}
@@ -1127,6 +1562,117 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
               <Button size="sm" variant="secondary" onClick={handleCloseLiveScreen}>
                 Close Viewer
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full-Resolution Screenshot Lightbox Modal */}
+      {lightboxShot && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
+          <div className="relative w-full max-w-5xl h-[88vh] flex flex-col rounded-2xl bg-slate-950 border border-white/20 shadow-2xl overflow-hidden">
+            {/* Header bar */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 bg-slate-900/90">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>📸</span> Workstation Capture
+                </span>
+                <span className="text-slate-500">•</span>
+                <span className="text-xs font-mono font-bold text-sky-400">
+                  {lightboxShot.displayTime} ({lightboxShot.dateKey})
+                </span>
+                <span className="text-slate-500">•</span>
+                <span className="text-xs text-slate-400 truncate max-w-xs font-mono">
+                  {lightboxShot.activeApp || 'Desktop'} {lightboxShot.windowTitle ? `— ${lightboxShot.windowTitle}` : ''}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-mono hidden sm:inline">
+                  {formatBytes(lightboxShot.fileSizeBytes)}
+                </span>
+
+                <a
+                  href={lightboxShot.imageUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  download
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition flex items-center gap-1 border border-white/5"
+                  title="Open/Download full size"
+                >
+                  <span>⬇️</span> Download
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => handleDeleteSingleShot(lightboxShot.id)}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 text-xs font-bold transition border border-rose-500/30 cursor-pointer"
+                  title="Delete from S3"
+                >
+                  🗑 Delete
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLightboxShot(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                  title="Close (Esc)"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Image viewport */}
+            <div className="flex-1 bg-black flex items-center justify-center relative overflow-hidden p-2">
+              <img
+                src={lightboxShot.imageUrl}
+                alt={`Screenshot at ${lightboxShot.displayTime}`}
+                className="max-h-full max-w-full object-contain rounded-lg shadow-2xl"
+              />
+
+              {/* Prev / Next Arrows */}
+              {shotsData?.screenshots && shotsData.screenshots.length > 1 && (
+                <>
+                  {lightboxIndex > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextIdx = lightboxIndex - 1;
+                        setLightboxIndex(nextIdx);
+                        setLightboxShot(shotsData.screenshots[nextIdx]);
+                      }}
+                      className="absolute left-6 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white text-lg border border-white/20 transition cursor-pointer shadow-lg"
+                      title="Previous"
+                    >
+                      ‹
+                    </button>
+                  )}
+
+                  {lightboxIndex < shotsData.screenshots.length - 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextIdx = lightboxIndex + 1;
+                        setLightboxIndex(nextIdx);
+                        setLightboxShot(shotsData.screenshots[nextIdx]);
+                      }}
+                      className="absolute right-6 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white text-lg border border-white/20 transition cursor-pointer shadow-lg"
+                      title="Next"
+                    >
+                      ›
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Lightbox Footer indicator */}
+            <div className="px-5 py-2.5 border-t border-white/10 bg-slate-950 flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span>Device: {lightboxShot.deviceId || 'Workstation'}</span>
+              <span>
+                Image {lightboxIndex + 1} of {shotsData?.screenshots?.length || 0}
+              </span>
             </div>
           </div>
         </div>

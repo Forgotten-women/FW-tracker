@@ -20,12 +20,13 @@ import { OtaPanel } from '@/components/OtaPanel';
 import { ComplaintsManagementPanel } from '@/components/ComplaintsManagementPanel';
 import { EmployeeDetailDrawer } from '@/components/EmployeeDetailDrawer';
 import { UnifiedWorkforcePanel } from '@/components/UnifiedWorkforcePanel';
+import { WorkstationsPanel } from '@/components/WorkstationsPanel';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import type { AdminEmployee, AttendanceCorrection, EmployeeDay, EnrollmentCode, NotificationItem } from '@/lib/types';
 
-type DashboardTab = 'overview' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
+type DashboardTab = 'overview' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -200,6 +201,15 @@ export default function DashboardPage() {
       ),
     },
     {
+      id: 'workstations',
+      label: 'Workstations & Screen Capture',
+      icon: (
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+      ),
+    },
+    {
       id: 'leave',
       label: 'Leave & Holidays',
       icon: (
@@ -355,7 +365,32 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* 4. LEAVE & HOLIDAYS TAB */}
+            {/* 2. WORKSTATIONS & SCREEN CAPTURE TAB */}
+            {activeTab === 'workstations' && (
+              <div className="flex flex-col gap-6">
+                <WorkstationsPanel
+                  onSelectEmployee={(empId) => {
+                    const found = employees.find(e => e.id === empId || e.employeeNumber === empId);
+                    if (found) {
+                      setSelectedEmployee({
+                        employeeId: found.id,
+                        employeeName: found.name,
+                        role: found.role,
+                        status: found.active ? 'IN_OFFICE' : 'AWAY',
+                        statusLabel: found.active ? 'Active' : 'Offline',
+                        timeWorkedSeconds: 0,
+                        timeWorkedFormatted: '0m',
+                        firstCheckIn: '—',
+                        lastActiveTime: '—',
+                        date: new Date().toISOString().slice(0, 10),
+                      } as any);
+                    }
+                  }}
+                />
+              </div>
+            )}
+
+            {/* 3. LEAVE & HOLIDAYS TAB */}
             {activeTab === 'leave' && (
               <div className="flex flex-col gap-6">
                 <LeaveManagementPanel />
