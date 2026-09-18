@@ -43,8 +43,45 @@ async function ensureLiveStreamTable() {
     `);
     liveStreamTableEnsured = true;
   } catch (err) {
-    // Non-blocking: table might already exist
     liveStreamTableEnsured = true;
+  }
+}
+
+let screenshotsTableEnsured = false;
+async function ensureScreenshotsTable() {
+  if (screenshotsTableEnsured) return;
+  try {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS workstation_screenshots (
+        id                  TEXT PRIMARY KEY,
+        employee_id         TEXT NOT NULL,
+        device_id           TEXT NOT NULL,
+        date_key            TEXT NOT NULL,
+        captured_at         BIGINT NOT NULL,
+        storage_path        TEXT NOT NULL,
+        file_size_bytes     BIGINT NOT NULL DEFAULT 0,
+        mime_type           TEXT NOT NULL DEFAULT 'image/jpeg',
+        active_app          TEXT,
+        window_title        TEXT,
+        capture_status      TEXT NOT NULL DEFAULT 'SUCCESS',
+        created_at          BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ws_shots_emp_date ON workstation_screenshots (employee_id, date_key);
+      CREATE INDEX IF NOT EXISTS idx_ws_shots_captured ON workstation_screenshots (captured_at);
+    `);
+
+    // Ensure employee columns exist
+    try {
+      await db.exec(`
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_enabled INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_interval_minutes INTEGER NOT NULL DEFAULT 5;
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_mode TEXT NOT NULL DEFAULT 'ACTIVE_ONLY';
+      `);
+    } catch (_) {}
+
+    screenshotsTableEnsured = true;
+  } catch (err) {
+    screenshotsTableEnsured = true;
   }
 }
 
@@ -106,8 +143,11 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
   const outsideWorkingHours = !isWithinWorkingHours;
 
-  const empRow = await db.prepare('SELECT app_tracking_enabled FROM employees WHERE id = ?').get(employeeId);
+  const empRow = await db.prepare('SELECT app_tracking_enabled, screenshot_enabled, screenshot_interval_minutes, screenshot_mode FROM employees WHERE id = ?').get(employeeId);
   const appTrackingEnabled = empRow ? (empRow.app_tracking_enabled !== 0) : true;
+  const screenshotEnabled = empRow ? (empRow.screenshot_enabled === 1) : false;
+  const screenshotIntervalMinutes = empRow ? (parseInt(empRow.screenshot_interval_minutes, 10) || 5) : 5;
+  const screenshotMode = empRow ? (empRow.screenshot_mode || 'ACTIVE_ONLY') : 'ACTIVE_ONLY';
 
   // 3. In-Office Verification (Multi-Signal: Direct BSSID, Air Proximity Beacon, Office Subnet, Office SSID)
   const locationVerdict = presence.classifyLocation({
@@ -419,6 +459,11 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       idleThresholdMinutes: idleThresholdMins,
       lockScreenGraceMinutes: lockGraceMins,
       approvedWorkProcesses: approvedProcesses,
+      screenshotPolicy: {
+        enabled: screenshotEnabled,
+        intervalMinutes: screenshotIntervalMinutes,
+        mode: screenshotMode,
+      },
     },
   });
 });
@@ -839,6 +884,91 @@ router.post('/stream-frame', requireDevice, async (req, res) => {
     res.json({ status: 'SUCCESS' });
   } catch (err) {
     console.error('[desktop/stream-frame] error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/desktop/screenshot
+// Ingests periodic screen captures, uploads to Supabase S3, and records metadata
+// ---------------------------------------------------------------------------
+router.post('/screenshot', requireDevice, async (req, res) => {
+  const { employeeId, deviceId } = req.auth;
+  const { frameBase64, activeApp = null, windowTitle = null, captureStatus = 'SUCCESS' } = req.body || {};
+  const nowMs = T.now();
+  const dateKey = T.dateKey(nowMs);
+
+  if (!frameBase64 || typeof frameBase64 !== 'string') {
+    return res.status(400).json({ status: 'ERROR', message: 'frameBase64 string is required.' });
+  }
+
+  let cleanBase64 = frameBase64.trim();
+  let mimeType = 'image/jpeg';
+  if (cleanBase64.startsWith('data:image/jpeg;base64,')) {
+    cleanBase64 = cleanBase64.slice('data:image/jpeg;base64,'.length);
+  } else if (cleanBase64.startsWith('data:image/png;base64,')) {
+    cleanBase64 = cleanBase64.slice('data:image/png;base64,'.length);
+    mimeType = 'image/png';
+  }
+
+  const isValidImage = (cleanBase64.startsWith('/9j/') || cleanBase64.startsWith('iVBOR')) && cleanBase64.length > 200;
+  if (!isValidImage) {
+    return res.status(400).json({ status: 'ERROR', message: 'Invalid or unsupported image format.' });
+  }
+
+  // Privacy Safeguard: reject frames if employee is on break or outside working hours
+  const activeBreak = await db.prepare(
+    'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
+  ).get(employeeId);
+
+  const sched = await schedule.resolve(employeeId, dateKey);
+  const shiftStartThreshold = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
+  const shiftEndThreshold = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
+  const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
+
+  if (activeBreak || !isWithinWorkingHours) {
+    return res.json({
+      status: 'PAUSED',
+      reason: activeBreak ? 'ON_BREAK' : 'OUTSIDE_HOURS',
+      message: 'Workstation screen capture paused for privacy.'
+    });
+  }
+
+  try {
+    await ensureScreenshotsTable();
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const fileSizeBytes = buffer.length;
+    const shotId = `shot_${employeeId}_${nowMs}_${crypto.randomUUID().slice(0, 6)}`;
+    const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+    const storageKey = `screenshots/${employeeId}/${dateKey}/${nowMs}_${deviceId}.${ext}`;
+
+    const storage = require('../domain/storage');
+    const saveResult = await storage.saveScreenshot({
+      key: storageKey,
+      buffer,
+      mimeType,
+    });
+
+    await db.prepare(`
+      INSERT INTO workstation_screenshots (
+        id, employee_id, device_id, date_key, captured_at,
+        storage_path, file_size_bytes, mime_type, active_app,
+        window_title, capture_status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      shotId, employeeId, deviceId, dateKey, nowMs,
+      saveResult.storageKey || storageKey, fileSizeBytes, mimeType,
+      activeApp, windowTitle, captureStatus, nowMs
+    );
+
+    res.json({
+      status: 'SUCCESS',
+      shotId,
+      fileSizeBytes,
+      storagePath: storageKey,
+    });
+  } catch (err) {
+    console.error('[desktop/screenshot] error:', err);
     res.status(500).json({ status: 'ERROR', message: err.message });
   }
 });

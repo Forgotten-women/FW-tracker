@@ -897,3 +897,58 @@ export interface ComplaintRecord {
   attachments: ComplaintAttachment[];
 }
 
+export interface ScreenshotStorageStats {
+  status: string;
+  totalBytes: number;
+  totalCount: number;
+  quotaGb: number;
+  quotaBytes: number;
+  usedPercentage: number;
+  retentionDays: number;
+  employees: {
+    employeeId: string;
+    employeeName: string;
+    screenshotEnabled: boolean;
+    intervalMinutes: number;
+    mode: 'ACTIVE_ONLY' | 'CONTINUOUS';
+    shotCount: number;
+    totalBytes: number;
+    latestCaptureAt: number | null;
+  }[];
+}
+
+export interface ScreenshotItem {
+  id: string;
+  employeeId: string;
+  deviceId: string;
+  dateKey: string;
+  capturedAt: number;
+  displayTime: string;
+  storagePath: string;
+  fileSizeBytes: number;
+  mimeType: string;
+  activeApp: string;
+  windowTitle: string;
+  captureStatus: string;
+  imageUrl: string;
+}
+
+export interface EmployeeScreenshotsResponse {
+  status: string;
+  employee: {
+    id: string;
+    name: string;
+    screenshotEnabled: boolean;
+    intervalMinutes: number;
+    mode: 'ACTIVE_ONLY' | 'CONTINUOUS';
+  };
+  dateKey: string;
+  count: number;
+  availableDates: {
+    dateKey: string;
+    count: number;
+    totalBytes: number;
+  }[];
+  screenshots: ScreenshotItem[];
+}
+

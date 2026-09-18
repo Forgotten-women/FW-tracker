@@ -82,10 +82,19 @@ pub struct SessionStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct ScreenshotPolicy {
+    pub enabled: bool,
+    pub interval_minutes: u32,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct PolicySettings {
     pub idle_threshold_minutes: u32,
     pub lock_screen_grace_minutes: u32,
     pub approved_work_processes: String,
+    pub screenshot_policy: Option<ScreenshotPolicy>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -254,6 +263,44 @@ pub async fn send_stream_frame(cfg: &AppConfig, frame_base64: &str) -> Result<()
         .await;
 
     Ok(())
+}
+
+pub async fn send_screenshot(
+    cfg: &AppConfig,
+    frame_base64: &str,
+    active_app: Option<&str>,
+    window_title: Option<&str>,
+    capture_status: &str,
+) -> Result<serde_json::Value, String> {
+    if cfg.token.is_empty() || frame_base64.is_empty() {
+        return Err("Not enrolled or empty frame".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/desktop/screenshot", cfg.server_url.trim_end_matches('/'));
+
+    let body = serde_json::json!({
+        "frameBase64": frame_base64,
+        "activeApp": active_app,
+        "windowTitle": window_title,
+        "captureStatus": capture_status,
+    });
+
+    let res = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .header("X-Device-Id", &cfg.device_id)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Screenshot upload failed: {}", err_text));
+    }
+
+    res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

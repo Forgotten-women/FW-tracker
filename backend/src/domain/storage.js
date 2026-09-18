@@ -248,11 +248,215 @@ async function deleteFile(key) {
   }
 }
 
+function getScreenshotsBucket() {
+  return process.env.SUPABASE_SCREENSHOTS_BUCKET || 'workstation-screenshots';
+}
+
+const LOCAL_SCREENSHOTS_STORE = path.join(DATA_DIR, 'screenshots');
+if (!fs.existsSync(LOCAL_SCREENSHOTS_STORE)) {
+  try { fs.mkdirSync(LOCAL_SCREENSHOTS_STORE, { recursive: true }); } catch (_) {}
+}
+
+/**
+ * Saves a screenshot to cloud storage (Supabase S3 / REST) or local private disk.
+ */
+async function saveScreenshot({ key, buffer, mimeType = 'image/jpeg' }) {
+  const bucket = getScreenshotsBucket();
+
+  // 1. Try S3 client
+  const s3 = getS3Client();
+  if (s3) {
+    try {
+      await s3.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: mimeType,
+      }));
+      return { storageKey: key, provider: 'supabase', path: key, bucket };
+    } catch (err) {
+      // If bucket does not exist, try fallback bucket
+      if (bucket !== getBucket()) {
+        try {
+          await s3.send(new PutObjectCommand({
+            Bucket: getBucket(),
+            Key: key,
+            Body: buffer,
+            ContentType: mimeType,
+          }));
+          return { storageKey: key, provider: 'supabase', path: key, bucket: getBucket() };
+        } catch (_) {}
+      }
+      console.warn('[storage/screenshot] S3 upload warning:', err?.message);
+    }
+  }
+
+  // 2. Try Supabase JS Client
+  const client = getSupabase();
+  if (client) {
+    try {
+      const { data, error } = await client.storage
+        .from(bucket)
+        .upload(key, buffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (!error && data) {
+        return { storageKey: key, provider: 'supabase', path: data.path, bucket };
+      }
+
+      // Try fallback bucket
+      if (bucket !== getBucket()) {
+        const { data: fbData, error: fbErr } = await client.storage
+          .from(getBucket())
+          .upload(key, buffer, {
+            contentType: mimeType,
+            upsert: true,
+          });
+        if (!fbErr && fbData) {
+          return { storageKey: key, provider: 'supabase', path: fbData.path, bucket: getBucket() };
+        }
+      }
+    } catch (err) {
+      console.warn('[storage/screenshot] Supabase REST upload warning:', err?.message);
+    }
+  }
+
+  // 3. Local disk fallback
+  const localPath = path.join(LOCAL_SCREENSHOTS_STORE, key);
+  const dir = path.dirname(localPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(localPath, buffer);
+
+  return { storageKey: key, provider: 'local', path: localPath, bucket: 'local' };
+}
+
+/**
+ * Retrieves the raw screenshot buffer.
+ */
+async function getScreenshotBuffer(key) {
+  if (!key) throw new Error('No storage key provided.');
+  const bucket = getScreenshotsBucket();
+
+  // 1. S3 Client
+  const s3 = getS3Client();
+  if (s3) {
+    for (const b of [bucket, getBucket()]) {
+      try {
+        const res = await s3.send(new GetObjectCommand({
+          Bucket: b,
+          Key: key,
+        }));
+        const stream = res.Body;
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        return Buffer.concat(chunks);
+      } catch (_) {}
+    }
+  }
+
+  // 2. Direct local file check
+  if (fs.existsSync(key)) return fs.readFileSync(key);
+  const localPath = path.join(LOCAL_SCREENSHOTS_STORE, key);
+  if (fs.existsSync(localPath)) return fs.readFileSync(localPath);
+
+  // 3. Supabase JS Client
+  const client = getSupabase();
+  if (client) {
+    for (const b of [bucket, getBucket()]) {
+      try {
+        const { data, error } = await client.storage.from(b).download(key);
+        if (!error && data) {
+          const arrayBuffer = await data.arrayBuffer();
+          return Buffer.from(arrayBuffer);
+        }
+      } catch (_) {}
+    }
+  }
+
+  throw new Error(`Screenshot not found in storage: ${key}`);
+}
+
+/**
+ * Generates a signed URL for a screenshot.
+ */
+async function getScreenshotSignedUrl(key, expiresInSeconds = 3600) {
+  const client = getSupabase();
+  if (client) {
+    const bucket = getScreenshotsBucket();
+    for (const b of [bucket, getBucket()]) {
+      try {
+        const { data, error } = await client.storage
+          .from(b)
+          .createSignedUrl(key, expiresInSeconds);
+        if (!error && data?.signedUrl) return data.signedUrl;
+      } catch (_) {}
+    }
+  }
+  return null;
+}
+
+/**
+ * Deletes a single screenshot from S3 / Supabase / local disk.
+ */
+async function deleteScreenshot(key) {
+  if (!key) return;
+  const bucket = getScreenshotsBucket();
+
+  const s3 = getS3Client();
+  if (s3) {
+    for (const b of [bucket, getBucket()]) {
+      try {
+        await s3.send(new DeleteObjectCommand({
+          Bucket: b,
+          Key: key,
+        }));
+      } catch (_) {}
+    }
+  }
+
+  const localPath = path.join(LOCAL_SCREENSHOTS_STORE, key);
+  if (fs.existsSync(localPath)) {
+    try { fs.unlinkSync(localPath); } catch (_) {}
+  }
+  if (fs.existsSync(key)) {
+    try { fs.unlinkSync(key); } catch (_) {}
+  }
+
+  const client = getSupabase();
+  if (client) {
+    for (const b of [bucket, getBucket()]) {
+      try {
+        await client.storage.from(b).remove([key]);
+      } catch (_) {}
+    }
+  }
+}
+
+/**
+ * Deletes multiple screenshots in bulk.
+ */
+async function deleteScreenshots(keys = []) {
+  if (!Array.isArray(keys) || keys.length === 0) return;
+  for (const k of keys) {
+    await deleteScreenshot(k);
+  }
+}
+
 module.exports = {
   saveFile,
   getFileBuffer,
   getSignedUrl,
   deleteFile,
+  getScreenshotsBucket,
+  saveScreenshot,
+  getScreenshotBuffer,
+  getScreenshotSignedUrl,
+  deleteScreenshot,
+  deleteScreenshots,
   isCloudConfigured: () => Boolean(getS3Client() || getSupabase()),
   LOCAL_STORE,
+  LOCAL_SCREENSHOTS_STORE,
 };
+

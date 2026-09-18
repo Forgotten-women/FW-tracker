@@ -819,6 +819,56 @@ export const api = {
     request<{ status: string; categories: string[]; statuses: ComplaintStatus[] }>(
       '/api/complaints/categories'
     ),
+
+  fetchScreenshotStats: () =>
+    request<import('./types').ScreenshotStorageStats>('/api/admin/screenshots/storage-stats'),
+
+  fetchEmployeeScreenshots: (employeeId: string, dateKey?: string) => {
+    const qs = dateKey ? `?dateKey=${encodeURIComponent(dateKey)}` : '';
+    return request<import('./types').EmployeeScreenshotsResponse>(
+      `/api/admin/screenshots/employee/${encodeURIComponent(employeeId)}${qs}`
+    );
+  },
+
+  updateScreenshotConfig: (
+    employeeId: string,
+    data: { enabled: boolean; intervalMinutes: number; mode: 'ACTIVE_ONLY' | 'CONTINUOUS' }
+  ) =>
+    request<{
+      status: string;
+      message: string;
+      config: { enabled: boolean; intervalMinutes: number; mode: string };
+    }>(`/api/admin/screenshots/employee/${encodeURIComponent(employeeId)}/config`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteScreenshots: (shotIds: string[]) =>
+    request<{ status: string; deletedCount: number; freedBytes: number }>(
+      '/api/admin/screenshots',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ shotIds }),
+      }
+    ),
+
+  bulkPurgeScreenshots: (data: { employeeId?: string; dateKey?: string; olderThanDays?: number }) =>
+    request<{ status: string; purgedCount: number; freedBytes: number }>(
+      '/api/admin/screenshots/bulk-purge',
+      {
+        method: 'DELETE',
+        body: JSON.stringify(data),
+      }
+    ),
+
+  updateAutoRetention: (data: { retentionDays: number; quotaGb?: number; runPurgeNow?: boolean }) =>
+    request<{ status: string; retentionDays: number; quotaGb: number; purgedCount: number; freedBytes: number }>(
+      '/api/admin/screenshots/auto-retention',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
 };
 
 

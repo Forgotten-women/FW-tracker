@@ -993,6 +993,53 @@ async function startAgent() {
     }
   }, 250);
 
+  let lastPeriodicShotTime = 0;
+  let screenshotPolicy = { enabled: false, intervalMinutes: 5, mode: 'ACTIVE_ONLY' };
+
+  // Periodic Screenshot Capturing Loop
+  setInterval(async () => {
+    if (!screenshotPolicy.enabled) return;
+    if (!isWithinOfficeHours()) return;
+    if (isManualBreak || isOnBreak) return;
+
+    const intervalMs = (screenshotPolicy.intervalMinutes || 5) * 60 * 1000;
+    const now = Date.now();
+    if (now - lastPeriodicShotTime < intervalMs) return;
+
+    const idle = getIdleSeconds();
+    const isLocked = getLockState().isLocked;
+
+    if (screenshotPolicy.mode === 'ACTIVE_ONLY' && (isLocked || idle >= 300)) {
+      return;
+    }
+
+    const cfgNow = loadConfig();
+    if (!cfgNow || !cfgNow.token || !cfgNow.serverUrl) return;
+
+    const captureStatus = (isLocked || idle >= 300) ? 'IDLE' : 'ACTIVE';
+    try {
+      const frameBase64 = await captureScreenBase64Fast();
+      if (frameBase64) {
+        lastPeriodicShotTime = now;
+        await fetch(`${cfgNow.serverUrl}/api/desktop/screenshot`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${cfgNow.token}`,
+            'X-Device-Id': cfgNow.deviceId || '',
+          },
+          body: JSON.stringify({
+            frameBase64,
+            activeApp: currentApp,
+            captureStatus,
+          }),
+        });
+      }
+    } catch (err) {
+      console.warn('[desktop] Periodic screenshot upload failed:', err.message);
+    }
+  }, 10000);
+
   async function syncLocalQueue() {
     if (isSyncing) return;
     if (!isWithinOfficeHours()) {
@@ -1091,6 +1138,7 @@ async function startAgent() {
             if (data.workstationStatus) currentWorkstationStatus = data.workstationStatus;
             if (data.appTrackingEnabled !== undefined) appTrackingEnabled = Boolean(data.appTrackingEnabled);
             if (data.outsideWorkingHours !== undefined) outsideWorkingHours = Boolean(data.outsideWorkingHours);
+            if (data.policy?.screenshotPolicy) screenshotPolicy = data.policy.screenshotPolicy;
 
             localDb.prepare('UPDATE local_events SET synced_at = ? WHERE event_id = ?').run(Date.now(), ev.event_id);
 

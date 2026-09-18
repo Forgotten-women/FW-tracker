@@ -384,6 +384,82 @@ fn main() {
                 }
             });
 
+            // Dedicated Periodic Screenshot Task (Customizable HR Interval + Self-Healing Watchdog)
+            let app_handle_shots = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut last_shot_time = std::time::Instant::now() - Duration::from_secs(3600);
+
+                loop {
+                    sleep(Duration::from_secs(10)).await;
+
+                    let state = app_handle_shots.state::<AppState>();
+                    let cfg = state.config.lock().unwrap().clone();
+                    if cfg.token.is_empty() {
+                        continue;
+                    }
+
+                    let (policy_enabled, interval_mins, mode, is_out_hours) = {
+                        let resp_guard = state.latest_response.lock().unwrap();
+                        if let Some(ref r) = *resp_guard {
+                            let p = r.policy.screenshot_policy.clone().unwrap_or_default();
+                            (p.enabled, p.interval_minutes.max(1), p.mode, r.outside_working_hours.unwrap_or(false))
+                        } else {
+                            (false, 5, "ACTIVE_ONLY".to_string(), false)
+                        }
+                    };
+
+                    if !policy_enabled || is_out_hours {
+                        continue;
+                    }
+
+                    let interval_duration = Duration::from_secs((interval_mins as u64) * 60);
+                    if last_shot_time.elapsed() < interval_duration {
+                        continue;
+                    }
+
+                    let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
+                    let (_lock_state, lock_duration) = tracker::session::get_lock_state();
+                    let idle_secs = tracker::idle::get_idle_seconds();
+
+                    if is_break {
+                        continue;
+                    }
+
+                    if mode == "ACTIVE_ONLY" && (lock_duration > 300 || idle_secs >= 300) {
+                        continue;
+                    }
+
+                    let capture_status = if lock_duration > 300 || idle_secs >= 300 {
+                        "IDLE"
+                    } else {
+                        "ACTIVE"
+                    };
+
+                    // Watchdog & Self-Healing Frame Capture:
+                    let frame_opt = tokio::task::spawn_blocking(|| {
+                        capture_screen_frame()
+                    }).await.unwrap_or(None);
+
+                    if let Some(frame) = frame_opt {
+                        last_shot_time = std::time::Instant::now();
+                        let mut active_app_name = None;
+                        let mut win_title = None;
+                        if let Some((proc_name, title)) = tracker::process::get_foreground_window_info() {
+                            active_app_name = Some(tracker::process::parse_active_application(&proc_name, &title));
+                            win_title = Some(title);
+                        }
+
+                        let _ = client::send_screenshot(
+                            &cfg,
+                            &frame,
+                            active_app_name.as_deref(),
+                            win_title.as_deref(),
+                            capture_status,
+                        ).await;
+                    }
+                }
+            });
+
             // Background Monitoring & Heartbeat Task
             tauri::async_runtime::spawn(async move {
                 let mut sample_count = 0;

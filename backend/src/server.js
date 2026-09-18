@@ -130,6 +130,8 @@ app.use('/api/documents', require('./routes/documents'));       // document vaul
 app.use('/api/complaints', require('./routes/complaints'));     // employee complaints & concerns
 app.use('/api/notifications', require('./routes/notifications')); // notifications
 app.use('/api/desktop', require('./routes/desktop'));             // desktop workstation agent
+app.use('/api/admin/screenshots', require('./routes/screenshots')); // workstation screenshots admin
+app.use('/api/screenshots', require('./routes/screenshots'));       // workstation screenshots alias
 app.use('/api/app', require('./routes/ota'));                   // OTA app version & releases
 app.use('/api', require('./routes/ota'));                       // admin OTA releases
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin

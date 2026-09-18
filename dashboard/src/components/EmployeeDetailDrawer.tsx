@@ -1074,6 +1074,22 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing }: Emplo
                       </span>
                     )}
                   </div>
+
+                  {liveFrame.lastFrameAt && (Date.now() - liveFrame.lastFrameAt > 4000) && (
+                    <div className="absolute bottom-4 inset-x-4 max-w-md mx-auto flex items-center justify-between p-3 rounded-xl bg-amber-950/90 border border-amber-500/40 text-amber-200 shadow-2xl backdrop-blur-md animate-fade-in">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span>⚠️</span>
+                        <span>Frame delivery paused ({Math.round((Date.now() - liveFrame.lastFrameAt) / 1000)}s ago).</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleOpenLiveScreen}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-bold text-[11px] hover:bg-amber-400 transition cursor-pointer"
+                      >
+                        Reconnect
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : liveStreamLoading || (isLiveScreenOpen && !liveStreamError) ? (
                 <div className="text-center space-y-3 p-8 animate-fade-in">
