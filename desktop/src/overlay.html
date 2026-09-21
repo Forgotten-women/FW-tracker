@@ -14,9 +14,9 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: rgba(7, 9, 14, 0.92);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(7, 9, 14, 0.94);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
       color: #f8fafc;
       width: 100vw;
       height: 100vh;
@@ -28,46 +28,52 @@
 
     .overlay-card {
       width: 90%;
-      max-width: 520px;
-      background: linear-gradient(145deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95));
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      max-width: 540px;
+      background: linear-gradient(145deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+      border: 1px solid rgba(255, 255, 255, 0.15);
       border-radius: 28px;
-      padding: 36px 32px;
-      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(99, 102, 241, 0.15);
+      padding: 38px 34px;
+      box-shadow: 0 30px 70px -15px rgba(0, 0, 0, 0.8), 0 0 50px rgba(99, 102, 241, 0.2);
       text-align: center;
       position: relative;
       animation: fadeInScale 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     @keyframes fadeInScale {
-      0% { opacity: 0; transform: scale(0.94); }
+      0% { opacity: 0; transform: scale(0.92); }
       100% { opacity: 1; transform: scale(1); }
     }
 
     .icon-badge {
-      width: 72px;
-      height: 72px;
+      width: 76px;
+      height: 76px;
       margin: 0 auto 20px;
-      border-radius: 22px;
+      border-radius: 24px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 36px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      font-size: 38px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.4);
     }
 
     .icon-warning {
-      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(217, 119, 6, 0.3));
-      border: 1px solid rgba(245, 158, 11, 0.4);
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(217, 119, 6, 0.35));
+      border: 1px solid rgba(245, 158, 11, 0.5);
+      animation: pulseGlow 2s infinite ease-in-out;
     }
 
     .icon-break {
-      background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(79, 70, 229, 0.3));
-      border: 1px solid rgba(99, 102, 241, 0.4);
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(79, 70, 229, 0.35));
+      border: 1px solid rgba(99, 102, 241, 0.5);
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 25px rgba(245, 158, 11, 0.2); }
+      50% { transform: scale(1.05); box-shadow: 0 0 40px rgba(245, 158, 11, 0.4); }
     }
 
     h1 {
-      font-size: 24px;
+      font-size: 26px;
       font-weight: 800;
       color: #ffffff;
       letter-spacing: -0.02em;
@@ -77,52 +83,56 @@
     p.subtitle {
       font-size: 13px;
       color: #94a3b8;
-      line-height: 1.5;
+      line-height: 1.6;
       margin-bottom: 24px;
+    }
+
+    p.subtitle strong {
+      color: #f8fafc;
     }
 
     /* Countdown Circle Wrap */
     .countdown-wrap {
-      margin: 20px auto 26px;
+      margin: 16px auto 26px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .countdown-number {
-      font-size: 48px;
+      font-size: 56px;
       font-weight: 900;
       font-variant-numeric: tabular-nums;
       color: #fbbf24;
-      text-shadow: 0 0 20px rgba(251, 191, 36, 0.4);
+      text-shadow: 0 0 25px rgba(251, 191, 36, 0.5);
       line-height: 1;
     }
 
     .countdown-label {
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 1.5px;
       color: #64748b;
     }
 
     /* Break Info Box */
     .break-info-box {
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 16px;
-      padding: 16px;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 18px;
+      padding: 18px;
       margin-bottom: 24px;
     }
 
     .break-timer {
-      font-size: 38px;
+      font-size: 42px;
       font-weight: 900;
       font-variant-numeric: tabular-nums;
       color: #38bdf8;
       margin-bottom: 4px;
-      text-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+      text-shadow: 0 0 20px rgba(56, 189, 248, 0.35);
     }
 
     .allowance-badge {
@@ -131,7 +141,7 @@
       gap: 6px;
       font-size: 12px;
       font-weight: 700;
-      padding: 4px 12px;
+      padding: 5px 14px;
       border-radius: 9999px;
       margin-top: 6px;
     }
@@ -143,9 +153,9 @@
     }
 
     .allowance-excess {
-      background: rgba(244, 63, 94, 0.15);
+      background: rgba(244, 63, 94, 0.2);
       color: #fb7185;
-      border: 1px solid rgba(244, 63, 94, 0.3);
+      border: 1px solid rgba(244, 63, 94, 0.4);
       animation: pulseAlert 2s infinite;
     }
 
@@ -163,8 +173,8 @@
 
     button {
       flex: 1;
-      padding: 14px 20px;
-      border-radius: 14px;
+      padding: 15px 22px;
+      border-radius: 16px;
       font-size: 14px;
       font-weight: 700;
       border: none;
@@ -179,12 +189,12 @@
     .btn-primary {
       background: linear-gradient(135deg, #4f46e5, #6366f1);
       color: #ffffff;
-      box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.5);
+      box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.5);
     }
 
     .btn-primary:hover {
       transform: translateY(-2px);
-      box-shadow: 0 15px 25px -5px rgba(79, 70, 229, 0.6);
+      box-shadow: 0 15px 30px -5px rgba(79, 70, 229, 0.65);
       background: linear-gradient(135deg, #4338ca, #4f46e5);
     }
 
@@ -199,18 +209,8 @@
     }
 
     .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.15);
       color: #ffffff;
-    }
-
-    .btn-amber {
-      background: linear-gradient(135deg, #d97706, #f59e0b);
-      color: #ffffff;
-      box-shadow: 0 10px 20px -5px rgba(217, 119, 6, 0.4);
-    }
-
-    .btn-amber:hover {
-      background: linear-gradient(135deg, #b45309, #d97706);
     }
 
     .footer-hint {
@@ -231,7 +231,7 @@
     <div class="icon-badge icon-warning">⏳</div>
     <h1>Are You Still Working?</h1>
     <p class="subtitle">
-      No activity detected for <strong>5 minutes</strong>.<br />
+      No activity detected on your PC for <strong>5 minutes</strong>.<br />
       If no action is taken, <strong>Break Mode</strong> will start automatically and backdate to when you stepped away.
     </p>
 
@@ -249,7 +249,7 @@
       </button>
     </div>
 
-    <p class="footer-hint">Moving your mouse or pressing any key will also dismiss this prompt.</p>
+    <p class="footer-hint">Click "I'm Still Working" or press Enter to dismiss this prompt.</p>
   </div>
 
   <!-- Phase 2: Active Break Mode -->
@@ -257,7 +257,7 @@
     <div class="icon-badge icon-break">☕</div>
     <h1 id="break-title">You Are on Break</h1>
     <p class="subtitle" id="break-subtitle">
-      Workstation tracking is paused. Return and resume work whenever you're ready.
+      Workstation tracking is currently paused. Resume your shift when you return.
     </p>
 
     <div class="break-info-box">
@@ -295,6 +295,24 @@
     let breakInterval = null;
     let breakStartTimestamp = null;
     const PERMITTED_BREAK_MINS = 30;
+
+    // Play subtle audio chime
+    function playChime() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+      } catch (_) {}
+    }
 
     // 1. Dismiss / I'm still working
     async function dismissPrompt() {
@@ -362,6 +380,8 @@
     function startGraceCountdown() {
       graceSeconds = 60;
       graceTimerNum.textContent = graceSeconds;
+      playChime();
+
       graceInterval = setInterval(() => {
         graceSeconds--;
         graceTimerNum.textContent = Math.max(0, graceSeconds);
@@ -421,21 +441,12 @@
     btnStartBreak.addEventListener('click', () => triggerBreak(0));
     btnResumeWork.addEventListener('click', resumeWork);
 
-    // Auto dismiss prompt on physical input
-    let initialMoveIgnored = false;
-    window.addEventListener('mousemove', () => {
-      if (!initialMoveIgnored) {
-        initialMoveIgnored = true;
-        return;
-      }
+    // Keyboard dismiss on Enter or Space
+    window.addEventListener('keydown', (e) => {
       if (currentPhase === 'PROMPT') {
-        dismissPrompt();
-      }
-    });
-
-    window.addEventListener('keydown', () => {
-      if (currentPhase === 'PROMPT') {
-        dismissPrompt();
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+          dismissPrompt();
+        }
       }
     });
 

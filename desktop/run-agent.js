@@ -547,51 +547,59 @@ function isWithinOfficeHours(date = new Date()) {
   return minutes >= startMinutes && minutes < endMinutes;
 }
 
+function launchBrowserApp(url, isFullscreen = false) {
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+
+  if (isWin) {
+    const candidates = [
+      path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Google\\Chrome\\Application\\chrome.exe'),
+      path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe'),
+      path.join(process.env['LocalAppData'] || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(process.env['LocalAppData'] || '', 'Google\\Chrome\\Application\\chrome.exe'),
+    ];
+
+    for (const exe of candidates) {
+      if (fs.existsSync(exe)) {
+        const tempProfile = path.join(os.tmpdir(), isFullscreen ? 'ot_overlay_profile' : 'ot_mini_profile');
+        const flags = isFullscreen
+          ? `"${exe}" --user-data-dir="${tempProfile}" --app="${url}" --start-fullscreen --no-first-run --no-default-browser-check`
+          : `"${exe}" --user-data-dir="${tempProfile}" --app="${url}" --window-size=380,640 --no-first-run --no-default-browser-check`;
+        const proc = exec(flags, (err) => {
+          if (err) console.warn('[desktop/ui] Browser process note:', err.message);
+        });
+        return proc;
+      }
+    }
+    // Fallback: PowerShell Start-Process
+    return exec(`powershell -NoProfile -Command "Start-Process '${url}'"`);
+  } else if (isMac) {
+    const cmd = isFullscreen
+      ? `open -a "Google Chrome" --args --app="${url}" --start-fullscreen || open "${url}"`
+      : `open -a "Google Chrome" --args --app="${url}" --window-size=380,640 || open "${url}"`;
+    return exec(cmd);
+  } else {
+    return exec(`xdg-open "${url}"`);
+  }
+}
+
 function launchMiniAppWindow(port = MINI_APP_PORT) {
   const url = `http://127.0.0.1:${port}`;
-  if (process.platform === 'win32') {
-    exec(`msedge --app="${url}" --window-size=380,640`, (err) => {
-      if (err) {
-        exec(`chrome --app="${url}" --window-size=380,640`, (err2) => {
-          if (err2) {
-            exec(`start "" "${url}"`);
-          }
-        });
-      }
-    });
-  } else if (process.platform === 'darwin') {
-    exec(`open -a "Google Chrome" --args --app="${url}"`, (err) => {
-      if (err) {
-        exec(`open "${url}"`);
-      }
-    });
-  } else {
-    exec(`xdg-open "${url}"`);
-  }
+  launchBrowserApp(url, false);
 }
 
 function launchIdleOverlayWindow(port = MINI_APP_PORT) {
   if (isOverlayOpen) return;
   isOverlayOpen = true;
+  console.log(`[${new Date().toLocaleTimeString()}] ⏳ Workstation idle for 5 mins - Launching Full-Screen Focus Prompt...`);
   const url = `http://127.0.0.1:${port}/overlay`;
-  if (process.platform === 'win32') {
-    exec(`msedge --app="${url}" --start-fullscreen`, (err) => {
-      if (err) {
-        exec(`chrome --app="${url}" --start-fullscreen`, (err2) => {
-          if (err2) {
-            exec(`start "" "${url}"`);
-          }
-        });
-      }
+  const proc = launchBrowserApp(url, true);
+  if (proc && typeof proc.on === 'function') {
+    proc.on('exit', () => {
+      isOverlayOpen = false;
     });
-  } else if (process.platform === 'darwin') {
-    exec(`open -a "Google Chrome" --args --app="${url}" --start-fullscreen`, (err) => {
-      if (err) {
-        exec(`open "${url}"`);
-      }
-    });
-  } else {
-    exec(`xdg-open "${url}"`);
   }
 }
 
