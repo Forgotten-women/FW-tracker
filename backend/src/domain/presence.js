@@ -482,7 +482,9 @@ const selectOpenBreakPresence = db.prepare(
 );
 
 const selectSummaryPresence = db.prepare(
-  'SELECT break_minutes, excess_break_minutes, daily_deficit_minutes, late_minutes FROM attendance_daily_summary WHERE employee_id = ? AND date_key = ?'
+  `SELECT break_minutes, excess_break_minutes, daily_deficit_minutes, late_minutes,
+          early_departure_minutes, unauthorised_missing_minutes, approved_adjustment_minutes
+   FROM attendance_daily_summary WHERE employee_id = ? AND date_key = ?`
 );
 
 /** Shape one derived day for an API response (formatting happens only here). */
@@ -510,6 +512,9 @@ async function presentDay(d, employee) {
   const breakMinutes = summary ? summary.break_minutes : 0;
   const excessBreakMinutes = summary ? summary.excess_break_minutes : 0;
   const dailyDeficitMinutes = (summary ? summary.daily_deficit_minutes : 0) || (isLate ? lateMinutes : 0);
+  const earlyDepartureMinutes = summary ? summary.early_departure_minutes : 0;
+  const unauthorisedMissingMinutes = summary ? summary.unauthorised_missing_minutes : 0;
+  const approvedAdjustmentMinutes = summary ? summary.approved_adjustment_minutes : 0;
 
   // Active shift minutes strictly count from scheduled start time onwards (e.g. 11:00 AM).
   // Early arrival before scheduled start is preserved in firstCheckIn but does not count as active worked time.
@@ -538,6 +543,9 @@ async function presentDay(d, employee) {
     breakMinutes,
     excessBreakMinutes,
     dailyDeficitMinutes,
+    earlyDepartureMinutes,
+    unauthorisedMissingMinutes,
+    approvedAdjustmentMinutes,
     lateMinutes,
     isLate,
     scheduledStartTime: s.startTime,

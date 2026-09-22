@@ -82,6 +82,16 @@ class Attendance {
   final bool needsReview;
   final List<WorkSession> sessions;
 
+  // Deficit breakdown for this day (backend/src/domain/presence.js
+  // presentDay(), attendance_daily_summary). All zero on a clean day.
+  final bool isLate;
+  final int lateMinutes;
+  final int excessBreakMinutes;
+  final int earlyDepartureMinutes;
+  final int unauthorisedMissingMinutes;
+  final int approvedAdjustmentMinutes;
+  final int dailyDeficitMinutes;
+
   const Attendance({
     required this.employeeId,
     required this.employeeName,
@@ -96,7 +106,24 @@ class Attendance {
     required this.adjustmentMinutes,
     required this.needsReview,
     required this.sessions,
+    this.isLate = false,
+    this.lateMinutes = 0,
+    this.excessBreakMinutes = 0,
+    this.earlyDepartureMinutes = 0,
+    this.unauthorisedMissingMinutes = 0,
+    this.approvedAdjustmentMinutes = 0,
+    this.dailyDeficitMinutes = 0,
   });
+
+  /// True when this day has any deficit reason at all -- the summary badge
+  /// shown on the timeline tile is gated on this rather than repeating the
+  /// per-field checks at every call site.
+  bool get hasDeficit =>
+      dailyDeficitMinutes > 0 ||
+      lateMinutes > 0 ||
+      excessBreakMinutes > 0 ||
+      earlyDepartureMinutes > 0 ||
+      unauthorisedMissingMinutes > 0;
 
   factory Attendance.fromJson(Map<String, dynamic> json) {
     final status = PresenceStatus.parse(json['status'] as String?);
@@ -137,6 +164,16 @@ class Attendance {
       sessions: (json['sessions'] as List<dynamic>? ?? [])
           .map((s) => WorkSession.fromJson(s as Map<String, dynamic>))
           .toList(),
+      isLate: json['isLate'] as bool? ?? false,
+      lateMinutes: (json['lateMinutes'] as num?)?.toInt() ?? 0,
+      excessBreakMinutes: (json['excessBreakMinutes'] as num?)?.toInt() ?? 0,
+      earlyDepartureMinutes:
+          (json['earlyDepartureMinutes'] as num?)?.toInt() ?? 0,
+      unauthorisedMissingMinutes:
+          (json['unauthorisedMissingMinutes'] as num?)?.toInt() ?? 0,
+      approvedAdjustmentMinutes:
+          (json['approvedAdjustmentMinutes'] as num?)?.toInt() ?? 0,
+      dailyDeficitMinutes: (json['dailyDeficitMinutes'] as num?)?.toInt() ?? 0,
     );
   }
 

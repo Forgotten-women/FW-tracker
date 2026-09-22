@@ -56,24 +56,43 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
       emit(const HomeLoading());
     }
 
-    // 2. Network revalidation
-    try {
-      final fresh = await repository.fetchFreshHomeSummary();
-      emit(HomeLoaded(
-        summary: fresh,
-        isRefreshing: false,
-        isOffline: false,
-        liveNow: DateTime.now(),
-      ));
-    } catch (e) {
-      if (state is HomeLoaded) {
-        emit((state as HomeLoaded).copyWith(
+    // 2. Network revalidation, retried a couple of times with a short
+    // backoff before giving up. This only matters for a cold start with no
+    // cache yet (fresh install, or the very first fetch of the day) -- once
+    // isCacheValid above is true, a failure here just quietly sets isOffline
+    // without ever reaching this retry loop's fallback. Without it, a single
+    // slow-but-recovering response (the backend's first request of the day
+    // doing extra work, a brief network blip) went straight to a dead-end
+    // "Connection Failure" screen with nothing to fall back on and no
+    // automatic recovery, when a couple of silent retries usually succeeds
+    // on their own.
+    const maxAttempts = 3;
+    Object? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final fresh = await repository.fetchFreshHomeSummary();
+        emit(HomeLoaded(
+          summary: fresh,
           isRefreshing: false,
-          isOffline: true,
+          isOffline: false,
+          liveNow: DateTime.now(),
         ));
-      } else {
-        emit(HomeFailure(e.toString()));
+        return;
+      } catch (e) {
+        lastError = e;
+        if (attempt < maxAttempts) {
+          await Future.delayed(Duration(seconds: attempt * 2));
+        }
       }
+    }
+
+    if (state is HomeLoaded) {
+      emit((state as HomeLoaded).copyWith(
+        isRefreshing: false,
+        isOffline: true,
+      ));
+    } else {
+      emit(HomeFailure(lastError.toString()));
     }
   }
 

@@ -54,6 +54,9 @@ void main() {
       expect(a.totalMinutes, 258);
       expect(a.sessions.single.open, isTrue);
       expect(a.sessions.single.to, 'now');
+      // No deficit fields in this payload -- must default to zero/false, not
+      // throw, and hasDeficit must correctly read as clean.
+      expect(a.hasDeficit, isFalse);
     });
 
     test('missing fields fall back instead of throwing', () {
@@ -64,6 +67,42 @@ void main() {
       expect(a.totalMinutes, 0);
       expect(a.firstCheckIn, '--');
       expect(a.sessions, isEmpty);
+      expect(a.hasDeficit, isFalse);
+    });
+
+    test('parses a per-day deficit breakdown for the history timeline', () {
+      final a = Attendance.fromJson({
+        'employeeId': 'emp_abc',
+        'date': '2026-09-15',
+        'status': 'IN_OFFICE',
+        'isLate': true,
+        'lateMinutes': 12,
+        'excessBreakMinutes': 8,
+        'earlyDepartureMinutes': 0,
+        'unauthorisedMissingMinutes': 0,
+        'approvedAdjustmentMinutes': 5,
+        'dailyDeficitMinutes': 15,
+      });
+
+      expect(a.isLate, isTrue);
+      expect(a.lateMinutes, 12);
+      expect(a.excessBreakMinutes, 8);
+      expect(a.earlyDepartureMinutes, 0);
+      expect(a.unauthorisedMissingMinutes, 0);
+      expect(a.approvedAdjustmentMinutes, 5);
+      expect(a.dailyDeficitMinutes, 15);
+      expect(a.hasDeficit, isTrue);
+    });
+
+    test('a day with only an approved adjustment and no raw deficit reason is still flagged', () {
+      // dailyDeficitMinutes alone (e.g. a manual HR debit with no late/break/
+      // early-departure component) must still surface as a deficit day.
+      final a = Attendance.fromJson({
+        'employeeId': 'emp_abc',
+        'date': '2026-09-16',
+        'dailyDeficitMinutes': 10,
+      });
+      expect(a.hasDeficit, isTrue);
     });
   });
 

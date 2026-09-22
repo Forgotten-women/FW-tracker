@@ -144,9 +144,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+          ),
+          const SizedBox(width: 8),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -551,12 +561,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('First In: ${day.firstCheckIn}', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                  Text('Last Seen: ${day.lastActiveTime}', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  Expanded(
+                    child: Text(
+                      'First In: ${day.firstCheckIn}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Last Seen: ${day.lastActiveTime}',
+                      textAlign: TextAlign.end,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
               Text('Total Worked: ${day.timeWorkedFormatted}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+              if (day.hasDeficit) ...[
+                const SizedBox(height: 14),
+                const Text(
+                  'DEFICIT BREAKDOWN',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: AppColors.textMuted),
+                ),
+                const SizedBox(height: 6),
+                if (day.lateMinutes > 0) _buildDeficitRow('Late arrival time', '${day.lateMinutes} mins'),
+                if (day.excessBreakMinutes > 0) _buildDeficitRow('Excess break time', '${day.excessBreakMinutes} mins'),
+                if (day.earlyDepartureMinutes > 0) _buildDeficitRow('Early departure time', '${day.earlyDepartureMinutes} mins'),
+                if (day.unauthorisedMissingMinutes > 0) _buildDeficitRow('Unauthorised absence', '${day.unauthorisedMissingMinutes} mins'),
+                if (day.approvedAdjustmentMinutes > 0)
+                  _buildDeficitRow('HR Approved Adjustments', '-${day.approvedAdjustmentMinutes} mins', isPositive: true),
+                const SizedBox(height: 4),
+                _buildDeficitRow('Total deficit for this day', '${day.dailyDeficitMinutes} mins'),
+              ],
               const Divider(height: 20, color: AppColors.border),
               if (existingDispute != null) ...[
                 const Text('Dispute History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
@@ -1005,23 +1045,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: s.open ? AppColors.teal : AppColors.textMuted,
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: s.open ? AppColors.teal : AppColors.textMuted,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                '${s.from} → ${s.to}',
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-              ),
-            ],
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    '${s.from} → ${s.to}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
@@ -1031,6 +1078,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             child: Text(
               liveDurationOverride ?? s.duration,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: AppColors.primaryLight, fontSize: 11, fontWeight: FontWeight.bold),
             ),
           ),

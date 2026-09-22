@@ -161,12 +161,15 @@ class AttendanceTimelineCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        day.timeWorkedFormatted.isEmpty ? '0h 0m' : day.timeWorkedFormatted,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                      Flexible(
+                        child: Text(
+                          day.timeWorkedFormatted.isEmpty ? '0h 0m' : day.timeWorkedFormatted,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -193,11 +196,26 @@ class AttendanceTimelineCard extends StatelessWidget {
                     day.firstCheckIn.isEmpty && day.lastActiveTime.isEmpty
                         ? 'No punches recorded'
                         : 'In: ${day.firstCheckIn.isEmpty ? "—" : day.firstCheckIn}  •  Out: ${day.lastActiveTime.isEmpty ? "—" : day.lastActiveTime}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 11,
                       color: AppColors.textMuted,
                     ),
                   ),
+                  if (day.hasDeficit) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠ ${_deficitSummary(day)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.amber,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -207,6 +225,25 @@ class AttendanceTimelineCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// A compact, single-line summary of every non-zero deficit reason for a
+  /// day, e.g. "Late 12m · Break +8m". Approved adjustments are shown too
+  /// (as a reduction) since they're part of the same running total and an
+  /// employee should be able to see they were credited back.
+  String _deficitSummary(Attendance day) {
+    final parts = <String>[];
+    if (day.lateMinutes > 0) parts.add('Late ${day.lateMinutes}m');
+    if (day.excessBreakMinutes > 0) parts.add('Break +${day.excessBreakMinutes}m');
+    if (day.earlyDepartureMinutes > 0) parts.add('Early ${day.earlyDepartureMinutes}m');
+    if (day.unauthorisedMissingMinutes > 0) {
+      parts.add('Missing ${day.unauthorisedMissingMinutes}m');
+    }
+    if (day.approvedAdjustmentMinutes > 0) {
+      parts.add('−${day.approvedAdjustmentMinutes}m adj.');
+    }
+    if (parts.isEmpty) return '${day.dailyDeficitMinutes}m deficit';
+    return parts.join(' · ');
   }
 
   String _extractDayOfWeek(String dateStr) {
