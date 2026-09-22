@@ -30,6 +30,7 @@ test('Over-The-Air (OTA) Updates Domain Logic', async (t) => {
       fileName: 'app-release.apk',
       fileSize: 24500000,
       downloadUrl: 'https://github.com/Abdullah-rethink/Office_tracker/releases/download/v1.0.1/app-release.apk',
+      sha256: 'a'.repeat(64),
       releaseNotes: '• Fixed salary calculation on working days\n• Dark theme fixes on enrollment',
       mandatory: false,
       actor: 'admin',
@@ -38,10 +39,39 @@ test('Over-The-Air (OTA) Updates Domain Logic', async (t) => {
     assert.ok(release.id);
     assert.strictEqual(release.version_name, '1.0.1');
     assert.strictEqual(release.version_code, 2);
+    assert.strictEqual(release.sha256, 'a'.repeat(64));
 
     const list = await OTA.listReleases();
     assert.strictEqual(list.length, 1);
     assert.strictEqual(list[0].versionCode, 2);
+    assert.strictEqual(list[0].sha256, 'a'.repeat(64));
+  });
+
+  await t.test('2b. Android release without a sha256 checksum is rejected', async () => {
+    await assert.rejects(
+      OTA.recordRelease({
+        versionName: '1.0.2',
+        versionCode: 3,
+        platform: 'android',
+        downloadUrl: 'https://example.com/app-release.apk',
+        actor: 'admin',
+      }),
+      /sha256 checksum is required/
+    );
+  });
+
+  await t.test('2c. Malformed sha256 checksum is rejected', async () => {
+    await assert.rejects(
+      OTA.recordRelease({
+        versionName: '1.0.2',
+        versionCode: 3,
+        platform: 'android',
+        downloadUrl: 'https://example.com/app-release.apk',
+        sha256: 'not-a-real-hash',
+        actor: 'admin',
+      }),
+      /64-character hex string/
+    );
   });
 
   await t.test('3. Client on version 1 detects updateAvailable = true, optional', async () => {

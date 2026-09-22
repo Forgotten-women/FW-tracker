@@ -12,6 +12,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_file/open_file.dart';
@@ -30,9 +31,11 @@ import 'token_store.dart';
 
 enum OtaStatus {
   downloading,
+  verifying,
   installing,
   already_running_error,
   permission_not_granted_error,
+  checksum_mismatch_error,
   internal_error,
 }
 
@@ -114,12 +117,26 @@ class OtaService {
     }
   }
 
-  /// Downloads the APK and triggers the native Android package installer.
+  /// Downloads the APK, verifies it against [expectedSha256], and triggers
+  /// the native Android package installer.
+  ///
+  /// [expectedSha256] should come from the release record the backend
+  /// returned for this update (`AppUpdateInfo.sha256`), not from anywhere
+  /// else -- it's what lets a downloaded file be trusted before the system
+  /// installer runs on it, since `downloadUrl` may point anywhere (a GitHub
+  /// Release asset, Supabase storage, ...), not necessarily our own host.
+  /// A null/empty value is treated as a hard failure rather than skipping
+  /// the check, since that would silently reopen the same install-anything
+  /// gap this verification exists to close.
   ///
   /// Yields [OtaEvent] objects with [OtaStatus.downloading] and a [progress]
-  /// value 0-100, then finally [OtaStatus.installing] when the file is handed
-  /// off to the system package-manager.
-  Stream<OtaEvent> downloadAndInstallAndroid(String downloadUrl) async* {
+  /// value 0-100, then [OtaStatus.verifying] while hashing, then finally
+  /// [OtaStatus.installing] when the file is handed off to the system
+  /// package-manager.
+  Stream<OtaEvent> downloadAndInstallAndroid(
+    String downloadUrl, {
+    String? expectedSha256,
+  }) async* {
     if (kIsWeb || !Platform.isAndroid) {
       throw UnsupportedError(
           'In-app APK installation is only supported on Android.');
@@ -150,6 +167,25 @@ class OtaService {
     } catch (e) {
       debugPrint('[OTA] download error: $e');
       yield OtaEvent(OtaStatus.internal_error);
+      return;
+    }
+
+    yield OtaEvent(OtaStatus.verifying);
+
+    final expected = expectedSha256?.trim().toLowerCase() ?? '';
+    if (expected.isEmpty) {
+      debugPrint('[OTA] refusing install: release has no sha256 checksum to verify against');
+      await apkFile.delete().catchError((_) => apkFile);
+      yield OtaEvent(OtaStatus.checksum_mismatch_error);
+      return;
+    }
+
+    final digest = await sha256.bind(apkFile.openRead()).first;
+    final actual = digest.toString();
+    if (actual != expected) {
+      debugPrint('[OTA] checksum mismatch: expected $expected, got $actual');
+      await apkFile.delete().catchError((_) => apkFile);
+      yield OtaEvent(OtaStatus.checksum_mismatch_error);
       return;
     }
 

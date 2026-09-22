@@ -64,6 +64,26 @@ jobs:
           echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "APK generated at forgottenwomen/build/app/outputs/flutter-apk/app-release.apk"
 
+      # The dashboard's "Register Release" form requires this checksum before
+      # a release is offered to Android clients at all -- the in-app OTA
+      # updater refuses to install an APK whose downloaded bytes don't match
+      # it. Computing it here (rather than asking whoever registers the
+      # release to download the asset and hash it by hand) keeps that step
+      # from being skipped or fat-fingered.
+      - name: 🔐 Compute APK SHA-256 checksum
+        id: checksum
+        run: |
+          HASH=$(sha256sum forgottenwomen/build/app/outputs/flutter-apk/app-release.apk | cut -d' ' -f1)
+          echo "sha256=$HASH" >> $GITHUB_OUTPUT
+          echo "$HASH  app-release.apk" > forgottenwomen/build/app/outputs/flutter-apk/app-release.apk.sha256
+          {
+            echo "### 🔐 APK SHA-256 checksum"
+            echo "Paste this into the dashboard's \"Register Release\" form:"
+            echo '```'
+            echo "$HASH"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: 📦 Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -80,7 +100,13 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+          body: |
+            **SHA-256:** `${{ steps.checksum.outputs.sha256 }}`
+
+            Paste this checksum into the dashboard's "Register Release" form along
+            with this release's `app-release.apk` download URL.
           files: |
             forgottenwomen/build/app/outputs/flutter-apk/app-release.apk
+            forgottenwomen/build/app/outputs/flutter-apk/app-release.apk.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

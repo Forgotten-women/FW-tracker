@@ -610,6 +610,7 @@ export interface AppReleaseItem {
   fileName: string | null;
   fileSize: number;
   downloadUrl: string;
+  sha256: string | null;
   releaseNotes: string;
   mandatory: boolean;
   downloadCount: number;

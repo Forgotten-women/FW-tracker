@@ -91,6 +91,7 @@ async function getLatestRelease({ platform = 'android', currentVersionCode = 0 }
       fileName: release.file_name,
       fileSize: release.file_size,
       downloadUrl,
+      sha256: release.sha256 || null,
       releaseNotes: release.release_notes || '',
       downloadCount: release.download_count,
       publishedAt: T.displayTime(release.published_at),
@@ -114,6 +115,7 @@ async function recordRelease({
   fileName,
   fileSize = 0,
   downloadUrl,
+  sha256,
   releaseNotes = '',
   mandatory = false,
   actor = 'admin',
@@ -129,6 +131,19 @@ async function recordRelease({
     throw new Error('downloadUrl is required.');
   }
 
+  const normPlatform = String(platform || 'android').toLowerCase();
+  let normSha256 = null;
+  if (sha256 !== undefined && sha256 !== null && String(sha256).trim() !== '') {
+    normSha256 = String(sha256).trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(normSha256)) {
+      throw new Error('sha256 must be a 64-character hex string.');
+    }
+  } else if (normPlatform === 'android' || normPlatform === 'universal') {
+    // Android installs the downloaded artifact directly, so an unverified
+    // download would defeat the whole point of OTA integrity checking.
+    throw new Error('sha256 checksum is required for android/universal releases.');
+  }
+
   const releaseId = id || 'rel_' + crypto.randomBytes(6).toString('hex');
   const nowMs = T.now();
 
@@ -136,10 +151,11 @@ async function recordRelease({
     id: releaseId,
     version_name: String(versionName).trim(),
     version_code: vCode,
-    platform: String(platform || 'android').toLowerCase(),
+    platform: normPlatform,
     file_name: fileName ? String(fileName).trim() : null,
     file_size: parseInt(fileSize, 10) || 0,
     download_url: String(downloadUrl).trim(),
+    sha256: normSha256,
     release_notes: String(releaseNotes || '').trim(),
     mandatory: mandatory ? 1 : 0,
     published_at: nowMs,
@@ -149,8 +165,8 @@ async function recordRelease({
   await tx(async () => {
     await db.prepare(`
       INSERT INTO app_releases
-        (id, version_name, version_code, platform, file_name, file_size, download_url, release_notes, mandatory, active, published_at, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        (id, version_name, version_code, platform, file_name, file_size, download_url, sha256, release_notes, mandatory, active, published_at, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         version_name = excluded.version_name,
         version_code = excluded.version_code,
@@ -158,6 +174,7 @@ async function recordRelease({
         file_name = excluded.file_name,
         file_size = excluded.file_size,
         download_url = excluded.download_url,
+        sha256 = excluded.sha256,
         release_notes = excluded.release_notes,
         mandatory = excluded.mandatory,
         published_at = excluded.published_at
@@ -169,6 +186,7 @@ async function recordRelease({
       record.file_name,
       record.file_size,
       record.download_url,
+      record.sha256,
       record.release_notes,
       record.mandatory,
       record.published_at,
@@ -201,6 +219,7 @@ async function listReleases() {
     fileName: r.file_name,
     fileSize: r.file_size,
     downloadUrl: r.download_url,
+    sha256: r.sha256 || null,
     releaseNotes: r.release_notes,
     mandatory: !!r.mandatory,
     downloadCount: r.download_count,
@@ -214,7 +233,7 @@ async function listReleases() {
 /**
  * Updates release active status or mandatory flag.
  */
-async function updateRelease(id, { active, mandatory, releaseNotes, actor = 'admin' } = {}) {
+async function updateRelease(id, { active, mandatory, releaseNotes, sha256, actor = 'admin' } = {}) {
   const before = await db.prepare('SELECT * FROM app_releases WHERE id = ?').get(id);
   if (!before) throw new Error('Release not found.');
 
@@ -222,21 +241,34 @@ async function updateRelease(id, { active, mandatory, releaseNotes, actor = 'adm
   const nextMandatory = mandatory !== undefined ? (mandatory ? 1 : 0) : before.mandatory;
   const nextNotes = releaseNotes !== undefined ? String(releaseNotes) : before.release_notes;
 
+  let nextSha256 = before.sha256;
+  if (sha256 !== undefined) {
+    const trimmed = String(sha256 || '').trim().toLowerCase();
+    if (trimmed === '') {
+      nextSha256 = null;
+    } else {
+      if (!/^[0-9a-f]{64}$/.test(trimmed)) {
+        throw new Error('sha256 must be a 64-character hex string.');
+      }
+      nextSha256 = trimmed;
+    }
+  }
+
   await tx(async () => {
-    await db.prepare('UPDATE app_releases SET active = ?, mandatory = ?, release_notes = ? WHERE id = ?')
-      .run(nextActive, nextMandatory, nextNotes, id);
+    await db.prepare('UPDATE app_releases SET active = ?, mandatory = ?, release_notes = ?, sha256 = ? WHERE id = ?')
+      .run(nextActive, nextMandatory, nextNotes, nextSha256, id);
     await audit({
       actor,
       action: 'APP_RELEASE_UPDATED',
       targetType: 'app_release',
       targetId: id,
       before,
-      after: { id, active: !!nextActive, mandatory: !!nextMandatory, releaseNotes: nextNotes },
+      after: { id, active: !!nextActive, mandatory: !!nextMandatory, releaseNotes: nextNotes, sha256: nextSha256 },
     });
   });
-  
 
-  return { id, active: !!nextActive, mandatory: !!nextMandatory, releaseNotes: nextNotes };
+
+  return { id, active: !!nextActive, mandatory: !!nextMandatory, releaseNotes: nextNotes, sha256: nextSha256 };
 }
 
 /**

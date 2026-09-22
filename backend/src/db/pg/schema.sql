@@ -1481,3 +1481,6 @@ CREATE INDEX IF NOT EXISTS idx_payroll_adj_type_source
   ON payroll_adjustments (adjustment_type, source_reference);
 CREATE INDEX IF NOT EXISTS idx_absence_unpaid_lookup
   ON absence_records (employee_id, status, treat_as_unpaid, consequences_applied_at);
+
+-- Migration 023
+ALTER TABLE app_releases ADD COLUMN IF NOT EXISTS sha256 TEXT;

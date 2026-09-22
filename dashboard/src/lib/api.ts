@@ -711,6 +711,7 @@ export const api = {
     fileName?: string;
     fileSize?: number;
     downloadUrl: string;
+    sha256?: string;
     releaseNotes?: string;
     mandatory?: boolean;
   }) =>
@@ -721,7 +722,7 @@ export const api = {
 
   updateRelease: (
     id: string,
-    data: { active?: boolean; mandatory?: boolean; releaseNotes?: string }
+    data: { active?: boolean; mandatory?: boolean; releaseNotes?: string; sha256?: string }
   ) =>
     request<{ status: string; release: AppReleaseItem }>(
       `/api/admin/releases/${encodeURIComponent(id)}`,

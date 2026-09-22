@@ -7,6 +7,7 @@ class AppUpdateInfo {
   final int? versionCode;
   final String? platform;
   final String? downloadUrl;
+  final String? sha256;
   final int? fileSize;
   final String? releaseNotes;
   final String? publishedAt;
@@ -22,6 +23,7 @@ class AppUpdateInfo {
     this.versionCode,
     this.platform,
     this.downloadUrl,
+    this.sha256,
     this.fileSize,
     this.releaseNotes,
     this.publishedAt,
@@ -42,6 +44,7 @@ class AppUpdateInfo {
       versionCode: latest?['versionCode'] as int?,
       platform: latest?['platform'] as String?,
       downloadUrl: latest?['downloadUrl'] as String?,
+      sha256: latest?['sha256'] as String?,
       fileSize: latest?['fileSize'] as int?,
       releaseNotes: latest?['releaseNotes'] as String?,
       publishedAt: latest?['publishedAt'] as String?,

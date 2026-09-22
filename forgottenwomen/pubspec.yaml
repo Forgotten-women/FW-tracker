@@ -49,6 +49,13 @@ dependencies:
   path_provider: ^2.1.5
   flutter_dotenv: ^6.0.1
 
+  # Verifying the downloaded APK's SHA-256 against the release record before
+  # handing it to the system installer -- the backend's download_url can
+  # point anywhere (GitHub Release asset, Supabase storage, ...), so this is
+  # the only thing standing between a compromised/MITM'd download and an
+  # unverified package install.
+  crypto: ^3.0.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -18,6 +18,7 @@ export function OtaPanel() {
   const [versionCode, setVersionCode] = useState('');
   const [platform, setPlatform] = useState('android');
   const [downloadUrl, setDownloadUrl] = useState('');
+  const [sha256, setSha256] = useState('');
   const [releaseNotes, setReleaseNotes] = useState('');
   const [mandatory, setMandatory] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -50,6 +51,10 @@ export function OtaPanel() {
   const handleCreateRelease = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!versionName.trim() || !versionCode || !downloadUrl.trim()) return;
+    if ((platform === 'android' || platform === 'universal') && !/^[0-9a-fA-F]{64}$/.test(sha256.trim())) {
+      setError('A valid 64-character SHA-256 checksum of the APK is required for Android/universal releases.');
+      return;
+    }
 
     setSubmitting(true);
     setError('');
@@ -59,6 +64,7 @@ export function OtaPanel() {
         versionCode: parseInt(versionCode, 10),
         platform,
         downloadUrl: downloadUrl.trim(),
+        sha256: sha256.trim() || undefined,
         releaseNotes: releaseNotes.trim(),
         mandatory,
       });
@@ -67,6 +73,7 @@ export function OtaPanel() {
       setVersionName('');
       setVersionCode('');
       setDownloadUrl('');
+      setSha256('');
       setReleaseNotes('');
       setMandatory(false);
       await loadData();
@@ -92,6 +99,25 @@ export function OtaPanel() {
       await loadData();
     } catch (e: any) {
       setError(e?.message || 'Failed to update release');
+    }
+  };
+
+  const handleSetChecksum = async (release: AppReleaseItem) => {
+    const input = window.prompt(
+      `Enter the SHA-256 checksum of the APK for v${release.versionName} (#${release.versionCode}):`,
+      release.sha256 || ''
+    );
+    if (input === null) return;
+    const trimmed = input.trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+      setError('Checksum must be a 64-character hex string.');
+      return;
+    }
+    try {
+      await api.updateRelease(release.id, { sha256: trimmed });
+      await loadData();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to update checksum');
     }
   };
 
@@ -234,6 +260,20 @@ export function OtaPanel() {
                       <div className="text-[10px] text-slate-400 truncate max-w-[200px]" title={r.downloadUrl}>
                         {r.downloadUrl}
                       </div>
+                      {(r.platform === 'android' || r.platform === 'universal') && (
+                        r.sha256 ? (
+                          <div className="mt-0.5 text-[9px] font-mono text-emerald-400/80" title={r.sha256}>
+                            sha256 ✓ {r.sha256.slice(0, 10)}…
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleSetChecksum(r)}
+                            className="mt-0.5 text-[9px] font-bold text-rose-400 hover:text-rose-300 underline decoration-dotted"
+                          >
+                            ⚠️ no checksum — phones will refuse this update. Click to add.
+                          </button>
+                        )
+                      )}
                     </td>
                     <td className="py-3.5 px-4">
                       <span className="inline-flex rounded-md bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-300 border border-indigo-500/20">
@@ -436,6 +476,24 @@ export function OtaPanel() {
                   placeholder="https://github.com/owner/repo/releases/download/v1.0.1/app-release.apk"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-300">
+                  SHA-256 Checksum {(platform === 'android' || platform === 'universal') && '*'}
+                </label>
+                <Input
+                  value={sha256}
+                  onChange={(e) => setSha256(e.target.value)}
+                  placeholder="64-character hex digest of the APK, e.g. sha256sum app-release.apk"
+                  className="font-mono"
+                  required={platform === 'android' || platform === 'universal'}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  The phone verifies the downloaded APK against this hash before installing it —
+                  without a match, the update is rejected. The GitHub Actions mobile build prints
+                  this value in its job summary.
+                </p>
               </div>
 
               <div>

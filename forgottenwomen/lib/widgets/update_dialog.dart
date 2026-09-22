@@ -81,7 +81,9 @@ class _UpdateDialogState extends State<UpdateDialog> {
     });
 
     try {
-      _otaService.downloadAndInstallAndroid(url).listen(
+      _otaService
+          .downloadAndInstallAndroid(url, expectedSha256: widget.updateInfo.sha256)
+          .listen(
         (OtaEvent event) {
           if (!mounted) return;
           switch (event.status) {
@@ -90,6 +92,11 @@ class _UpdateDialogState extends State<UpdateDialog> {
               setState(() {
                 _progress = p;
                 _statusText = 'Downloading update… $p%';
+              });
+              break;
+            case OtaStatus.verifying:
+              setState(() {
+                _statusText = 'Verifying download…';
               });
               break;
             case OtaStatus.installing:
@@ -107,6 +114,12 @@ class _UpdateDialogState extends State<UpdateDialog> {
               setState(() {
                 _downloading = false;
                 _errorMessage = 'Permission to install unknown packages was denied. Please allow it in device settings.';
+              });
+              break;
+            case OtaStatus.checksum_mismatch_error:
+              setState(() {
+                _downloading = false;
+                _errorMessage = 'The downloaded update failed a security check and was discarded. Please try again later or contact HR.';
               });
               break;
             case OtaStatus.internal_error:
