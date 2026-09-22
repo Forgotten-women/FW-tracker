@@ -490,6 +490,16 @@ fn main() {
                 let mut app_breakdown: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
                 let mut latest_app: Option<String> = None;
                 let mut first_run = true;
+                // Real elapsed time since the previous tick, not the loop's own
+                // nominal 10s sleep interval. tokio's sleep (like any timer) does
+                // not advance while the OS itself is suspended, so a laptop that
+                // sleeps for 20 minutes over lunch previously resumed this loop
+                // with exactly one tick having passed -- crediting only 10 of
+                // those ~1200 real seconds to either active or idle, silently
+                // losing the rest. Every employee's workstation shows this same
+                // shape of gap against the phone/Wi-Fi presence figure, which is
+                // tracked independently and doesn't have this failure mode.
+                let mut last_tick_at = std::time::Instant::now();
 
                 loop {
                     let state = app_handle.state::<AppState>();
@@ -530,11 +540,33 @@ fn main() {
                     sleep(Duration::from_secs(10)).await;
                     sample_count += 1;
 
+                    // The real gap since the last tick, not an assumed 10s. Under
+                    // normal operation this IS ~10s; after a sleep/suspend/resume
+                    // (or any other stall that parks this async task) it can be
+                    // far larger, and that whole gap must be accounted for
+                    // somewhere rather than silently discarded. Clamped so one
+                    // freak stall (system asleep for hours, clock changed) can't
+                    // dump an implausible multi-hour credit into a single day's
+                    // total; 3600s already comfortably covers a real lunch-break
+                    // sleep, and anything beyond that is capped rather than lost.
+                    let now_instant = std::time::Instant::now();
+                    let elapsed_secs = now_instant
+                        .duration_since(last_tick_at)
+                        .as_secs()
+                        .clamp(1, 3600);
+                    last_tick_at = now_instant;
+
                     if cfg.token.is_empty() {
                         continue;
                     }
 
                     let idle_secs = tracker::idle::get_idle_seconds();
+                    // Refreshes IS_LOCKED/LOCKED_SINCE before reading them, so
+                    // get_lock_state() below (and every other reader of it --
+                    // the screenshot task, get_app_status) reflects real lock
+                    // state instead of the permanently-UNLOCKED default this
+                    // never having been called left it at.
+                    tracker::session::set_screen_locked(tracker::session::poll_is_locked());
                     let (lock_state, lock_duration) = tracker::session::get_lock_state();
                     let bssid = tracker::network::get_connected_bssid();
                     let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
@@ -546,18 +578,23 @@ fn main() {
                             .unwrap_or(true)
                     };
 
-                    // Track active vs idle seconds in 10s slice
+                    // Track active vs idle seconds using the real elapsed time for
+                    // this tick. A stall long enough to push idle_secs past the
+                    // threshold (which includes a sleep/suspend gap, since
+                    // GetLastInputInfo's reference clock keeps advancing through
+                    // suspend) is correctly attributed to idle in full, rather
+                    // than only 10 of its actual seconds.
                     if is_break || lock_duration > 300 || idle_secs >= 300 {
-                        accumulated_idle += 10;
+                        accumulated_idle += elapsed_secs;
                     } else {
-                        accumulated_active += 10;
+                        accumulated_active += elapsed_secs;
                         if app_tracking_allowed {
                             if let Some((proc_name, title)) = tracker::process::get_foreground_window_info() {
                                 let app_name = tracker::process::parse_active_application(&proc_name, &title);
                                 latest_app = Some(app_name.clone());
-                                *app_breakdown.entry(app_name).or_insert(0) += 10;
+                                *app_breakdown.entry(app_name).or_insert(0) += elapsed_secs;
                             } else {
-                                *app_breakdown.entry("Desktop Active".to_string()).or_insert(0) += 10;
+                                *app_breakdown.entry("Desktop Active".to_string()).or_insert(0) += elapsed_secs;
                             }
                         } else {
                             latest_app = Some("Active Workstation".to_string());
