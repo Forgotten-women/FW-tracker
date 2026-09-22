@@ -67,6 +67,21 @@
         <div class="timer-label" id="timer-label">TODAY'S ACTIVE TIME</div>
         <div class="timer-display" id="active-timer">00:00:00</div>
 
+        <!-- Office Presence (phone app + office Wi-Fi verification) shown
+             alongside this agent's own Active Time, since the two measure
+             different things and can legitimately disagree: Active Time
+             excludes any stretch with no keyboard/mouse input (idle, screen
+             locked, the PC asleep), while Office Presence stays continuous
+             as long as the phone is confirmed on the office network. The gap
+             note below explains a large difference instead of leaving it
+             unexplained. -->
+        <div class="presence-row" id="presence-row">
+          <span class="presence-icon">📶</span>
+          <span class="presence-label">Office Presence</span>
+          <span class="presence-value" id="presence-value">--</span>
+        </div>
+        <div id="presence-gap-note" class="presence-gap-note hidden"></div>
+
         <!-- Live Break Remaining Countdown (appears when on break) -->
         <div id="break-countdown-wrap" class="break-countdown-wrap hidden">
           <div class="break-countdown-header">

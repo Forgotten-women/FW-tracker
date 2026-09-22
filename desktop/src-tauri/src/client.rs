@@ -78,6 +78,15 @@ pub struct SessionStats {
     pub break_started_at: Option<u64>,
     #[serde(default)]
     pub break_remaining_seconds: Option<i64>,
+    // Office presence (phone app + Wi-Fi/BSSID verification), independent of
+    // this agent's own active_seconds -- the same figure the HR dashboard
+    // and payroll use. #[serde(default)] so an older backend or a request
+    // that hit the try/catch fallback (see backend/src/routes/desktop.js)
+    // and omitted/nulled these fields doesn't fail deserialization.
+    #[serde(default)]
+    pub office_presence_minutes: Option<i64>,
+    #[serde(default)]
+    pub office_presence_formatted: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { db, tx, audit } = require('../db');
 const { requireDevice } = require('../middleware/auth');
 const presence = require('../domain/presence');
+const attendance = require('../domain/attendance');
 const schedule = require('../domain/schedule');
 const T = require('../util/time');
 const { config } = require('../config');
@@ -417,6 +418,21 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     ? Math.max(0, (breakPermittedMinutes * 60) - Math.round((nowMs - openBreakRecord.started_at) / 1000))
     : 0;
 
+  // Office presence time (phone app + Wi-Fi/BSSID verification) -- a
+  // deliberately separate figure from this agent's own activeSeconds above.
+  // The desktop agent only knows keyboard/mouse activity on THIS machine;
+  // presence is tracked independently via presence_events and is what the HR
+  // dashboard and payroll actually use. Surfaced here so the desktop widget
+  // can show both side by side instead of an employee only ever seeing the
+  // (often lower) workstation-only figure with no context for the gap.
+  let officePresenceMinutes = null;
+  let officePresenceFormatted = null;
+  try {
+    const day = await attendance.deriveDay(employeeId, dateKey, nowMs);
+    officePresenceMinutes = day.workedMinutes;
+    officePresenceFormatted = T.formatMinutes(day.workedMinutes);
+  } catch (_) {}
+
   // Check if an authorized HR stream request is active (requested within last 25s)
   let liveStreamRequested = false;
   try {
@@ -454,6 +470,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       breakPermittedMinutes,
       breakStartedAt,
       breakRemainingSeconds,
+      officePresenceMinutes,
+      officePresenceFormatted,
     },
     policy: {
       idleThresholdMinutes: idleThresholdMins,

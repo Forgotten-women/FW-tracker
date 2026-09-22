@@ -241,6 +241,12 @@ fn main() {
                 break_permitted_minutes: Some(30),
                 break_started_at: None,
                 break_remaining_seconds: None,
+                // No real backend response yet at instant-launch time (this
+                // is the cached-from-last-session placeholder), so there is
+                // no fresh presence figure to show until the first real
+                // heartbeat replaces it.
+                office_presence_minutes: None,
+                office_presence_formatted: None,
             },
             policy: client::PolicySettings::default(),
         })

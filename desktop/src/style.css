@@ -216,6 +216,40 @@ input:focus {
   letter-spacing: 1px;
 }
 
+.presence-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(51, 65, 85, 0.6);
+  font-size: 12px;
+}
+
+.presence-icon {
+  font-size: 12px;
+}
+
+.presence-label {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.presence-value {
+  color: #38bdf8;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.presence-gap-note {
+  font-size: 10.5px;
+  color: #f59e0b;
+  text-align: center;
+  margin-top: 4px;
+  line-height: 1.3;
+}
+
 .break-countdown-wrap {
   margin-top: 12px;
   padding-top: 10px;

@@ -69,6 +69,8 @@ const undoCheckoutWrap = document.getElementById('undo-checkout-wrap');
 const undoTimerNum = document.getElementById('undo-timer-num');
 const undoCheckoutBtn = document.getElementById('undo-checkout-btn');
 const activeTimer = document.getElementById('active-timer');
+const presenceValue = document.getElementById('presence-value');
+const presenceGapNote = document.getElementById('presence-gap-note');
 const statBreak = document.getElementById('stat-break');
 const statIdle = document.getElementById('stat-idle');
 const statusBanner = document.getElementById('status-banner');
@@ -262,6 +264,38 @@ async function refreshStatus() {
 
         if (data.latest && data.latest.today && checkinText) {
           checkinText.textContent = `Check-in: ${data.latest.today.checkInTime || 'Not Recorded'}`;
+        }
+
+        // Office Presence (phone + Wi-Fi verified) alongside this agent's own
+        // Active Time. Backend omits/nulls these fields if it couldn't
+        // resolve presence for some reason -- shown as "--" rather than a
+        // stale or misleading number in that case.
+        if (presenceValue) {
+          const presenceMins = data.latest.today.officePresenceMinutes;
+          if (presenceMins === null || presenceMins === undefined) {
+            presenceValue.textContent = '--';
+            if (presenceGapNote) presenceGapNote.classList.add('hidden');
+          } else {
+            presenceValue.textContent = data.latest.today.officePresenceFormatted
+              || formatHMS(presenceMins * 60);
+
+            // A gap of 10+ minutes between the two is worth explaining --
+            // it almost always means idle/locked/asleep time that presence
+            // (continuous as long as the phone stays on office Wi-Fi) counts
+            // but this agent's own Active Time does not.
+            const activeMins = Math.floor(currentActiveSecs / 60);
+            const gapMins = presenceMins - activeMins;
+            if (presenceGapNote) {
+              if (gapMins >= 10) {
+                presenceGapNote.textContent =
+                  `ℹ️ ${gapMins}m more presence than active time -- likely idle, `
+                  + `screen-locked, or sleep time while still on office Wi-Fi.`;
+                presenceGapNote.classList.remove('hidden');
+              } else {
+                presenceGapNote.classList.add('hidden');
+              }
+            }
+          }
         }
 
         const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
