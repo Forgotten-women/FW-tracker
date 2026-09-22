@@ -1473,3 +1473,11 @@ CREATE TABLE IF NOT EXISTS document_download_grants (
   expires_at   BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_doc_grants_expires ON document_download_grants (expires_at);
+
+-- Migration 022
+CREATE INDEX IF NOT EXISTS idx_payroll_adj_employee_type
+  ON payroll_adjustments (employee_id, adjustment_type);
+CREATE INDEX IF NOT EXISTS idx_payroll_adj_type_source
+  ON payroll_adjustments (adjustment_type, source_reference);
+CREATE INDEX IF NOT EXISTS idx_absence_unpaid_lookup
+  ON absence_records (employee_id, status, treat_as_unpaid, consequences_applied_at);

@@ -482,6 +482,45 @@ async function balanceFor(employeeId, nowMs = T.now(), includeToday = true) {
   };
 }
 
+const selectLedgerAsOf = db.prepare(`
+  SELECT * FROM attendance_deficit_ledger
+  WHERE employee_id = ? AND created_at < ?
+  ORDER BY created_at DESC, id DESC LIMIT 1
+`);
+
+/**
+ * Point-in-time deficit balance, for payroll: "as it stood through the end of
+ * dateKey", not "right now" like balanceFor(). balanceFor always reads the
+ * latest row regardless of when it was posted, which would leak deficit
+ * accrued after a payroll period's end date (e.g. processing a September
+ * period a few days into October) into that period's deduction.
+ *
+ * Bounded by created_at -- the ledger's real insertion order, which is what
+ * balance_after is actually cumulative over -- rather than date_key: a
+ * backdated HR_ADJUSTMENT or CORRECTION can carry an arbitrary date_key, but
+ * its balance_after still reflects the running total at the moment it was
+ * actually inserted, so date_key alone is not a safe cutoff.
+ */
+async function balanceAsOf(employeeId, dateKey) {
+  const cutoffMs = T.endOfDay(dateKey);
+  const row = await selectLedgerAsOf.get(employeeId, cutoffMs);
+  const dayEquivalent = (await schedule.resolve(employeeId, dateKey)).dayEquivalentMinutes;
+
+  if (!row) {
+    return { balanceMinutes: 0, wholeDayEquivalents: 0, carryForwardMinutes: 0, dayEquivalentMinutes: dayEquivalent };
+  }
+
+  const balance = Math.max(0, row.balance_after);
+  return {
+    balanceMinutes: balance,
+    // Re-derived from the row's own balance rather than trusting its stored
+    // whole_days_after, in case dayEquivalentMinutes has changed since.
+    wholeDayEquivalents: Math.floor(balance / dayEquivalent),
+    carryForwardMinutes: balance % dayEquivalent,
+    dayEquivalentMinutes: dayEquivalent,
+  };
+}
+
 async function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { createdBy = 'system' } = {}) {
   const existing = await selectLedgerForDay.get(employeeId, dateKey);
   // Recomputing a day must adjust by the difference, not post the whole figure
@@ -883,7 +922,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
 module.exports = {
   deriveDay, recomputeDay, present,
   startBreak, endBreak,
-  balanceFor, postDeficit, adjustBalance,
+  balanceFor, balanceAsOf, postDeficit, adjustBalance,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,
 };

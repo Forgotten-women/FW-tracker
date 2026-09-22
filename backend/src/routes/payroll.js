@@ -171,6 +171,20 @@ router.get('/periods/:id/prepare', requirePermission('payroll.read'), async (req
   }
 });
 
+// Turns the unpaid-days preview the prepare sheet already shows into real
+// PROPOSED adjustments. Deliberately a separate explicit action (not a side
+// effect of GET .../prepare) and gated on payroll.approve rather than
+// payroll.read -- generating deductions for the whole period is closer in
+// weight to closing it than to a single manual adjustment. Safe to call more
+// than once; a second call creates nothing new.
+router.post('/periods/:id/generate-deductions', requirePermission('payroll.approve'), async (req, res) => {
+  try {
+    res.json({ status: 'SUCCESS', ...await PR.generatePeriodDeductions({ periodId: req.params.id, actor: getActor(req) }) });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 router.post('/periods/:id/close', requirePermission('payroll.approve'), async (req, res) => {
   try {
     res.json({ status: 'SUCCESS', ...await PR.closePeriod({ periodId: req.params.id, actor: getActor(req) }) });

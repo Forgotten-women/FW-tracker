@@ -91,9 +91,12 @@ test('Employee Payroll Statements Domain & Policy Gating', async (t) => {
     assert.equal(aug.name, 'August 2026 Payroll');
     assert.equal(aug.monthlyGross, 200000);
     assert.equal(aug.workingDaysCount, 21);
-    assert.equal(aug.basePayable, 193846.15);
+    // A full-period employee (started well before August) is paid the whole
+    // monthly salary as the undeducted baseline, not a re-derivation from a
+    // day count -- that re-derivation is the bug this feature fixes.
+    assert.equal(aug.basePayable, 200000);
     assert.equal(aug.adjustmentsTotal, 15000);
-    assert.equal(aug.netPayable, 208846.15);
+    assert.equal(aug.netPayable, 215000);
     assert.equal(aug.exchangeRate, 360.0);
     assert.equal(aug.adjustments.length, 1);
     assert.equal(aug.adjustments[0].type, 'OVERTIME');
