@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Office Tracker",
-    "version": "1.0.26"
+    "version": "1.0.27"
   },
   "tauri": {
     "allowlist": {
@@ -45,6 +45,17 @@
     },
     "security": {
       "csp": null
+    },
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZGMDc5RUM0MTdEODAzNTMKUldSVEE5Z1h4SjRIYjc0bGtPRzUvMGFzOS91L3piUFBhaDdPbGw2ZkxySUxMdWVLY0M4ZUFvdkoK",
+      "endpoints": [
+        "https://github.com/Forgotten-women/FW-tracker/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "quiet"
+      }
     },
     "systemTray": {
       "iconPath": "icons/icon.png",

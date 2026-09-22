@@ -80,7 +80,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code-signing (optional – leave empty to skip)
+          # macOS code-signing/notarization (optional – leave empty to skip).
           # For production, set these in GitHub → Settings → Secrets:
           # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -88,15 +88,23 @@ jobs:
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          # TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          #
+          # Updater signing -- REQUIRED for auto-update. tauri.conf.json's
+          # updater.pubkey is the public half of this same keypair (generated
+          # via `npx @tauri-apps/cli signer generate`); without these two
+          # secrets set in GitHub → Settings → Secrets and variables →
+          # Actions, this build step produces installers but no signature,
+          # and every running app's silent update check will simply find
+          # nothing valid to install.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
           tauriScript: npx @tauri-apps/cli
           args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }}
           includeDebug: false
           includeRelease: true
-          includeUpdaterJson: false
+          includeUpdaterJson: true
 
       # ── 9. Determine artifact paths ───────────────────────────────────────────
       - name: 📍 Find built installer(s)
@@ -158,8 +166,12 @@ jobs:
           fail_on_unmatched_files: false
           files: |
             desktop/src-tauri/target/**/bundle/msi/*.msi
+            desktop/src-tauri/target/**/bundle/msi/*.msi.zip
+            desktop/src-tauri/target/**/bundle/msi/*.msi.zip.sig
             desktop/src-tauri/target/**/bundle/nsis/*.exe
             desktop/src-tauri/target/**/bundle/dmg/*.dmg
             desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz
+            desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
+            desktop/src-tauri/target/**/latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

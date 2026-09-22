@@ -13,6 +13,11 @@ backend/node_modules/
 secrets.h
 firmware/**/secrets.h
 backend/config/office.local.json
+# Tauri updater signing key (generated via `npx @tauri-apps/cli signer
+# generate`) -- private half must only ever live as a GitHub Actions secret,
+# never in the repo. Only the .pub half's contents belong in tauri.conf.json.
+desktop/*.key
+desktop/*.key.pub
 
 # Runtime data — contains employee PII (names, MACs, movement logs).
 # Must never be committed. See backend/data/README.md

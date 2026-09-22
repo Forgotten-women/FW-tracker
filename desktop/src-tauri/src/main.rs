@@ -307,6 +307,41 @@ fn main() {
                     .show();
             }
 
+            // Silent auto-update. tauri.conf.json sets updater.dialog=false and
+            // windows.installMode="quiet", so this is the only trigger --
+            // Tauri's own update-prompt UI is disabled by that config, and
+            // nothing else calls the updater. A confirmed update is verified
+            // against updater.pubkey before anything is installed (built into
+            // download_and_install()), so a compromised or MITM'd download
+            // can't silently replace the app -- only a release actually signed
+            // with the matching private key (kept only as a GitHub Actions
+            // secret, never in this repo) will be accepted.
+            let app_handle_updater = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    match tauri::updater::builder(app_handle_updater.clone()).check().await {
+                        Ok(update) if update.is_update_available() => {
+                            println!(
+                                "[updater] {} available (current {}); installing silently",
+                                update.latest_version(),
+                                update.current_version()
+                            );
+                            if let Err(e) = update.download_and_install().await {
+                                eprintln!("[updater] install failed: {}", e);
+                            }
+                            // A successful install restarts the app itself, so
+                            // there is nothing further to do on this path.
+                        }
+                        Ok(_) => {}
+                        Err(e) => eprintln!("[updater] check failed: {}", e),
+                    }
+                    // Frequent enough that a new release reaches every
+                    // workstation within the working day; infrequent enough
+                    // not to hammer GitHub's release API from every machine.
+                    sleep(Duration::from_secs(6 * 60 * 60)).await;
+                }
+            });
+
             // Dedicated Fast Live Screen Stream Worker (sub-second 3-4 FPS real-time streaming)
             let app_handle_stream = app_handle.clone();
             tauri::async_runtime::spawn(async move {
