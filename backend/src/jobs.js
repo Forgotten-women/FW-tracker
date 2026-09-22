@@ -62,22 +62,28 @@ async function detectTransitions(nowMs = T.now()) {
 // Day rollover
 // ---------------------------------------------------------------------------
 
-let lastRolloverKey = null;
-
 /**
  * At local midnight, finalise the day that just ended.
  *
  * Sessions are already bounded by the day window in the derivation, so nothing
  * can run away here - this marks the day closed and recomputes it one last
  * time so the cached row is final.
+ *
+ * Idempotency is checked against audit_log rather than an in-memory pointer:
+ * on Vercel this can be invoked by a cron hit landing on any Lambda instance,
+ * with no memory of a prior tick, so an in-process "have I already rolled
+ * today over" flag would never advance and this would silently never run in
+ * production (this is exactly what was happening -- see
+ * backend/src/routes/cron.js). A durable check makes repeated/concurrent
+ * invocations for the same day a safe no-op instead.
  */
 async function rollover(nowMs = T.now()) {
-  const todayKey = T.dateKey(nowMs);
-  if (lastRolloverKey === null) { lastRolloverKey = todayKey; return; }
-  if (lastRolloverKey === todayKey) return;
+  const closedKey = T.dateKey(nowMs - DAY_MS);
 
-  const closedKey = lastRolloverKey;
-  lastRolloverKey = todayKey;
+  const already = await db.prepare(
+    "SELECT 1 FROM audit_log WHERE action = 'DAY_ROLLOVER' AND target_id = ? LIMIT 1"
+  ).get(closedKey);
+  if (already) return;
 
   const employees = await db.prepare('SELECT id, name FROM employees WHERE active = 1').all();
   let closed = 0;
@@ -457,36 +463,44 @@ async function scanAbsences(nowMs = T.now()) {
 
 let timer = null;
 
-async function start() {
-  const tick = async () => {
-    const nowMs = T.now();
-    try {
-      await rollover(nowMs);
-      // Before transitions, so an employee whose binding has just lapsed is
-      // evaluated against the new reality rather than a stale one.
-      const expired = await bindings.expireStale(nowMs);
-      if (expired) console.log(`[jobs] ${expired} MAC binding(s) expired without reconfirmation`);
-      await detectTransitions(nowMs);
-      await evaluateWarnings(nowMs);
-      await scanAbsences(nowMs);
-      await sendAttendanceReminders(nowMs);
-      await sendBreakReminders(nowMs);
-      await accrueLeave(nowMs);
-      await notifyHrAlerts(nowMs);
-      await retention(nowMs);
-      void await nightlyBackup(nowMs);
-    } catch (err) {
-      // A failing maintenance tick must never take the server down.
-      console.error('[jobs] tick failed:', err.message);
-    }
-  };
+/**
+ * The full maintenance sweep: rollover, MAC-binding expiry, transitions,
+ * warnings, absence scan, reminders, leave accrual, HR alerts, retention,
+ * backup. Shared between the self-hosted setInterval loop below (every 60s;
+ * each individual job's own idempotency guard makes the extra calls cheap
+ * no-ops) and the Vercel Cron endpoint (backend/src/routes/cron.js), which
+ * has no persistent process to run a loop in and instead calls this once
+ * per invocation.
+ */
+async function runMaintenanceTick(nowMs = T.now()) {
+  try {
+    await rollover(nowMs);
+    // Before transitions, so an employee whose binding has just lapsed is
+    // evaluated against the new reality rather than a stale one.
+    const expired = await bindings.expireStale(nowMs);
+    if (expired) console.log(`[jobs] ${expired} MAC binding(s) expired without reconfirmation`);
+    await detectTransitions(nowMs);
+    await evaluateWarnings(nowMs);
+    await scanAbsences(nowMs);
+    await sendAttendanceReminders(nowMs);
+    await sendBreakReminders(nowMs);
+    await accrueLeave(nowMs);
+    await notifyHrAlerts(nowMs);
+    await retention(nowMs);
+    void await nightlyBackup(nowMs);
+  } catch (err) {
+    // A failing maintenance tick must never take the server (or the cron
+    // request) down.
+    console.error('[jobs] tick failed:', err.message);
+  }
+}
 
+async function start() {
   // Prime the status map so the first tick does not emit a burst of spurious
   // DEPARTED entries for everyone who is legitimately away.
   await detectTransitions(T.now());
-  lastRolloverKey = T.dateKey();
 
-  timer = setInterval(tick, TICK_MS);
+  timer = setInterval(() => runMaintenanceTick(T.now()), TICK_MS);
   timer.unref();
   console.log(`[jobs] maintenance running every ${TICK_MS / 1000}s (rollover, retention, backup)`);
 }
@@ -496,4 +510,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, nightlyBackup, sendAttendanceReminders };
+module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, nightlyBackup, sendAttendanceReminders, runMaintenanceTick };

@@ -136,6 +136,7 @@ app.use('/api/app', require('./routes/ota'));                   // OTA app versi
 app.use('/api', require('./routes/ota'));                       // admin OTA releases
 app.use('/api/dashboard', require('./routes/dashboard'));      // admin
 app.use('/api/admin', require('./routes/admin'));              // admin
+app.use('/api/cron', require('./routes/cron'));                // Vercel Cron trigger for scheduled maintenance
 
 // Express 4 ignores the promise an async handler returns, so a rejection
 // leaves the request hanging with no response rather than producing a 500.

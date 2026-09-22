@@ -18,5 +18,11 @@
       "src": "/(.*)",
       "dest": "api/index.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/daily",
+      "schedule": "0 19 * * *"
+    }
   ]
 }
