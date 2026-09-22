@@ -14,6 +14,7 @@ mod tracker {
 mod tray;
 
 use client::{AppConfig, HeartbeatPayload, HeartbeatResponse};
+use db::OfflineStore;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{Manager, State};
@@ -95,6 +96,10 @@ fn capture_screen_frame() -> Option<String> {
 struct AppState {
     config: Mutex<AppConfig>,
     latest_response: Mutex<Option<HeartbeatResponse>>,
+    // Durable local queue for heartbeats that failed to send (backend
+    // outage / no network), so a crash or restart during that outage
+    // doesn't silently lose the accumulated work time -- see db.rs.
+    offline_store: OfflineStore,
 }
 
 #[tauri::command]
@@ -209,6 +214,8 @@ fn main() {
 
     autostart::ensure_autostart_registered();
     let initial_config = client::load_config();
+    let offline_store = tauri::async_runtime::block_on(OfflineStore::init(client::offline_db_path()))
+        .expect("failed to initialize local offline-event store");
 
     let now_date_key = chrono::Local::now().format("%Y-%m-%d").to_string();
     let initial_latest_response = if !initial_config.cached_date_key.is_empty()
@@ -245,6 +252,7 @@ fn main() {
         .manage(AppState {
             config: Mutex::new(initial_config.clone()),
             latest_response: Mutex::new(initial_latest_response),
+            offline_store,
         })
         .system_tray(tray::create_tray())
         .on_system_tray_event(tray::handle_tray_event)
@@ -277,6 +285,20 @@ fn main() {
                     let _ = window.center();
                     let _ = window.set_focus();
                 }
+            }
+
+            // An already-enrolled device starts with the window hidden and only
+            // a tray icon visible (see the branch above and the CloseRequested
+            // handler at the bottom of this file, which hides rather than
+            // closes). With no other signal, that's indistinguishable from
+            // covert background monitoring. Surface a native OS notification on
+            // every launch so the person at the keyboard is told monitoring has
+            // started for this session, not just once at enrollment time.
+            if !initial_config.token.is_empty() {
+                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                    .title("Office Tracker")
+                    .body("Monitoring has started for this session. Right-click the tray icon for status and options.")
+                    .show();
             }
 
             // Dedicated Fast Live Screen Stream Worker (sub-second 3-4 FPS real-time streaming)
@@ -576,6 +598,7 @@ fn main() {
                             current_app: latest_app.clone(),
                             app_breakdown: if app_breakdown.is_empty() { None } else { Some(app_breakdown.clone()) },
                         };
+                        let payload_for_retry = payload.clone();
                         match client::send_heartbeat(&cfg, payload).await {
                             Ok(resp) => {
                                 accumulated_active = 0;
@@ -607,9 +630,57 @@ fn main() {
                                 if !final_resp.in_office && !visible.is_empty() {
                                     tracker::network::auto_connect_office_wifi();
                                 }
+
+                                // Backend is reachable again: opportunistically drain anything
+                                // queued from a prior outage. Each queued entry is a past 60s
+                                // delta, so replaying it as its own heartbeat call is safe -- the
+                                // backend adds active/idle seconds incrementally per call, exactly
+                                // like the live tick above.
+                                if let Ok(queued) = state.offline_store.fetch_unsynced(10).await {
+                                    for evt in queued {
+                                        if evt.event_type != "heartbeat" {
+                                            continue;
+                                        }
+                                        match serde_json::from_str::<HeartbeatPayload>(&evt.payload) {
+                                            Ok(queued_payload) => {
+                                                match client::send_heartbeat(&cfg, queued_payload).await {
+                                                    Ok(_) => {
+                                                        let _ = state.offline_store.mark_synced(&evt.event_id).await;
+                                                    }
+                                                    Err(_) => {
+                                                        let _ = state.offline_store.increment_retry(&evt.event_id).await;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {
+                                                // Corrupt entry; drop it rather than retrying it forever.
+                                                let _ = state.offline_store.mark_synced(&evt.event_id).await;
+                                            }
+                                        }
+                                    }
+                                }
+                                let _ = state.offline_store.cleanup_synced(7 * 24 * 60 * 60 * 1000).await;
                             }
                             Err(e) => {
-                                eprintln!("[tracker] Heartbeat delivery failed (internet outage?): {e}. Preserving accumulated work time for automatic catch-up on reconnect.");
+                                eprintln!("[tracker] Heartbeat delivery failed (internet outage?): {e}. Queuing this interval to the local offline store instead of holding it only in memory.");
+                                // Durably persist this interval so a crash/restart during the
+                                // outage can't silently lose it, then reset the in-memory
+                                // accumulators -- the next interval starts a fresh 60s window
+                                // instead of growing an ever-larger in-memory-only bucket.
+                                match serde_json::to_string(&payload_for_retry) {
+                                    Ok(json) => {
+                                        if state.offline_store.queue_event("heartbeat", &json).await.is_ok() {
+                                            accumulated_active = 0;
+                                            accumulated_idle = 0;
+                                            app_breakdown.clear();
+                                        }
+                                        // If the disk write itself failed, keep accumulating in
+                                        // memory and retry queuing next cycle rather than
+                                        // dropping this interval's data outright.
+                                    }
+                                    Err(_) => {}
+                                }
                             }
                         }
                     }

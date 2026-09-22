@@ -1265,6 +1265,20 @@ function PeriodDetailView({
           )}
 
           {/* Adjustments Panel */}
+          {(() => {
+            // adj.calculated/approved.amount carries no currency of its own
+            // -- it was computed in the employee's own base salary currency,
+            // same as every other figure on this sheet. Without this lookup,
+            // formatMoney silently defaulted every row here to GBP-sourced
+            // conversion regardless of the employee's actual currency, and
+            // used the hardcoded DEFAULT_PKR_RATE instead of this period's
+            // own exchangeRate (periodRate) -- so in PKR view these two
+            // columns could show a different rate/currency than the rest of
+            // the sheet an HR reviewer is looking at for the same period.
+            const employeeCurrencyById = new Map(
+              sheet.employees.map((e) => [e.employeeId, 'currency' in e.salary ? e.salary.currency : undefined]),
+            );
+            return (
           <SectionCard title={`Payroll Adjustments${pendingAdjCount > 0 ? ` (${pendingAdjCount} pending)` : ''}`}>
             {adjustments.length === 0 ? (
               <p className="py-4 text-center text-sm text-slate-500">No adjustments proposed yet.</p>
@@ -1295,9 +1309,9 @@ function PeriodDetailView({
                           </div>
                         </td>
                         <td className="py-2.5 text-slate-300">{adj.type.replace(/_/g, ' ')}</td>
-                        <td className="py-2.5 text-right font-mono text-slate-300">{formatMoney(adj.calculated.amount, currency)}</td>
+                        <td className="py-2.5 text-right font-mono text-slate-300">{formatMoney(adj.calculated.amount, currency, employeeCurrencyById.get(adj.employeeId), periodRate)}</td>
                         <td className="py-2.5 text-right font-mono text-emerald-400">
-                          {adj.approved ? formatMoney(adj.approved.amount, currency) : '—'}
+                          {adj.approved ? formatMoney(adj.approved.amount, currency, employeeCurrencyById.get(adj.employeeId), periodRate) : '—'}
                         </td>
                         <td className="py-2.5 pl-3"><StatusBadge status={adj.status} /></td>
                         {!isClosed && (
@@ -1320,6 +1334,8 @@ function PeriodDetailView({
               </div>
             )}
           </SectionCard>
+            );
+          })()}
         </>
       )}
 

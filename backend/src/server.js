@@ -107,9 +107,9 @@ app.get('/', healthHandler);
 // admin key for a single-use, short-lived ticket (POST /api/admin/sse-ticket)
 // and passes that instead. That keeps the long-lived admin key out of URLs,
 // server logs and browser history.
-app.get('/api/events', (req, res) => {
+app.get('/api/events', async (req, res) => {
   const ticket = String(req.query.ticket || '');
-  if (!consumeSseTicket(ticket)) {
+  if (!(await consumeSseTicket(ticket))) {
     return res.status(401).json({ status: 'ERROR', message: 'A valid SSE ticket is required.' });
   }
   events.register(res);

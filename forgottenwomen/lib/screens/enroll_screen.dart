@@ -1,5 +1,6 @@
 // Enrolment Screen
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
@@ -89,6 +90,10 @@ class _EnrollScreenState extends State<EnrollScreen> {
 
       try {
         await _probe.ensureBackgroundLocationPermission();
+      } catch (_) {}
+
+      try {
+        await _probe.ensureBatteryOptimizationExemption();
       } catch (_) {}
 
       try {
@@ -187,12 +192,20 @@ class _EnrollScreenState extends State<EnrollScreen> {
           'Pair this device',
           style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textLight),
         ),
+        // The server-address override is a debug/staging convenience only.
+        // A release build must always talk to the operator-controlled
+        // backend baked in at build time (TokenStore.defaultServerUrl) --
+        // letting anyone repoint a production install at an arbitrary host
+        // would make the TLS trust restriction in pinned_http_client.dart
+        // pointless and hand an attacker a trivial way to harvest
+        // enrolment codes and device tokens via a look-alike server.
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, color: AppColors.textMuted),
-            tooltip: 'Server settings',
-            onPressed: _showServerDialog,
-          ),
+          if (kDebugMode)
+            IconButton(
+              icon: const Icon(Icons.settings_outlined, color: AppColors.textMuted),
+              tooltip: 'Server settings',
+              onPressed: _showServerDialog,
+            ),
         ],
       ),
       body: Center(
@@ -328,31 +341,52 @@ class _EnrollScreenState extends State<EnrollScreen> {
                 ),
                 const SizedBox(height: 16),
                 Center(
-                  child: InkWell(
-                    onTap: _showServerDialog,
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              _serverController.text.isNotEmpty
-                                  ? _serverController.text
-                                  : TokenStore.defaultServerUrl,
-                              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-                              overflow: TextOverflow.ellipsis,
+                  // Only a debug build lets you edit the server address.
+                  // A release build shows it as plain, non-interactive text
+                  // -- see the note on the AppBar settings action above.
+                  child: kDebugMode
+                      ? InkWell(
+                          onTap: _showServerDialog,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    _serverController.text.isNotEmpty
+                                        ? _serverController.text
+                                        : TokenStore.defaultServerUrl,
+                                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                const Icon(Icons.edit_outlined, size: 12, color: AppColors.teal),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          const Icon(Icons.edit_outlined, size: 12, color: AppColors.teal),
-                        ],
-                      ),
-                    ),
-                  ),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  TokenStore.defaultServerUrl,
+                                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                 ),
               ],
             ),

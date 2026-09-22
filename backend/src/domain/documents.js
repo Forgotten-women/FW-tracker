@@ -517,7 +517,13 @@ async function requiredReadPermission(documentId) {
 // Signed Downloads (Spec 27)
 // ---------------------------------------------------------------------------
 
-const grants = new Map();
+// Backed by the document_download_grants table (migration 021) rather than
+// an in-memory Map: on Vercel, the request that issues a grant and the one
+// that redeems it (typically a separate browser navigation to the download
+// URL) can land on different Lambda instances. An in-memory Map only the
+// issuing instance ever saw made a freshly-issued, still-valid download
+// link fail for the employee/HR user clicking it whenever the redeeming
+// request happened to land elsewhere.
 const GRANT_TTL_MS = 60 * 1000;
 
 async function issueDownloadToken({ documentId, permissions, actor, ip = null }) {
@@ -527,8 +533,13 @@ async function issueDownloadToken({ documentId, permissions, actor, ip = null })
 
   const token = crypto.randomBytes(24).toString('hex');
   const nowMs = T.now();
-  grants.set(token, { documentId, expires: nowMs + GRANT_TTL_MS });
-  for (const [k, g] of grants) if (g.expires < nowMs) grants.delete(k);
+  const expiresAt = nowMs + GRANT_TTL_MS;
+  await db.prepare(
+    'INSERT INTO document_download_grants (token, document_id, expires_at) VALUES (?, ?, ?)'
+  ).run(token, documentId, expiresAt);
+  if (Math.random() < 0.05) {
+    db.prepare('DELETE FROM document_download_grants WHERE expires_at < ?').run(nowMs).catch(() => {});
+  }
 
   await db.prepare(`
     INSERT INTO document_access_log (document_id, user_id, at, action, ip) VALUES (?,?,?,?,?)
@@ -538,21 +549,25 @@ async function issueDownloadToken({ documentId, permissions, actor, ip = null })
 }
 
 async function redeemDownloadToken(token, { ip = null } = {}) {
-  const g = grants.get(token);
+  // DELETE ... RETURNING atomically removes and reads the grant in one
+  // statement, so two concurrent redemption attempts (including one on
+  // another instance) cannot both succeed.
+  const g = await db.prepare(
+    'DELETE FROM document_download_grants WHERE token = ? RETURNING document_id, expires_at'
+  ).get(token);
   if (!g) return null;
-  grants.delete(token);
-  if (g.expires < T.now()) return null;
+  if (g.expires_at < T.now()) return null;
 
   const version = await db.prepare(`
     SELECT dv.* FROM document_versions dv
     JOIN employee_documents d ON d.id = dv.document_id
     WHERE dv.document_id = ? AND dv.version = d.current_version
-  `).get(g.documentId);
+  `).get(g.document_id);
   if (!version) return null;
 
   await db.prepare(`
     INSERT INTO document_access_log (document_id, user_id, at, action, ip) VALUES (?,?,?,?,?)
-  `).run(g.documentId, null, T.now(), 'DOWNLOAD', ip);
+  `).run(g.document_id, null, T.now(), 'DOWNLOAD', ip);
 
   return {
     path: version.storage_path,

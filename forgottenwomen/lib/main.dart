@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'screens/enroll_screen.dart';
 import 'screens/main_shell.dart';
+import 'services/device_probe.dart';
 import 'services/notification_service.dart';
 import 'services/presence_service.dart';
 import 'services/token_store.dart';
@@ -51,6 +52,13 @@ class _OfficeTrackerAppState extends State<OfficeTrackerApp> {
       if (!mounted) return;
       setState(() => _enrolled = enrolled);
       if (enrolled) {
+        // Re-request on every startup, not just at enrollment: this covers
+        // devices that enrolled before this exemption request existed, and
+        // any OEM that silently revokes the exemption after an app/OS
+        // update.
+        try {
+          await DeviceProbe().ensureBatteryOptimizationExemption();
+        } catch (_) {}
         try {
           await PresenceService.start();
         } catch (e) {

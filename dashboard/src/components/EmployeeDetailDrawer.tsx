@@ -313,6 +313,11 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
   // Live Screen Handlers
   const handleOpenLiveScreen = async () => {
     if (!workstation?.deviceId) return;
+    const confirmed = window.confirm(
+      `Start live screen viewing for ${employee?.employeeName || 'this employee'}? ` +
+        'Their workstation screen will be streamed to you in near real time until you close this view.',
+    );
+    if (!confirmed) return;
     setIsLiveScreenOpen(true);
     setLiveStreamLoading(true);
     setLiveStreamError(null);
@@ -351,8 +356,14 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
           if (frame.active) {
             setLiveStreamError(null);
           } else if (!frame.isBreak && pollCount > 35) {
-            // Only timeout after at least ~10 seconds of polling with no active frame
+            // Only timeout after at least ~10 seconds of polling with no
+            // active frame -- and then actually stop polling. This used to
+            // only set an error message while leaving the 300ms interval
+            // running indefinitely, so an admin who left this view open (or
+            // switched tabs) kept hammering the backend/desktop agent at
+            // ~3.3 req/s with no cap for as long as the drawer stayed open.
             setLiveStreamError('Live stream ended or timed out.');
+            clearInterval(interval);
           }
         }
       } catch (err: any) {

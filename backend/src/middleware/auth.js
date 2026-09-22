@@ -150,15 +150,30 @@ function requireAdmin(req, res, next) {
 // --- hardware sensor (ESP8266) --------------------------------------------
 
 // Signatures already accepted, so a captured request cannot be replayed inside
-// the freshness window. Bounded and swept, since this runs on a long-lived
-// process.
-const seenSignatures = new Map(); // signature -> expiry epoch ms
+// the freshness window. Backed by sensor_replay_signatures (migration 021)
+// rather than an in-memory Map: on Vercel, consecutive requests can land on
+// different Lambda instances, so a per-process Map only protected against
+// replay on whichever single instance happened to have seen the original
+// request -- a captured request replayed against any other instance sailed
+// through. A shared table makes this a global guarantee.
 const REPLAY_WINDOW_MS = 5 * 60 * 1000;
 
-function rememberSignature(sig, nowMs) {
-  seenSignatures.set(sig, nowMs + REPLAY_WINDOW_MS);
-  if (seenSignatures.size > 5000) {
-    for (const [k, exp] of seenSignatures) if (exp < nowMs) seenSignatures.delete(k);
+async function hasSeenSignature(sig) {
+  const row = await db.prepare(
+    'SELECT 1 FROM sensor_replay_signatures WHERE signature = ?'
+  ).get(sig);
+  return !!row;
+}
+
+async function rememberSignature(sig, nowMs) {
+  await db.prepare(
+    'INSERT INTO sensor_replay_signatures (signature, expires_at) VALUES (?, ?) ON CONFLICT (signature) DO NOTHING'
+  ).run(sig, nowMs + REPLAY_WINDOW_MS);
+  // Opportunistic sweep instead of a dedicated cron for this alone; cheap
+  // and bounded, same approach used for sse_tickets and document grants
+  // below.
+  if (Math.random() < 0.01) {
+    db.prepare('DELETE FROM sensor_replay_signatures WHERE expires_at < ?').run(nowMs).catch(() => {});
   }
 }
 
@@ -169,7 +184,7 @@ function rememberSignature(sig, nowMs) {
  * POST a fabricated device list. Requires express.json to have captured
  * req.rawBody (see server.js).
  */
-function requireSensor(req, res, next) {
+async function requireSensor(req, res, next) {
   const sensorId = req.headers['x-sensor-id'];
   const timestamp = req.headers['x-timestamp'];
   const signature = req.headers['x-signature'];
@@ -195,7 +210,7 @@ function requireSensor(req, res, next) {
     });
   }
 
-  if (seenSignatures.has(signature)) {
+  if (await hasSeenSignature(signature)) {
     return res.status(401).json({ status: 'ERROR', code: 'REPLAY', message: 'This request has already been processed.' });
   }
 
@@ -206,7 +221,7 @@ function requireSensor(req, res, next) {
     return res.status(401).json({ status: 'ERROR', code: 'BAD_SIGNATURE', message: 'Sensor signature did not verify.' });
   }
 
-  rememberSignature(signature, nowMs);
+  await rememberSignature(signature, nowMs);
   req.auth = { kind: 'sensor', sensorId: String(sensorId) };
   next();
 }
@@ -292,12 +307,23 @@ function requireEmployeeAccess(paramName = 'employeeId') {
 // profile hiding bank details, say) would wrongly hide them from the admin-key
 // dashboard. Loaded once and reused.
 let adminPermissionSet = null;
+let adminPermissionSetLoadedAt = 0;
+// role_permissions has no write path in this app today (it is seed data,
+// changed only by editing the database directly), so a plain forever-cache
+// was rarely wrong in practice -- but on a long-lived process (self-hosted,
+// or `npm start`, as opposed to Vercel's frequent cold starts) a direct
+// database edit revoking a permission from super_admin used to never take
+// effect until the process restarted. A short TTL bounds that staleness
+// without re-querying on every single admin-key request.
+const ADMIN_PERMISSION_SET_TTL_MS = 5 * 60 * 1000;
 async function superAdminPermissions() {
-  if (!adminPermissionSet) {
+  const nowMs = T.now();
+  if (!adminPermissionSet || nowMs - adminPermissionSetLoadedAt > ADMIN_PERMISSION_SET_TTL_MS) {
     adminPermissionSet = new Set(
       (await db.prepare("SELECT permission_id AS p FROM role_permissions WHERE role_id = 'super_admin'")
         .all()).map(r => r.p),
     );
+    adminPermissionSetLoadedAt = nowMs;
   }
   return adminPermissionSet;
 }
@@ -357,25 +383,36 @@ function requireRole(...allowedRoles) {
 // its admin key for a single-use, short-lived ticket and passes that in the
 // query string instead. This keeps the long-lived admin key out of URLs,
 // access logs and browser history.
+//
+// Backed by the sse_tickets table (migration 021) rather than an in-memory
+// Map: a ticket issued on one Vercel Lambda instance could be redeemed on a
+// different instance that has no record of it, failing a legitimate SSE
+// connection. A shared table makes issue and redemption consistent no
+// matter which instance handles either request.
 
-const sseTickets = new Map(); // ticket -> expiry epoch ms
 const SSE_TICKET_TTL_MS = 30 * 1000;
 
-function issueSseTicket() {
+async function issueSseTicket() {
   const ticket = crypto.randomBytes(24).toString('hex');
   const nowMs = T.now();
-  sseTickets.set(ticket, nowMs + SSE_TICKET_TTL_MS);
-  for (const [k, exp] of sseTickets) if (exp < nowMs) sseTickets.delete(k);
-  return { ticket, expiresAt: nowMs + SSE_TICKET_TTL_MS };
+  const expiresAt = nowMs + SSE_TICKET_TTL_MS;
+  await db.prepare('INSERT INTO sse_tickets (ticket, expires_at) VALUES (?, ?)').run(ticket, expiresAt);
+  if (Math.random() < 0.05) {
+    db.prepare('DELETE FROM sse_tickets WHERE expires_at < ?').run(nowMs).catch(() => {});
+  }
+  return { ticket, expiresAt };
 }
 
-/** Redeems a ticket. Single use: a redeemed ticket is immediately discarded. */
-function consumeSseTicket(ticket) {
+/**
+ * Redeems a ticket. Single use: DELETE ... RETURNING atomically removes and
+ * reads the row in one statement, so two concurrent redemption attempts
+ * (including one on another instance) cannot both succeed.
+ */
+async function consumeSseTicket(ticket) {
   if (!ticket) return false;
-  const exp = sseTickets.get(ticket);
-  if (!exp) return false;
-  sseTickets.delete(ticket);
-  return exp >= T.now();
+  const row = await db.prepare('DELETE FROM sse_tickets WHERE ticket = ? RETURNING expires_at').get(ticket);
+  if (!row) return false;
+  return row.expires_at >= T.now();
 }
 
 module.exports = {

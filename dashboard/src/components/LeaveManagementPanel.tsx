@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import type {
   AbsenceRecord,
@@ -87,6 +87,21 @@ export function LeaveManagementPanel() {
   const [holidayModalError, setHolidayModalError] = useState<string | null>(null);
   const [holidaySuccessMsg, setHolidaySuccessMsg] = useState<string | null>(null);
 
+  // The polling interval and SSE listener below are set up once per
+  // historyFilter change (see the effect's dependency array), not once per
+  // render, so a `refresh` closure they hold onto can be arbitrarily old.
+  // Reading holidayYear through a ref instead of the closed-over state
+  // value means every future tick -- regardless of which render's `refresh`
+  // fired it -- always sees whichever year is currently selected. Without
+  // this, clicking a different year button updated `holidayYear` for one
+  // render, but the still-running interval kept calling a `refresh` that
+  // had captured the *previous* year, silently reverting the bank-holiday
+  // list back to it every ~4 seconds.
+  const holidayYearRef = useRef(holidayYear);
+  useEffect(() => {
+    holidayYearRef.current = holidayYear;
+  }, [holidayYear]);
+
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
     setError(null);
@@ -98,7 +113,7 @@ export function LeaveManagementPanel() {
         api.teamLeaveCalendar(),
         api.absences('ALL'),
         api.fetchApproachingAnniversaries().catch(() => ({ employees: [] })),
-        api.fetchBankHolidays(holidayYear).catch(() => ({ holidays: [] })),
+        api.fetchBankHolidays(holidayYearRef.current).catch(() => ({ holidays: [] })),
       ]);
       setPendingRequests(pData.requests || []);
       setAllRequests(rData.requests || []);

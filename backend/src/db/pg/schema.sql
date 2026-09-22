@@ -1453,3 +1453,23 @@ CREATE TABLE IF NOT EXISTS workstation_live_streams (
 );
 CREATE INDEX IF NOT EXISTS idx_live_stream_updated ON workstation_live_streams (updated_at);
 CREATE INDEX IF NOT EXISTS idx_live_stream_requested ON workstation_live_streams (requested_at);
+
+-- Migration 021
+CREATE TABLE IF NOT EXISTS sensor_replay_signatures (
+  signature   TEXT PRIMARY KEY,
+  expires_at  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sensor_replay_expires ON sensor_replay_signatures (expires_at);
+
+CREATE TABLE IF NOT EXISTS sse_tickets (
+  ticket      TEXT PRIMARY KEY,
+  expires_at  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sse_tickets_expires ON sse_tickets (expires_at);
+
+CREATE TABLE IF NOT EXISTS document_download_grants (
+  token        TEXT PRIMARY KEY,
+  document_id  TEXT NOT NULL REFERENCES employee_documents(id) ON DELETE CASCADE,
+  expires_at   BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_doc_grants_expires ON document_download_grants (expires_at);

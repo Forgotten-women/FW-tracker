@@ -6,9 +6,9 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'pinned_http_client.dart';
 import 'token_store.dart';
 
 typedef NotificationTapCallback = void Function(String? payload);
@@ -17,6 +17,8 @@ class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
+
+  final _http = createPinnedHttpClient();
 
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
@@ -187,7 +189,7 @@ class NotificationService {
     final baseUrl = serverUrl ?? await tokenStore.readServerUrl();
     final uri = Uri.parse('$baseUrl/api/notifications/mine');
     try {
-      final res = await http.get(uri, headers: {
+      final res = await _http.get(uri, headers: {
         'Authorization': 'Bearer $token',
         'Accept': 'application/json',
       });

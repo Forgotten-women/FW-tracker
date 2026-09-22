@@ -54,7 +54,7 @@ class DeviceProbe {
     try {
       final hasInUse = await ensureLocationPermission();
       if (!hasInUse) return false;
-      
+
       // On Android 12+, we check status rather than forcing a pop-up dialog
       // which can cause ColorOS/Oppo OS-level exceptions.
       final status = await Permission.locationAlways.status;
@@ -62,6 +62,29 @@ class DeviceProbe {
       return true; // Proceed smoothly
     } catch (_) {
       return true;
+    }
+  }
+
+  /// Requests exemption from Android's battery-optimization killer for the
+  /// background presence service.
+  ///
+  /// The manifest declares REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, but
+  /// declaring the permission does nothing by itself -- it must actually be
+  /// requested. Without this, OEMs with aggressive background-process
+  /// killers (Xiaomi/MIUI, Oppo/ColorOS, Huawei, Samsung "sleeping apps")
+  /// can silently freeze or kill the foreground presence service despite
+  /// FOREGROUND_SERVICE being held, producing attendance gaps that look
+  /// identical to genuine absence with no warning to the employee or HR.
+  /// iOS has no equivalent concept, so this is a no-op there.
+  Future<bool> ensureBatteryOptimizationExemption() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final status = await Permission.ignoreBatteryOptimizations.status;
+      if (status.isGranted) return true;
+      if (status.isPermanentlyDenied) return false;
+      return (await Permission.ignoreBatteryOptimizations.request()).isGranted;
+    } catch (_) {
+      return false;
     }
   }
 

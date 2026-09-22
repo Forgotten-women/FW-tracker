@@ -105,6 +105,16 @@ pub fn config_path() -> PathBuf {
     dir
 }
 
+/// Local SQLite store for heartbeats that couldn't be delivered (backend
+/// outage, no network). See `db::OfflineStore`.
+pub fn offline_db_path() -> PathBuf {
+    let mut dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("OfficeTracker");
+    let _ = fs::create_dir_all(&dir);
+    dir.push("offline_events.db");
+    dir
+}
+
 pub fn load_config() -> AppConfig {
     if let Ok(data) = fs::read_to_string(config_path()) {
         serde_json::from_str(&data).unwrap_or_default()

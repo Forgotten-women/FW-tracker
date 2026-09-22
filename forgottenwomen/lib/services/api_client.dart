@@ -10,6 +10,8 @@ import 'package:http/http.dart' as http;
 
 import '../models/attendance.dart';
 import '../models/hr.dart';
+import 'pinned_http_client.dart';
+import 'server_time.dart';
 import 'token_store.dart';
 
 /// A failure the caller can act on, rather than a swallowed exception.
@@ -41,7 +43,7 @@ class ApiClient {
 
   ApiClient({TokenStore? store, http.Client? client, this.timeout = const Duration(seconds: 25)})
       : _store = store ?? TokenStore(),
-        _http = client ?? http.Client();
+        _http = client ?? createPinnedHttpClient();
 
   Future<Uri> _uri(String path, [Map<String, dynamic>? query]) async {
     final base = Uri.parse('${await _store.readServerUrl()}$path');
@@ -50,6 +52,11 @@ class ApiClient {
   }
 
   Map<String, dynamic> _decode(http.Response res) {
+    // Every response carries a `Date` header regardless of status code; use
+    // it to keep the office-hours background-service gate's notion of "now"
+    // reconciled against the server's clock instead of the device's own.
+    unawaited(ServerTime.recordDateHeader(res.headers['date']));
+
     late final Map<String, dynamic> body;
     try {
       body = jsonDecode(res.body) as Map<String, dynamic>;

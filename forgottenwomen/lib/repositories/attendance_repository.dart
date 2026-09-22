@@ -53,12 +53,9 @@ class AttendanceRepository {
 
   Future<void> _tryFlushQueue() async {
     try {
-      final pending = await offlineQueue.readAll();
-      if (pending.isEmpty) return;
-      final res = await apiClient.ping(pending);
-      if (res.accepted > 0 || res.duplicates > 0) {
-        await offlineQueue.removeDelivered(pending.length);
-      }
+      // Goes through OfflineQueue.flush so this can never race the
+      // background heartbeat isolate's own concurrent flush attempt.
+      await offlineQueue.flush((pending) => apiClient.ping(pending));
     } catch (_) {
       // Offline queue flush can be retried on next heartbeat or refresh
     }

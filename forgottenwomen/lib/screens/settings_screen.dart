@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
@@ -151,38 +152,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  TextField(
-                    controller: _serverController,
-                    keyboardType: TextInputType.url,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Server address',
-                      prefixIcon: Icon(Icons.dns_outlined),
+              // Editing the server address is a debug/staging convenience
+              // only. A release build must always talk to the
+              // operator-controlled backend: letting an enrolled employee
+              // repoint a production install at an arbitrary host would
+              // both defeat the TLS trust restriction in
+              // pinned_http_client.dart and let anyone with the app
+              // installed harvest a look-alike server's traffic.
+              child: kDebugMode
+                  ? Column(
+                      children: [
+                        TextField(
+                          controller: _serverController,
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          decoration: const InputDecoration(
+                            labelText: 'Server address',
+                            prefixIcon: Icon(Icons.dns_outlined),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _testConnection,
+                            icon: const Icon(Icons.network_check, size: 16),
+                            label: const Text('Test connection'),
+                          ),
+                        ),
+                        if (_reachable != null) ...[
+                          const SizedBox(height: 8),
+                          Text(_reachable!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _reachable!.startsWith('Server')
+                                    ? AppColors.teal
+                                    : Colors.red.shade700,
+                              )),
+                        ],
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        const Icon(Icons.dns_outlined, size: 18, color: AppColors.textMuted),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _serverController.text,
+                            style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _testConnection,
-                      icon: const Icon(Icons.network_check, size: 16),
-                      label: const Text('Test connection'),
-                    ),
-                  ),
-                  if (_reachable != null) ...[
-                    const SizedBox(height: 8),
-                    Text(_reachable!,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _reachable!.startsWith('Server')
-                              ? AppColors.teal
-                              : Colors.red.shade700,
-                        )),
-                  ],
-                ],
-              ),
             ),
           ),
           const SizedBox(height: 20),

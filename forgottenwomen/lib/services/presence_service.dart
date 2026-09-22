@@ -10,6 +10,7 @@ import 'api_client.dart';
 import 'device_probe.dart';
 import 'notification_service.dart';
 import 'offline_queue.dart';
+import 'server_time.dart';
 import 'token_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -36,19 +37,8 @@ Future<PingResult?> sendHeartbeat({
     await buffer.add(observation);
   } catch (_) {}
 
-  List<QueuedObservation> pending = const [];
   try {
-    pending = await buffer.readAll();
-  } catch (_) {}
-
-  if (pending.isEmpty) return null;
-
-  try {
-    final result = await api.ping(pending);
-    try {
-      await buffer.removeDelivered(pending.length);
-    } catch (_) {}
-    return result;
+    return await buffer.flush((pending) => api.ping(pending));
   } on ApiException catch (e) {
     if (e.needsReEnrollment) {
       rethrow;
@@ -90,7 +80,10 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
 
   Future<void> runPresenceTick() async {
     try {
-      final now = DateTime.now();
+      // Reconciled against the server's clock (see server_time.dart) so a
+      // wrong device timezone/clock can't silently suppress heartbeats
+      // during real office hours.
+      final now = await ServerTime.now();
       final withinHours = isWithinOfficeHours(now);
 
       if (!withinHours) {
@@ -206,7 +199,7 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
 Future<bool> onIosBackground(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
   try {
-    if (!isWithinOfficeHours()) {
+    if (!isWithinOfficeHours(await ServerTime.now())) {
       return true;
     }
     await NotificationService().initialize();
@@ -222,7 +215,7 @@ class PresenceService {
 
   static Future<void> configure() async {
     try {
-      final withinHours = isWithinOfficeHours();
+      final withinHours = isWithinOfficeHours(await ServerTime.now());
       if (!withinHours) {
         try {
           await NotificationService().cancelNotification(8800);

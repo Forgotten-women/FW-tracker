@@ -324,34 +324,45 @@
     }
 
     // 2. Start Break (Immediate or Auto)
-    async function triggerBreak(retroactiveMinutes = 0) {
+    //
+    // `auto` is a boolean, not a guessed backdate: run-agent.js is the only
+    // process with a continuously-tracked, accurate idle duration, so it is
+    // the sole authority on how far to backdate an auto-idle-conversion
+    // (see its onSecondSample / AUTO_BREAK_SECONDS comment and the
+    // /api/break handler). Sending a locally-guessed number of minutes from
+    // here used to race that agent-side trigger for the same idle episode
+    // and could disagree with it -- now this only reports the *reason*, and
+    // takes whatever `startedAt` the agent's response says actually applied.
+    async function triggerBreak(auto = false) {
       currentPhase = 'BREAK';
       if (graceInterval) clearInterval(graceInterval);
 
       cardPrompt.classList.add('hidden');
       cardBreak.classList.remove('hidden');
 
-      const now = Date.now();
-      breakStartTimestamp = retroactiveMinutes > 0 ? now - (retroactiveMinutes * 60 * 1000) : now;
-
-      if (retroactiveMinutes > 0) {
-        breakSubtitle.innerHTML = `Auto-break activated after 5m of inactivity (<strong>backdated ${retroactiveMinutes}m</strong>).`;
-      } else {
-        breakSubtitle.textContent = 'Break session active. Workstation tracking is currently paused.';
-      }
-
+      // Show something immediately while the request is in flight; corrected
+      // below once the agent's authoritative startedAt comes back.
+      breakStartTimestamp = Date.now();
+      breakSubtitle.textContent = 'Break session active. Workstation tracking is currently paused.';
       startBreakTicker();
 
       try {
-        await fetch('/api/break', {
+        const res = await fetch('/api/break', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             onBreak: true,
-            reason: retroactiveMinutes > 0 ? 'AUTO_IDLE_CONVERSION' : 'EMPLOYEE_MANUAL',
-            startedAt: breakStartTimestamp
+            reason: auto ? 'AUTO_IDLE_CONVERSION' : 'EMPLOYEE_MANUAL',
           })
         });
+        const data = await res.json().catch(() => null);
+        if (data && data.startedAt) {
+          breakStartTimestamp = data.startedAt;
+          if (auto) {
+            const backdatedMins = Math.max(0, Math.round((Date.now() - breakStartTimestamp) / 60000));
+            breakSubtitle.innerHTML = `Auto-break activated after inactivity (<strong>backdated ${backdatedMins}m</strong>).`;
+          }
+        }
       } catch (_) {}
     }
 
@@ -388,8 +399,9 @@
 
         if (graceSeconds <= 0) {
           clearInterval(graceInterval);
-          // 60s expired -> Convert to break retroactively (5 minutes idle)
-          triggerBreak(5);
+          // 60s expired -> convert to a break. run-agent.js decides and
+          // reports the real backdated start time (see triggerBreak above).
+          triggerBreak(true);
         }
       }, 1000);
     }
@@ -438,7 +450,7 @@
 
     // Button event handlers
     btnStillWorking.addEventListener('click', dismissPrompt);
-    btnStartBreak.addEventListener('click', () => triggerBreak(0));
+    btnStartBreak.addEventListener('click', () => triggerBreak(false));
     btnResumeWork.addEventListener('click', resumeWork);
 
     // Keyboard dismiss on Enter or Space

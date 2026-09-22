@@ -989,8 +989,8 @@ router.post('/settings', async (req, res) => {
 
 // Exchanges the admin key for a short-lived ticket the dashboard can pass to
 // EventSource, which cannot set an Authorization header.
-router.post('/sse-ticket', (req, res) => {
-  res.json({ status: 'SUCCESS', ...issueSseTicket() });
+router.post('/sse-ticket', async (req, res) => {
+  res.json({ status: 'SUCCESS', ...(await issueSseTicket()) });
 });
 
 module.exports = router;

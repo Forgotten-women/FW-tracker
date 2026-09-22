@@ -537,6 +537,10 @@ let appTrackingEnabled = true;
 let outsideWorkingHours = false;
 let isOverlayOpen = false;
 let lastDismissedAt = 0;
+// The authoritative break start time, set wherever a break actually begins
+// (onSecondSample's auto-conversion or the /api/break handler) and returned
+// to the overlay so its UI reflects the real backdate instead of a guess.
+let lastBreakStartedAtMs = null;
 
 function isWithinOfficeHours(date = new Date()) {
   const day = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
@@ -730,9 +734,35 @@ function startMiniAppServer(port = MINI_APP_PORT) {
           let reqData = {};
           try { reqData = JSON.parse(body); } catch (_) {}
           const targetBreak = typeof reqData.onBreak === 'boolean' ? reqData.onBreak : !isManualBreak;
+          const isAutoIdleConversion = reqData.reason === 'AUTO_IDLE_CONVERSION';
+
+          // The overlay's own grace-period timer used to send this with a
+          // hardcoded 5-minute backdate, independent of onSecondSample's own
+          // AUTO_BREAK_SECONDS trigger (see the comment there) -- the two
+          // could disagree on startedAt for the same idle episode. If this
+          // is an auto-idle-conversion request and onSecondSample already
+          // converted the break (the common case, since it fires as soon as
+          // idle crosses the threshold), this is a stale duplicate: report
+          // the already-applied state back without sending a second,
+          // differently-backdated break-start to the server.
+          if (isAutoIdleConversion && targetBreak && (isManualBreak || isOnBreak)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak, startedAt: lastBreakStartedAtMs }));
+          }
+
           isManualBreak = targetBreak;
           isOnBreak = targetBreak;
           currentWorkstationStatus = targetBreak ? 'ON_BREAK' : 'ACTIVE';
+
+          // For an auto-idle-conversion, always derive startedAt from this
+          // process's own continuously-tracked idle duration rather than
+          // trusting a client-supplied guess, so however this got triggered
+          // the backdate is the same accurate value onSecondSample would
+          // have used.
+          const startedAt = isAutoIdleConversion
+            ? Date.now() - (latestContinuousIdle * 1000)
+            : (reqData.startedAt || undefined);
+          lastBreakStartedAtMs = targetBreak ? (startedAt || Date.now()) : null;
 
           const cfgNow = loadConfig();
           if (cfgNow && cfgNow.token && cfgNow.serverUrl) {
@@ -746,7 +776,7 @@ function startMiniAppServer(port = MINI_APP_PORT) {
                 body: JSON.stringify({
                   onBreak: targetBreak,
                   reason: reqData.reason || (targetBreak ? 'Employee manual break' : 'Employee resumed work'),
-                  startedAt: reqData.startedAt || undefined,
+                  startedAt,
                 }),
               });
             } catch (err) {
@@ -761,7 +791,7 @@ function startMiniAppServer(port = MINI_APP_PORT) {
             }
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak }));
+          return res.end(JSON.stringify({ status: 'SUCCESS', isManualBreak, startedAt: lastBreakStartedAtMs }));
         } catch (err) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ status: 'ERROR', message: err.message }));
@@ -1217,7 +1247,14 @@ async function startAgent() {
     }
   }
 
-  let latestContinuousIdle = 0;
+  // latestContinuousIdle is declared once, at module scope, specifically so
+  // the /api/break handler in startMiniAppServer can read the same
+  // continuously-updated value this function writes (see the comment there
+  // and in the AUTO_BREAK_SECONDS block below). A second `let` here used to
+  // shadow it, silently splitting them into two unrelated variables: this
+  // one ticked every second, the module-level one never moved off its
+  // initial 0 -- so anything outside this function that read
+  // latestContinuousIdle always saw "not idle" regardless of reality.
 
   function onSecondSample(idleSecs, procName, title) {
     const withinHours = isWithinOfficeHours();
@@ -1278,11 +1315,25 @@ async function startAgent() {
       }
 
       // 2. Continuous Idle > 6 minutes (5m + 60s grace) -> Auto-convert to Break retroactively (5m backdated)
-      if (latestContinuousIdle >= AUTO_BREAK_SECONDS) {
+      //
+      // This is the single authoritative place that decides an idle episode
+      // has become a break: it is the only code with an accurate,
+      // continuously-updated idle duration (latestContinuousIdle). The
+      // overlay window's own grace countdown (overlay.html) used to make
+      // this same decision independently on its own local 60s timer, which
+      // raced this one -- both could fire, each with a different guessed
+      // startedAt, for the same idle episode. The overlay's countdown now
+      // only reflects state; it defers the actual conversion (and the
+      // startedAt backdate) to this block via the isManualBreak/isOnBreak
+      // guard below and the /api/break handler's own recomputation.
+      // Guarding on the current break state also stops this from refiring
+      // every single second for as long as the user stays idle.
+      if (latestContinuousIdle >= AUTO_BREAK_SECONDS && !isManualBreak && !isOnBreak) {
         const retroactiveStartMs = Date.now() - (latestContinuousIdle * 1000);
         isManualBreak = true;
         isOnBreak = true;
         currentWorkstationStatus = 'ON_BREAK';
+        lastBreakStartedAtMs = retroactiveStartMs;
 
         const cfgNow = loadConfig();
         if (cfgNow && cfgNow.token && cfgNow.serverUrl) {

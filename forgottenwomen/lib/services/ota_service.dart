@@ -20,6 +20,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/ota.dart';
+import 'pinned_http_client.dart';
 import 'token_store.dart';
 
 // ---------------------------------------------------------------------------
@@ -49,9 +50,19 @@ class OtaService {
   final TokenStore _store;
   final http.Client _http;
 
-  OtaService({TokenStore? store, http.Client? client})
+  // The APK/manifest itself is fetched from `downloadUrl`, which HR sets
+  // per release and may point anywhere (a GitHub Release asset, Supabase
+  // storage, ...) — not necessarily our own backend's host. The trust
+  // restriction in `createPinnedHttpClient` is scoped to the CA our backend
+  // actually uses, so pinning it here too could reject a legitimate
+  // download hosted elsewhere. Only the version-check call against our own
+  // backend uses the restricted client.
+  final http.Client _downloadHttp;
+
+  OtaService({TokenStore? store, http.Client? client, http.Client? downloadClient})
       : _store = store ?? TokenStore(),
-        _http = client ?? http.Client();
+        _http = client ?? createPinnedHttpClient(),
+        _downloadHttp = downloadClient ?? http.Client();
 
   /// Reads current installed app version information.
   Future<PackageInfo> getPackageInfo() async {
@@ -119,7 +130,7 @@ class OtaService {
 
     try {
       final request = http.Request('GET', Uri.parse(downloadUrl));
-      final streamedResponse = await _http.send(request);
+      final streamedResponse = await _downloadHttp.send(request);
       final total = streamedResponse.contentLength ?? 0;
       int received = 0;
 
