@@ -104,12 +104,14 @@ class _SalaryScreenState extends State<SalaryScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
                 children: [
-                  if (_error != null) ...[
+                  if (_error != null && _statement != null) ...[
                     _buildErrorBanner(_error!),
                     const SizedBox(height: 16),
                   ],
 
-                  if (_statement == null || !_statement!.enabled) ...[
+                  if (_statement == null) ...[
+                    _buildErrorView(_error ?? 'Could not load salary statements'),
+                  ] else if (!_statement!.enabled) ...[
                     _buildRestrictedCard(_statement?.message),
                   ] else ...[
                     // 1. Current Active Salary Hero Card
@@ -172,6 +174,53 @@ class _SalaryScreenState extends State<SalaryScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(msg, style: const TextStyle(color: AppColors.amber, fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorView(String msg) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.amber.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.amber.withValues(alpha: 0.3)),
+            ),
+            child: const Icon(Icons.cloud_off_rounded, color: AppColors.amber, size: 36),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Unable to Load Statements',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            msg,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: () => _loadStatements(),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Try Again'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
           ),
         ],
       ),

@@ -17,12 +17,20 @@ const T = require('../util/time');
 // ---------------------------------------------------------------------------
 
 router.get('/mine/statements', requireDevice, async (req, res) => {
-  const { employeeId } = req.auth;
-  const result = await PR.employeeStatements(employeeId);
-  res.json({
-    status: 'SUCCESS',
-    ...result,
-  });
+  try {
+    const { employeeId } = req.auth;
+    const result = await PR.employeeStatements(employeeId);
+    res.json({
+      status: 'SUCCESS',
+      ...result,
+    });
+  } catch (err) {
+    console.error('Error in /mine/statements:', err);
+    res.status(500).json({
+      status: 'ERROR',
+      message: err.message || 'Failed to load payroll statements',
+    });
+  }
 });
 
 // Reading pay is a sensitive permission; spec 3.2 keeps it away from managers

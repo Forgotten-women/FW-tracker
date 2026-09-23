@@ -97,9 +97,30 @@ const healthHandler = async (req, res) => {
   }
 };
 
+const pingHandler = async (req, res) => {
+  let dbStatus = 'ok';
+  try {
+    await db.prepare('SELECT 1').get();
+  } catch (err) {
+    dbStatus = 'degraded';
+  }
+
+  res.status(200).json({
+    status: 'pong',
+    service: 'office-tracker-backend',
+    timestamp: Date.now(),
+    iso: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    database: dbStatus,
+  });
+};
+
 app.get('/health', healthHandler);
 app.get('/api/health', healthHandler);
 app.get('/', healthHandler);
+
+// UptimeRobot / Ping Monitoring endpoints (supports GET, HEAD, etc.)
+app.all(['/ping', '/api/ping', '/uptime', '/api/uptime'], pingHandler);
 
 // --- live stream -----------------------------------------------------------
 

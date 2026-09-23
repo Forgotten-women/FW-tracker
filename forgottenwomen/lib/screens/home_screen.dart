@@ -93,7 +93,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total Accumulated Deficit', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                  const Expanded(
+                    child: Text(
+                      'Total Accumulated Deficit',
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Text(
                     deficit.formatted,
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.amber),
@@ -824,14 +830,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               decoration: BoxDecoration(
                                 color: AppColors.surfaceDark,
                                 borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
                               ),
                               child: Row(
                                 children: [
                                   Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
-                                      color: AppColors.primary.withOpacity(0.15),
+                                      color: AppColors.primary.withValues(alpha: 0.15),
                                       shape: BoxShape.circle,
                                     ),
                                     child: const Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
