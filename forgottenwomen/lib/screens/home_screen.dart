@@ -95,7 +95,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Expanded(
                     child: Text(
-                      'Total Accumulated Deficit',
+                      'Total Accumulated Deficit (All-Time)',
                       style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                   ),
@@ -107,10 +107,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 4),
             const Text(
-              'TODAY\'S COMPONENTS',
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: AppColors.textMuted),
+              'Running balance carried across every day, not just today -- '
+              'it can be larger than today\'s components below even on a '
+              'perfect day, and smaller than their sum if HR has already '
+              'approved an adjustment.',
+              style: TextStyle(fontSize: 10, color: AppColors.textMuted, height: 1.3),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'TODAY\'S COMPONENTS',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: AppColors.textMuted),
+                ),
+                Text(
+                  'Today so far: ${b.formatted}',
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textMuted),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             _buildDeficitRow('Late arrival time', '${b.lateMinutes} mins'),
