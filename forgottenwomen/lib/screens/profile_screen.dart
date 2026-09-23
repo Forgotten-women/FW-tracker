@@ -118,6 +118,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 16),
                       _buildPersonalDetailsCard(_profile!),
                       const SizedBox(height: 16),
+                      _buildBankDetailsCard(_profile!.bankDetails),
+                      const SizedBox(height: 16),
                       _buildEmergencyContactsCard(_profile!.emergencyContacts),
                       const SizedBox(height: 16),
                       _buildKycStatusCard(_profile!),
@@ -724,6 +726,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             )).toList(),
+    );
+  }
+
+  Widget _buildBankDetailsCard(BankDetails bank) {
+    return _buildSectionContainer(
+      title: 'Bank & Disbursement Details',
+      icon: Icons.account_balance_outlined,
+      children: [
+        if (!bank.hasDetails)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'No bank account details recorded yet.',
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted, fontStyle: FontStyle.italic),
+            ),
+          )
+        else ...[
+          if (bank.bankName != null && bank.bankName!.isNotEmpty)
+            _buildDetailRow('Bank Name', bank.bankName!),
+          if (bank.accountName != null && bank.accountName!.isNotEmpty)
+            _buildDetailRow('Account Title', bank.accountName!),
+          if (bank.accountNumber != null && bank.accountNumber!.isNotEmpty)
+            _buildDetailRow('Account Number', bank.accountNumber!),
+          if (bank.sortCode != null && bank.sortCode!.isNotEmpty)
+            _buildDetailRow('Branch Code / Sort Code', bank.sortCode!),
+          if (bank.iban != null && bank.iban!.isNotEmpty)
+            _buildDetailRow('IBAN', bank.iban!),
+        ],
+      ],
     );
   }
 

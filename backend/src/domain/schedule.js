@@ -141,16 +141,49 @@ async function resolve(employeeId, dateKey = T.dateKey()) {
   };
 }
 
-/** Scheduled working dates in a range, for absence detection and reports. */
+/** Scheduled working dates in a range, for absence detection and reports (Batch optimized). */
 async function workingDaysBetween(employeeId, fromKey, toKey) {
+  // Fast path: Pre-fetch pattern, office, and calendar days for the range to avoid N x 4 round-trip queries
+  const [empPatternRow, defaultPattern, empOffice] = await Promise.all([
+    selectEmploymentPattern.get(employeeId, toKey, fromKey),
+    selectDefaultPattern.get(),
+    selectEmployeeOffice.get(employeeId),
+  ]);
+
+  const pattern = (empPatternRow && empPatternRow.id) ? empPatternRow : defaultPattern;
+  const workingDays = (pattern?.working_days || config.office.workingDays?.join(',') || 'mon,tue,wed,thu,fri')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+  const officeId = empPatternRow?.office_id || empOffice?.office_id;
+  const calendarMap = new Map();
+  if (officeId) {
+    const calendarRows = await db.prepare(
+      'SELECT date, day_type FROM calendar_days WHERE office_id = ? AND date >= ? AND date <= ?'
+    ).all(officeId, fromKey, toKey);
+    for (const r of calendarRows) {
+      calendarMap.set(r.date, r.day_type);
+    }
+  }
+
   const out = [];
   let cursor = T.startOfDay(fromKey);
   const end = T.startOfDay(toKey);
   // Bounded so a malformed range cannot spin.
   for (let guard = 0; cursor <= end && guard < 800; guard++) {
     const key = T.dateKey(cursor);
-    const s = await resolve(employeeId, key);
-    if (s.isWorkingDay) out.push(key);
+    const day = weekdayKey(key);
+    let isWorking = workingDays.includes(day);
+
+    if (isWorking) {
+      const bankHoliday = await holidays.isBankHoliday(key);
+      if (bankHoliday && bankHoliday.isActive) {
+        isWorking = false;
+      } else if (calendarMap.has(key) && calendarMap.get(key) !== 'WORKING') {
+        isWorking = false;
+      }
+    }
+
+    if (isWorking) out.push(key);
     cursor = T.endOfDay(key);
   }
   return out;

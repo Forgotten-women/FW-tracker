@@ -816,6 +816,38 @@ class EmergencyContact {
   );
 }
 
+class BankDetails {
+  final String? bankName;
+  final String? accountName;
+  final String? accountNumber;
+  final String? sortCode;
+  final String? iban;
+
+  const BankDetails({
+    this.bankName,
+    this.accountName,
+    this.accountNumber,
+    this.sortCode,
+    this.iban,
+  });
+
+  factory BankDetails.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const BankDetails();
+    return BankDetails(
+      bankName: json['bankName'] as String? ?? json['bank_name'] as String?,
+      accountName: json['accountName'] as String? ?? json['account_name'] as String?,
+      accountNumber: json['accountNumber'] as String? ?? json['account_number'] as String?,
+      sortCode: json['sortCode'] as String? ?? json['sort_code'] as String?,
+      iban: json['iban'] as String?,
+    );
+  }
+
+  bool get hasDetails =>
+      (bankName != null && bankName!.isNotEmpty) ||
+      (accountNumber != null && accountNumber!.isNotEmpty) ||
+      (iban != null && iban!.isNotEmpty);
+}
+
 class EmployeeProfile {
   final String id;
   final String name;
@@ -853,6 +885,9 @@ class EmployeeProfile {
   final String? postcode;
   final String? nationalId;
 
+  // Bank details
+  final BankDetails bankDetails;
+
   // Emergency contacts & KYC
   final List<EmergencyContact> emergencyContacts;
   final SalaryInfo salary;
@@ -889,6 +924,7 @@ class EmployeeProfile {
     this.city,
     this.postcode,
     this.nationalId,
+    this.bankDetails = const BankDetails(),
     this.emergencyContacts = const [],
     required this.salary,
     this.kycVerifiedCount = 0,
@@ -934,6 +970,7 @@ class EmployeeProfile {
       city: pers?['city'] as String?,
       postcode: pers?['postcode'] as String?,
       nationalId: pers?['nationalId'] as String?,
+      bankDetails: BankDetails.fromJson(json['bank'] as Map<String, dynamic>? ?? json['bankDetails'] as Map<String, dynamic>?),
       emergencyContacts: contactsList,
       salary: SalaryInfo.fromJson(json['salary'] as Map<String, dynamic>?),
       kycVerifiedCount: (kyc?['verifiedCount'] as num?)?.toInt() ?? 0,
