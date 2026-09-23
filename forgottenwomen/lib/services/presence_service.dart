@@ -1,7 +1,9 @@
 // Presence reporting.
 
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
@@ -195,6 +197,30 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
   Timer.periodic(heartbeatInterval, (_) => runPresenceTick());
 }
 
+// Android only. Android kills a plain (non-foreground) background service
+// once the app isn't open, which is exactly what onBackgroundStart above
+// deliberately becomes outside office hours (setAsBackgroundService()) --
+// so most nights the service is fully gone by the time it would matter.
+// RECEIVE_BOOT_COMPLETED only gets it running again after a device reboot,
+// not every morning. This alarm, scheduled via _dailyResumeAlarmId below,
+// is what actually restarts it at 11:00 AM daily regardless of whether it
+// was killed overnight. Runs in its own isolate (owned by the
+// AndroidAlarmManager service, not the app or the background-service
+// isolate), so it re-registers plugins and reconfigures the background
+// service from scratch before starting it.
+const int _dailyResumeAlarmId = 0x4F540B; // arbitrary stable id ("OT" + tag)
+
+@pragma('vm:entry-point')
+Future<void> dailyResumeAlarmCallback() async {
+  DartPluginRegistrant.ensureInitialized();
+  try {
+    await PresenceService.configure();
+    await PresenceService.start();
+  } catch (e) {
+    debugPrint('dailyResumeAlarmCallback error: $e');
+  }
+}
+
 @pragma('vm:entry-point')
 Future<bool> onIosBackground(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
@@ -241,6 +267,42 @@ class PresenceService {
       );
     } catch (e) {
       debugPrint('PresenceService configure error: $e');
+    }
+  }
+
+  /// Schedules the OS-level alarm (Android only) that restarts the presence
+  /// service at 11:00 AM every day, even if Android fully killed it
+  /// overnight. Safe to call on every app launch -- android_alarm_manager_plus
+  /// replaces any existing alarm registered under the same id rather than
+  /// stacking duplicates.
+  static Future<void> scheduleDailyResume() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await AndroidAlarmManager.initialize();
+
+      final now = DateTime.now();
+      var next = DateTime(now.year, now.month, now.day, 11, 0);
+      if (!next.isAfter(now)) {
+        next = next.add(const Duration(days: 1));
+      }
+
+      await AndroidAlarmManager.periodic(
+        const Duration(days: 1),
+        _dailyResumeAlarmId,
+        dailyResumeAlarmCallback,
+        startAt: next,
+        // Inexact: avoids requiring the user to separately grant
+        // SCHEDULE_EXACT_ALARM on Android 12+. A few minutes of slack on a
+        // "restart the background service" alarm is immaterial -- the
+        // service's own office-hours check (11:00-19:00) already tolerates
+        // exactly this kind of small timing slop everywhere else.
+        exact: false,
+        allowWhileIdle: true,
+        wakeup: true,
+        rescheduleOnReboot: true,
+      );
+    } catch (e) {
+      debugPrint('PresenceService.scheduleDailyResume error: $e');
     }
   }
 

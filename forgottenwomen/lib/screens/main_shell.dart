@@ -44,7 +44,15 @@ class _MainShellState extends State<MainShell> {
     NotificationService().onNotificationTapped = _handleNotificationTap;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkOtaUpdate();
+      _checkNotificationLaunch();
     });
+  }
+
+  Future<void> _checkNotificationLaunch() async {
+    final payload = await NotificationService().checkLaunchPayload();
+    if (mounted && payload != null) {
+      _handleNotificationTap(payload);
+    }
   }
 
   Future<void> _checkOtaUpdate() async {

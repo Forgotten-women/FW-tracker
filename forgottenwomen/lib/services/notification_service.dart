@@ -176,6 +176,26 @@ class NotificationService {
     } catch (_) {}
   }
 
+  /// If the app was cold-launched by the user tapping a notification (not
+  /// just resumed from background), returns that notification's payload.
+  ///
+  /// onDidReceiveNotificationResponse (wired in initialize(), above) only
+  /// fires for a tap while the plugin is already listening -- on a cold
+  /// launch, initialize() runs in main.dart before MainShell exists to set
+  /// onNotificationTapped, so the tap that actually launched the app was
+  /// silently dropped: the app opened, but never navigated anywhere. Call
+  /// this once a screen exists to route to, and feed the result through the
+  /// same handler used for a live tap.
+  Future<String?> checkLaunchPayload() async {
+    try {
+      final details = await _notificationsPlugin.getNotificationAppLaunchDetails();
+      if (details != null && details.didNotificationLaunchApp) {
+        return details.notificationResponse?.payload;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Polls /api/notifications/mine for the logged-in employee.
   /// For each new unread notification, fires a native status bar notification.
   Future<int> checkAndDispatchUnseenNotifications({
@@ -221,16 +241,25 @@ class NotificationService {
           final category = item['category']?.toString();
           final link = item['link']?.toString() ?? category ?? '';
 
-          // Generate numeric notification ID from string hash
-          final numericId = id.hashCode & 0x7FFFFFFF;
+          // BREAK reminders are already delivered locally and offline by
+          // presence_service.dart's own 30s timer, which is both more
+          // precise (exact 25/30-minute mark) and doesn't depend on the
+          // backend's cron sweep ever reaching this employee's record. This
+          // server copy exists for the in-app feed / HR-side visibility,
+          // not as a second tray popup for the same break -- showing it too
+          // would double-notify for one event.
+          if (category != 'BREAK') {
+            // Generate numeric notification ID from string hash
+            final numericId = id.hashCode & 0x7FFFFFFF;
 
-          await showSystemNotification(
-            id: numericId,
-            title: title,
-            body: body,
-            payload: link,
-            category: category,
-          );
+            await showSystemNotification(
+              id: numericId,
+              title: title,
+              body: body,
+              payload: link,
+              category: category,
+            );
+          }
 
           seenIds.add(id);
           newlyDispatched++;

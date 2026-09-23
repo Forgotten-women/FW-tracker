@@ -2,7 +2,7 @@ name: office_tracker
 description: "Office presence and attendance tracking - employee app."
 publish_to: 'none'
 
-version: 1.0.5+6
+version: 1.0.6+7
 
 environment:
   sdk: ^3.13.1
@@ -41,6 +41,14 @@ dependencies:
   # moment the app is backgrounded, which is why the old "pings every 15s in
   # background" claim was false.
   flutter_background_service: ^5.0.10
+
+  # Android-only. The presence background service demotes itself outside
+  # office hours and gets killed by the OS once it's not a foreground
+  # service and the app isn't open -- RECEIVE_BOOT_COMPLETED only restarts
+  # it after a device reboot, not every morning. This schedules a real
+  # OS-level alarm (survives the Dart VM/app being fully killed) to restart
+  # the service at 11:00 AM daily.
+  android_alarm_manager_plus: ^4.0.6
   file_picker: ^8.1.7
   flutter_local_notifications: ^18.0.1
   package_info_plus: ^8.1.0

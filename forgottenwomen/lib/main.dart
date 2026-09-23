@@ -26,6 +26,11 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('PresenceService.configure non-fatal error: $e');
   }
+  try {
+    await PresenceService.scheduleDailyResume();
+  } catch (e) {
+    debugPrint('PresenceService.scheduleDailyResume non-fatal error: $e');
+  }
   runApp(const OfficeTrackerApp());
 }
 
