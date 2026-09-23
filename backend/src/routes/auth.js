@@ -10,26 +10,22 @@ const rbac = require('../domain/rbac');
 const { requireUser } = require('../middleware/auth');
 const { audit, db } = require('../db');
 const T = require('../util/time');
+const rateLimiter = require('../lib/rateLimiter');
 
 // Per-IP throttle in front of the per-account lockout. The account lockout
 // stops one account being ground down; this stops one host working through a
 // list of accounts, which the per-account counter would never notice.
-const attempts = new Map();
-const WINDOW_MS = 15 * 60 * 1000;
+//
+// Backed by Redis (see lib/rateLimiter.js) rather than a local Map: Vercel
+// routes requests across many short-lived instances, so a counter that only
+// lives in one instance's memory never sees an attacker's full request
+// volume and the throttle silently stops working under real distributed
+// traffic.
+const WINDOW_SECONDS = 15 * 60;
 const MAX_PER_IP = 30;
 
-function ipThrottled(ip) {
-  const nowMs = T.now();
-  const rec = attempts.get(ip);
-  if (!rec || rec.resetAt < nowMs) {
-    attempts.set(ip, { count: 1, resetAt: nowMs + WINDOW_MS });
-    return false;
-  }
-  rec.count++;
-  if (attempts.size > 5000) {
-    for (const [k, v] of attempts) if (v.resetAt < nowMs) attempts.delete(k);
-  }
-  return rec.count > MAX_PER_IP;
+async function ipThrottled(ip) {
+  return rateLimiter.isThrottled('login', ip, MAX_PER_IP, WINDOW_SECONDS);
 }
 
 function present(user) {
@@ -50,7 +46,7 @@ function present(user) {
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  if (ipThrottled(ip)) {
+  if (await ipThrottled(ip)) {
     return res.status(429).json({
       status: 'ERROR', code: 'RATE_LIMITED',
       message: 'Too many sign-in attempts. Try again shortly.',

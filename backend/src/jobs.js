@@ -16,6 +16,7 @@ const N = require('./domain/notifications');
 const schedule = require('./domain/schedule');
 const events = require('./events');
 const T = require('./util/time');
+const { claimOnce, swap } = require('./lib/dedupe');
 
 const TICK_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -30,7 +31,16 @@ const insertMovement = db.prepare(
 
 // Status is derived, so nothing needs to be "marked" away - but a DEPARTED
 // movement entry still has to be emitted once, when the transition happens.
-const lastKnownStatus = new Map(); // employeeId -> status
+//
+// The previous-status comparison is stored via lib/dedupe.js's swap() (Redis
+// with an in-memory fallback), not a bare in-memory Map -- on Vercel, each
+// invocation of this tick can land on a different Lambda instance with no
+// memory of the previous one, so a plain Map's `prev` was undefined far more
+// often than not, meaning most real transitions were silently never detected
+// (the `prev === undefined` guard below exists specifically to avoid firing
+// a false DEPARTED event on a cold instance's first-ever look at an
+// employee, but on Vercel almost every tick looked "cold").
+const TRANSITION_TTL_SECONDS = 20 * 60 * 60; // covers the rest of a working day
 
 async function detectTransitions(nowMs = T.now()) {
   const todayKey = T.dateKey(nowMs);
@@ -38,8 +48,7 @@ async function detectTransitions(nowMs = T.now()) {
 
   for (const emp of employees) {
     const d = await P.deriveDay(emp.id, todayKey, nowMs);
-    const prev = lastKnownStatus.get(emp.id);
-    lastKnownStatus.set(emp.id, d.status);
+    const prev = await swap('transition-status', emp.id, d.status, TRANSITION_TTL_SECONDS);
 
     if (prev === undefined || prev === d.status) continue;
 
@@ -111,7 +120,9 @@ async function rollover(nowMs = T.now()) {
   });
   
 
-  lastKnownStatus.clear();
+  // No in-memory map to clear anymore (see detectTransitions above) -- the
+  // per-employee "last known status" now lives in Redis with its own TTL, so
+  // it ages out on its own rather than needing an explicit reset here.
   console.log(`[jobs] rolled over ${closedKey}: ${closed} employee-day(s) closed`);
   
   try {
@@ -298,12 +309,15 @@ async function nightlyBackup(nowMs = T.now()) {
 // Check-out reminder: fires at 7:05 PM (5 mins after shift end) if no manual
 // clock-out event has been recorded.
 //
-// Both fire ONCE per employee per day. Tracking is done via a simple in-memory
-// Set keyed on "employeeId:dateKey" so server restart on the same day can
-// re-send, but a normal day never double-fires.
-
-const _sentCheckInReminder = new Set();   // "emp_id:date_key"
-const _sentCheckOutReminder = new Set();  // "emp_id:date_key"
+// Both fire ONCE per employee per day. Tracking is via claimOnce (Redis,
+// shared across instances, see lib/dedupe.js) keyed on "employeeId:dateKey"
+// -- NOT an in-memory Set. Vercel Cron can invoke this on a different,
+// possibly cold, Lambda instance every time it fires, so an in-memory Set
+// only ever deduped within one warm container's lifetime: in production this
+// meant an employee could get the same "you haven't checked in" or
+// "clock-out reminder" notification resent every time the cron tick landed
+// on a fresh container, for as long as the condition kept being true.
+const REMINDER_TTL_SECONDS = 20 * 60 * 60; // comfortably covers the rest of a working day
 
 async function sendAttendanceReminders(nowMs = T.now()) {
   const todayKey = T.dateKey(nowMs);
@@ -320,27 +334,25 @@ async function sendAttendanceReminders(nowMs = T.now()) {
       // -----------------------------------------------------------------------
       // 1. Check-In Reminder — at grace expiry (11:10 AM)
       // -----------------------------------------------------------------------
-      const checkInKey = `${emp.id}:${todayKey}:checkin`;
-      if (!_sentCheckInReminder.has(checkInKey) && nowMs >= s.latestOnTimeAt) {
+      if (nowMs >= s.latestOnTimeAt) {
         // Derive today's attendance to check if any check-in exists.
         const day = await A.deriveDay(emp.id, todayKey, nowMs);
 
         if (!day.firstInAt) {
-          // No check-in recorded at all — send the reminder.
-          _sentCheckInReminder.add(checkInKey);
-          await N.notify({
-            employeeId: emp.id,
-            category: 'ATTENDANCE',
-            title: '⏰ Attendance Not Recorded',
-            body: 'Your check-in has not been detected yet today. If you have arrived, please ensure your phone is connected to the office Wi-Fi. If the sensor failed, open the app to confirm your attendance.',
-            severity: 'warning',
-            link: '/attendance',
-            nowMs,
-          });
-          console.log(`[jobs] check-in reminder sent → ${emp.name} (${emp.id}) for ${todayKey}`);
-        } else {
-          // Already checked in — mark as sent so we don't re-check every minute.
-          _sentCheckInReminder.add(checkInKey);
+          // No check-in recorded at all — send the reminder, but only once.
+          const claimed = await claimOnce('checkin-reminder', `${emp.id}:${todayKey}`, REMINDER_TTL_SECONDS);
+          if (claimed) {
+            await N.notify({
+              employeeId: emp.id,
+              category: 'ATTENDANCE',
+              title: '⏰ Attendance Not Recorded',
+              body: 'Your check-in has not been detected yet today. If you have arrived, please ensure your phone is connected to the office Wi-Fi. If the sensor failed, open the app to confirm your attendance.',
+              severity: 'warning',
+              link: '/attendance',
+              nowMs,
+            });
+            console.log(`[jobs] check-in reminder sent → ${emp.name} (${emp.id}) for ${todayKey}`);
+          }
         }
       }
 
@@ -348,8 +360,7 @@ async function sendAttendanceReminders(nowMs = T.now()) {
       // 2. Check-Out Reminder — at 7:05 PM (5 mins after scheduled end)
       // -----------------------------------------------------------------------
       const checkOutReminderAt = s.scheduledEndAt + 5 * 60 * 1000; // +5 mins
-      const checkOutKey = `${emp.id}:${todayKey}:checkout`;
-      if (!_sentCheckOutReminder.has(checkOutKey) && nowMs >= checkOutReminderAt) {
+      if (nowMs >= checkOutReminderAt) {
         // Check if a CLOCK_OUT attendance event exists for today.
         const clockOutEvent = await db.prepare(`
           SELECT id FROM attendance_events
@@ -361,25 +372,21 @@ async function sendAttendanceReminders(nowMs = T.now()) {
           // No manual clock-out — check if they were even present today before sending.
           const day = await A.deriveDay(emp.id, todayKey, nowMs);
           if (day.firstInAt) {
-            // Was present but has not clocked out — send the reminder.
-            _sentCheckOutReminder.add(checkOutKey);
-            await N.notify({
-              employeeId: emp.id,
-              category: 'ATTENDANCE',
-              title: '🔔 Clock-Out Reminder',
-              body: 'It is 7:05 PM and your clock-out has not been recorded. If you have finished your working day, please clock out from the app so your attendance is accurately logged.',
-              severity: 'info',
-              link: '/attendance',
-              nowMs,
-            });
-            console.log(`[jobs] clock-out reminder sent → ${emp.name} (${emp.id}) for ${todayKey}`);
-          } else {
-            // Not present today — skip silently.
-            _sentCheckOutReminder.add(checkOutKey);
+            // Was present but has not clocked out — send the reminder, but only once.
+            const claimed = await claimOnce('checkout-reminder', `${emp.id}:${todayKey}`, REMINDER_TTL_SECONDS);
+            if (claimed) {
+              await N.notify({
+                employeeId: emp.id,
+                category: 'ATTENDANCE',
+                title: '🔔 Clock-Out Reminder',
+                body: 'It is 7:05 PM and your clock-out has not been recorded. If you have finished your working day, please clock out from the app so your attendance is accurately logged.',
+                severity: 'info',
+                link: '/attendance',
+                nowMs,
+              });
+              console.log(`[jobs] clock-out reminder sent → ${emp.name} (${emp.id}) for ${todayKey}`);
+            }
           }
-        } else {
-          // Already clocked out — mark as sent.
-          _sentCheckOutReminder.add(checkOutKey);
         }
       }
     } catch (err) {
@@ -393,9 +400,12 @@ async function sendAttendanceReminders(nowMs = T.now()) {
 // ---------------------------------------------------------------------------
 // 1. 5 minutes before break ends: "You have 5 minutes left on your break."
 // 2. Once 30-minute break is completed: "Your 30-minute break period has been completed."
-
-const _sentBreak5mReminder = new Set();
-const _sentBreakEndedReminder = new Set();
+//
+// Deduped via claimOnce (Redis-backed, see top of file) rather than an
+// in-memory Set, for the same cross-instance reason as the attendance
+// reminders above -- a break record's id is stable for its lifetime, so it
+// makes a fine dedup key.
+const BREAK_REMINDER_TTL_SECONDS = 2 * 60 * 60; // a break never lasts anywhere near this long
 
 async function sendBreakReminders(nowMs = T.now()) {
   try {
@@ -408,33 +418,35 @@ async function sendBreakReminders(nowMs = T.now()) {
 
     for (const br of activeBreaks) {
       const elapsedMins = (nowMs - br.started_at) / 60000;
-      const key5m = `${br.id}:5m`;
-      const keyEnded = `${br.id}:ended`;
 
       // 5 minutes remaining reminder (at minute 25 of 30)
-      if (elapsedMins >= 25 && elapsedMins < 30 && !_sentBreak5mReminder.has(key5m)) {
-        _sentBreak5mReminder.add(key5m);
-        await N.notify({
-          employeeId: br.employee_id,
-          category: 'BREAK',
-          title: 'Break Reminder',
-          message: 'You have 5 minutes left on your break.',
-          nowMs,
-        });
-        console.log(`[jobs] 5m break reminder sent → ${br.employee_name} (${br.employee_id})`);
+      if (elapsedMins >= 25 && elapsedMins < 30) {
+        const claimed = await claimOnce('break-5m-reminder', br.id, BREAK_REMINDER_TTL_SECONDS);
+        if (claimed) {
+          await N.notify({
+            employeeId: br.employee_id,
+            category: 'BREAK',
+            title: 'Break Reminder',
+            message: 'You have 5 minutes left on your break.',
+            nowMs,
+          });
+          console.log(`[jobs] 5m break reminder sent → ${br.employee_name} (${br.employee_id})`);
+        }
       }
 
       // Break ended reminder (at minute 30)
-      if (elapsedMins >= 30 && !_sentBreakEndedReminder.has(keyEnded)) {
-        _sentBreakEndedReminder.add(keyEnded);
-        await N.notify({
-          employeeId: br.employee_id,
-          category: 'BREAK',
-          title: 'Break Completed',
-          message: 'Your 30-minute break period has been completed. Please return to work to avoid deficit time.',
-          nowMs,
-        });
-        console.log(`[jobs] break completed reminder sent → ${br.employee_name} (${br.employee_id})`);
+      if (elapsedMins >= 30) {
+        const claimed = await claimOnce('break-ended-reminder', br.id, BREAK_REMINDER_TTL_SECONDS);
+        if (claimed) {
+          await N.notify({
+            employeeId: br.employee_id,
+            category: 'BREAK',
+            title: 'Break Completed',
+            message: 'Your 30-minute break period has been completed. Please return to work to avoid deficit time.',
+            nowMs,
+          });
+          console.log(`[jobs] break completed reminder sent → ${br.employee_name} (${br.employee_id})`);
+        }
       }
     }
   } catch (err) {
