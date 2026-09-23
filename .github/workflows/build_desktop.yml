@@ -96,8 +96,16 @@ jobs:
           # Actions, this build step produces installers but no signature,
           # and every running app's silent update check will simply find
           # nothing valid to install.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          #
+          # Tauri v1's bundler (this project is on tauri 1.5.4, see
+          # src-tauri/Cargo.toml) reads TAURI_PRIVATE_KEY / TAURI_KEY_PASSWORD
+          # specifically -- TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) is the v2
+          # convention and is silently ignored by v1, which is why an earlier
+          # version of this workflow built unsigned installers despite the
+          # secrets being set. The GitHub secret names themselves don't need
+          # to change -- only which env var name they're exposed as here.
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
           tauriScript: npx @tauri-apps/cli
