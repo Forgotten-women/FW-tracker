@@ -107,11 +107,18 @@ export default function DashboardPage() {
       window.addEventListener('office-tracker-sse', handleSse);
     }
 
+    // SSE ('office-tracker-sse', wired above) is the primary update path --
+    // this interval is only a slow backstop in case a stream drops silently
+    // for a while. It used to run every 4s *in addition to* SSE already
+    // firing the same 3 calls on every relevant event, so every push was
+    // immediately followed by a duplicate fetch, and the timer alone fired
+    // ~900 times/hour per open dashboard regardless of whether anything had
+    // changed -- a meaningful, avoidable share of Supabase egress.
     const interval = setInterval(() => {
       loadCorrections();
       loadNotifications();
       loadComplaintsCount();
-    }, 4000);
+    }, 60000);
 
     return () => {
       if (typeof window !== 'undefined') {

@@ -87,9 +87,12 @@ export function WarningBoard() {
       window.addEventListener('office-tracker-sse', handleSse);
     }
 
+    // SSE (above) is the primary update path; this is only a backstop for a
+    // stream that silently stops delivering. It used to run every 4s next to
+    // SSE already refreshing on every relevant event -- doubling every push.
     const interval = setInterval(() => {
       refresh(true);
-    }, 4000);
+    }, 60000);
 
     return () => {
       if (typeof window !== 'undefined') {

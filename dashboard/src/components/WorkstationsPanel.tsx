@@ -338,7 +338,10 @@ export function WorkstationsPanel({
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 20000); // 20s auto refresh
+    // Not SSE-backed (unlike most other panels), so this is the only update
+    // path -- kept well above 4s to limit Supabase read/egress volume for a
+    // background admin view that doesn't need near-real-time refresh.
+    const interval = setInterval(loadData, 45000);
     return () => clearInterval(interval);
   }, []);
 

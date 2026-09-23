@@ -63,17 +63,28 @@ export function useDashboard(
   }, [onUnauthorized]);
 
   // Data plus the polling fallback.
+  //
+  // This used to poll every 6s unconditionally, in addition to SSE's
+  // onmessage handler (below) already calling refresh() on every push -- so
+  // a live SSE connection meant every update was fetched twice, and the
+  // timer alone fired every 6s regardless of whether the stream was healthy.
+  // Slowing it down while 'live' (SSE is doing the real-time work; this is
+  // only a safety net against a stream that silently stopped delivering
+  // without erroring) and keeping it fast while not 'live' (genuinely the
+  // only thing keeping data current) preserves the documented "stale by at
+  // most ~15s" guarantee without the redundant fetch volume.
   useEffect(() => {
     if (!unlocked) return;
     aliveRef.current = true;
     const initial = setTimeout(() => void refresh(), 0);
-    const id = setInterval(() => void refresh(), 6000);
+    const intervalMs = connection === 'live' ? 60000 : 6000;
+    const id = setInterval(() => void refresh(), intervalMs);
     return () => {
       aliveRef.current = false;
       clearTimeout(initial);
       clearInterval(id);
     };
-  }, [unlocked, refresh]);
+  }, [unlocked, refresh, connection]);
 
   // Live stream.
   useEffect(() => {
