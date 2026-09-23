@@ -535,13 +535,17 @@ class _SalaryScreenState extends State<SalaryScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            p.adjustmentsTotal >= 0 ? 'Approved Overtime & Additions' : 'Approved Deficit & Deductions',
-                            style: TextStyle(
-                              color: p.adjustmentsTotal >= 0 ? AppColors.teal : AppColors.amber,
-                              fontSize: 12,
+                          Expanded(
+                            child: Text(
+                              p.adjustmentsTotal >= 0 ? 'Approved Overtime & Additions' : 'Approved Deficit & Deductions',
+                              style: TextStyle(
+                                color: p.adjustmentsTotal >= 0 ? AppColors.teal : AppColors.amber,
+                                fontSize: 12,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          const SizedBox(width: 8),
                           Text(
                             (p.adjustmentsTotal >= 0 ? '+' : '') + _formatCurrency(p.adjustmentsTotal, cur),
                             style: TextStyle(

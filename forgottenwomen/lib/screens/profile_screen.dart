@@ -325,9 +325,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 if (p.employeeNumber != null)
-                  _buildMiniMeta('EMPLOYEE ID', p.employeeNumber!),
+                  Expanded(child: _buildMiniMeta('EMPLOYEE ID', p.employeeNumber!)),
+                if (p.employeeNumber != null && p.workEmail != null)
+                  const SizedBox(width: 12),
                 if (p.workEmail != null)
-                  _buildMiniMeta('WORK EMAIL', p.workEmail!),
+                  Expanded(child: _buildMiniMeta('WORK EMAIL', p.workEmail!)),
               ],
             ),
           ],
@@ -343,11 +345,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Text(
           label,
           style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.textMuted),
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 2),
         Text(
           value,
           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textLight),
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
