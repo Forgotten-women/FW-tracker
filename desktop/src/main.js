@@ -67,10 +67,11 @@ const breakToggleBtn = document.getElementById('break-toggle-btn');
 const checkoutBtn = document.getElementById('checkout-btn');
 const undoCheckoutWrap = document.getElementById('undo-checkout-wrap');
 const undoTimerNum = document.getElementById('undo-timer-num');
-const undoCheckoutBtn = document.getElementById('undo-checkout-btn');
+const shiftTargetCard = document.getElementById('shift-target-card');
+const shiftWorkedValue = document.getElementById('shift-worked-value');
+const shiftProgressFill = document.getElementById('shift-progress-fill');
+const shiftRemText = document.getElementById('shift-rem-text');
 const activeTimer = document.getElementById('active-timer');
-const presenceValue = document.getElementById('presence-value');
-const presenceGapNote = document.getElementById('presence-gap-note');
 const statBreak = document.getElementById('stat-break');
 const statIdle = document.getElementById('stat-idle');
 const statusBanner = document.getElementById('status-banner');
@@ -266,34 +267,37 @@ async function refreshStatus() {
           checkinText.textContent = `Check-in: ${data.latest.today.checkInTime || 'Not Recorded'}`;
         }
 
-        // Office Presence (phone + Wi-Fi verified) alongside this agent's own
-        // Active Time. Backend omits/nulls these fields if it couldn't
-        // resolve presence for some reason -- shown as "--" rather than a
-        // stale or misleading number in that case.
-        if (presenceValue) {
-          const presenceMins = data.latest.today.officePresenceMinutes;
-          if (presenceMins === null || presenceMins === undefined) {
-            presenceValue.textContent = '--';
-            if (presenceGapNote) presenceGapNote.classList.add('hidden');
-          } else {
-            presenceValue.textContent = data.latest.today.officePresenceFormatted
-              || formatHMS(presenceMins * 60);
+        // Official Daily Shift Target (HR Dashboard Synced)
+        if (shiftTargetCard) {
+          const REQUIRED_SHIFT_MINS = data.latest.today.shiftTargetMinutes || 450;
+          const hrWorkedMins = (data.latest.today.officePresenceMinutes !== null && data.latest.today.officePresenceMinutes !== undefined)
+            ? data.latest.today.officePresenceMinutes
+            : Math.floor(currentActiveSecs / 60);
+          const hrFormatted = data.latest.today.officePresenceFormatted || `${Math.floor(hrWorkedMins / 60)}h ${hrWorkedMins % 60}m`;
+          const pct = (data.latest.today.shiftProgressPercent !== null && data.latest.today.shiftProgressPercent !== undefined)
+            ? data.latest.today.shiftProgressPercent
+            : Math.min(100, Math.round((hrWorkedMins / REQUIRED_SHIFT_MINS) * 100));
+          const remMins = (data.latest.today.shiftRemainingMinutes !== null && data.latest.today.shiftRemainingMinutes !== undefined)
+            ? data.latest.today.shiftRemainingMinutes
+            : Math.max(0, REQUIRED_SHIFT_MINS - hrWorkedMins);
+          const remFormatted = data.latest.today.shiftRemainingFormatted || `${Math.floor(remMins / 60)}h ${remMins % 60}m`;
 
-            // A gap of 10+ minutes between the two is worth explaining --
-            // it almost always means idle/locked/asleep time that presence
-            // (continuous as long as the phone stays on office Wi-Fi) counts
-            // but this agent's own Active Time does not.
-            const activeMins = Math.floor(currentActiveSecs / 60);
-            const gapMins = presenceMins - activeMins;
-            if (presenceGapNote) {
-              if (gapMins >= 10) {
-                presenceGapNote.textContent =
-                  `ℹ️ ${gapMins}m more presence than active time -- likely idle, `
-                  + `screen-locked, or sleep time while still on office Wi-Fi.`;
-                presenceGapNote.classList.remove('hidden');
-              } else {
-                presenceGapNote.classList.add('hidden');
-              }
+          if (shiftWorkedValue) {
+            shiftWorkedValue.innerHTML = `${hrFormatted} <span class="shift-pct">(${pct}%)</span>`;
+          }
+          if (shiftProgressFill) {
+            shiftProgressFill.style.width = `${Math.max(4, Math.min(100, pct))}%`;
+            if (pct >= 100) {
+              shiftProgressFill.className = 'shift-progress-fill completed';
+            } else {
+              shiftProgressFill.className = 'shift-progress-fill';
+            }
+          }
+          if (shiftRemText) {
+            if (remMins <= 0 || pct >= 100) {
+              shiftRemText.innerHTML = '<span class="rem-emerald font-bold">✅ Target Achieved</span>';
+            } else {
+              shiftRemText.innerHTML = `<span class="rem-amber">⏳ ${remFormatted} remaining</span>`;
             }
           }
         }

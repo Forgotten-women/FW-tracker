@@ -62,25 +62,25 @@
         <span id="checkin-text">Check-in: --:--</span>
       </div>
 
-      <!-- Live Active Timer -->
+      <!-- Official Daily Shift Target (HR Dashboard Synced) -->
+      <div class="shift-target-card" id="shift-target-card">
+        <div class="shift-header">
+          <span class="shift-title">⏱️ Daily Shift Target (7h 30m / day)</span>
+          <span class="shift-value" id="shift-worked-value">0h 0m <span class="shift-pct" id="shift-pct">(0%)</span></span>
+        </div>
+        <div class="shift-progress-track">
+          <div class="shift-progress-fill" id="shift-progress-fill" style="width: 4%;"></div>
+        </div>
+        <div class="shift-footer">
+          <span class="shift-req">Target: 7h 30m required</span>
+          <span class="shift-rem" id="shift-rem-text"><span class="rem-amber">⏳ 7h 30m remaining</span></span>
+        </div>
+      </div>
+
+      <!-- Live Workstation Active Timer -->
       <div class="timer-container" id="timer-container">
         <div class="timer-label" id="timer-label">TODAY'S ACTIVE TIME</div>
         <div class="timer-display" id="active-timer">00:00:00</div>
-
-        <!-- Office Presence (phone app + office Wi-Fi verification) shown
-             alongside this agent's own Active Time, since the two measure
-             different things and can legitimately disagree: Active Time
-             excludes any stretch with no keyboard/mouse input (idle, screen
-             locked, the PC asleep), while Office Presence stays continuous
-             as long as the phone is confirmed on the office network. The gap
-             note below explains a large difference instead of leaving it
-             unexplained. -->
-        <div class="presence-row" id="presence-row">
-          <span class="presence-icon">📶</span>
-          <span class="presence-label">Office Presence</span>
-          <span class="presence-value" id="presence-value">--</span>
-        </div>
-        <div id="presence-gap-note" class="presence-gap-note hidden"></div>
 
         <!-- Live Break Remaining Countdown (appears when on break) -->
         <div id="break-countdown-wrap" class="break-countdown-wrap hidden">

@@ -528,6 +528,12 @@ let todayLiveStats = {
   breakSeconds: 0,
   idleSeconds: 0,
   dateKey: initialTodayStr,
+  officePresenceMinutes: null,
+  officePresenceFormatted: null,
+  shiftTargetMinutes: 450,
+  shiftProgressPercent: 0,
+  shiftRemainingMinutes: 450,
+  shiftRemainingFormatted: '7h 30m',
 };
 let currentWorkstationStatus = 'ACTIVE';
 let isManualBreak = false;

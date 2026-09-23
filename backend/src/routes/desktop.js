@@ -427,10 +427,17 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   // (often lower) workstation-only figure with no context for the gap.
   let officePresenceMinutes = null;
   let officePresenceFormatted = null;
+  const shiftTargetMinutes = 450; // 7h 30m standard required shift
+  let shiftProgressPercent = 0;
+  let shiftRemainingMinutes = 450;
+  let shiftRemainingFormatted = '7h 30m';
   try {
     const day = await attendance.deriveDay(employeeId, dateKey, nowMs);
     officePresenceMinutes = day.workedMinutes;
     officePresenceFormatted = T.formatMinutes(day.workedMinutes);
+    shiftProgressPercent = Math.min(100, Math.round((day.workedMinutes / shiftTargetMinutes) * 100));
+    shiftRemainingMinutes = Math.max(0, shiftTargetMinutes - day.workedMinutes);
+    shiftRemainingFormatted = `${Math.floor(shiftRemainingMinutes / 60)}h ${shiftRemainingMinutes % 60}m`;
   } catch (_) {}
 
   // Check if an authorized HR stream request is active (requested within last 25s)
@@ -472,6 +479,10 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       breakRemainingSeconds,
       officePresenceMinutes,
       officePresenceFormatted,
+      shiftTargetMinutes,
+      shiftProgressPercent,
+      shiftRemainingMinutes,
+      shiftRemainingFormatted,
     },
     policy: {
       idleThresholdMinutes: idleThresholdMins,
@@ -615,6 +626,21 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
   const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStart && nowMs <= shiftEnd);
   const outsideWorkingHours = !isWithinWorkingHours;
 
+  let officePresenceMinutes = null;
+  let officePresenceFormatted = null;
+  const shiftTargetMinutes = 450;
+  let shiftProgressPercent = 0;
+  let shiftRemainingMinutes = 450;
+  let shiftRemainingFormatted = '7h 30m';
+  try {
+    const day = await attendance.deriveDay(employeeId, dateKey, nowMs);
+    officePresenceMinutes = day.workedMinutes;
+    officePresenceFormatted = T.formatMinutes(day.workedMinutes);
+    shiftProgressPercent = Math.min(100, Math.round((day.workedMinutes / shiftTargetMinutes) * 100));
+    shiftRemainingMinutes = Math.max(0, shiftTargetMinutes - day.workedMinutes);
+    shiftRemainingFormatted = `${Math.floor(shiftRemainingMinutes / 60)}h ${shiftRemainingMinutes % 60}m`;
+  } catch (_) {}
+
   res.json({
     status: 'SUCCESS',
     syncedEventIds,
@@ -626,6 +652,12 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
       activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
       unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
       idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
+      officePresenceMinutes,
+      officePresenceFormatted,
+      shiftTargetMinutes,
+      shiftProgressPercent,
+      shiftRemainingMinutes,
+      shiftRemainingFormatted,
     },
   });
 });
