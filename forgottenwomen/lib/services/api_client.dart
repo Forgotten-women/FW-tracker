@@ -41,7 +41,7 @@ class ApiClient {
   final http.Client _http;
   final Duration timeout;
 
-  ApiClient({TokenStore? store, http.Client? client, this.timeout = const Duration(seconds: 25)})
+  ApiClient({TokenStore? store, http.Client? client, this.timeout = const Duration(seconds: 45)})
       : _store = store ?? TokenStore(),
         _http = client ?? createPinnedHttpClient();
 
@@ -90,15 +90,30 @@ class ApiClient {
     };
   }
 
-  Future<T> _guard<T>(Future<T> Function() fn) async {
-    try {
-      return await fn();
-    } on ApiException {
-      rethrow;
-    } on TimeoutException {
-      throw ApiException('The server did not respond in time.');
-    } catch (e) {
-      throw ApiException('Could not reach the server: $e');
+  /// Wraps every API call with automatic retry on transient failures
+  /// (timeouts and network errors). ApiExceptions (server-returned errors)
+  /// are never retried — those are intentional responses.
+  Future<T> _guard<T>(Future<T> Function() fn, {int maxRetries = 1}) async {
+    int attempt = 0;
+    while (true) {
+      try {
+        return await fn();
+      } on ApiException {
+        rethrow;
+      } on TimeoutException {
+        attempt++;
+        if (attempt > maxRetries) {
+          throw ApiException('The server did not respond in time.');
+        }
+        // Brief pause before retry to let the server recover.
+        await Future.delayed(Duration(seconds: 2 * attempt));
+      } catch (e) {
+        attempt++;
+        if (attempt > maxRetries) {
+          throw ApiException('Could not reach the server: $e');
+        }
+        await Future.delayed(Duration(seconds: 2 * attempt));
+      }
     }
   }
 

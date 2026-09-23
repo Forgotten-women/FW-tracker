@@ -26,132 +26,148 @@ const T = require('../util/time');
 // GET /api/attendance/home-summary - consolidated fast batch for the mobile dashboard.
 // Delivers today's details, past 7 days history, dispute corrections, and notification counts in ONE call.
 router.get('/home-summary', requireDevice, async (req, res) => {
-  const { employeeId, employeeName, employeeRole } = req.auth;
-  const nowMs = T.now();
-  const dateKey = T.dateKey(nowMs);
+  try {
+    const { employeeId, employeeName, employeeRole } = req.auth;
+    const nowMs = T.now();
+    const dateKey = T.dateKey(nowMs);
 
-  // 1. Derive today's day first so it can be reused across all calculations
-  const day = await A.deriveDay(employeeId, dateKey, nowMs);
+    // 1. Derive today's day first so it can be reused across all calculations
+    const day = await A.deriveDay(employeeId, dateKey, nowMs);
 
-  // 2. Run companion metrics in parallel reusing pre-derived `day`
-  const [lateness, balance, workingHours, correctionRows, notifsResult] = await Promise.all([
-    A.latenessStatus(employeeId, dateKey),
-    A.balanceFor(employeeId),
-    A.calculateWorkingHoursMetrics(employeeId, dateKey, day),
-    db.prepare('SELECT * FROM attendance_corrections WHERE employee_id = ? ORDER BY requested_at DESC LIMIT 20').all(employeeId),
-    N.listForEmployee(employeeId, { includeDismissed: false }).catch(() => ({ unreadCount: 0, notifications: [] })),
-  ]);
+    // 2. Run companion metrics in parallel reusing pre-derived `day`
+    const [lateness, balance, workingHours, correctionRows, notifsResult] = await Promise.all([
+      A.latenessStatus(employeeId, dateKey),
+      A.balanceFor(employeeId),
+      A.calculateWorkingHoursMetrics(employeeId, dateKey, day),
+      db.prepare('SELECT * FROM attendance_corrections WHERE employee_id = ? ORDER BY requested_at DESC LIMIT 20').all(employeeId),
+      N.listForEmployee(employeeId, { includeDismissed: false }).catch(() => ({ unreadCount: 0, notifications: [] })),
+    ]);
 
-  // 3. Fast history: Today reuses day.presence directly. Past 6 days loaded from attendance_days cache.
-  const days = 7;
-  const dayKeys = [];
-  for (let i = 0; i < days; i++) {
-    dayKeys.push(T.dateKey(nowMs - i * 24 * 60 * 60 * 1000));
-  }
+    // 3. Fast history: Today reuses day.presence directly. Past 6 days loaded from attendance_days cache.
+    const days = 7;
+    const dayKeys = [];
+    for (let i = 0; i < days; i++) {
+      dayKeys.push(T.dateKey(nowMs - i * 24 * 60 * 60 * 1000));
+    }
 
-  const pastKeys = dayKeys.slice(1);
-  const placeholders = pastKeys.map(() => '?').join(',');
-  const cachedRows = await db.prepare(
-    `SELECT * FROM attendance_days WHERE employee_id = ? AND date_key IN (${placeholders})`
-  ).all(employeeId, ...pastKeys);
-  const cachedMap = new Map(cachedRows.map(r => [r.date_key, r]));
+    const pastKeys = dayKeys.slice(1);
+    const placeholders = pastKeys.map(() => '?').join(',');
+    const cachedRows = await db.prepare(
+      `SELECT * FROM attendance_days WHERE employee_id = ? AND date_key IN (${placeholders})`
+    ).all(employeeId, ...pastKeys);
+    const cachedMap = new Map(cachedRows.map(r => [r.date_key, r]));
 
-  const summaryRows = await db.prepare(
-    `SELECT * FROM attendance_daily_summary WHERE employee_id = ? AND date_key IN (${placeholders})`
-  ).all(employeeId, ...pastKeys);
-  const summaryMap = new Map(summaryRows.map(r => [r.date_key, r]));
+    const summaryRows = await db.prepare(
+      `SELECT * FROM attendance_daily_summary WHERE employee_id = ? AND date_key IN (${placeholders})`
+    ).all(employeeId, ...pastKeys);
+    const summaryMap = new Map(summaryRows.map(r => [r.date_key, r]));
 
-  const historyDays = await Promise.all(
-    dayKeys.map(async (key, idx) => {
-      if (idx === 0 && day.presence) {
-        return P.presentDay(day.presence, { name: employeeName, role: employeeRole });
-      }
-      const cached = cachedMap.get(key);
-      if (cached) {
-        let sessions = [];
-        try { sessions = JSON.parse(cached.sessions_json || '[]'); } catch (_) {}
-        const summ = summaryMap.get(key);
-        const workedMins = (summ && summ.worked_minutes != null) ? summ.worked_minutes : cached.total_minutes;
-        const d = {
-          employeeId,
-          dateKey: key,
-          firstInAt: cached.first_in_at,
-          lastActiveAt: cached.last_active_at,
-          sessions,
-          totalMinutes: workedMins,
-          status: cached.status,
-          statusLabel: cached.status === 'IN_OFFICE' ? 'Active in Office' : (cached.status === 'CLOSED' ? 'Day closed' : (cached.status || 'Not Arrived Yet')),
-          inactivityMinutes: 0,
-          graceMinutesLeft: 0,
-          eventCount: sessions.length,
-          exceededCap: false,
-          lastSource: null,
-          sensorCarried: false,
-        };
+    const historyDays = await Promise.all(
+      dayKeys.map(async (key, idx) => {
+        if (idx === 0 && day.presence) {
+          return P.presentDay(day.presence, { name: employeeName, role: employeeRole });
+        }
+        const cached = cachedMap.get(key);
+        if (cached) {
+          let sessions = [];
+          try { sessions = JSON.parse(cached.sessions_json || '[]'); } catch (_) {}
+          const summ = summaryMap.get(key);
+          const workedMins = (summ && summ.worked_minutes != null) ? summ.worked_minutes : cached.total_minutes;
+          const d = {
+            employeeId,
+            dateKey: key,
+            firstInAt: cached.first_in_at,
+            lastActiveAt: cached.last_active_at,
+            sessions,
+            totalMinutes: workedMins,
+            status: cached.status,
+            statusLabel: cached.status === 'IN_OFFICE' ? 'Active in Office' : (cached.status === 'CLOSED' ? 'Day closed' : (cached.status || 'Not Arrived Yet')),
+            inactivityMinutes: 0,
+            graceMinutesLeft: 0,
+            eventCount: sessions.length,
+            exceededCap: false,
+            lastSource: null,
+            sensorCarried: false,
+          };
+          return P.presentDay(d, { name: employeeName, role: employeeRole });
+        }
+        const d = await P.deriveDay(employeeId, key, nowMs);
         return P.presentDay(d, { name: employeeName, role: employeeRole });
-      }
-      const d = await P.deriveDay(employeeId, key, nowMs);
-      return P.presentDay(d, { name: employeeName, role: employeeRole });
-    })
-  );
+      })
+    );
 
-  const corrections = correctionRows.map(r => ({
-    id: r.id, date: r.date_key, reason: r.reason, status: r.status,
-    requestedAt: T.displayTime(r.requested_at),
-    reviewedAt: r.reviewed_at ? T.displayTime(r.reviewed_at) : null,
-    reviewNotes: r.review_notes,
-  }));
+    const corrections = correctionRows.map(r => ({
+      id: r.id, date: r.date_key, reason: r.reason, status: r.status,
+      requestedAt: T.displayTime(r.requested_at),
+      reviewedAt: r.reviewed_at ? T.displayTime(r.reviewed_at) : null,
+      reviewNotes: r.review_notes,
+    }));
 
-  res.json({
-    status: 'SUCCESS',
-    employee: { id: employeeId, name: employeeName, role: employeeRole },
-    today: A.present(day),
-    workingHours,
-    lateness,
-    deficitBalance: {
-      minutes: balance.balanceMinutes,
-      formatted: T.formatMinutes(balance.balanceMinutes),
-      wholeDayEquivalents: balance.wholeDayEquivalents,
-      carryForwardMinutes: balance.carryForwardMinutes,
-      dayEquivalentMinutes: balance.dayEquivalentMinutes,
-    },
-    history: historyDays,
-    corrections,
-    unreadNotificationsCount: notifsResult.unreadCount || 0,
-    serverTimeMs: nowMs,
-  });
+    res.json({
+      status: 'SUCCESS',
+      employee: { id: employeeId, name: employeeName, role: employeeRole },
+      today: A.present(day),
+      workingHours,
+      lateness,
+      deficitBalance: {
+        minutes: balance.balanceMinutes,
+        formatted: T.formatMinutes(balance.balanceMinutes),
+        wholeDayEquivalents: balance.wholeDayEquivalents,
+        carryForwardMinutes: balance.carryForwardMinutes,
+        dayEquivalentMinutes: balance.dayEquivalentMinutes,
+      },
+      history: historyDays,
+      corrections,
+      unreadNotificationsCount: notifsResult.unreadCount || 0,
+      serverTimeMs: nowMs,
+    });
+  } catch (err) {
+    console.error('Error in /home-summary:', err);
+    res.status(500).json({
+      status: 'ERROR',
+      message: err.message || 'Failed to load home summary',
+    });
+  }
 });
 
 // GET /api/attendance/today - everything the employee home screen needs.
 router.get('/today', requireDevice, async (req, res) => {
-  const { employeeId, employeeName } = req.auth;
-  const nowMs = T.now();
-  const dateKey = T.dateKey(nowMs);
+  try {
+    const { employeeId, employeeName } = req.auth;
+    const nowMs = T.now();
+    const dateKey = T.dateKey(nowMs);
 
-  const [day, lateness, balance, workingHours] = await Promise.all([
-    A.deriveDay(employeeId, dateKey, nowMs),
-    A.latenessStatus(employeeId, dateKey),
-    A.balanceFor(employeeId),
-    A.calculateWorkingHoursMetrics(employeeId, dateKey),
-  ]);
+    const [day, lateness, balance, workingHours] = await Promise.all([
+      A.deriveDay(employeeId, dateKey, nowMs),
+      A.latenessStatus(employeeId, dateKey),
+      A.balanceFor(employeeId),
+      A.calculateWorkingHoursMetrics(employeeId, dateKey),
+    ]);
 
-  res.json({
-    status: 'SUCCESS',
-    employee: { id: employeeId, name: employeeName },
-    today: A.present(day),
-    workingHours,
-    // Spec 19.2: the employee must see their lateness standing clearly.
-    lateness,
-    // Spec 19.3: the deficit broken down, not one unexplained number.
-    deficitBalance: {
-      minutes: balance.balanceMinutes,
-      formatted: T.formatMinutes(balance.balanceMinutes),
-      wholeDayEquivalents: balance.wholeDayEquivalents,
-      carryForwardMinutes: balance.carryForwardMinutes,
-      dayEquivalentMinutes: balance.dayEquivalentMinutes,
-    },
-    serverTimeMs: nowMs,
-  });
+    res.json({
+      status: 'SUCCESS',
+      employee: { id: employeeId, name: employeeName },
+      today: A.present(day),
+      workingHours,
+      // Spec 19.2: the employee must see their lateness standing clearly.
+      lateness,
+      // Spec 19.3: the deficit broken down, not one unexplained number.
+      deficitBalance: {
+        minutes: balance.balanceMinutes,
+        formatted: T.formatMinutes(balance.balanceMinutes),
+        wholeDayEquivalents: balance.wholeDayEquivalents,
+        carryForwardMinutes: balance.carryForwardMinutes,
+        dayEquivalentMinutes: balance.dayEquivalentMinutes,
+      },
+      serverTimeMs: nowMs,
+    });
+  } catch (err) {
+    console.error('Error in /today:', err);
+    res.status(500).json({
+      status: 'ERROR',
+      message: err.message || 'Failed to load today details',
+    });
+  }
 });
 
 // POST /api/attendance/break/start
