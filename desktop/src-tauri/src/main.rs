@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use tokio::time::{sleep, Duration};
+use uuid::Uuid;
 
 static IS_MANUAL_BREAK: AtomicBool = AtomicBool::new(false);
 
@@ -571,6 +572,9 @@ fn main() {
                         let visible = tracker::network::get_visible_office_bssids();
                         let local_ip = tracker::network::get_local_ip();
                         let payload = HeartbeatPayload {
+                            // A zero-delta status probe, never queued/retried -- applying
+                            // "add 0 seconds" twice is a no-op, so no id is needed here.
+                            event_id: None,
                             active_seconds: 0,
                             idle_seconds: 0,
                             lock_state: "UNLOCKED".to_string(),
@@ -679,7 +683,12 @@ fn main() {
                         let local_ip = tracker::network::get_local_ip();
                         let ssid = tracker::network::get_connected_ssid();
                         let visible = tracker::network::get_visible_office_bssids();
+                        // Generated once per interval, not per send attempt: this same
+                        // id must survive a queue-then-replay round trip unchanged (see
+                        // HeartbeatPayload::event_id) so a retried delivery can be
+                        // recognised as a repeat rather than double-counted.
                         let payload = HeartbeatPayload {
+                            event_id: Some(format!("evt_{}", Uuid::new_v4())),
                             active_seconds: accumulated_active,
                             idle_seconds: accumulated_idle,
                             lock_state,

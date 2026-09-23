@@ -24,6 +24,21 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatPayload {
+    // Generated once per 60s accumulation interval (main.rs) and carried
+    // through unchanged if this exact payload has to be queued to the
+    // offline store and replayed later -- lets the backend's existing
+    // idempotency check (desktop.js's /heartbeat, desktop_heartbeat_dedupe
+    // table) recognise a retried delivery and skip re-applying its
+    // active/idle seconds. Without this, a heartbeat whose response was
+    // lost after the server had already processed it (a real possibility:
+    // the client can't tell "never reached the server" apart from "reached
+    // the server, response got lost") got queued and replayed anyway, and
+    // the server -- having no way to tell it was a repeat -- added the same
+    // interval's seconds again. Optional only for backward JSON
+    // compatibility with any already-queued local_events rows from before
+    // this field existed.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub event_id: Option<String>,
     pub active_seconds: u64,
     pub idle_seconds: u64,
     pub lock_state: String,
