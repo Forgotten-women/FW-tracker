@@ -429,6 +429,7 @@ async function myEmployeeProfile(employeeId) {
     : (await db.prepare('SELECT * FROM working_patterns WHERE is_default = 1').get() ||
        await db.prepare('SELECT * FROM working_patterns ORDER BY created_at ASC LIMIT 1').get());
   const p = await db.prepare('SELECT * FROM employee_personal WHERE employee_id = ?').get(employeeId);
+  const bank = await db.prepare('SELECT * FROM employee_bank_details WHERE employee_id = ?').get(employeeId);
 
   const contacts = (await db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ? ORDER BY is_primary DESC, created_at ASC').all(employeeId))
     .map(c => ({ id: c.id, name: c.name, relationship: c.relationship, phone: c.phone, email: c.email, isPrimary: !!c.is_primary }));
@@ -514,6 +515,13 @@ async function myEmployeeProfile(employeeId) {
       postcode: p.postcode,
       country: p.country,
       nationalId: p.national_id,
+    } : null,
+    bankDetails: bank ? {
+      bankName: bank.bank_name,
+      accountName: bank.account_name,
+      accountNumber: bank.account_number,
+      sortCode: bank.sort_code,
+      iban: bank.iban,
     } : null,
     emergencyContacts: contacts,
     salary,

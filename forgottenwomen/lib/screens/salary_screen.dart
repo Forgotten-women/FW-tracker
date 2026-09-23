@@ -13,6 +13,7 @@ class SalaryScreen extends StatefulWidget {
 
 class _SalaryScreenState extends State<SalaryScreen> {
   final _api = ApiClient();
+  static EmployeePayrollStatement? _cachedStatement;
   bool _loading = true;
   bool _refreshing = false;
   String? _error;
@@ -21,7 +22,11 @@ class _SalaryScreenState extends State<SalaryScreen> {
   @override
   void initState() {
     super.initState();
-    _loadStatements();
+    if (_cachedStatement != null) {
+      _statement = _cachedStatement;
+      _loading = false;
+    }
+    _loadStatements(isBackground: _cachedStatement != null);
   }
 
   @override
@@ -30,10 +35,10 @@ class _SalaryScreenState extends State<SalaryScreen> {
     super.dispose();
   }
 
-  Future<void> _loadStatements({bool isRefresh = false}) async {
+  Future<void> _loadStatements({bool isRefresh = false, bool isBackground = false}) async {
     if (isRefresh) {
       setState(() => _refreshing = true);
-    } else {
+    } else if (!isBackground) {
       setState(() {
         _loading = true;
         _error = null;
@@ -42,6 +47,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
 
     try {
       final res = await _api.fetchMyPayrollStatements();
+      _cachedStatement = res;
       if (mounted) {
         setState(() {
           _statement = res;
@@ -53,7 +59,10 @@ class _SalaryScreenState extends State<SalaryScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString().replaceAll('ApiException: ', '');
+          // If we already have a statement showing, don't replace with full error screen
+          if (_statement == null) {
+            _error = e.toString().replaceAll('ApiException: ', '');
+          }
           _loading = false;
           _refreshing = false;
         });

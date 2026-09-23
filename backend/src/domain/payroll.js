@@ -138,6 +138,8 @@ async function setSalary({ employeeId, amount, effectiveFrom, reason, actor, cur
     });
   });
 
+  invalidatePayrollCache(employeeId);
+
   return await salaryAt(employeeId, effectiveFrom);
 }
 
@@ -724,6 +726,8 @@ async function decideAdjustment({ adjustmentId, decision, approvedDays = null, a
     });
   });
 
+  invalidatePayrollCache(adj.employee_id);
+
   return { decision, approvedAmount: finalAmount, approvedDays: finalDays };
 }
 
@@ -743,6 +747,7 @@ async function closePeriod({ periodId, actor }) {
     .run(actor, T.now(), periodId);
 
   await audit({ actor, action: 'PAYROLL_PERIOD_CLOSED', targetType: 'payroll_period', targetId: periodId });
+  invalidatePayrollCache();
   return { closed: true };
 }
 
@@ -837,7 +842,27 @@ async function generatePeriodDeductions({ periodId, actor }) {
  * Employee self-service statement retrieval across all payroll periods.
  * Gated by org_settings.show_salary_to_employees.
  */
+// In-memory cache for employee payroll statements.
+// Key: employeeId -> { data, expiresAt }
+const statementsCache = new Map();
+const STATEMENTS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function invalidatePayrollCache(employeeId = null) {
+  if (employeeId) {
+    statementsCache.delete(employeeId);
+  } else {
+    statementsCache.clear();
+  }
+}
+
 async function employeeStatements(employeeId) {
+  // Check in-memory cache first
+  const now = Date.now();
+  const cached = statementsCache.get(employeeId);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+
   const setting = await db.prepare("SELECT value FROM org_settings WHERE key = 'show_salary_to_employees'").get();
   const enabled = setting ? String(setting.value).trim() === '1' : false;
   if (!enabled) {
@@ -854,6 +879,29 @@ async function employeeStatements(employeeId) {
   const periods = await db.prepare('SELECT * FROM payroll_periods ORDER BY start_date DESC').all();
   const periodStatements = [];
 
+  const employment = await selectEmploymentDates.get(employeeId);
+
+  // Batch query all approved adjustments for this employee across all periods
+  const allAdjustments = await db.prepare(`
+    SELECT id, period_id, adjustment_type, explanation, approved_amount, approved_days, status, approved_at
+    FROM payroll_adjustments
+    WHERE employee_id = ? AND status = 'APPROVED'
+    ORDER BY created_at ASC
+  `).all(employeeId);
+
+  const adjustmentsByPeriod = new Map();
+  for (const a of allAdjustments) {
+    if (!adjustmentsByPeriod.has(a.period_id)) {
+      adjustmentsByPeriod.set(a.period_id, []);
+    }
+    adjustmentsByPeriod.get(a.period_id).push(a);
+  }
+
+  // Pre-fetch working pattern once
+  const wp = await (employment?.working_pattern_id
+    ? db.prepare('SELECT * FROM working_patterns WHERE id = ?').get(employment.working_pattern_id)
+    : db.prepare('SELECT * FROM working_patterns ORDER BY created_at ASC LIMIT 1').get());
+
   for (const p of periods) {
     const salary = await salaryAt(employeeId, p.end_date);
     if (salary.blocked) continue;
@@ -864,7 +912,6 @@ async function employeeStatements(employeeId) {
       periodEnd: p.end_date,
     });
 
-    const employment = await selectEmploymentDates.get(employeeId);
     const effectiveStart = (employment?.start_date && employment.start_date > p.start_date)
       ? employment.start_date
       : p.start_date;
@@ -878,24 +925,12 @@ async function employeeStatements(employeeId) {
       workingDaysCount = workedDays.length;
     }
 
-    const fullPeriodDays = await (await eligibleWorkingDays(employeeId, p.start_date, p.end_date)).length;
+    const fullPeriodDays = (await eligibleWorkingDays(employeeId, p.start_date, p.end_date)).length;
     const isStarter = starter.applicable && !starter.blocked;
-    // A partial period keeps the day-rate basis; a full period's undeducted
-    // baseline is the whole monthly salary, not a re-derivation from a day
-    // count (that re-derivation was the bug this feature exists to fix --
-    // see preparePeriod()'s isPartialPeriod branch for the matching preview
-    // calculation). adjustmentsTotal below already carries the approved
-    // deficit/absence/leave deductions, so this is the only change needed
-    // here for netPayable to be correct.
     const isPartialPeriod = effectiveStart > p.start_date || effectiveEnd < p.end_date;
     const baseGross = isPartialPeriod ? money(salary.dailyPrecise * workingDaysCount) : salary.monthly;
 
-    const adjustments = await db.prepare(`
-      SELECT id, adjustment_type, explanation, approved_amount, approved_days, status, approved_at
-      FROM payroll_adjustments
-      WHERE period_id = ? AND employee_id = ? AND status = 'APPROVED'
-      ORDER BY created_at ASC
-    `).all(p.id, employeeId);
+    const adjustments = adjustmentsByPeriod.get(p.id) || [];
 
     let adjustmentsTotal = 0;
     for (const a of adjustments) {
@@ -933,7 +968,7 @@ async function employeeStatements(employeeId) {
     });
   }
 
-  return {
+  const result = {
     enabled: true,
     currentSalary: {
       monthly: currentSalary.monthly,
@@ -946,6 +981,14 @@ async function employeeStatements(employeeId) {
     },
     periods: periodStatements,
   };
+
+  // Cache calculated result
+  statementsCache.set(employeeId, {
+    data: result,
+    expiresAt: now + STATEMENTS_CACHE_TTL_MS,
+  });
+
+  return result;
 }
 
 module.exports = {
@@ -953,7 +996,7 @@ module.exports = {
   eligibleWorkingDays, starterCalculation, leaverCalculation,
   createPeriod, updatePeriodExchangeRate, preparePeriod, proposeAdjustment, decideAdjustment, closePeriod,
   generatePeriodDeductions, unpaidDaysSummary,
-  employeeStatements,
+  employeeStatements, invalidatePayrollCache,
   ATTENDANCE_DEFICIT_DAY, UNAUTHORISED_ABSENCE_UNPAID, UNPAID_LEAVE_DEDUCTION,
 };
 
