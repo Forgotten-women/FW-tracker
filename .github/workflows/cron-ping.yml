@@ -1,0 +1,32 @@
+name: ⏰ Trigger Backend Maintenance Cron
+
+# Vercel's own Cron (vercel.json) only supports daily granularity on this
+# plan, so runMaintenanceTick() (day rollover, warning evaluation, absence
+# sweep, and -- what this is actually for -- the check-in/check-out/break
+# reminder notifications in jobs.js) was only ever evaluated once a day at a
+# fixed time, making every time-sensitive reminder effectively unable to
+# fire anywhere near its intended time of day. This workflow pings the same
+# endpoint every 10 minutes instead, using GitHub Actions as a free
+# alternative to a paid Vercel plan's more frequent Cron. Each job's own
+# idempotency guard (Redis-backed, see backend/src/lib/dedupe.js) makes the
+# extra calls cheap no-ops once something has already fired for the day.
+#
+# GitHub does not guarantee scheduled workflows run exactly on time --
+# expect a few minutes of slack, which the backend's own 15-minute grace
+# windows around shift start/end already tolerate.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📡 Hit /api/cron/daily
+        run: |
+          BACKEND_URL="${{ secrets.BACKEND_URL || 'https://backend-ten-lyart-57.vercel.app' }}"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "$BACKEND_URL/api/cron/daily"

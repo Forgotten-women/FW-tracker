@@ -12,13 +12,21 @@
 // against the connection-pool limits a serverless Postgres setup has.
 //
 // This route gives Vercel Cron (configured in vercel.json) something to hit
-// once a day. It is not a general-purpose admin endpoint: the ONLY caller is
-// meant to be Vercel's own cron scheduler, authenticated the way Vercel's
-// own docs describe -- setting a CRON_SECRET environment variable makes
-// Vercel automatically send it back as `Authorization: Bearer <secret>` on
-// every cron-triggered request, so a request lacking that exact header is
-// rejected outright rather than allowed to run maintenance jobs (including
-// day rollover, which finalises payroll-relevant figures) on demand.
+// once a day. Vercel's own Cron is not frequent enough on its own, though:
+// day rollover genuinely only needs once/day, but the time-sensitive
+// reminders inside runMaintenanceTick (check-in/check-out/break reminders,
+// jobs.js) need evaluating every few minutes to fire anywhere near their
+// intended time of day. .github/workflows/cron-ping.yml pings this same
+// route every 10 minutes as a free supplement. It is not a general-purpose
+// admin endpoint: the only legitimate callers are Vercel's own cron
+// scheduler and that GitHub Actions workflow, both authenticated the same
+// way -- a CRON_SECRET environment variable, sent back as
+// `Authorization: Bearer <secret>`, so a request lacking that exact header
+// is rejected outright rather than allowed to run maintenance jobs
+// (including day rollover, which finalises payroll-relevant figures) on
+// demand. Every individual job inside runMaintenanceTick is independently
+// idempotent (see jobs.js), so calling this far more often than "daily" is
+// safe by construction, not just by convention.
 
 const express = require('express');
 const router = express.Router();
