@@ -355,13 +355,13 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
           setLiveFrame(frame);
           if (frame.active) {
             setLiveStreamError(null);
-          } else if (!frame.isBreak && pollCount > 35) {
+          } else if (!frame.isBreak && pollCount > 10) {
             // Only timeout after at least ~10 seconds of polling with no
             // active frame -- and then actually stop polling. This used to
-            // only set an error message while leaving the 300ms interval
-            // running indefinitely, so an admin who left this view open (or
-            // switched tabs) kept hammering the backend/desktop agent at
-            // ~3.3 req/s with no cap for as long as the drawer stayed open.
+            // only set an error message while leaving the interval running
+            // indefinitely, so an admin who left this view open (or switched
+            // tabs) kept hammering the backend/desktop agent with no cap for
+            // as long as the drawer stayed open.
             setLiveStreamError('Live stream ended or timed out.');
             clearInterval(interval);
           }
@@ -374,7 +374,10 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     };
 
     pollFrame();
-    const interval = setInterval(pollFrame, 300);
+    // Matches the desktop agent's ~1 FPS capture rate (main.rs) -- polling
+    // faster than frames are actually produced only burns extra Redis
+    // commands/bandwidth (see backend/src/lib/liveFrame.js) for no benefit.
+    const interval = setInterval(pollFrame, 1000);
 
     return () => {
       isMounted = false;

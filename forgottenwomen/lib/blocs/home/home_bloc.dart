@@ -25,7 +25,13 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
 
   void _startPeriodicSync() {
     _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    // /api/attendance/home-summary does a real per-request aggregation
+    // server-side (deriveDay, lateness, deficit balance, a 7-day history
+    // loop) -- polling it every 10s from every phone, all day, every day,
+    // was a meaningful contributor to Supabase's egress bill. 30s still
+    // feels live for a screen showing today's attendance/deficit, at a
+    // third of the request volume.
+    _syncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       add(const HomePeriodicSyncRequested());
     });
   }

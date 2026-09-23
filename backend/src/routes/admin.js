@@ -15,6 +15,7 @@ const bindings = require('../domain/bindings');
 const L = require('../domain/leave');
 const T = require('../util/time');
 const { config } = require('../config');
+const liveFrame = require('../lib/liveFrame');
 
 router.use(requireAdmin);
 
@@ -581,8 +582,12 @@ router.get('/workstations/:deviceId/live-frame', async (req, res) => {
       'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
     ).get(employeeId);
 
+    // Only small metadata (last_frame_at/status) lives in Postgres now --
+    // the frame bytes themselves are in Redis (lib/liveFrame.js), since a
+    // base64 screenshot read back on every ~300ms dashboard poll is exactly
+    // the kind of payload that blows a Supabase egress quota.
     const streamRow = await db.prepare(
-      'SELECT * FROM workstation_live_streams WHERE device_id = ?'
+      'SELECT employee_id, requested_at, last_frame_at, status FROM workstation_live_streams WHERE device_id = ?'
     ).get(deviceId);
 
     // Keep requested_at renewed while admin is actively polling
@@ -591,13 +596,13 @@ router.get('/workstations/:deviceId/live-frame', async (req, res) => {
         .run(nowMs, nowMs, deviceId);
     }
 
+    const frameBase64 = await liveFrame.getFrame(deviceId);
     const isFrameValid = Boolean(
-      streamRow &&
-      streamRow.frame_base64 &&
-      (streamRow.frame_base64.startsWith('/9j/') ||
-       streamRow.frame_base64.startsWith('iVBOR') ||
-       streamRow.frame_base64.startsWith('data:image/')) &&
-      streamRow.frame_base64.length > 200
+      frameBase64 &&
+      (frameBase64.startsWith('/9j/') ||
+       frameBase64.startsWith('iVBOR') ||
+       frameBase64.startsWith('data:image/')) &&
+      frameBase64.length > 200
     );
 
     const hasRecentFrame = Boolean(
@@ -610,7 +615,7 @@ router.get('/workstations/:deviceId/live-frame', async (req, res) => {
     res.json({
       status: 'SUCCESS',
       active: Boolean(hasRecentFrame && !activeBreak),
-      frameBase64: hasRecentFrame && !activeBreak ? streamRow.frame_base64 : null,
+      frameBase64: hasRecentFrame && !activeBreak ? frameBase64 : null,
       lastFrameAt: streamRow ? streamRow.last_frame_at : null,
       requestedAt: streamRow ? streamRow.requested_at : null,
       streamStatus: streamRow ? streamRow.status : 'OFFLINE',
@@ -633,6 +638,7 @@ router.post('/workstations/:deviceId/stop-stream', async (req, res) => {
       SET status = 'STOPPED', requested_at = 0, frame_base64 = NULL, updated_at = ?
       WHERE device_id = ?
     `).run(nowMs, deviceId);
+    await liveFrame.clearFrame(deviceId);
 
     res.json({ status: 'SUCCESS', message: 'Stream stopped.' });
   } catch (err) {

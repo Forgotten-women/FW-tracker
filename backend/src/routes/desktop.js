@@ -15,6 +15,7 @@ const attendance = require('../domain/attendance');
 const schedule = require('../domain/schedule');
 const T = require('../util/time');
 const { config } = require('../config');
+const liveFrame = require('../lib/liveFrame');
 
 async function getOrgSetting(key, defaultValue) {
   try {
@@ -935,16 +936,21 @@ router.post('/stream-frame', requireDevice, async (req, res) => {
   }
 
   try {
+    // The frame bytes themselves go to Redis, not Postgres -- see
+    // lib/liveFrame.js for why. This row only tracks small, byte-cheap
+    // metadata (last_frame_at/status), which the dashboard's live-frame
+    // response still relies on for freshness/status display.
+    await liveFrame.setFrame(deviceId, cleanFrame);
+
     await ensureLiveStreamTable();
     await db.prepare(`
       INSERT INTO workstation_live_streams (device_id, employee_id, requested_at, last_frame_at, frame_base64, status, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
+      VALUES (?, ?, ?, ?, NULL, 'ACTIVE', ?)
       ON CONFLICT (device_id) DO UPDATE SET
         last_frame_at = EXCLUDED.last_frame_at,
-        frame_base64 = EXCLUDED.frame_base64,
         status = 'ACTIVE',
         updated_at = EXCLUDED.updated_at
-    `).run(deviceId, employeeId, nowMs, nowMs, cleanFrame, nowMs);
+    `).run(deviceId, employeeId, nowMs, nowMs, nowMs);
 
     res.json({ status: 'SUCCESS' });
   } catch (err) {

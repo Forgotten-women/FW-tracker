@@ -342,7 +342,20 @@ fn main() {
                 }
             });
 
-            // Dedicated Fast Live Screen Stream Worker (sub-second 3-4 FPS real-time streaming)
+            // Dedicated Live Screen Stream Worker (~1 FPS while actively watched)
+            //
+            // Idle check_interval is deliberately long (20s, not 1s): this
+            // loop runs continuously for every enrolled device for as long as
+            // the app is open, 24/7, regardless of whether anyone is ever
+            // watching -- at 1s across ~19 workstations that was ~1.6M
+            // requests/day against the Postgres-backed stream-status check
+            // alone, which was the single largest contributor to a Supabase
+            // egress quota breach. Watching a screen live is a deliberate,
+            // occasional HR action, not something that needs sub-few-second
+            // discovery latency, so a 20s worst-case delay before streaming
+            // starts is an acceptable trade for cutting that request volume
+            // ~20x. The 2s in-stream interval is unchanged since it only
+            // runs while a device is actually being watched.
             let app_handle_stream = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 let mut is_streaming = false;
@@ -360,7 +373,7 @@ fn main() {
                         continue;
                     }
 
-                    let check_interval = if is_streaming { Duration::from_secs(2) } else { Duration::from_secs(1) };
+                    let check_interval = if is_streaming { Duration::from_secs(2) } else { Duration::from_secs(20) };
                     if last_status_check.elapsed() >= check_interval {
                         last_status_check = std::time::Instant::now();
                         if let Ok(status) = client::check_stream_status(&cfg).await {
@@ -431,7 +444,11 @@ fn main() {
                                 let _ = client::send_stream_frame(&cfg, &frame).await;
                             }
                         }
-                        sleep(Duration::from_millis(250)).await;
+                        // ~1 FPS: plenty for spot-checking a screen, and a
+                        // quarter of the command/bandwidth cost of the
+                        // previous 4 FPS against the Redis-backed frame
+                        // store this now writes to (see backend/routes/desktop.js).
+                        sleep(Duration::from_millis(1000)).await;
                     } else {
                         #[cfg(target_os = "windows")]
                         {
