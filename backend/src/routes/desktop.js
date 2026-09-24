@@ -970,15 +970,16 @@ router.get('/stream-status', requireDevice, async (req, res) => {
   try {
     // Always fresh here: this is the call that starts a stream, so a lease
     // cached from before the request was made must not answer "no".
-    const [requested, permission] = await Promise.all([
-      liveView.leaseActive(deviceId, nowMs, { fresh: true }),
-      liveView.permission(employeeId, deviceId, nowMs),
-    ]);
-    const liveStreamRequested = Boolean(requested && permission.isPermitted);
+    const requested = await liveView.leaseActive(deviceId, nowMs, { fresh: true });
+    if (!requested) {
+      // The idle case (older agents ask every 20s): one query, nothing else.
+      return res.json({ status: 'SUCCESS', liveStreamRequested: false });
+    }
+    const permission = await liveView.permission(employeeId, deviceId, nowMs);
+    const liveStreamRequested = Boolean(permission.isPermitted);
 
-    // "Laptop notified" for the viewer -- only when there is a request, so the
-    // idle polls of older agents don't spend Redis commands.
-    if (requested) await liveFrame.setAck(deviceId, nowMs);
+    // "Laptop notified" for the viewer.
+    await liveFrame.setAck(deviceId, nowMs);
 
     res.json({
       status: 'SUCCESS',

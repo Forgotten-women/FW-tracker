@@ -4,11 +4,12 @@
  * PayrollPanel — Spec section 2.13
  *
  * Every figure here is a CALCULATION. Nothing changes anyone's pay until a
- * human approves an adjustment and a payroll period is closed. The backend
- * enforces this; this UI makes it obvious.
+ * person approves it: an adjustment one at a time, or the month's run as a
+ * whole ("Approve & publish", in ./payroll). The backend enforces this; this
+ * UI makes it obvious.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type {
   AdminEmployee,
@@ -17,54 +18,38 @@ import type {
   PayrollPeriod,
   StarterCalculation,
 } from '@/lib/types';
+import { Badge, Button, Empty } from './primitives';
 import {
   AlertTriangleIcon,
   BriefcaseIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CurrencyExchangeIcon,
   EyeIcon,
   HandIcon,
   InfoIcon,
   LockIcon,
   PencilIcon,
+  PlusIcon,
   RocketIcon,
   SettingsIcon,
 } from './icons';
+import {
+  type Currency,
+  DEFAULT_PKR_RATE,
+  LINE_STATUS_META,
+  PERIOD_STATUS_META,
+  formatActor,
+  formatDate,
+  formatMoney,
+  formatTimestamp,
+  isFinalStatus,
+} from './payroll/format';
+import { PayrollRunView } from './payroll/PayrollRunView';
 
-// ---------------------------------------------------------------------------
-// Currency helpers
-// ---------------------------------------------------------------------------
-
-type Currency = 'GBP' | 'PKR';
-
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  GBP: '£',
-  PKR: '₨',
-  USD: '$',
-  EUR: '€',
-};
-
-const DEFAULT_PKR_RATE = 350;
-
-function formatMoney(
-  amount: number | null | undefined,
-  displayCurrency: Currency,
-  recordedCurrency?: string,
-  pkrRate: number = DEFAULT_PKR_RATE,
-): string {
-  if (amount == null) return '—';
-  const src = (recordedCurrency || 'GBP').toUpperCase();
-  const tgt = (displayCurrency || 'GBP').toUpperCase();
-
-  let value = amount;
-  if (src === 'GBP' && tgt === 'PKR') {
-    value = amount * pkrRate;
-  } else if (src === 'PKR' && tgt === 'GBP') {
-    value = amount / (pkrRate || 1);
-  }
-
-  const sym = CURRENCY_SYMBOLS[tgt] ?? `${tgt} `;
-  return `${sym}${value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Shared by every modal here: scrolls on a short screen instead of clipping.
+const MODAL_BACKDROP = 'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center';
+const MODAL_SHELL = 'glass-panel-elevated w-full rounded-3xl p-6';
 
 // ---------------------------------------------------------------------------
 // Exchange Rate Modal
@@ -93,8 +78,8 @@ function ExchangeRateModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-sm`}>
         <div className="flex items-center gap-2 mb-2">
           <CurrencyExchangeIcon className="h-5 w-5 shrink-0" />
           <h2 className="text-base font-bold text-white">GBP / PKR Conversion Rate</h2>
@@ -196,30 +181,23 @@ interface PrepareSheet {
 // ---------------------------------------------------------------------------
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    OPEN: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-    DRAFT: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-    CLOSED: 'bg-slate-700/50 text-slate-400 border-slate-600/30',
-    PROPOSED: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-    APPROVED: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
-    REJECTED: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
-  };
-  const cls = map[status] ?? 'bg-slate-700/50 text-slate-400 border-slate-600/30';
+  const meta = PERIOD_STATUS_META[status as keyof typeof PERIOD_STATUS_META] ?? LINE_STATUS_META[status];
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cls}`}>
-      {status}
-    </span>
+    <Badge tone={meta?.tone ?? 'muted'} size="sm" dot={status === 'IN_REVIEW'}>
+      {meta?.label ?? status}
+    </Badge>
   );
 }
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-sheet shadow-xl overflow-hidden">
-      <div className="border-b border-slate-800/80 px-5 py-4">
+    <section className="glass-panel min-w-0 overflow-hidden rounded-3xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-5 py-4">
         <h3 className="text-sm font-bold text-white">{title}</h3>
+        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
       <div className="p-5">{children}</div>
-    </div>
+    </section>
   );
 }
 
@@ -232,11 +210,19 @@ function CreatePeriodModal({
   onCreate,
 }: {
   onClose: () => void;
-  onCreate: (name: string, from: string, to: string, exchangeRate?: number) => Promise<void>;
+  onCreate: (
+    name: string,
+    from: string,
+    to: string,
+    exchangeRate: number,
+    dates: { cutoffDate: string | null; payDate: string | null },
+  ) => Promise<void>;
 }) {
   const [name, setName] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [cutoff, setCutoff] = useState('');
+  const [payDate, setPayDate] = useState('');
   const [exchangeRate, setExchangeRate] = useState('350.00');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -244,12 +230,13 @@ function CreatePeriodModal({
   const handleSubmit = async () => {
     if (!name.trim() || !from || !to) { setError('All fields are required.'); return; }
     if (to < from) { setError('End date must be on or after start date.'); return; }
+    if (cutoff && (cutoff < from || cutoff > to)) { setError('The cut-off must fall inside the period.'); return; }
     const parsedRate = parseFloat(exchangeRate);
     if (isNaN(parsedRate) || parsedRate <= 0) { setError('Please enter a valid positive conversion rate.'); return; }
     setLoading(true);
     setError('');
     try {
-      await onCreate(name.trim(), from, to, parsedRate);
+      await onCreate(name.trim(), from, to, parsedRate, { cutoffDate: cutoff || null, payDate: payDate || null });
       onClose();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create period.');
@@ -259,9 +246,13 @@ function CreatePeriodModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
-        <h2 className="mb-5 text-base font-bold text-white">Create Payroll Period</h2>
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-md`}>
+        <h2 className="mb-1 text-base font-bold text-white">Create Payroll Period</h2>
+        <p className="mb-5 text-xs text-slate-400">
+          Each calendar month&apos;s period is opened automatically, with its cut-off on the 25th. Create one by hand only
+          for an off-cycle run; it must not overlap a month that already has a period.
+        </p>
         {error && (
           <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-300">{error}</div>
         )}
@@ -296,6 +287,31 @@ function CreatePeriodModal({
               />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-400">Cut-off (optional)</label>
+              <input
+                type="date"
+                value={cutoff}
+                min={from || undefined}
+                max={to || undefined}
+                onChange={(e) => setCutoff(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-400">Pay Date (optional)</label>
+              <input
+                type="date"
+                value={payDate}
+                onChange={(e) => setPayDate(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+            <p className="col-span-2 -mt-1 text-[11px] text-slate-500">
+              Without a cut-off, deductions run to the end date. With one, anything dated after it rolls into the next run.
+            </p>
+          </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-400">Exchange Rate (1 GBP = PKR ₨)</label>
             <input
@@ -306,7 +322,7 @@ function CreatePeriodModal({
               placeholder="e.g. 350.00"
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-mono text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
             />
-            <p className="mt-1 text-[11px] text-slate-500">Rate applied to this specific payroll run. Can be adjusted before period closing.</p>
+            <p className="mt-1 text-[11px] text-slate-500">Rate applied to this specific payroll run. Can be adjusted until the run is published.</p>
           </div>
         </div>
         <div className="mt-6 flex gap-3">
@@ -386,8 +402,8 @@ export function SetSalaryModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-md`}>
         <h2 className="mb-1 text-base font-bold text-white">Record Employee Salary</h2>
         <p className="mb-4 text-xs text-slate-400">
           Salaries are append-only. Historical payroll will preserve previous rates.
@@ -551,8 +567,8 @@ function ProposeAdjModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-md`}>
         <h2 className="mb-5 text-base font-bold text-white">Propose Payroll Adjustment</h2>
         {error && (
           <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-300">{error}</div>
@@ -582,7 +598,7 @@ function ProposeAdjModal({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-400">Amount (GBP)</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-400">Amount (in the employee&apos;s salary currency; negative deducts)</label>
             <input
               type="number"
               step="0.01"
@@ -621,7 +637,7 @@ function ProposeAdjModal({
           </button>
         </div>
         <p className="mt-3 text-[11px] text-slate-500">
-          <InfoIcon className="inline-block h-3.5 w-3.5" /> Proposed adjustments affect nothing until approved by an authorised HR user.
+          <InfoIcon className="inline-block h-3.5 w-3.5" /> Proposed adjustments affect nothing until approved by an authorised HR user. A line entered by hand always needs its own decision in the monthly run.
         </p>
       </div>
     </div>
@@ -634,10 +650,13 @@ function ProposeAdjModal({
 
 function DecideAdjModal({
   adj,
+  formatAmount,
   onClose,
   onDecided,
 }: {
   adj: PayrollAdjustment;
+  /** In the employee's own salary currency, as the rest of the sheet shows it. */
+  formatAmount: (amount: number | null) => string;
   onClose: () => void;
   onDecided: () => void;
 }) {
@@ -664,8 +683,8 @@ function DecideAdjModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-md`}>
         <h2 className="mb-1 text-base font-bold text-white">Review Adjustment</h2>
         <p className="mb-4 text-xs text-slate-400">
           {adj.employeeName} {adj.employeeNumber && <span className="font-mono text-indigo-400 font-bold">({adj.employeeNumber})</span>} · {adj.type}
@@ -674,8 +693,8 @@ function DecideAdjModal({
           <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-300">{error}</div>
         )}
         <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-xs space-y-1">
-          <div className="flex justify-between"><span className="text-slate-400">Calculated amount</span><span className="font-mono text-white">£{adj.calculated.amount?.toFixed(2)}</span></div>
-          {adj.explanation && <p className="text-slate-400 pt-1">"{adj.explanation}"</p>}
+          <div className="flex justify-between"><span className="text-slate-400">Calculated amount</span><span className="font-mono text-white">{formatAmount(adj.calculated.amount)}</span></div>
+          {adj.explanation && <p className="text-slate-400 pt-1">&ldquo;{adj.explanation}&rdquo;</p>}
         </div>
         <div className="flex flex-col gap-4">
           <div className="flex gap-2">
@@ -696,7 +715,7 @@ function DecideAdjModal({
           </div>
           {decision === 'APPROVED' && (
             <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-400">Override Amount (leave blank to use calculated)</label>
+              <label className="mb-1 block text-xs font-semibold text-slate-400">Override Amount (negative deducts; leave blank to use calculated)</label>
               <input
                 type="number"
                 step="0.01"
@@ -743,13 +762,14 @@ function DecideAdjModal({
 // ---------------------------------------------------------------------------
 
 function StarterLeaverPreview({
-  periodId,
   employees,
   currency,
+  canPropose,
   onPropose,
 }: {
-  periodId: string;
   employees: AdminEmployee[];
+  /** False once the period is final: nothing can be proposed into it. */
+  canPropose: boolean;
   currency: Currency;
   onPropose: (employeeId: string, amount: number, type: string, explanation: string) => void;
 }) {
@@ -790,7 +810,6 @@ function StarterLeaverPreview({
   const handlePropose = () => {
     if (!result || !employeeId) return;
     if (mode === 'STARTER' && starterCalc?.calculatedGross) {
-      const emp = employees.find((e) => e.id === employeeId);
       onPropose(employeeId, starterCalc.calculatedGross, 'STARTER',
         `Starter pro-rata: ${starterCalc.eligibleWorkingDays} days × £${starterCalc.dailyRate?.toFixed(2)}/day (started ${starterCalc.startDate})`);
     } else if (mode === 'LEAVER' && leaverCalc?.grossPay) {
@@ -881,13 +900,15 @@ function StarterLeaverPreview({
                   <div className="flex justify-between"><span className="text-slate-400">Daily rate</span><span className="font-mono text-white">{formatMoney(starterCalc.dailyRate ?? null, currency)}</span></div>
                   <div className="flex justify-between text-sm font-bold"><span className="text-slate-300">Calculated gross</span><span className="text-emerald-400">{formatMoney(starterCalc.calculatedGross ?? null, currency)}</span></div>
                   <p className="pt-1 text-[11px] text-slate-500">{starterCalc.formula}</p>
-                  <button
-                    type="button"
-                    onClick={handlePropose}
-                    className="mt-3 rounded-lg bg-amber-600/20 border border-amber-500/30 hover:bg-amber-600/30 px-3 py-1.5 text-xs font-semibold text-amber-300 transition"
-                  >
-                    + Propose as Adjustment
-                  </button>
+                  {canPropose && (
+                    <button
+                      type="button"
+                      onClick={handlePropose}
+                      className="mt-3 rounded-lg bg-amber-600/20 border border-amber-500/30 hover:bg-amber-600/30 px-3 py-1.5 text-xs font-semibold text-amber-300 transition"
+                    >
+                      + Propose as Adjustment
+                    </button>
+                  )}
                 </div>
               )}
             </>
@@ -914,13 +935,15 @@ function StarterLeaverPreview({
                     </>
                   )}
                   <p className="pt-1 text-[11px] text-amber-400/80"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> These are calculations only. No changes made until HR approves.</p>
-                  <button
-                    type="button"
-                    onClick={handlePropose}
-                    className="mt-2 rounded-lg bg-amber-600/20 border border-amber-500/30 hover:bg-amber-600/30 px-3 py-1.5 text-xs font-semibold text-amber-300 transition"
-                  >
-                    + Propose as Adjustment
-                  </button>
+                  {canPropose && (
+                    <button
+                      type="button"
+                      onClick={handlePropose}
+                      className="mt-2 rounded-lg bg-amber-600/20 border border-amber-500/30 hover:bg-amber-600/30 px-3 py-1.5 text-xs font-semibold text-amber-300 transition"
+                    >
+                      + Propose as Adjustment
+                    </button>
+                  )}
                 </div>
               )}
             </>
@@ -934,6 +957,8 @@ function StarterLeaverPreview({
 // ---------------------------------------------------------------------------
 // Period Detail View
 // ---------------------------------------------------------------------------
+
+type DetailTab = 'run' | 'prep' | 'tools';
 
 function PeriodDetailView({
   period,
@@ -950,10 +975,23 @@ function PeriodDetailView({
   onBack: () => void;
   onRefresh: () => void;
 }) {
+  // A legacy CLOSED period never went through the run, so it has no review.
+  const hasRun = period.status !== 'CLOSED';
+  const isFinal = isFinalStatus(period.status);
+  // Closing publishes no payslips, so it is only offered where it always was:
+  // a period created by hand and still open. The monthly run ends in PAID.
+  const canCloseLegacy = !period.autoCreated && period.status === 'OPEN';
+
+  const [tab, setTab] = useState<DetailTab>(hasRun ? 'run' : 'prep');
+  const [prepVisited, setPrepVisited] = useState(!hasRun);
   const [sheet, setSheet] = useState<PrepareSheet | null>(null);
   const [adjustments, setAdjustments] = useState<PayrollAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // dataKey: something changed on the server (the run view reloads too).
+  // liveKey: the live stream ticked (only the preparation sheet follows it).
+  const [dataKey, setDataKey] = useState(0);
+  const [liveKey, setLiveKey] = useState(0);
   const [showProposeModal, setShowProposeModal] = useState(false);
   const [showSetSalary, setShowSetSalary] = useState(false);
   const [showRateModal, setShowRateModal] = useState(false);
@@ -965,44 +1003,75 @@ function PeriodDetailView({
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState('');
 
-  const loadData = useCallback(async () => {
-    setError('');
-    try {
-      const [prepRes, adjRes] = await Promise.all([
-        api.payrollPrepare(period.id),
-        api.payrollAdjustments(period.id),
-      ]);
-      const prepSheet = prepRes as unknown as PrepareSheet;
-      setSheet(prepSheet);
-      if (prepSheet.period?.exchangeRate) {
-        setPeriodRate(prepSheet.period.exchangeRate);
+  const changed = useCallback(() => {
+    setDataKey((k) => k + 1);
+    onRefresh();
+  }, [onRefresh]);
+
+  const openTab = (t: DetailTab) => {
+    setTab(t);
+    if (t === 'prep') setPrepVisited(true);
+  };
+
+  // Every tab needs the adjustments: the run view uses them to find lines of
+  // employees left out of the run.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.payrollAdjustments(period.id);
+        if (cancelled) return;
+        setAdjustments(res.adjustments ?? []);
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load adjustments.');
       }
-      setAdjustments(adjRes.adjustments ?? []);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load period data.');
-    } finally {
-      setLoading(false);
-    }
-  }, [period.id]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [period.id, dataKey, liveKey]);
+
+  // The preparation sheet is loaded the first time its tab is opened.
+  useEffect(() => {
+    if (!prepVisited) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const prepRes = await api.payrollPrepare(period.id);
+        if (cancelled) return;
+        const prepSheet = prepRes as unknown as PrepareSheet;
+        setSheet(prepSheet);
+        if (prepSheet.period?.exchangeRate) setPeriodRate(prepSheet.period.exchangeRate);
+        setError('');
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load period data.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [period.id, prepVisited, dataKey, liveKey]);
+
+  // As before, the preparation sheet follows the live stream while it is on
+  // screen (attendance deficits move with every clock event).
+  useEffect(() => {
+    if (tab !== 'prep') return;
+    const handleSse = () => setLiveKey((k) => k + 1);
+    window.addEventListener('office-tracker-sse', handleSse);
+    return () => window.removeEventListener('office-tracker-sse', handleSse);
+  }, [tab]);
 
   const handleSavePeriodRate = async (newRate: number) => {
     try {
       await api.updatePeriodExchangeRate(period.id, newRate);
       setPeriodRate(newRate);
-      await loadData();
-      onRefresh();
+      changed();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to update period rate.');
     }
   };
-
-  useEffect(() => {
-    loadData();
-
-    const handleSse = () => { loadData(); };
-    if (typeof window !== 'undefined') window.addEventListener('office-tracker-sse', handleSse);
-    return () => { if (typeof window !== 'undefined') window.removeEventListener('office-tracker-sse', handleSse); };
-  }, [loadData]);
 
   const handleClose = async () => {
     setClosing(true);
@@ -1019,29 +1088,38 @@ function PeriodDetailView({
     }
   };
 
-  const pendingAdjCount = adjustments.filter((a) => a.status === 'PENDING').length;
-  const isClosed = period.status === 'CLOSED';
+  const pendingAdjCount = adjustments.filter((a) => a.status === 'PROPOSED').length;
+  const currencyOf = (employeeId: string) => {
+    const e = sheet?.employees.find((x) => x.employeeId === employeeId);
+    return e?.salary.currency;
+  };
+
+  const tabs: { id: DetailTab; label: string }[] = [
+    ...(hasRun ? [{ id: 'run' as const, label: 'Payroll run' }] : []),
+    { id: 'prep', label: 'Preparation sheet' },
+    { id: 'tools', label: 'Starter / leaver' },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300 transition flex items-center gap-1.5"
-          >
-            ← Back to Periods
-          </button>
-          <div>
-            <h2 className="text-base font-bold text-white">{period.name}</h2>
-            <p className="text-xs text-slate-400">{period.from} → {period.to}</p>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button variant="secondary" size="sm" onClick={onBack} icon={<ChevronLeftIcon className="h-3.5 w-3.5" />}>
+              Periods
+            </Button>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-base font-bold text-white">{period.name}</h2>
+                <StatusBadge status={period.status} />
+                {period.autoCreated && <Badge tone="accent" size="sm">Auto</Badge>}
+              </div>
+              <p className="text-xs text-slate-400">{formatDate(period.from)} to {formatDate(period.to)}</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Currency switcher & Period Rate pill */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Currency switcher & Period Rate pill */}
             <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
               {(['GBP', 'PKR'] as Currency[]).map((c) => (
                 <button
@@ -1058,7 +1136,7 @@ function PeriodDetailView({
                 </button>
               ))}
             </div>
-            {!isClosed ? (
+            {!isFinal ? (
               <button
                 type="button"
                 onClick={() => setShowRateModal(true)}
@@ -1074,35 +1152,41 @@ function PeriodDetailView({
                 <span>£1 = ₨{periodRate.toFixed(2)}</span>
               </span>
             )}
+            {!isFinal && (
+              <>
+                <Button size="sm" variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => { setSetSalaryEmployeeId(null); setShowSetSalary(true); }}>
+                  Record salary
+                </Button>
+                <Button size="sm" variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => setShowProposeModal(true)}>
+                  Propose adjustment
+                </Button>
+              </>
+            )}
+            {canCloseLegacy && (
+              <Button size="sm" variant="ghost" onClick={() => setClosingConfirm(true)}>
+                Close period (legacy)
+              </Button>
+            )}
           </div>
-          <StatusBadge status={period.status} />
-          {!isClosed && (
-            <>
-              <button
-                type="button"
-                onClick={() => { setSetSalaryEmployeeId(null); setShowSetSalary(true); }}
-                className="rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-300 transition"
-              >
-                + Record Salary
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowProposeModal(true)}
-                className="rounded-lg bg-amber-600/20 border border-amber-500/30 hover:bg-amber-600/30 px-4 py-2 text-xs font-semibold text-amber-300 transition"
-              >
-                + Propose Adjustment
-              </button>
-            </>
-          )}
-          {!isClosed && (
+        </div>
+
+        <div role="tablist" aria-label="Period views" className="flex w-full flex-wrap gap-1 rounded-2xl border border-white/10 bg-white/5 p-1 sm:w-fit">
+          {tabs.map((t) => (
             <button
+              key={t.id}
               type="button"
-              onClick={() => setClosingConfirm(true)}
-              className="rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 px-4 py-2 text-xs font-semibold text-slate-300 transition"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => openTab(t.id)}
+              className={`flex-1 whitespace-nowrap rounded-xl px-3.5 py-1.5 text-xs font-bold transition cursor-pointer sm:flex-none ${
+                tab === t.id
+                  ? 'bg-accent-gradient text-on-accent shadow-accent'
+                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
+              }`}
             >
-              Close Period
+              {t.label}
             </button>
-          )}
+          ))}
         </div>
       </div>
 
@@ -1110,7 +1194,25 @@ function PeriodDetailView({
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {error}</div>
       )}
 
-      {loading ? (
+      {/* Kept mounted while another tab is shown, so decisions in progress survive. */}
+      {hasRun && (
+        <div className={tab === 'run' ? '' : 'hidden'}>
+          <PayrollRunView
+            period={period}
+            adjustments={adjustments}
+            currency={currency}
+            rate={periodRate}
+            refreshKey={dataKey}
+            onChanged={changed}
+            onRecordSalary={(employeeId) => {
+              setSetSalaryEmployeeId(employeeId);
+              setShowSetSalary(true);
+            }}
+          />
+        </div>
+      )}
+
+      {tab === 'prep' && (loading ? (
         <div className="flex h-48 items-center justify-center">
           <div className="h-7 w-7 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
         </div>
@@ -1305,7 +1407,7 @@ function PeriodDetailView({
                       <th className="pb-2 text-right font-semibold">Calculated</th>
                       <th className="pb-2 text-right font-semibold">Approved</th>
                       <th className="pb-2 text-left font-semibold pl-3">Status</th>
-                      {!isClosed && <th className="pb-2 text-right font-semibold">Action</th>}
+                      {!isFinal && <th className="pb-2 text-right font-semibold">Action</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
@@ -1327,9 +1429,9 @@ function PeriodDetailView({
                           {adj.approved ? formatMoney(adj.approved.amount, currency, employeeCurrencyById.get(adj.employeeId), periodRate) : '—'}
                         </td>
                         <td className="py-2.5 pl-3"><StatusBadge status={adj.status} /></td>
-                        {!isClosed && (
+                        {!isFinal && (
                           <td className="py-2.5 text-right">
-                            {adj.status === 'PENDING' && (
+                            {adj.status === 'PROPOSED' && (
                               <button
                                 type="button"
                                 onClick={() => setDecideAdj(adj)}
@@ -1350,26 +1452,29 @@ function PeriodDetailView({
             );
           })()}
         </>
-      )}
+      ))}
 
-      {/* Starter/Leaver Preview */}
-      <StarterLeaverPreview
-        periodId={period.id}
-        employees={employees}
-        currency={currency}
-        onPropose={(eid, amount, type, explanation) => {
-          setPrefill({ employeeId: eid, amount, type, explanation });
-          setShowProposeModal(true);
-        }}
-      />
+      {tab === 'tools' && (
+        <StarterLeaverPreview
+          employees={employees}
+          currency={currency}
+          canPropose={!isFinal}
+          onPropose={(eid, amount, type, explanation) => {
+            setPrefill({ employeeId: eid, amount, type, explanation });
+            setShowProposeModal(true);
+          }}
+        />
+      )}
 
       {/* Close Period Confirmation */}
       {closingConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-rose-700/50 bg-sheet p-6 shadow-2xl">
+        <div className={MODAL_BACKDROP}>
+          <div className={`${MODAL_SHELL} max-w-sm border-rose-500/40`}>
             <h2 className="mb-2 text-base font-bold text-white">Close Payroll Period?</h2>
             <p className="mb-4 text-xs text-slate-400">
               This is irreversible. All proposed adjustments must be decided first. Once closed, no new adjustments can be added.
+              Closing is the legacy way to finish a manual period: it publishes <strong>no payslips</strong>. To publish
+              payslips, approve the run on the Payroll run tab instead.
             </p>
             {closeError && <div className="mb-3 text-xs text-rose-400">{closeError}</div>}
             {pendingAdjCount > 0 && (
@@ -1401,7 +1506,7 @@ function PeriodDetailView({
           prefilledType={prefill?.type}
           prefilledExplanation={prefill?.explanation}
           onClose={() => { setShowProposeModal(false); setPrefill(null); }}
-          onProposed={loadData}
+          onProposed={changed}
         />
       )}
 
@@ -1412,7 +1517,7 @@ function PeriodDetailView({
           prefilledEmployeeId={setSalaryEmployeeId ?? undefined}
           defaultEffectiveFrom={period.from}
           onClose={() => { setShowSetSalary(false); setSetSalaryEmployeeId(null); }}
-          onSuccess={loadData}
+          onSuccess={changed}
         />
       )}
 
@@ -1429,11 +1534,94 @@ function PeriodDetailView({
       {decideAdj && (
         <DecideAdjModal
           adj={decideAdj}
+          formatAmount={(amount) => formatMoney(amount, currency, currencyOf(decideAdj.employeeId), periodRate)}
           onClose={() => setDecideAdj(null)}
-          onDecided={loadData}
+          onDecided={changed}
         />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Period list
+// ---------------------------------------------------------------------------
+
+const RATE_STORAGE_KEY = 'office_tracker_pkr_rate';
+
+function readSavedRate(): number {
+  try {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem(RATE_STORAGE_KEY) : null;
+    const parsed = saved ? parseFloat(saved) : NaN;
+    return !isNaN(parsed) && parsed > 0 ? parsed : DEFAULT_PKR_RATE;
+  } catch {
+    return DEFAULT_PKR_RATE;
+  }
+}
+
+const OPEN_ACTION: Record<PayrollPeriod['status'], string> = {
+  OPEN: 'Open',
+  IN_REVIEW: 'Review & approve',
+  PUBLISHED: 'Payslips',
+  PAID: 'View',
+  CLOSED: 'View',
+};
+
+function PeriodRow({ period: p, onOpen }: { period: PayrollPeriod; onOpen: () => void }) {
+  const needsReview = p.status === 'IN_REVIEW';
+  return (
+    <li
+      className={`flex flex-col gap-3 rounded-2xl border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${
+        needsReview ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/3 hover:bg-white/5'
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-bold text-white">{p.name}</span>
+          <StatusBadge status={p.status} />
+          <Badge tone={p.autoCreated ? 'accent' : 'muted'} size="sm">
+            {p.autoCreated ? 'Auto-created' : 'Manual'}
+          </Badge>
+        </div>
+        <p className="mt-0.5 text-xs text-slate-400">{formatDate(p.from)} to {formatDate(p.to)}</p>
+        <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+          <div>
+            <dt className="inline">Cut-off </dt>
+            <dd className="inline text-slate-300">{p.cutoffDate ? formatDate(p.cutoffDate) : 'none'}</dd>
+          </div>
+          <div>
+            <dt className="inline">Pay date </dt>
+            <dd className="inline text-slate-300">{formatDate(p.payDate)}</dd>
+          </div>
+          <div>
+            <dt className="inline">Rate </dt>
+            <dd className="inline font-mono text-slate-300">£1 = ₨{(p.exchangeRate || 350.0).toFixed(2)}</dd>
+          </div>
+          {p.publishedAt != null && (
+            <div>
+              <dt className="inline">Published </dt>
+              <dd className="inline text-slate-300">{formatTimestamp(p.publishedAt)}</dd>
+            </div>
+          )}
+          {p.paidAt != null && (
+            <div>
+              <dt className="inline">Paid </dt>
+              <dd className="inline text-slate-300">{formatTimestamp(p.paidAt)}</dd>
+            </div>
+          )}
+          {p.status === 'CLOSED' && p.approvedBy && (
+            <div>
+              <dt className="inline">Closed by </dt>
+              <dd className="inline text-slate-300">{formatActor(p.approvedBy)}</dd>
+            </div>
+          )}
+        </dl>
+      </div>
+      <Button variant={needsReview ? 'accent' : 'secondary'} size="sm" className="shrink-0 self-start sm:self-center" onClick={onOpen}>
+        {OPEN_ACTION[p.status] ?? 'View'}
+        <ChevronRightIcon className="h-3.5 w-3.5" />
+      </Button>
+    </li>
   );
 }
 
@@ -1451,46 +1639,59 @@ export function PayrollPanel() {
   const [showCreate, setShowCreate] = useState(false);
   const [showSetSalary, setShowSetSalary] = useState(false);
   const [showRateModal, setShowRateModal] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState<PayrollPeriod | null>(null);
+  // By id, so the open period follows the list as it reloads (its status
+  // moves on when the run is approved or paid).
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const [currency, setCurrency] = useState<Currency>('GBP');
-  const [pkrRate, setPkrRate] = useState<number>(DEFAULT_PKR_RATE);
+  const [pkrRate, setPkrRate] = useState<number>(readSavedRate);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('office_tracker_pkr_rate');
-      if (saved) {
-        const parsed = parseFloat(saved);
-        if (!isNaN(parsed) && parsed > 0) setPkrRate(parsed);
-      }
-    }
-  }, []);
+  const loadPeriods = useCallback(() => setReloadKey((k) => k + 1), []);
 
   const handleSaveRate = (newRate: number) => {
     setPkrRate(newRate);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('office_tracker_pkr_rate', newRate.toString());
+    try {
+      window.localStorage.setItem(RATE_STORAGE_KEY, newRate.toString());
+    } catch {
+      // Storage blocked: the rate still applies for this visit.
     }
   };
 
-  const loadPeriods = useCallback(async () => {
-    setError('');
-    try {
-      const [pRes, eRes, sRes] = await Promise.all([
-        api.payrollPeriods(),
-        api.employees(),
-        api.getSettings().catch(() => ({ settings: {} as Record<string, string> })),
-      ]);
-      setPeriods(pRes.periods ?? []);
-      setEmployees(eRes.employees ?? []);
-      if (sRes?.settings) {
-        setShowSalaryToEmployees(sRes.settings.show_salary_to_employees === '1' || sRes.settings.show_salary_to_employees === 'true');
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [pRes, eRes, sRes] = await Promise.all([
+          api.payrollPeriods(),
+          api.employees(),
+          api.getSettings().catch(() => ({ settings: {} as Record<string, string> })),
+        ]);
+        if (cancelled) return;
+        setPeriods(pRes.periods ?? []);
+        setEmployees(eRes.employees ?? []);
+        if (sRes?.settings) {
+          setShowSalaryToEmployees(sRes.settings.show_salary_to_employees === '1' || sRes.settings.show_salary_to_employees === 'true');
+        }
+        setError('');
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load payroll data.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load payroll data.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  useEffect(() => {
+    window.addEventListener('office-tracker-sse', loadPeriods);
+    const iv = setInterval(loadPeriods, 30_000);
+    return () => {
+      window.removeEventListener('office-tracker-sse', loadPeriods);
+      clearInterval(iv);
+    };
+  }, [loadPeriods]);
 
   const handleToggleSalaryVisibility = async () => {
     const nextVal = !showSalaryToEmployees;
@@ -1505,95 +1706,85 @@ export function PayrollPanel() {
     }
   };
 
-  useEffect(() => {
+  const handleCreate = async (
+    name: string,
+    startDate: string,
+    endDate: string,
+    exchangeRate: number,
+    dates: { cutoffDate: string | null; payDate: string | null },
+  ) => {
+    await api.createPayrollPeriod(name, startDate, endDate, exchangeRate, dates);
     loadPeriods();
-    const handleSse = () => { loadPeriods(); };
-    if (typeof window !== 'undefined') window.addEventListener('office-tracker-sse', handleSse);
-    const iv = setInterval(loadPeriods, 30_000);
-    return () => {
-      if (typeof window !== 'undefined') window.removeEventListener('office-tracker-sse', handleSse);
-      clearInterval(iv);
-    };
-  }, [loadPeriods]);
-
-  const handleCreate = async (name: string, startDate: string, endDate: string, exchangeRate?: number) => {
-    await api.createPayrollPeriod(name, startDate, endDate, exchangeRate);
-    await loadPeriods();
   };
 
   // Period detail drill-down
+  const selectedPeriod = selectedPeriodId ? periods.find((p) => p.id === selectedPeriodId) ?? null : null;
   if (selectedPeriod) {
     return (
       <PeriodDetailView
+        key={selectedPeriod.id}
         period={selectedPeriod}
         employees={employees}
         currency={currency}
         onCurrencyChange={setCurrency}
-        onBack={() => setSelectedPeriod(null)}
+        onBack={() => setSelectedPeriodId(null)}
         onRefresh={loadPeriods}
       />
     );
   }
 
-  const openPeriods = periods.filter((p) => p.status === 'OPEN' || p.status === 'DRAFT');
-  const closedPeriods = periods.filter((p) => p.status === 'CLOSED');
+  const currentPeriods = periods.filter((p) => p.status === 'OPEN' || p.status === 'IN_REVIEW' || p.status === 'PUBLISHED');
+  const pastPeriods = periods.filter((p) => p.status === 'PAID' || p.status === 'CLOSED');
+  const inReview = periods.filter((p) => p.status === 'IN_REVIEW');
 
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white">Payroll Preparation</h2>
-          <p className="text-sm text-slate-400">All figures are calculations requiring HR approval before any pay is affected.</p>
+          <h2 className="text-xl font-bold text-white">Payroll</h2>
+          <p className="text-sm text-slate-400">
+            Each month opens automatically; deductions are generated at the cut-off. Nothing is paid until HR approves the run.
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Currency switcher & Rate pill */}
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
-              {(['GBP', 'PKR'] as Currency[]).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setCurrency(c)}
-                  className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
-                    currency === c
-                      ? 'bg-indigo-600 text-on-accent shadow'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {c === 'GBP' ? '£ GBP' : '₨ PKR'}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowRateModal(true)}
-              title="Click to change exchange rate"
-              className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/80 hover:bg-slate-800 px-3 py-1.5 text-xs font-mono text-indigo-300 transition"
-            >
-              <span>£1 = ₨{pkrRate.toFixed(2)}</span>
-              <SettingsIcon className="h-3 w-3 shrink-0 text-slate-500" />
-            </button>
+          <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
+            {(['GBP', 'PKR'] as Currency[]).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCurrency(c)}
+                className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
+                  currency === c
+                    ? 'bg-indigo-600 text-on-accent shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {c === 'GBP' ? '£ GBP' : '₨ PKR'}
+              </button>
+            ))}
           </div>
           <button
             type="button"
-            onClick={() => setShowSetSalary(true)}
-            className="rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-300 transition"
+            onClick={() => setShowRateModal(true)}
+            title="Click to change exchange rate"
+            className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/80 hover:bg-slate-800 px-3 py-1.5 text-xs font-mono text-indigo-300 transition"
           >
-            + Set Salary
+            <span>£1 = ₨{pkrRate.toFixed(2)}</span>
+            <SettingsIcon className="h-3 w-3 shrink-0 text-slate-500" />
           </button>
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-on-accent shadow-lg shadow-indigo-600/20 transition"
-          >
-            + New Period
-          </button>
+          <Button variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => setShowSetSalary(true)}>
+            Set salary
+          </Button>
+          <Button variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => setShowCreate(true)}>
+            New period
+          </Button>
         </div>
       </div>
 
       {/* Employee Mobile Salary Visibility Setting Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-sheet px-4 py-3 shadow-md">
+      <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3">
         <div className="flex items-center gap-3">
           <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${showSalaryToEmployees ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
             {showSalaryToEmployees ? <EyeIcon className="h-5 w-5" /> : <LockIcon className="h-5 w-5" />}
@@ -1607,8 +1798,8 @@ export function PayrollPanel() {
             </div>
             <p className="text-[11px] text-slate-400">
               {showSalaryToEmployees
-                ? 'Staff can view their monthly gross pay, daily rate and currency on the mobile app Profile screen in real-time.'
-                : 'Personal salaries are hidden from mobile app and stripped from employee API responses.'}
+                ? 'Staff can view their pay and published payslips in the mobile app, and are told when a payslip is published.'
+                : 'Personal salaries and payslips are hidden from the mobile app and stripped from employee API responses.'}
             </p>
           </div>
         </div>
@@ -1628,7 +1819,7 @@ export function PayrollPanel() {
 
       {currency === 'PKR' && (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-300">
-          <span><CurrencyExchangeIcon className="inline-block h-3.5 w-3.5" /> PKR conversions use the current exchange rate <strong>£1.00 = ₨{pkrRate.toFixed(2)}</strong>.</span>
+          <span><CurrencyExchangeIcon className="inline-block h-3.5 w-3.5" /> PKR conversions use the current exchange rate <strong>£1.00 = ₨{pkrRate.toFixed(2)}</strong>. Inside a period, that period&apos;s own rate is used.</span>
           <button
             type="button"
             onClick={() => setShowRateModal(true)}
@@ -1643,103 +1834,64 @@ export function PayrollPanel() {
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {error}</div>
       )}
 
+      {inReview.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400">
+              <AlertTriangleIcon className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-bold text-amber-300">
+                {inReview.length === 1 ? `${inReview[0].name} is ready for review` : `${inReview.length} payroll runs are ready for review`}
+              </div>
+              <div className="text-xs text-amber-400/80">Deductions are generated. Nothing is paid until the run is approved.</div>
+            </div>
+          </div>
+          <Button variant="accent" size="sm" onClick={() => setSelectedPeriodId(inReview[0].id)}>
+            Review {inReview.length === 1 ? 'now' : inReview[0].name}
+            <ChevronRightIcon className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex h-48 items-center justify-center">
           <div className="h-7 w-7 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
         </div>
+      ) : periods.length === 0 ? (
+        <Empty
+          icon={<BriefcaseIcon className="h-6 w-6" />}
+          title="No payroll periods yet"
+          description="This month's period opens automatically on the next maintenance run. For an off-cycle run, create one by hand."
+          action={
+            <Button variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => setShowCreate(true)}>
+              Create a period
+            </Button>
+          }
+        />
       ) : (
         <>
-          {/* Open Periods */}
-          <SectionCard title={`Open Periods (${openPeriods.length})`}>
-            {openPeriods.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 py-10">
-                <BriefcaseIcon className="h-10 w-10" />
-                <p className="text-sm text-slate-400">No open payroll periods. Create one to start preparation.</p>
-                <button
-                  type="button"
-                  onClick={() => setShowCreate(true)}
-                  className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-on-accent transition"
-                >
-                  + Create First Period
-                </button>
-              </div>
+          <SectionCard title={`Current runs (${currentPeriods.length})`}>
+            {currentPeriods.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-500">
+                No run in progress. This month&apos;s period opens automatically.
+              </p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-xs text-slate-400">
-                      <th className="pb-2 text-left font-semibold">Period Name</th>
-                      <th className="pb-2 text-left font-semibold">Date Range</th>
-                      <th className="pb-2 text-left font-semibold">Conversion Rate</th>
-                      <th className="pb-2 text-left font-semibold">Status</th>
-                      <th className="pb-2 text-right font-semibold">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {openPeriods.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 font-medium text-white">{p.name}</td>
-                        <td className="py-3 text-slate-400">{p.from} → {p.to}</td>
-                        <td className="py-3 font-mono text-xs text-indigo-300">
-                          1 GBP = ₨{(p.exchangeRate || 350.0).toFixed(2)}
-                        </td>
-                        <td className="py-3"><StatusBadge status={p.status} /></td>
-                        <td className="py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPeriod(p)}
-                            className="rounded-lg bg-indigo-600/20 border border-indigo-500/30 hover:bg-indigo-600/30 px-3 py-1.5 text-xs font-semibold text-indigo-300 transition"
-                          >
-                            View →
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="flex flex-col gap-2">
+                {currentPeriods.map((p) => (
+                  <PeriodRow key={p.id} period={p} onOpen={() => setSelectedPeriodId(p.id)} />
+                ))}
+              </ul>
             )}
           </SectionCard>
 
-          {/* Closed Periods */}
-          {closedPeriods.length > 0 && (
-            <SectionCard title={`Closed Periods (${closedPeriods.length})`}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-xs text-slate-400">
-                      <th className="pb-2 text-left font-semibold">Period Name</th>
-                      <th className="pb-2 text-left font-semibold">Date Range</th>
-                      <th className="pb-2 text-left font-semibold">Locked Rate</th>
-                      <th className="pb-2 text-left font-semibold">Status</th>
-                      <th className="pb-2 text-left font-semibold">Closed By</th>
-                      <th className="pb-2 text-right font-semibold">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {closedPeriods.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-800/30 transition-colors opacity-75">
-                        <td className="py-3 font-medium text-white">{p.name}</td>
-                        <td className="py-3 text-slate-400">{p.from} → {p.to}</td>
-                        <td className="py-3 font-mono text-xs text-slate-400">
-                          1 GBP = ₨{(p.exchangeRate || 350.0).toFixed(2)}
-                        </td>
-                        <td className="py-3"><StatusBadge status={p.status} /></td>
-                        <td className="py-3 text-slate-500 text-xs">{p.approvedBy ?? '—'}</td>
-                        <td className="py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPeriod(p)}
-                            className="rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 transition"
-                          >
-                            View →
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {pastPeriods.length > 0 && (
+            <SectionCard title={`Paid and closed (${pastPeriods.length})`}>
+              <ul className="flex flex-col gap-2">
+                {pastPeriods.map((p) => (
+                  <PeriodRow key={p.id} period={p} onOpen={() => setSelectedPeriodId(p.id)} />
+                ))}
+              </ul>
             </SectionCard>
           )}
         </>

@@ -15,6 +15,14 @@ const schedule = require('../domain/schedule');
 // All shift management routes require HR or System Admin privileges
 router.use(requireRole('HR_ADMIN', 'SYSTEM_ADMIN', 'SUPER_ADMIN'));
 
+// Any shift edit or assignment drops schedule.js's cached default pattern once
+// the write has finished, so this instance applies it immediately (others
+// within the cache's 60s TTL).
+router.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => schedule.invalidate());
+  next();
+});
+
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // ---------------------------------------------------------------------------

@@ -281,12 +281,98 @@ async function recordEvent({
 // ---------------------------------------------------------------------------
 
 const selectDayEvents = db.prepare(`
-  SELECT observed_at, source, confidence, location
+  SELECT id, observed_at, source, confidence, location, received_at
   FROM presence_events
   WHERE employee_id = ? AND (location = 'OFFICE' OR location = 'REMOTE_VERIFIED')
     AND observed_at >= ? AND observed_at < ?
-  ORDER BY observed_at ASC
+  ORDER BY observed_at ASC, id ASC
 `);
+
+// ---------------------------------------------------------------------------
+// Day-event cache
+//
+// deriveDay replays the whole day's verified events, and it runs on every
+// phone ping, every desktop heartbeat, and for every employee on every
+// dashboard refresh -- several times per request. Re-reading the day each
+// time made the rows transferred grow with the square of the day's events:
+// by late afternoon one phone ping pulled ~220 KB out of Postgres and one
+// dashboard refresh ~1 MB, which is what kept Supabase egress at ~1 GB/day
+// after the live-frame fix.
+//
+// Each instance now keeps the rows it has already read and asks only for rows
+// received since (with an overlap for transactions that commit late). A count
+// of the day's rows is checked every time: if it disagrees with the cache
+// (retention deleted rows, a backdated insert fell outside the overlap), the
+// day is re-read in full. So the result is always exactly what a full read
+// would return; only the bytes moved change. Per-instance is fine on Vercel:
+// every instance reads Postgres truth, it just reads less of it.
+// ---------------------------------------------------------------------------
+
+const selectDayEventsSince = db.prepare(`
+  SELECT id, observed_at, source, confidence, location, received_at
+  FROM presence_events
+  WHERE employee_id = ? AND (location = 'OFFICE' OR location = 'REMOTE_VERIFIED')
+    AND observed_at >= ? AND observed_at < ? AND received_at >= ?
+`);
+
+const countDayEvents = db.prepare(`
+  SELECT COUNT(*) AS c
+  FROM presence_events
+  WHERE employee_id = ? AND (location = 'OFFICE' OR location = 'REMOTE_VERIFIED')
+    AND observed_at >= ? AND observed_at < ?
+`);
+
+const DAY_CACHE_MAX_ENTRIES = 400;
+const RECEIVED_OVERLAP_MS = 2 * 60 * 1000;
+const dayEventCache = new Map(); // `${employeeId}|${dayStart}` -> { rows, ids, maxReceivedAt }
+
+function byObservedThenId(a, b) {
+  return (Number(a.observed_at) - Number(b.observed_at)) || (Number(a.id) - Number(b.id));
+}
+
+function cacheDay(key, rows) {
+  const entry = {
+    rows,
+    ids: new Set(rows.map(r => String(r.id))),
+    maxReceivedAt: rows.reduce((m, r) => Math.max(m, Number(r.received_at) || 0), 0),
+  };
+  dayEventCache.delete(key);
+  dayEventCache.set(key, entry);
+  if (dayEventCache.size > DAY_CACHE_MAX_ENTRIES) {
+    dayEventCache.delete(dayEventCache.keys().next().value);
+  }
+  return entry;
+}
+
+async function loadDayEvents(employeeId, dayStart, dayEnd) {
+  const key = `${employeeId}|${dayStart}`;
+  const cached = dayEventCache.get(key);
+  if (!cached) {
+    return cacheDay(key, await selectDayEvents.all(employeeId, dayStart, dayEnd)).rows;
+  }
+
+  const since = Math.max(0, cached.maxReceivedAt - RECEIVED_OVERLAP_MS);
+  const [fresh, counted] = await Promise.all([
+    selectDayEventsSince.all(employeeId, dayStart, dayEnd, since),
+    countDayEvents.get(employeeId, dayStart, dayEnd),
+  ]);
+
+  let added = false;
+  for (const r of fresh) {
+    const id = String(r.id);
+    if (cached.ids.has(id)) continue;
+    cached.ids.add(id);
+    cached.rows.push(r);
+    cached.maxReceivedAt = Math.max(cached.maxReceivedAt, Number(r.received_at) || 0);
+    added = true;
+  }
+  if (added) cached.rows.sort(byObservedThenId);
+
+  if (Number(counted?.c) !== cached.rows.length) {
+    return cacheDay(key, await selectDayEvents.all(employeeId, dayStart, dayEnd)).rows;
+  }
+  return cached.rows;
+}
 
 // Which signal is currently keeping someone present. Worth showing, because
 // "the app is reporting" and "the sensor is reporting because the app proved
@@ -351,8 +437,10 @@ function replaySessions(events, { dayStart, dayEnd, nowMs }) {
   });
 }
 
+// Only the adjustment is needed here. SELECT * also pulled the day's whole
+// sessions_json out of Postgres on every derivation (several per request).
 const selectAttendanceRow = db.prepare(
-  'SELECT * FROM attendance_days WHERE employee_id = ? AND date_key = ?'
+  'SELECT adjustment_minutes FROM attendance_days WHERE employee_id = ? AND date_key = ?'
 );
 
 /**
@@ -363,7 +451,7 @@ const selectAttendanceRow = db.prepare(
 async function deriveDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
   const dayStart = T.startOfDay(dayKey);
   const dayEnd = T.endOfDay(dayKey);
-  const events = await selectDayEvents.all(employeeId, dayStart, dayEnd);
+  const events = await loadDayEvents(employeeId, dayStart, dayEnd);
 
   const existing = await selectAttendanceRow.get(employeeId, dayKey);
   const adjustment = existing ? existing.adjustment_minutes : 0;

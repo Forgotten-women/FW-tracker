@@ -36,6 +36,26 @@ const selectDefaultPattern = db.prepare(
   'SELECT * FROM working_patterns WHERE is_default = 1 AND active = 1 LIMIT 1'
 );
 
+// The organisation default is read for every employee without their own
+// pattern on every derivation -- 19 times per dashboard refresh -- and only
+// changes when HR edits shifts (routes/shifts.js calls invalidate()). Other
+// instances pick an edit up within the TTL.
+const DEFAULT_PATTERN_TTL_MS = 60 * 1000;
+let defaultPatternCache = null; // { value, expiresAtMs }
+
+async function getDefaultPattern() {
+  if (defaultPatternCache && defaultPatternCache.expiresAtMs > Date.now()) {
+    return defaultPatternCache.value;
+  }
+  const value = await selectDefaultPattern.get();
+  defaultPatternCache = { value, expiresAtMs: Date.now() + DEFAULT_PATTERN_TTL_MS };
+  return value;
+}
+
+function invalidate() {
+  defaultPatternCache = null;
+}
+
 const selectEmployeeOffice = db.prepare('SELECT office_id FROM employees WHERE id = ?');
 
 const selectCalendarDay = db.prepare(
@@ -57,7 +77,7 @@ function weekdayKey(dateKey) {
  */
 async function resolve(employeeId, dateKey = T.dateKey()) {
   const row = await selectEmploymentPattern.get(employeeId, dateKey, dateKey);
-  const pattern = (row && row.id) ? row : await selectDefaultPattern.get();
+  const pattern = (row && row.id) ? row : await getDefaultPattern();
 
   const workingDays = (pattern?.working_days || config.office.workingDays?.join(',') || 'mon,tue,wed,thu,fri')
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -147,7 +167,7 @@ async function workingDaysBetween(employeeId, fromKey, toKey) {
   // Fast path: Pre-fetch pattern, office, and calendar days for the range to avoid N x 4 round-trip queries
   const [empPatternRow, defaultPattern, empOffice] = await Promise.all([
     selectEmploymentPattern.get(employeeId, toKey, fromKey),
-    selectDefaultPattern.get(),
+    getDefaultPattern(),
     selectEmployeeOffice.get(employeeId),
   ]);
 
@@ -190,4 +210,4 @@ async function workingDaysBetween(employeeId, fromKey, toKey) {
   return out;
 }
 
-module.exports = { resolve, workingDaysBetween, weekdayKey };
+module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate };

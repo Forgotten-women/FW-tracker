@@ -22,7 +22,12 @@ class EstimateCard extends StatelessWidget {
     return GlassCard(
       strong: true,
       radius: 26,
-      tint: tone.withValues(alpha: AppColors.isDark ? 0.08 : 0.10),
+      // Dark: a plain amber wash. Light: amber over the strong glass fill,
+      // so the card stays a light surface instead of letting the orbs
+      // behind it turn the wash muddy.
+      tint: AppColors.isDark
+          ? tone.withValues(alpha: 0.08)
+          : Color.alphaBlend(tone.withValues(alpha: 0.08), AppColors.glassFillStrong),
       borderColor: tone.withValues(alpha: 0.45),
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
       child: Column(

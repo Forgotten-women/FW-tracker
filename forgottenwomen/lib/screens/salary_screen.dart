@@ -1,291 +1,177 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/hr.dart';
+import '../models/payroll.dart';
 import '../services/api_client.dart';
+import '../services/payslip_watcher.dart';
 import '../theme.dart';
+import '../widgets/glass/glass.dart';
+import '../widgets/payroll/estimate_card.dart';
+import '../widgets/payroll/payslip_widgets.dart';
+import 'payslip_detail_screen.dart';
 
+/// The Salary tab: this month's running estimate, then every published
+/// payslip (and legacy CLOSED month), newest first. Everything comes from
+/// GET /api/payroll/mine/statements; the server decides what is visible
+/// (`enabled`) and says why when it isn't.
 class SalaryScreen extends StatefulWidget {
-  const SalaryScreen({super.key});
+  /// Defaults to a client of the screen's own (disposed with it).
+  final ApiClient? api;
+
+  const SalaryScreen({super.key, this.api});
+
+  /// Forgets the in-memory statements, as a fresh launch would.
+  @visibleForTesting
+  static void clearCache() {
+    _SalaryScreenState._cachedStatement = null;
+    _SalaryScreenState._cachedAt = null;
+  }
 
   @override
   State<SalaryScreen> createState() => _SalaryScreenState();
 }
 
 class _SalaryScreenState extends State<SalaryScreen> {
-  final _api = ApiClient();
+  late final ApiClient _api = widget.api ?? ApiClient();
+
+  // The last statements loaded, kept for the life of the app so the tab
+  // shows them at once and still has something to show offline. In memory
+  // only, on purpose: pay figures are not written to SharedPreferences,
+  // which is plaintext on disk.
   static EmployeePayrollStatement? _cachedStatement;
-  bool _loading = true;
-  bool _refreshing = false;
-  String? _error;
+  static DateTime? _cachedAt;
+
   EmployeePayrollStatement? _statement;
+  bool _loading = false;
+  String? _error;
+  bool _offline = false;
+
+  // Right after a payslip is published the home summary can already report
+  // it while the statements response (cached server-side for up to a
+  // minute) does not yet. A few spaced retries close that gap.
+  Timer? _staleTimer;
+  int _staleRetries = 0;
 
   @override
   void initState() {
     super.initState();
-    if (_cachedStatement != null) {
-      _statement = _cachedStatement;
-      _loading = false;
-    }
-    _loadStatements(isBackground: _cachedStatement != null);
+    _statement = _cachedStatement;
+    PayslipWatcher.latestPublishedAt.addListener(_onPayslipSeen);
+    PayslipWatcher.refreshRequests.addListener(_onRefreshRequested);
+    _loading = true;
+    _load();
   }
 
   @override
   void dispose() {
-    _api.dispose();
+    PayslipWatcher.latestPublishedAt.removeListener(_onPayslipSeen);
+    PayslipWatcher.refreshRequests.removeListener(_onRefreshRequested);
+    _staleTimer?.cancel();
+    if (widget.api == null) _api.dispose();
     super.dispose();
   }
 
-  Future<void> _loadStatements({bool isRefresh = false, bool isBackground = false}) async {
-    if (isRefresh) {
-      setState(() => _refreshing = true);
-    } else if (!isBackground) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
-
-    try {
-      final res = await _api.fetchMyPayrollStatements();
-      _cachedStatement = res;
-      if (mounted) {
-        setState(() {
-          _statement = res;
-          _loading = false;
-          _refreshing = false;
-          _error = null;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          // If we already have a statement showing, don't replace with full error screen
-          if (_statement == null) {
-            _error = e.toString().replaceAll('ApiException: ', '');
-          }
-          _loading = false;
-          _refreshing = false;
-        });
-      }
+  void _onPayslipSeen() {
+    final seen = PayslipWatcher.latestPublishedAt.value;
+    final have = _statement?.latestPayslip?.publishedAt ?? 0;
+    if (seen != null && seen > have) {
+      _staleRetries = 0;
+      _load();
     }
   }
 
-  String _formatCurrency(double amount, String currency) {
-    final sym = currency == 'PKR' ? '₨ ' : (currency == 'GBP' ? '£' : (currency == 'USD' ? '\$' : '$currency '));
-    final parts = amount.toStringAsFixed(2).split('.');
-    final integerPart = parts[0].replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-      (Match m) => '${m[1]},',
+  void _onRefreshRequested() {
+    _staleRetries = 0;
+    _load();
+  }
+
+  // One request at a time: a refresh asked for while one is running is
+  // answered by that one.
+  bool _requestInFlight = false;
+
+  Future<void> _load() async {
+    if (_requestInFlight || !mounted) return;
+    _requestInFlight = true;
+    if (!_loading) setState(() => _loading = true);
+    try {
+      final res = await _api.fetchMyPayrollStatements();
+      _cachedStatement = res;
+      _cachedAt = DateTime.now();
+      if (!mounted) return;
+      setState(() {
+        _statement = res;
+        _error = null;
+        _offline = false;
+      });
+      _scheduleStaleRetry(res);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is ApiException ? e.message : e.toString();
+        // No HTTP response at all (timeout, no route): offline, not a
+        // server refusal.
+        _offline = e is ApiException && e.statusCode == null && e.code == null;
+      });
+    } finally {
+      _requestInFlight = false;
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _scheduleStaleRetry(EmployeePayrollStatement res) {
+    _staleTimer?.cancel();
+    final seen = PayslipWatcher.latestPublishedAt.value;
+    final have = res.latestPayslip?.publishedAt ?? 0;
+    if (!res.enabled || seen == null || seen <= have) {
+      _staleRetries = 0;
+      return;
+    }
+    if (_staleRetries >= 3) return;
+    _staleRetries++;
+    _staleTimer = Timer(const Duration(seconds: 25), () {
+      if (mounted) _load();
+    });
+  }
+
+  void _openPayslip(PayrollPeriodStatement p) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PayslipDetailScreen(statement: p, api: _api)),
     );
-    return '$sym$integerPart.${parts[1]}';
   }
 
   @override
   Widget build(BuildContext context) {
+    final s = _statement;
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Salary & Statements', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-            Text('Official Monthly Compensation', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: _refreshing
-                ? SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
-                  )
-                : Icon(Icons.refresh, color: AppColors.textSecondary),
-            onPressed: _refreshing ? null : () => _loadStatements(isRefresh: true),
-          ),
-        ],
-      ),
-      body: _loading
-          ? Center(child: CircularProgressIndicator(color: AppColors.primary))
-          : RefreshIndicator(
-              color: AppColors.teal,
-              onRefresh: () => _loadStatements(isRefresh: true),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
-                children: [
-                  if (_error != null && _statement != null) ...[
-                    _buildErrorBanner(_error!),
-                    const SizedBox(height: 16),
-                  ],
-
-                  if (_statement == null) ...[
-                    _buildErrorView(_error ?? 'Could not load salary statements'),
-                  ] else if (!_statement!.enabled) ...[
-                    _buildRestrictedCard(_statement?.message),
-                  ] else ...[
-                    // 1. Current Active Salary Hero Card
-                    if (_statement!.currentSalary != null && !_statement!.currentSalary!.blocked)
-                      _buildSalaryHeroCard(_statement!.currentSalary!),
-                    const SizedBox(height: 24),
-
-                    // 2. Section Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'MONTHLY PAYROLL STATEMENTS',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.1,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceDark,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Text(
-                            '${_statement!.periods.length} Periods',
-                            style: TextStyle(fontSize: 11, color: AppColors.primaryLight, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // 3. Statement Periods List
-                    if (_statement!.periods.isEmpty)
-                      _buildEmptyPeriodsCard()
-                    else
-                      ..._statement!.periods.map((p) => _buildPeriodStatementTile(p)),
-                  ],
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildErrorBanner(String msg) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.amber.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.amber.withValues(alpha: 0.4)),
-      ),
-      child: Row(
+      appBar: _appBar(),
+      body: Column(
         children: [
-          Icon(Icons.warning_amber_rounded, color: AppColors.amber, size: 20),
-          const SizedBox(width: 10),
+          if (_loading)
+            LinearProgressIndicator(
+              minHeight: 2.5,
+              backgroundColor: Colors.transparent,
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryLight),
+            ),
           Expanded(
-            child: Text(msg, style: TextStyle(color: AppColors.amber, fontSize: 12)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorView(String msg) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.amber.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.amber.withValues(alpha: 0.3)),
-            ),
-            child: Icon(Icons.cloud_off_rounded, color: AppColors.amber, size: 36),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Unable to Load Statements',
-            style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            msg,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
-          ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: () => _loadStatements(),
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Try Again'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: AppColors.onAccent,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRestrictedCard(String? customMessage) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.slateDark,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Icon(Icons.lock_outline_rounded, color: AppColors.textMuted, size: 36),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Compensation Restricted',
-            style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            customMessage ?? 'Salary figures and period statements are restricted by company HR policy.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.bgDark,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: AppColors.primaryLight, size: 14),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'HR enables visibility during active pay review cycles',
-                    style: TextStyle(color: AppColors.primaryLight, fontSize: 11, fontWeight: FontWeight.w500),
+            child: RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: _load,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 30),
+                    children: s == null
+                        ? (_error == null ? _skeleton() : [_errorState()])
+                        : _content(s),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ],
@@ -293,500 +179,325 @@ class _SalaryScreenState extends State<SalaryScreen> {
     );
   }
 
-  Widget _buildSalaryHeroCard(SalaryInfo salary) {
-    final cur = salary.currency;
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppColors.primary.withValues(alpha: 0.18),
-            AppColors.surfaceDark,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+  PreferredSizeWidget _appBar() {
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      toolbarHeight: 72,
+      titleSpacing: 16,
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Salary',
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, letterSpacing: -0.4, color: AppColors.textPrimary),
+          ),
+          Text(
+            'Payslips and this month so far',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500, color: AppColors.textSecondary),
+          ),
+        ],
       ),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: Tooltip(
+            message: 'Refresh',
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: GlassCard(
+                radius: 15,
+                padding: EdgeInsets.zero,
+                onTap: _loading ? null : _onRefreshRequested,
+                child: Center(
+                  child: _loading
+                      ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
+                        )
+                      : Icon(Icons.refresh_rounded, size: 19, color: AppColors.textPrimary),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+      ],
+    );
+  }
+
+  List<Widget> _content(EmployeePayrollStatement s) {
+    final salary = s.currentSalary;
+    return [
+      if (_error != null) ...[
+        _staleBanner(),
+        const SizedBox(height: 12),
+      ],
+      if (!s.enabled)
+        _restrictedCard(s.message)
+      else ...[
+        if (s.estimate != null) ...[
+          EstimateCard(estimate: s.estimate!),
+          const SizedBox(height: 22),
+        ],
+        SectionLabel(
+          'Payslips',
+          trailing: s.periods.isEmpty
+              ? null
+              : Text(
+                  '${s.periods.length}',
+                  style: monoStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textTertiary),
+                ),
+        ),
+        if (s.periods.isEmpty)
+          _emptyPayslips()
+        else
+          for (final p in s.periods)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: PayslipTile(period: p, onTap: () => _openPayslip(p)),
+            ),
+        if (salary != null && !salary.blocked && salary.monthly > 0) ...[
+          const SizedBox(height: 14),
+          const SectionLabel('Current salary'),
+          _currentSalaryCard(salary),
+        ],
+      ],
+    ];
+  }
+
+  Widget _currentSalaryCard(SalaryInfo salary) {
+    final cur = salary.currency;
+    return GlassCard(
+      radius: 22,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              GradientIconTile(
+                icon: Icons.account_balance_wallet_rounded,
+                colors: [AppColors.primary, AppColors.accentEnd],
+                size: 38,
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.account_balance_wallet_outlined, color: AppColors.primaryLight, size: 18),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'CURRENT BASE COMPENSATION',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.1,
-                          color: AppColors.primaryLight,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    Text(
+                      'Gross monthly salary',
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                    ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(formatPayrollMoney(salary.monthly, cur), style: monoStyle(fontSize: 20, letterSpacing: -0.5)),
                     ),
                   ],
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: PayrollInfoTile(label: 'Daily rate', value: formatPayrollMoney(salary.daily, cur))),
               const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.teal.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.teal.withValues(alpha: 0.4)),
-                ),
-                child: Text(
-                  cur,
-                  style: TextStyle(
-                    color: AppColors.teal,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 10,
-                  ),
+              Expanded(child: PayrollInfoTile(label: 'Annual', value: formatPayrollMoney(salary.annual, cur))),
+              const SizedBox(width: 8),
+              Expanded(
+                child: PayrollInfoTile(
+                  label: 'Effective from',
+                  value: formatPayrollDate(salary.effectiveFrom) ?? '-',
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 14),
-          Text(
-            _formatCurrency(salary.monthly, cur),
-            style: TextStyle(
-              fontSize: 30,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text('Gross Monthly Salary', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.bgDark.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildMetricCol('Daily Rate (1/260)', _formatCurrency(salary.daily, cur)),
-                Container(width: 1, height: 26, color: AppColors.border),
-                _buildMetricCol('Annualized', _formatCurrency(salary.annual, cur)),
-              ],
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildMetricCol(String label, String value) {
-    return Column(
-      children: [
-        Text(value, style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
-        const SizedBox(height: 2),
-        Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
-      ],
+  Widget _emptyPayslips() {
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        children: [
+          Icon(Icons.receipt_long_outlined, size: 32, color: AppColors.textTertiary),
+          const SizedBox(height: 10),
+          Text(
+            'No payslips yet',
+            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'When HR approves a monthly payroll run, your payslip appears here and you get a notification.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, height: 1.4, color: AppColors.textSecondary),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildEmptyPeriodsCard() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+  Widget _restrictedCard(String? message) {
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        children: [
+          GradientIconTile(icon: Icons.lock_outline_rounded, colors: payslipToneColors(null), size: 48),
+          const SizedBox(height: 14),
+          Text(
+            'Salary details are restricted',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 6),
+          // The server's policy message, verbatim.
+          Text(
+            (message == null || message.isEmpty)
+                ? 'Salary and monthly statements are restricted by company HR policy.'
+                : message,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.textSecondary),
+          ),
+        ],
       ),
-      child: Center(
+    );
+  }
+
+  String _loadedAtText() {
+    final at = _cachedAt;
+    if (at == null) return 'earlier';
+    final h = at.hour.toString().padLeft(2, '0');
+    final m = at.minute.toString().padLeft(2, '0');
+    return 'at $h:$m';
+  }
+
+  Widget _staleBanner() {
+    final tone = AppColors.amber;
+    final text = _offline
+        ? "You're offline. Showing the payslips loaded ${_loadedAtText()}."
+        : "Couldn't refresh ($_error). Showing the payslips loaded ${_loadedAtText()}.";
+    return GlassCard(
+      radius: 16,
+      tint: tone.withValues(alpha: 0.12),
+      borderColor: tone.withValues(alpha: 0.35),
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      child: Row(
+        children: [
+          Icon(_offline ? Icons.wifi_off_rounded : Icons.info_outline_rounded, color: tone, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(text, style: TextStyle(color: tone, fontSize: 11.5, fontWeight: FontWeight.w600, height: 1.35)),
+          ),
+          TextButton(
+            onPressed: _loading ? null : _onRefreshRequested,
+            style: TextButton.styleFrom(foregroundColor: tone),
+            child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _errorState() {
+    final tone = _offline ? AppColors.amber : AppColors.danger;
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        children: [
+          Icon(_offline ? Icons.wifi_off_rounded : Icons.cloud_off_rounded, size: 40, color: tone),
+          const SizedBox(height: 12),
+          Text(
+            _offline ? "You're offline" : "Couldn't load your payslips",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _offline ? 'Connect to the internet, then try again.' : (_error ?? 'Something went wrong.'),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _loading ? null : _onRefreshRequested,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Try again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _skeleton() {
+    Widget bar(double width, double height) => Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: AppColors.border,
+            borderRadius: BorderRadius.circular(6),
+          ),
+        );
+    return [
+      GlassCard(
+        strong: true,
+        radius: 26,
+        padding: const EdgeInsets.all(18),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.calendar_today_outlined, color: AppColors.textMuted, size: 32),
-            SizedBox(height: 10),
-            Text(
-              'No Payroll Periods Available',
-              style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            SizedBox(height: 4),
-            Text(
-              'When HR prepares and publishes monthly payroll cycles, your monthly pay statements will appear here.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            bar(140, 14),
+            const SizedBox(height: 14),
+            bar(double.infinity, 34),
+            const SizedBox(height: 16),
+            bar(90, 10),
+            const SizedBox(height: 8),
+            bar(180, 28),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: bar(double.infinity, 44)),
+                const SizedBox(width: 8),
+                Expanded(child: bar(double.infinity, 44)),
+                const SizedBox(width: 8),
+                Expanded(child: bar(double.infinity, 44)),
+              ],
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildPeriodStatementTile(PayrollPeriodStatement p) {
-    final isClosed = p.status == 'CLOSED';
-    final hasAdjustments = p.adjustments.isNotEmpty || p.adjustmentsTotal != 0;
-    final cur = p.currency;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => _openPeriodDetailsSheet(p),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Period Title & Status Badge
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      p.name,
-                      style: TextStyle(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: isClosed
-                          ? AppColors.slateDark
-                          : AppColors.teal.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: isClosed
-                            ? AppColors.border
-                            : AppColors.teal.withValues(alpha: 0.4),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isClosed ? Icons.lock_outline : Icons.fiber_manual_record,
-                          size: isClosed ? 11 : 9,
-                          color: isClosed ? AppColors.textMuted : AppColors.teal,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          isClosed ? 'CLOSED' : 'OPEN / ACTIVE',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: isClosed ? AppColors.textMuted : AppColors.teal,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${p.startDate} → ${p.endDate}',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
-              ),
-              const SizedBox(height: 12),
-
-              // 2. Financial Breakdown Row
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.bgDark,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            p.workingDaysCount > 0
-                                ? 'Period Base (${p.workingDaysCount} working days)'
-                                : 'Period Base Gross',
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(_formatCurrency(p.basePayable, cur), style: TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                    if (hasAdjustments) ...[
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              p.adjustmentsTotal >= 0 ? 'Approved Overtime & Additions' : 'Approved Deficit & Deductions',
-                              style: TextStyle(
-                                color: p.adjustmentsTotal >= 0 ? AppColors.teal : AppColors.amber,
-                                fontSize: 12,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            (p.adjustmentsTotal >= 0 ? '+' : '') + _formatCurrency(p.adjustmentsTotal, cur),
-                            style: TextStyle(
-                              color: p.adjustmentsTotal >= 0 ? AppColors.teal : AppColors.amber,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                    Divider(height: 16, thickness: 1, color: AppColors.border),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Total Calculated Statement',
-                          style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                        Text(
-                          _formatCurrency(p.netPayable, cur),
-                          style: TextStyle(
-                            color: AppColors.teal,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // 3. Footer tag with exchange rate and detail hint
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Conversion Rate: £1.00 = ₨${p.exchangeRate.toStringAsFixed(2)}',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 10),
-                  ),
-                  Row(
-                    children: [
-                      Text(
-                        'View breakdown',
-                        style: TextStyle(color: AppColors.primaryLight, fontSize: 11, fontWeight: FontWeight.w600),
-                      ),
-                      SizedBox(width: 4),
-                      Icon(Icons.chevron_right, color: AppColors.primaryLight, size: 14),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _openPeriodDetailsSheet(PayrollPeriodStatement p) {
-    final cur = p.currency;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.sheet,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.65,
-        maxChildSize: 0.9,
-        minChildSize: 0.4,
-        expand: false,
-        builder: (_, scrollController) => ListView(
-          controller: scrollController,
-          padding: const EdgeInsets.all(20),
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      const SizedBox(height: 22),
+      for (var i = 0; i < 3; i++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: GlassCard(
+            radius: 20,
+            padding: const EdgeInsets.all(14),
+            child: Row(
               children: [
+                bar(42, 42),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(p.name, style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
-                      const SizedBox(height: 2),
-                      Text('${p.startDate} to ${p.endDate}', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                    ],
+                    children: [bar(110, 13), const SizedBox(height: 6), bar(80, 10)],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: p.status == 'CLOSED' ? AppColors.slateDark : AppColors.teal.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: p.status == 'CLOSED' ? AppColors.border : AppColors.teal.withValues(alpha: 0.4)),
-                  ),
-                  child: Text(
-                    p.status,
-                    style: TextStyle(
-                      color: p.status == 'CLOSED' ? AppColors.textMuted : AppColors.teal,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
+                bar(70, 16),
               ],
             ),
-            const SizedBox(height: 20),
-
-            // Summary Card
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.bgDark,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Column(
-                children: [
-                  _buildDetailRow('Contract Monthly Rate', _formatCurrency(p.monthlyGross, cur)),
-                  const SizedBox(height: 8),
-                  _buildDetailRow('Daily Rate (1/260)', _formatCurrency(p.dailyRate, cur)),
-                  const SizedBox(height: 8),
-                  _buildDetailRow('Working Days in Period', '${p.workingDaysCount} working days'),
-                  const SizedBox(height: 8),
-                  _buildDetailRow('Period Base Calculated', _formatCurrency(p.basePayable, cur), isBold: true),
-                  const SizedBox(height: 8),
-                  _buildDetailRow('Locked Exchange Rate', '£1.00 = ₨${p.exchangeRate.toStringAsFixed(2)}'),
-                  Divider(height: 20, thickness: 1, color: AppColors.border),
-                  _buildDetailRow(
-                    'Net Calculated Total',
-                    _formatCurrency(p.netPayable, cur),
-                    isBold: true,
-                    valueColor: AppColors.teal,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Itemized Adjustments
-            Text(
-              'APPROVED ADJUSTMENTS & OVERTIME',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1),
-            ),
-            const SizedBox(height: 10),
-            if (p.adjustments.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.bgDark,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Text(
-                  'No manual adjustments or overtime added for this period.',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                ),
-              )
-            else
-              ...p.adjustments.map((a) => Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.bgDark,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                a.type.replaceAll('_', ' '),
-                                style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                              if (a.explanation.isNotEmpty)
-                                Text(a.explanation, style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          (a.amount >= 0 ? '+' : '') + _formatCurrency(a.amount, cur),
-                          style: TextStyle(
-                            color: a.amount >= 0 ? AppColors.teal : AppColors.amber,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value, {bool isBold = false, Color? valueColor}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isBold ? AppColors.textPrimary : AppColors.textMuted,
-              fontSize: 12,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-            ),
-            overflow: TextOverflow.ellipsis,
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
-          value,
-          textAlign: TextAlign.right,
-          style: TextStyle(
-            color: valueColor ?? (isBold ? AppColors.textPrimary : AppColors.textSecondary),
-            fontSize: isBold ? 14 : 12,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
-          ),
-        ),
-      ],
-    );
+    ];
   }
 }

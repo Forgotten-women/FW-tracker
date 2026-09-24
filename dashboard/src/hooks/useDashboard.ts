@@ -7,6 +7,12 @@ import type { AdminEmployee, DashboardSummary, NotificationItem } from '@/lib/ty
 
 export type ConnectionState = 'live' | 'polling' | 'reconnecting';
 
+// Live updates are coalesced into one reload per this window (see onmessage).
+const SSE_COALESCE_MS = 5000;
+// Background reloads refresh the employee directory at most this often;
+// explicit refresh() calls (after an HR edit) always include it.
+const EMPLOYEES_MAX_AGE_MS = 5 * 60 * 1000;
+
 interface UseDashboard {
   summary: DashboardSummary | null;
   employees: AdminEmployee[];
@@ -34,15 +40,25 @@ export function useDashboard(
   const sourceRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
+  const lastEmployeesAtRef = useRef(0);
+  const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aliveRef = useRef(true);
   const onNotificationRef = useRef(onNotification);
   onNotificationRef.current = onNotification;
 
-  const refresh = useCallback(async () => {
+  // The employee directory changes rarely (HR edits), unlike the live board,
+  // so it is re-fetched at most every few minutes rather than on every update.
+  const refresh = useCallback(async (opts: { employees?: boolean } = {}) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const [s, e] = await Promise.all([api.summary(), api.employees()]);
+      const wantEmployees =
+        opts.employees || Date.now() - lastEmployeesAtRef.current > EMPLOYEES_MAX_AGE_MS;
+      const [s, e] = await Promise.all([
+        api.summary(),
+        wantEmployees ? api.employees() : Promise.resolve(null),
+      ]);
+      if (wantEmployees && e) lastEmployeesAtRef.current = Date.now();
       if (!aliveRef.current) return;
       if (s) setSummary(s);
       if (e && Array.isArray(e.employees)) {
@@ -106,8 +122,10 @@ export function useDashboard(
           if (!cancelled) setConnection('live');
         };
         source.onmessage = (event) => {
+          let type: string | null = null;
           try {
             const parsed = JSON.parse(event.data);
+            type = parsed && typeof parsed.type === 'string' ? parsed.type : null;
             if (parsed && parsed.type === 'NOTIFICATION' && parsed.data) {
               onNotificationRef.current?.(parsed.data as NotificationItem);
             }
@@ -115,7 +133,18 @@ export function useDashboard(
               window.dispatchEvent(new CustomEvent('office-tracker-sse', { detail: parsed }));
             }
           } catch (_) {}
-          void refresh();
+          // Every phone ping and laptop heartbeat is a PRESENCE_UPDATED --
+          // around one a second across the team -- and each used to trigger a
+          // full reload of everyone's day, which was a large share of the
+          // database's egress. Coalesce: at most one reload per few seconds,
+          // however many updates arrive in between.
+          if (!pendingRefreshRef.current) {
+            const employees = type === 'SETTINGS_UPDATED' || type === 'DAY_ROLLOVER';
+            pendingRefreshRef.current = setTimeout(() => {
+              pendingRefreshRef.current = null;
+              void refresh({ employees });
+            }, SSE_COALESCE_MS);
+          }
         };
         source.onerror = () => {
           if (cancelled) return;
@@ -134,10 +163,16 @@ export function useDashboard(
     return () => {
       cancelled = true;
       if (retryRef.current) clearTimeout(retryRef.current);
+      if (pendingRefreshRef.current) {
+        clearTimeout(pendingRefreshRef.current);
+        pendingRefreshRef.current = null;
+      }
       sourceRef.current?.close();
       sourceRef.current = null;
     };
   }, [unlocked, refresh]);
 
-  return { summary, employees, connection, error, refresh };
+  const refreshAll = useCallback(() => refresh({ employees: true }), [refresh]);
+
+  return { summary, employees, connection, error, refresh: refreshAll };
 }
