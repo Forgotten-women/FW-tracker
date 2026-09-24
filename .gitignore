@@ -49,3 +49,4 @@ dist/
 *.md
 *.xlsx
 scratch/*
+*.csv

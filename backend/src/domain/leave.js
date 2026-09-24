@@ -23,6 +23,18 @@ const T = require('../util/time');
 
 const ENTITLEMENT = config.leave.annualEntitlementDays;
 
+const selectEntitlement = db.prepare(`
+  SELECT holiday_entitlement_days FROM employment_records
+  WHERE employee_id = ? AND effective_from <= ?
+  ORDER BY effective_from DESC, created_at DESC LIMIT 1
+`);
+
+async function entitlementFor(employeeId, onDate = T.dateKey()) {
+  const row = await selectEntitlement.get(employeeId, onDate);
+  const val = Number(row?.holiday_entitlement_days);
+  return (val > 0) ? val : config.leave.annualEntitlementDays;
+}
+
 // ---------------------------------------------------------------------------
 // Holiday year
 // ---------------------------------------------------------------------------
@@ -145,8 +157,9 @@ async function finaliseYear(employeeId, yearsOfService, startDate, { actor = 'sy
   const yearEnd = addMonths(startDate, (yearsOfService + 1) * 12);
   const leaveYear = `${yearStart}/${yearsOfService}`;
 
+  const entitlement = await entitlementFor(employeeId, startDate);
   const already = (await selectAccrued.get(employeeId, leaveYear)).days;
-  const delta = ENTITLEMENT - already;
+  const delta = entitlement - already;
   if (delta < 0.005) return { finalised: false, upToDate: true };
 
   await insertLedger.run({
@@ -177,8 +190,9 @@ async function accrue(employeeId, onDate = T.dateKey(), { actor = 'system' } = {
     await finaliseYear(employeeId, year.yearsOfService - 1, year.startDate, { actor });
   }
 
+  const entitlement = await entitlementFor(employeeId, onDate);
   const already = (await selectAccrued.get(employeeId, year.leaveYear)).days;
-  const target = (ENTITLEMENT * year.monthsCompleted) / 12;
+  const target = (entitlement * year.monthsCompleted) / 12;
   const delta = target - already;
 
   // Rounded to a hundredth of a day before comparing, so floating-point dust
@@ -407,7 +421,7 @@ async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestId = n
     nextAccrualDate: year.nextAccrualDate,
 
     // The 8 distinct metrics required by policy:
-    annualEntitlementDays: ENTITLEMENT,
+    annualEntitlementDays: await entitlementFor(employeeId, onDate),
     accruedDays: round2(raw.accruedDays),
     takenDays: round2(raw.takenDays),
     approvedCarryForwardDays: round2(raw.carryOverDays),
@@ -1136,7 +1150,7 @@ async function historicalCyclesFor(employeeId, asOfDate = T.dateKey()) {
       cycleStartDate: yearStart,
       cycleEndDate,
       nextRenewalDate: yearEnd,
-      annualEntitlement: ENTITLEMENT,
+      annualEntitlement: await entitlementFor(employeeId, onDate),
       accrued: Math.round((totals.ACCRUAL || 0) * 100) / 100,
       carriedForwardIn: Math.round((totals.CARRY_OVER || 0) * 100) / 100,
       adjustments: Math.round((totals.ADJUSTMENT || 0) * 100) / 100,
@@ -1324,8 +1338,9 @@ async function monthlyReportFor(employeeId, { monthKey = null, asOfDate = T.date
   }
 
   // 6. Entitlements & Balances
+  const entitlement = await entitlementFor(employeeId, asOfDate);
   // Remaining annual balance: annual entitlement + carry forward + adjustments - annual taken - annual booked
-  const remainingAnnual = round2(ENTITLEMENT + carryOver + adjustments + forfeit - annualLeaveTaken - annualLeaveBooked);
+  const remainingAnnual = round2(entitlement + carryOver + adjustments + forfeit - annualLeaveTaken - annualLeaveBooked);
   // Currently entitled to take right now without overdraft: accrued to date + carry forward + adjustments - annual taken - annual booked
   const currentlyEntitled = round2(Math.max(0, accrued + carryOver + adjustments + forfeit - annualLeaveTaken - annualLeaveBooked));
 
@@ -1407,7 +1422,7 @@ async function monthlyReportFor(employeeId, { monthKey = null, asOfDate = T.date
     summaryExplanation,
 
     // The Required Metrics
-    annualEntitlementDays: ENTITLEMENT,
+    annualEntitlementDays: entitlement,
     leaveAlreadyTaken: round2(annualLeaveTaken),
     paidLeaveUsed: {
       cycleTotal: round2(cyclePaidLeaveUsed),

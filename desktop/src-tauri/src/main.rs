@@ -231,6 +231,7 @@ fn main() {
             app_tracking_enabled: Some(true),
             outside_working_hours: Some(false),
             live_stream_requested: Some(false),
+            live_view: None,
             today: client::SessionStats {
                 date_key: initial_config.cached_date_key.clone(),
                 check_in_time: None,
@@ -442,7 +443,7 @@ fn main() {
                             }
 
                             if let Some(frame) = frame_opt {
-                                let _ = client::send_stream_frame(&cfg, &frame).await;
+                                let _ = client::send_stream_frame(&cfg, Some(frame.as_str())).await;
                             }
                         }
                         // ~1 FPS: plenty for spot-checking a screen, and a
