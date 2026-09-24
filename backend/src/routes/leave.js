@@ -168,20 +168,10 @@ router.post('/request', requireDevice, async (req, res) => {
 });
 
 router.post('/request/:id/cancel', requireDevice, async (req, res) => {
-  const r = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
-  if (!r || r.employee_id !== req.auth.employeeId) {
-    return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
-  }
-  try {
-    const out = await L.cancelRequest({
-      requestId: req.params.id,
-      actor: `employee:${req.auth.employeeId}`,
-      reason: req.body?.reason || null,
-    });
-    res.json({ status: 'SUCCESS', ...out });
-  } catch (err) {
-    res.status(400).json({ status: 'ERROR', message: err.message });
-  }
+  return res.status(403).json({
+    status: 'ERROR',
+    message: 'Employees are not permitted to cancel leave requests directly. Please contact HR to amend or cancel your leave.',
+  });
 });
 
 // ---------------------------------------------------------------------------

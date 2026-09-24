@@ -108,16 +108,16 @@ class _MainShellState extends State<MainShell> {
         value: _homeBloc,
         child: BlocBuilder<HomeBloc, HomeState>(
           builder: (context, homeState) {
-            int unreadCount = 0;
+            int warningCount = 0;
             if (homeState is HomeLoaded) {
-              unreadCount = homeState.summary.unreadNotificationsCount;
+              warningCount = homeState.summary.warningCount;
             }
 
             final navItems = [
               const GlassNavItem(icon: Icons.home_outlined, activeIcon: Icons.home_rounded, label: 'Home'),
               const GlassNavItem(icon: Icons.event_available_outlined, activeIcon: Icons.event_available_rounded, label: 'Leave'),
               const GlassNavItem(icon: Icons.account_balance_wallet_outlined, activeIcon: Icons.account_balance_wallet_rounded, label: 'Salary'),
-              GlassNavItem(icon: Icons.gavel_outlined, activeIcon: Icons.gavel_rounded, label: 'Warnings', badge: unreadCount),
+              GlassNavItem(icon: Icons.gavel_outlined, activeIcon: Icons.gavel_rounded, label: 'Warnings', badge: warningCount),
               const GlassNavItem(icon: Icons.folder_outlined, activeIcon: Icons.folder_rounded, label: 'Documents'),
             ];
 

@@ -9,6 +9,7 @@ const { db } = require('../db');
 const { config } = require('../config');
 const { requireAdmin } = require('../middleware/auth');
 const P = require('../domain/presence');
+const History = require('../domain/history');
 const events = require('../events');
 const T = require('../util/time');
 
@@ -103,6 +104,28 @@ router.get('/summary', async (req, res) => {
 });
 
 // GET /api/dashboard/history?from=YYYY-MM-DD&to=YYYY-MM-DD
+// GET /api/dashboard/employees/:employeeId/days?from=YYYY-MM-DD&to=YYYY-MM-DD
+// One employee's attendance for any past range (up to 62 days per call).
+router.get('/employees/:employeeId/days', async (req, res) => {
+  try {
+    const out = await History.daysInRange(req.params.employeeId, String(req.query.from || ''), String(req.query.to || ''));
+    res.json({ status: 'SUCCESS', employee: out.employee, from: out.from, to: out.to, employmentStart: out.employmentStart || null, days: out.days });
+  } catch (err) {
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// GET /api/dashboard/employees/:employeeId/day/YYYY-MM-DD - everything about
+// one day, including what only HR sees (movements log, top applications).
+router.get('/employees/:employeeId/day/:dateKey', async (req, res) => {
+  try {
+    const day = await History.dayDetail(req.params.employeeId, req.params.dateKey, { forHr: true });
+    res.json({ status: 'SUCCESS', day });
+  } catch (err) {
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 router.get('/history', async (req, res) => {
   const from = String(req.query.from || T.dateKey());
   const to = String(req.query.to || T.dateKey());

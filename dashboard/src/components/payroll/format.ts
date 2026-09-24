@@ -168,7 +168,7 @@ export function formatActor(actor: string | null | undefined): string {
 // ---------------------------------------------------------------------------
 
 function sentenceCase(code: string): string {
-  const words = code.toLowerCase().replace(/_/g, ' ');
+  const words = code.toLowerCase().replace(/_/g, ' ').replace(/\bhr\b/g, 'HR');
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 

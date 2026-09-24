@@ -1272,13 +1272,6 @@ class _LeaveScreenState extends State<LeaveScreen> {
             ),
             child: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
           ),
-          if (r.isPending || r.isApproved)
-            IconButton(
-              icon: const Icon(Icons.close, size: 16),
-              color: AppColors.textMuted,
-              onPressed: () => _cancel(r),
-              tooltip: 'Cancel',
-            ),
         ],
       ),
     );

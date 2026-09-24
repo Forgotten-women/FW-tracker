@@ -37,7 +37,7 @@ router.get('/home-summary', requireDevice, async (req, res) => {
     const day = await A.deriveDay(employeeId, dateKey, nowMs);
 
     // 2. Run companion metrics in parallel reusing pre-derived `day`
-    const [lateness, balance, workingHours, correctionRows, notifsResult, latestPayslip] = await Promise.all([
+    const [lateness, balance, workingHours, correctionRows, notifsResult, latestPayslip, warningRow] = await Promise.all([
       A.latenessStatus(employeeId, dateKey),
       A.balanceFor(employeeId),
       A.calculateWorkingHoursMetrics(employeeId, dateKey, day),
@@ -46,6 +46,7 @@ router.get('/home-summary', requireDevice, async (req, res) => {
       // One indexed query, so the phone can spot a newly published payslip
       // on every poll without fetching its statements.
       PR.latestPayslipFor(employeeId).catch(() => null),
+      db.prepare('SELECT COUNT(*) AS count FROM formal_warnings WHERE employee_id = ?').get(employeeId).catch(() => ({ count: 0 })),
     ]);
 
     // 3. Fast history: Today reuses day.presence directly. Past 6 days loaded from attendance_days cache.
@@ -124,6 +125,7 @@ router.get('/home-summary', requireDevice, async (req, res) => {
       history: historyDays,
       corrections,
       unreadNotificationsCount: notifsResult.unreadCount || 0,
+      warningCount: Number(warningRow?.count || 0),
       latestPayslip,
       serverTimeMs: nowMs,
     });

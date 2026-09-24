@@ -627,6 +627,7 @@ class HomeSummary {
   final List<Attendance> history;
   final List<CorrectionRequest> corrections;
   final int unreadNotificationsCount;
+  final int warningCount;
   final int serverTimeMs;
 
   const HomeSummary({
@@ -634,6 +635,7 @@ class HomeSummary {
     required this.history,
     required this.corrections,
     this.unreadNotificationsCount = 0,
+    this.warningCount = 0,
     required this.serverTimeMs,
   });
 
@@ -651,6 +653,7 @@ class HomeSummary {
       history: historyList,
       corrections: correctionsList,
       unreadNotificationsCount: (json['unreadNotificationsCount'] as num?)?.toInt() ?? 0,
+      warningCount: (json['warningCount'] as num?)?.toInt() ?? 0,
       serverTimeMs: (json['serverTimeMs'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
     );
   }

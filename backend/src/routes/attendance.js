@@ -12,6 +12,7 @@ const { db } = require('../db');
 const { config } = require('../config');
 const { requireDevice, requireSensor, requireAdmin } = require('../middleware/auth');
 const P = require('../domain/presence');
+const History = require('../domain/history');
 const bindings = require('../domain/bindings');
 const events = require('../events');
 const T = require('../util/time');
@@ -177,6 +178,28 @@ router.get('/me', requireDevice, async (req, res) => {
     attendance: await P.presentDay(d, { name: employeeName, role: employeeRole }),
     serverTimeMs: nowMs,
   });
+});
+
+// GET /api/attendance/mine/days?from=YYYY-MM-DD&to=YYYY-MM-DD
+// The employee's own attendance for any past range (up to 62 days per call),
+// e.g. a month at a time for the calendar. See domain/history.js.
+router.get('/mine/days', requireDevice, async (req, res) => {
+  try {
+    const out = await History.daysInRange(req.auth.employeeId, String(req.query.from || ''), String(req.query.to || ''));
+    res.json({ status: 'SUCCESS', from: out.from, to: out.to, employmentStart: out.employmentStart || null, days: out.days });
+  } catch (err) {
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// GET /api/attendance/mine/day/YYYY-MM-DD - one day in full.
+router.get('/mine/day/:dateKey', requireDevice, async (req, res) => {
+  try {
+    const day = await History.dayDetail(req.auth.employeeId, req.params.dateKey, { forHr: false });
+    res.json({ status: 'SUCCESS', day });
+  } catch (err) {
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 // GET /api/attendance/my-history?days=7
