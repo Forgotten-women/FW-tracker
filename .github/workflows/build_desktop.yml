@@ -75,35 +75,12 @@ jobs:
         run: npm ci
         working-directory: desktop
 
-      # ── 8. Build Tauri installer ──────────────────────────────────────────────
+      # ── 8. Build Tauri installer & publish GitHub Release ────────────────────
       - name: 🔨 Build Tauri app (${{ matrix.platform }})
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS code-signing/notarization (optional – leave empty to skip).
-          # For production, set these in GitHub → Settings → Secrets:
-          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          #
-          # Updater signing -- REQUIRED for auto-update. tauri.conf.json's
-          # updater.pubkey is the public half of this same keypair (generated
-          # via `npx @tauri-apps/cli signer generate`); without these two
-          # secrets set in GitHub → Settings → Secrets and variables →
-          # Actions, this build step produces installers but no signature,
-          # and every running app's silent update check will simply find
-          # nothing valid to install.
-          #
-          # Tauri v1's bundler (this project is on tauri 1.5.4, see
-          # src-tauri/Cargo.toml) reads TAURI_PRIVATE_KEY / TAURI_KEY_PASSWORD
-          # specifically -- TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) is the v2
-          # convention and is silently ignored by v1, which is why an earlier
-          # version of this workflow built unsigned installers despite the
-          # secrets being set. The GitHub secret names themselves don't need
-          # to change -- only which env var name they're exposed as here.
+          # Tauri v1 updater signing keys (v1 uses TAURI_PRIVATE_KEY, not the v2 name)
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -113,31 +90,11 @@ jobs:
           includeDebug: false
           includeRelease: true
           includeUpdaterJson: true
-
-      # ── 9. Determine artifact paths ───────────────────────────────────────────
-      - name: 📍 Find built installer(s)
-        id: artifacts
-        shell: bash
-        run: |
-          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
-            MSI=$(find desktop/src-tauri/target -name "*.msi" 2>/dev/null | head -1)
-            NSIS=$(find desktop/src-tauri/target -name "*.exe" 2>/dev/null | head -1)
-            echo "paths=$MSI $NSIS" >> $GITHUB_OUTPUT
-            echo "Found Windows: $MSI | $NSIS"
-          else
-            DMG=$(find desktop/src-tauri/target -name "*.dmg" 2>/dev/null | head -1)
-            APP=$(find desktop/src-tauri/target -name "*.app.tar.gz" 2>/dev/null | head -1)
-            echo "paths=$DMG $APP" >> $GITHUB_OUTPUT
-            echo "Found macOS: $DMG | $APP"
-          fi
-
-      # ── 10. Upload to GitHub Release ──────────────────────────────────────────
-      - name: 🚀 Upload installers to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
-          name: 🖥️ Office Tracker Desktop ${{ github.event.inputs.release_tag || github.ref_name }}
-          body: |
+          # Providing tagName tells tauri-action to create/update the GitHub Release
+          # and upload all bundles automatically.
+          tagName: ${{ github.event.inputs.release_tag || github.ref_name }}
+          releaseName: 🖥️ Office Tracker Desktop ${{ github.event.inputs.release_tag || github.ref_name }}
+          releaseBody: |
             ## Office Tracker Desktop Agent
 
             ### 📥 Downloads
@@ -168,18 +125,5 @@ jobs:
 
             ---
             *Built automatically by GitHub Actions from commit `${{ github.sha }}`*
-          generate_release_notes: false
-          draft: false
+          releaseDraft: false
           prerelease: false
-          fail_on_unmatched_files: false
-          files: |
-            desktop/src-tauri/target/**/bundle/msi/*.msi
-            desktop/src-tauri/target/**/bundle/msi/*.msi.zip
-            desktop/src-tauri/target/**/bundle/msi/*.msi.zip.sig
-            desktop/src-tauri/target/**/bundle/nsis/*.exe
-            desktop/src-tauri/target/**/bundle/dmg/*.dmg
-            desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz
-            desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
-            desktop/src-tauri/target/**/latest.json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
