@@ -702,16 +702,49 @@ export interface AppUsageItem {
   lastUsedAt: string;
 }
 
+/**
+ * Where a live-view session stands (backend/src/routes/admin.js):
+ * LIVE - frames flowing; STARTING - laptop acknowledged, first frame on its way;
+ * WAITING - laptop hasn't checked in since the request; the rest explain why
+ * no stream is possible right now.
+ */
+export type LivePhase =
+  | 'LIVE'
+  | 'STARTING'
+  | 'WAITING'
+  | 'OFFLINE'
+  | 'PAUSED_BREAK'
+  | 'OUTSIDE_HOURS'
+  | 'ENDED';
+
 export interface LiveFrameResponse {
   status: string;
+  phase?: LivePhase;
   active: boolean;
   frameBase64: string | null;
+  /** true when `since` matched the latest frame, so no image was sent. */
+  unchanged?: boolean;
   lastFrameAt: number | null;
-  requestedAt: number | null;
-  streamStatus: string;
+  lastActivityAt?: number | null;
+  requestedAt?: number | null;
+  streamStatus?: string;
+  ackAt?: number | null;
+  lastSeenAt?: number | null;
   isBreak: boolean;
   breakMessage?: string | null;
+  agent?: { version: string | null; doorbell: boolean } | null;
+  doorbellConfigured?: boolean;
+  frameStore?: 'redis' | 'memory';
+  warning?: 'LIVE_STORE_NOT_SHARED' | null;
   message?: string;
+}
+
+export interface LiveStreamRequestResponse {
+  status: string;
+  message: string;
+  doorbell?: 'SENT' | 'FAILED' | 'UNAVAILABLE';
+  frameStore?: 'redis' | 'memory';
+  warning?: 'LIVE_STORE_NOT_SHARED' | null;
 }
 
 export interface ApproachingAnniversaryEmployee {

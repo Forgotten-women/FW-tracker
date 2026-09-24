@@ -8,6 +8,18 @@
 import React, { useState } from 'react';
 import type { NotificationItem } from '@/lib/types';
 import { api } from '@/lib/api';
+import {
+  AlertTriangleIcon,
+  BellIcon,
+  FileTextIcon,
+  PalmTreeIcon,
+  PinIcon,
+  SirenIcon,
+  SparklesIcon,
+  ThermometerIcon,
+  TimerIcon,
+  XIcon,
+} from './icons';
 
 interface NotificationDrawerProps {
   open: boolean;
@@ -18,13 +30,13 @@ interface NotificationDrawerProps {
   onNavigateTab?: (tab: string) => void;
 }
 
-const CATEGORY_META: Record<string, { label: string; icon: string; tabTarget: string; tone: string }> = {
-  LEAVE: { label: 'Leave', icon: '🏖️', tabTarget: 'leave', tone: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' },
-  CORRECTION: { label: 'Dispute', icon: '⏱️', tabTarget: 'history', tone: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
-  ABSENCE: { label: 'Absence', icon: '🤒', tabTarget: 'warnings', tone: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
-  DOCUMENT: { label: 'Document', icon: '📄', tabTarget: 'documents', tone: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
-  WARNING: { label: 'Warning', icon: '⚠️', tabTarget: 'warnings', tone: 'bg-orange-500/10 text-orange-400 border-orange-500/30' },
-  HR_ALERT: { label: 'Compliance', icon: '🚨', tabTarget: 'live', tone: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
+const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; tabTarget: string; tone: string }> = {
+  LEAVE: { label: 'Leave', icon: <PalmTreeIcon className="h-3.5 w-3.5" />, tabTarget: 'leave', tone: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' },
+  CORRECTION: { label: 'Dispute', icon: <TimerIcon className="h-3.5 w-3.5" />, tabTarget: 'history', tone: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
+  ABSENCE: { label: 'Absence', icon: <ThermometerIcon className="h-3.5 w-3.5" />, tabTarget: 'warnings', tone: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
+  DOCUMENT: { label: 'Document', icon: <FileTextIcon className="h-3.5 w-3.5" />, tabTarget: 'documents', tone: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
+  WARNING: { label: 'Warning', icon: <AlertTriangleIcon className="h-3.5 w-3.5" />, tabTarget: 'warnings', tone: 'bg-orange-500/10 text-orange-400 border-orange-500/30' },
+  HR_ALERT: { label: 'Compliance', icon: <SirenIcon className="h-3.5 w-3.5" />, tabTarget: 'live', tone: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
 };
 
 const SEVERITY_BADGE: Record<string, { label: string; tone: string }> = {
@@ -104,7 +116,7 @@ export function NotificationDrawer({
         <div className="flex items-center justify-between border-b border-zinc-800/80 px-5 py-4">
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 border border-zinc-800 text-lg shadow-inner">
-              🔔
+              <BellIcon className="h-5 w-5" />
             </span>
             <div>
               <div className="flex items-center gap-2">
@@ -135,7 +147,7 @@ export function NotificationDrawer({
               onClick={onClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
             >
-              ✕
+              <XIcon className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -145,10 +157,10 @@ export function NotificationDrawer({
           {[
             { id: 'ALL', label: `All (${notifications.length})` },
             { id: 'UNREAD', label: `Unread (${unreadCount})` },
-            { id: 'LEAVE', label: '🏖️ Leave' },
-            { id: 'CORRECTION', label: '⏱️ Disputes' },
-            { id: 'DOCUMENT', label: '📄 Docs' },
-            { id: 'ABSENCE', label: '🤒 Absences' },
+            { id: 'LEAVE', label: <><PalmTreeIcon className="inline-block h-3.5 w-3.5" /> Leave</> },
+            { id: 'CORRECTION', label: <><TimerIcon className="inline-block h-3.5 w-3.5" /> Disputes</> },
+            { id: 'DOCUMENT', label: <><FileTextIcon className="inline-block h-3.5 w-3.5" /> Docs</> },
+            { id: 'ABSENCE', label: <><ThermometerIcon className="inline-block h-3.5 w-3.5" /> Absences</> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -170,7 +182,7 @@ export function NotificationDrawer({
           {filtered.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center text-center p-6">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-900/80 border border-zinc-800 text-2xl mb-3 shadow-inner">
-                ✨
+                <SparklesIcon className="h-6 w-6" />
               </div>
               <p className="text-sm font-medium text-zinc-300">All caught up!</p>
               <p className="text-xs text-zinc-400 max-w-xs mt-1">
@@ -183,7 +195,7 @@ export function NotificationDrawer({
             filtered.map((n) => {
               const meta = CATEGORY_META[n.category] || {
                 label: n.category,
-                icon: '📌',
+                icon: <PinIcon className="h-3.5 w-3.5" />,
                 tabTarget: 'live',
                 tone: 'bg-zinc-800 text-zinc-400 border-zinc-700',
               };
@@ -225,7 +237,7 @@ export function NotificationDrawer({
                         title="Dismiss notification"
                         className="opacity-0 group-hover:opacity-100 rounded p-1 hover:bg-zinc-800 hover:text-zinc-200 transition"
                       >
-                        ✕
+                        <XIcon className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>

@@ -11,6 +11,34 @@ import type {
   EmployeeScreenshotsResponse,
 } from '../lib/types';
 import { Badge } from './primitives';
+import {
+  BotIcon,
+  BrowserIcon,
+  BuildingIcon,
+  CameraIcon,
+  ChartBarIcon,
+  ChatBubbleIcon,
+  CheckCircleIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  CloudIcon,
+  CodeIcon,
+  EraserIcon,
+  FilmIcon,
+  FolderIcon,
+  FoldersIcon,
+  GitBranchIcon,
+  GlobeIcon,
+  LaptopIcon,
+  MonitorIcon,
+  RefreshIcon,
+  SettingsIcon,
+  TrashIcon,
+  XIcon,
+  ZoomInIcon,
+} from './icons';
 
 function formatAppDuration(seconds: number) {
   if (!seconds || seconds <= 0) return '0s';
@@ -33,16 +61,16 @@ function formatBytes(bytes: number) {
 function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICATION') {
   const lower = (appName || '').toLowerCase();
   if (lower.includes('youtube')) {
-    return { label: 'Streaming (Web)', icon: '🎬', badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
+    return { label: 'Streaming (Web)', icon: <FilmIcon className="h-4 w-4" />, badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
   }
   if (lower.includes('whatsapp') || lower.includes('web.whatsapp')) {
-    return { label: 'WhatsApp Web', icon: '💬', badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+    return { label: 'WhatsApp Web', icon: <ChatBubbleIcon className="h-4 w-4" />, badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
   }
   if (lower.includes('github') || lower.includes('gitlab')) {
-    return { label: 'Code Repository', icon: '🐙', badgeClass: 'text-purple-400 bg-purple-500/10 border-purple-500/20' };
+    return { label: 'Code Repository', icon: <GitBranchIcon className="h-4 w-4" />, badgeClass: 'text-purple-400 bg-purple-500/10 border-purple-500/20' };
   }
   if (lower.includes('chatgpt') || lower.includes('openai') || lower.includes('claude') || lower.includes('gemini')) {
-    return { label: 'AI Assistant', icon: '🤖', badgeClass: 'text-teal-400 bg-teal-500/10 border-teal-500/20' };
+    return { label: 'AI Assistant', icon: <BotIcon className="h-4 w-4" />, badgeClass: 'text-teal-400 bg-teal-500/10 border-teal-500/20' };
   }
   if (
     explicitCategory === 'WEBSITE' ||
@@ -55,24 +83,24 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
     lower.includes('.ai') ||
     lower.includes('.co')
   ) {
-    return { label: 'Website / Portal', icon: '🌐', badgeClass: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20' };
+    return { label: 'Website / Portal', icon: <GlobeIcon className="h-4 w-4" />, badgeClass: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20' };
   }
   if (lower.includes('code') || lower.includes('antigravity') || lower.includes('ide') || lower.includes('studio') || lower.includes('terminal') || lower.includes('git') || lower.includes('dbeaver') || lower.includes('postman')) {
-    return { label: 'Development', icon: '⚡', badgeClass: 'text-sky-400 bg-sky-500/10 border-sky-500/20' };
+    return { label: 'Development', icon: <CodeIcon className="h-4 w-4" />, badgeClass: 'text-sky-400 bg-sky-500/10 border-sky-500/20' };
   }
   if (lower.includes('chrome') || lower.includes('edge') || lower.includes('firefox') || lower.includes('browser') || lower.includes('safari') || lower.includes('brave')) {
-    return { label: 'Web Browser', icon: '🌍', badgeClass: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
+    return { label: 'Web Browser', icon: <BrowserIcon className="h-4 w-4" />, badgeClass: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
   }
   if (lower.includes('teams') || lower.includes('slack') || lower.includes('zoom') || lower.includes('meet') || lower.includes('outlook') || lower.includes('discord')) {
-    return { label: 'Communication', icon: '💬', badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+    return { label: 'Communication', icon: <ChatBubbleIcon className="h-4 w-4" />, badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
   }
   if (lower.includes('excel') || lower.includes('word') || lower.includes('docs') || lower.includes('sheets') || lower.includes('notion') || lower.includes('figma')) {
-    return { label: 'Productivity', icon: '📊', badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
+    return { label: 'Productivity', icon: <ChartBarIcon className="h-4 w-4" />, badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
   }
   if (lower.includes('spotify') || lower.includes('netflix')) {
-    return { label: 'Media', icon: '🎬', badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
+    return { label: 'Media', icon: <FilmIcon className="h-4 w-4" />, badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
   }
-  return { label: 'Application', icon: '💻', badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
+  return { label: 'Application', icon: <LaptopIcon className="h-4 w-4" />, badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
 }
 
 export function WorkstationsPanel({
@@ -245,7 +273,7 @@ export function WorkstationsPanel({
         intervalMinutes: Number(shotIntervalMins),
         mode: shotMode,
       });
-      setSettingsSuccess('✓ Configuration updated! Laptop will update monitoring on next heartbeat.');
+      setSettingsSuccess('Configuration updated! Laptop will update monitoring on next heartbeat.');
       await loadData();
     } catch (err: any) {
       alert(err?.message || 'Failed to save settings.');
@@ -263,7 +291,7 @@ export function WorkstationsPanel({
         quotaGb: parseFloat(quotaGbInput) || 10,
         runPurgeNow,
       });
-      setStorageMessage(`✓ Storage policy saved! ${runPurgeNow ? `Cleaned up ${res.purgedCount} old captures (${formatBytes(res.freedBytes)} freed).` : ''}`);
+      setStorageMessage(`Storage policy saved! ${runPurgeNow ? `Cleaned up ${res.purgedCount} old captures (${formatBytes(res.freedBytes)} freed).` : ''}`);
       await loadData();
     } catch (err: any) {
       alert(err?.message || 'Failed to update storage settings.');
@@ -445,7 +473,7 @@ export function WorkstationsPanel({
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            💻 Workstations & Surveillance Monitoring
+            <LaptopIcon className="h-5 w-5 shrink-0" /> Workstations & Surveillance Monitoring
           </h2>
           <p className="text-sm text-slate-400">
             Real-time active work tracking, periodic screenshot surveillance on Supabase S3, and software logs.
@@ -456,14 +484,14 @@ export function WorkstationsPanel({
             onClick={() => setIsStorageModalOpen(true)}
             className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <span>☁️</span> S3 Storage & Retention
+            <CloudIcon className="h-3.5 w-3.5 shrink-0" /> S3 Storage & Retention
           </button>
           <button
             onClick={loadData}
             disabled={loading}
             className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10 transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
           >
-            <span>🔄</span> Refresh
+            <RefreshIcon className="h-3.5 w-3.5 shrink-0" /> Refresh
           </button>
         </div>
       </div>
@@ -480,7 +508,7 @@ export function WorkstationsPanel({
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               <div className="h-10 w-10 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-xl shrink-0">
-                ☁️
+                <CloudIcon className="h-5 w-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -561,7 +589,7 @@ export function WorkstationsPanel({
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          🖥️ Active Workstations ({workstations.length})
+          <MonitorIcon className="h-4 w-4 shrink-0" /> Active Workstations ({workstations.length})
         </button>
         <button
           onClick={() => setActiveTab('app_usage')}
@@ -571,7 +599,7 @@ export function WorkstationsPanel({
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          📊 Application & Software Usage ({appUsage.length})
+          <ChartBarIcon className="h-4 w-4 shrink-0" /> Application & Software Usage ({appUsage.length})
         </button>
         <button
           onClick={() => {
@@ -589,7 +617,7 @@ export function WorkstationsPanel({
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          🗂️ Employee App Backlog
+          <FoldersIcon className="h-4 w-4 shrink-0" /> Employee App Backlog
         </button>
       </div>
 
@@ -605,7 +633,7 @@ export function WorkstationsPanel({
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Active Today</th>
                   <th className="py-3 px-4">Break / Idle</th>
-                  <th className="py-3 px-4">📸 Screenshots</th>
+                  <th className="py-3 px-4"><CameraIcon className="inline-block h-3.5 w-3.5" /> Screenshots</th>
                   <th className="py-3 px-4">Network & BSSID</th>
                   <th className="py-3 px-4">Last Seen</th>
                   <th className="py-3 px-4 text-right">Actions</th>
@@ -683,7 +711,7 @@ export function WorkstationsPanel({
                                 : 'bg-slate-800/60 text-slate-400 border-slate-700/60 hover:bg-slate-700/60'
                             }`}
                           >
-                            <span>📸</span>
+                            <CameraIcon className="h-3.5 w-3.5 shrink-0" />
                             <span>{count > 0 ? `${count} shots` : 'Gallery'}</span>
                             <span className="text-[10px] font-mono opacity-80">
                               {isEnabled ? `(${interval}m)` : '(Off)'}
@@ -693,11 +721,11 @@ export function WorkstationsPanel({
                         <td className="py-3.5 px-4">
                           {ws.inOffice ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-400 bg-teal-950/40 px-2 py-1 rounded-md border border-teal-800/40">
-                              🏢 In Office
+                              <BuildingIcon className="h-3.5 w-3.5 shrink-0" /> In Office
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-800/40 px-2 py-1 rounded-md border border-slate-700/40">
-                              🌐 Outside Office
+                              <GlobeIcon className="h-3.5 w-3.5 shrink-0" /> Outside Office
                             </span>
                           )}
                           {ws.connectedBssid && (
@@ -721,7 +749,8 @@ export function WorkstationsPanel({
                                 className="inline-flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-bold text-sky-300 hover:bg-sky-500/20 transition cursor-pointer"
                                 title="Open Screenshot Surveillance Gallery"
                               >
-                                <span>📸 Photos</span>
+                                <CameraIcon className="h-3 w-3 shrink-0" />
+                                <span>Photos</span>
                               </button>
                             )}
                             {onSelectEmployee && ws.employeeId && (
@@ -754,7 +783,7 @@ export function WorkstationsPanel({
           <div className="glass-panel rounded-2xl p-4 border border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
             <div>
               <div className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-                <span>📁</span> Employee Activity Breakdown (Collapsible View)
+                <FolderIcon className="h-4 w-4 shrink-0" /> Employee Activity Breakdown (Collapsible View)
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 Click an employee row to expand or collapse their software usage breakdown.
@@ -829,7 +858,7 @@ export function WorkstationsPanel({
                           <div className="text-[10px] text-slate-400">Tracked in software</div>
                         </div>
                         <span className="text-xs text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700">
-                          {open ? 'Collapse ▴' : 'View Breakdown ▾'}
+                          {open ? <>Collapse <ChevronUpIcon className="inline-block h-3.5 w-3.5" /></> : <>View Breakdown <ChevronDownIcon className="inline-block h-3.5 w-3.5" /></>}
                         </span>
                       </div>
                     </div>
@@ -902,7 +931,7 @@ export function WorkstationsPanel({
         <div className="space-y-4">
           <div className="glass-panel rounded-2xl p-4 border border-teal-500/20 bg-teal-500/5">
             <div className="flex items-start gap-3">
-              <span className="text-xl">🗂️</span>
+              <FoldersIcon className="h-5 w-5 shrink-0" />
               <div>
                 <h3 className="text-sm font-bold text-white">Storage-Optimized Activity Backlog</h3>
                 <p className="mt-1 text-xs text-slate-300 leading-relaxed">
@@ -986,7 +1015,7 @@ export function WorkstationsPanel({
           <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
-                <span className="text-2xl">☁️</span>
+                <CloudIcon className="h-6 w-6 shrink-0" />
                 <div>
                   <h3 className="text-base font-bold text-white">Supabase S3 Storage & Retention</h3>
                   <p className="text-xs text-slate-400">Configure surveillance storage quotas and auto-retention rules.</p>
@@ -996,13 +1025,13 @@ export function WorkstationsPanel({
                 onClick={() => setIsStorageModalOpen(false)}
                 className="p-1 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
               >
-                ✕
+                <XIcon className="h-4 w-4" />
               </button>
             </div>
 
             {storageMessage && (
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold">
-                {storageMessage}
+                <CheckCircleIcon className="inline-block h-3.5 w-3.5" /> {storageMessage}
               </div>
             )}
 
@@ -1053,7 +1082,7 @@ export function WorkstationsPanel({
                 disabled={storageSaving}
                 className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 text-rose-300 font-bold text-xs transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
               >
-                <span>🧹</span> {storageSaving ? 'Purging…' : 'Run Purge Cleanup Now'}
+                <EraserIcon className="h-3.5 w-3.5 shrink-0" /> {storageSaving ? 'Purging…' : 'Run Purge Cleanup Now'}
               </button>
 
               <div className="flex items-center gap-2">
@@ -1086,7 +1115,7 @@ export function WorkstationsPanel({
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-xl">
-                  📸
+                  <CameraIcon className="h-5 w-5" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -1120,7 +1149,7 @@ export function WorkstationsPanel({
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    ⚙️ Interval & Settings
+                    <SettingsIcon className="inline-block h-3.5 w-3.5" /> Interval & Settings
                   </button>
                 </div>
 
@@ -1128,7 +1157,7 @@ export function WorkstationsPanel({
                   onClick={closeScreenshotsModal}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
                 >
-                  ✕
+                  <XIcon className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -1188,7 +1217,8 @@ export function WorkstationsPanel({
                           disabled={actionLoading}
                           className="px-3 py-1.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold text-xs hover:bg-rose-500/30 transition cursor-pointer disabled:opacity-50 flex items-center gap-1"
                         >
-                          <span>🗑️ Delete ({selectedShotIds.size})</span>
+                          <TrashIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span>Delete ({selectedShotIds.size})</span>
                         </button>
                       )}
 
@@ -1215,7 +1245,7 @@ export function WorkstationsPanel({
                     </div>
                   ) : !shotsData?.screenshots || shotsData.screenshots.length === 0 ? (
                     <div className="py-20 text-center space-y-2 border border-dashed border-slate-800 rounded-2xl">
-                      <div className="text-3xl">📷</div>
+                      <CameraIcon className="mx-auto h-8 w-8" />
                       <h4 className="text-sm font-bold text-white">No Screenshots Found for {selectedDateKey}</h4>
                       <p className="text-xs text-slate-400 max-w-sm mx-auto">
                         No periodic captures recorded on this date. Make sure screenshot surveillance is toggled ON in the Settings tab.
@@ -1260,7 +1290,7 @@ export function WorkstationsPanel({
                               />
                               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                                 <span className="p-1.5 rounded-lg bg-black/75 text-white text-xs font-semibold backdrop-blur-sm">
-                                  🔍 Expand
+                                  <ZoomInIcon className="inline-block h-3.5 w-3.5" /> Expand
                                 </span>
                               </div>
                             </div>
@@ -1304,7 +1334,7 @@ export function WorkstationsPanel({
 
                   {settingsSuccess && (
                     <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold">
-                      {settingsSuccess}
+                      <CheckCircleIcon className="inline-block h-3.5 w-3.5" /> {settingsSuccess}
                     </div>
                   )}
 
@@ -1432,14 +1462,14 @@ export function WorkstationsPanel({
                   }}
                   className="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 text-xs font-semibold transition cursor-pointer"
                 >
-                  🗑️ Delete
+                  <TrashIcon className="inline-block h-3.5 w-3.5" /> Delete
                 </button>
                 <button
                   type="button"
                   onClick={() => setLightboxShot(null)}
                   className="p-1.5 rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition cursor-pointer"
                 >
-                  ✕ Close
+                  <XIcon className="inline-block h-4 w-4" /> Close
                 </button>
               </div>
             </div>
@@ -1466,7 +1496,7 @@ export function WorkstationsPanel({
                       className="absolute left-6 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white text-lg border border-white/20 transition cursor-pointer"
                       title="Previous (Left Arrow)"
                     >
-                      ‹
+                      <ChevronLeftIcon className="h-5 w-5" />
                     </button>
                   )}
 
@@ -1481,7 +1511,7 @@ export function WorkstationsPanel({
                       className="absolute right-6 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white text-lg border border-white/20 transition cursor-pointer"
                       title="Next (Right Arrow)"
                     >
-                      ›
+                      <ChevronRightIcon className="h-5 w-5" />
                     </button>
                   )}
                 </>

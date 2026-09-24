@@ -202,3 +202,30 @@ INSERT INTO warning_rules (id, name, rule_type, threshold, monitoring_period, wa
 
 -- working_patterns (1 row)
 INSERT INTO working_patterns (id, name, working_days, start_time, end_time, permitted_break_minutes, day_equivalent_minutes, grace_minutes, is_default, active, created_at) VALUES ('wp_default', 'Forgotten Women standard (11:00-19:00)', 'mon,tue,wed,thu,fri', '11:00', '19:00', 30, 480, NULL, 1, 1, 0) ON CONFLICT DO NOTHING;
+
+-- Migration 019: confidential concerns permissions
+INSERT INTO permissions (id, category, description, is_sensitive) VALUES
+  ('self.complaint.submit', 'self', 'Submit confidential concerns and complaints', 0),
+  ('self.complaint.read',   'self', 'View own submitted complaints', 0),
+  ('complaint.read',        'complaint', 'View employee complaints and concerns (HR/Manager confidential)', 1),
+  ('complaint.write',       'complaint', 'Update status, add response notes and resolve employee complaints', 1)
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO role_permissions (role_id, permission_id) VALUES
+  ('employee',    'self.complaint.submit'),
+  ('employee',    'self.complaint.read'),
+  ('manager',     'self.complaint.submit'),
+  ('manager',     'self.complaint.read'),
+  ('manager',     'complaint.read'),
+  ('hr',          'self.complaint.submit'),
+  ('hr',          'self.complaint.read'),
+  ('hr',          'complaint.read'),
+  ('hr',          'complaint.write'),
+  ('super_admin', 'self.complaint.submit'),
+  ('super_admin', 'self.complaint.read'),
+  ('super_admin', 'complaint.read'),
+  ('super_admin', 'complaint.write')
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+-- Migration 024: monthly payroll run settings
+INSERT INTO org_settings (key, value, updated_at, updated_by) VALUES ('payroll_cutoff_day', '25', 0, 'system') ON CONFLICT DO NOTHING;
+INSERT INTO org_settings (key, value, updated_at, updated_by) VALUES ('show_payroll_estimate_to_employees', '1', 0, 'system') ON CONFLICT DO NOTHING;

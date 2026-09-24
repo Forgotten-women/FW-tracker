@@ -10,6 +10,7 @@ import type {
   WarningTrigger,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
+import { CheckIcon, PaperclipIcon, SearchIcon, SirenIcon, ThermometerIcon } from './icons';
 
 export function WarningBoard() {
   const [board, setBoard] = useState<WarningBoardSummary | null>(null);
@@ -507,7 +508,7 @@ export function WarningBoard() {
                           </div>
                           {emp.pendingReview && (
                             <span className="mt-0.5 inline-block text-[10px] font-bold text-warn">
-                              ● Pending HR Review
+                              <span className="inline-block h-1.5 w-1.5 rounded-full bg-current align-middle" /> Pending HR Review
                             </span>
                           )}
                         </td>
@@ -615,7 +616,7 @@ export function WarningBoard() {
                           {w.acknowledgedAt ? (
                             <div>
                               <span className="text-[11px] font-semibold text-brand">
-                                ✓ Acknowledged
+                                <CheckIcon className="inline-block h-3.5 w-3.5" /> Acknowledged
                               </span>
                               <div className="text-[10px] text-dim">{w.acknowledgedAt}</div>
                               {w.ackComments && (
@@ -691,7 +692,7 @@ export function WarningBoard() {
                 disabled={scanning}
                 className="py-1 px-3 text-xs"
               >
-                {scanning ? 'Scanning…' : '🔍 Scan for No-Shows'}
+                {scanning ? 'Scanning…' : <><SearchIcon className="h-3.5 w-3.5 shrink-0" /> Scan for No-Shows</>}
               </Button>
             </div>
           </div>
@@ -729,14 +730,14 @@ export function WarningBoard() {
                         </td>
                         <td className="px-3 py-3 align-middle">
                           <Badge tone={isNoShow ? 'danger' : isSick ? 'warn' : 'muted'}>
-                            {isNoShow ? '🚨 SUSPECTED NO-SHOW' : `🤒 ${abs.absenceType}`}
+                            {isNoShow ? <><SirenIcon className="h-3.5 w-3.5 shrink-0" /> SUSPECTED NO-SHOW</> : <><ThermometerIcon className="h-3.5 w-3.5 shrink-0" /> {abs.absenceType}</>}
                           </Badge>
                         </td>
                         <td className="px-3 py-3 align-middle max-w-[260px]">
                           <div className="text-xs text-text">{abs.reason || 'Auto-flagged scheduled no-show'}</div>
                           {abs.documentTitle && (
                             <div className="mt-1 text-[11px] text-brand font-medium">
-                              📎 Attached Doc: {abs.documentTitle}
+                              <PaperclipIcon className="inline-block h-3.5 w-3.5" /> Attached Doc: {abs.documentTitle}
                             </div>
                           )}
                           {abs.reviewNotes && (

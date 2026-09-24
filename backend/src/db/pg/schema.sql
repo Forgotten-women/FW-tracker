@@ -1343,10 +1343,6 @@ DO $$ BEGIN
   ALTER TABLE workstation_sessions ADD CONSTRAINT fk_workstation_sessions_device_id
     FOREIGN KEY (device_id) REFERENCES devices (id) ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  ALTER TABLE leave_carry_forward_records ADD CONSTRAINT fk_carry_forward_records_employee_id
-    FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE;
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Indexes ------------------------------------------------------------------
 
@@ -1440,6 +1436,67 @@ CREATE TABLE IF NOT EXISTS leave_carry_forward_records (
   CONSTRAINT uq_carry_forward_emp_year UNIQUE (employee_id, from_leave_year)
 );
 CREATE INDEX IF NOT EXISTS idx_carry_forward_emp ON leave_carry_forward_records(employee_id);
+-- The FK has to follow the CREATE TABLE above; it used to sit in the
+-- constraints block, before the table existed, so a fresh schema failed to build.
+DO $$ BEGIN
+  ALTER TABLE leave_carry_forward_records ADD CONSTRAINT fk_carry_forward_records_employee_id
+    FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Migration 017 (index)
+CREATE INDEX IF NOT EXISTS idx_app_usage_emp_session ON workstation_app_usage(employee_id, session_date);
+
+-- Migration 018 (DDL only; the holiday rows are org data, not schema)
+CREATE TABLE IF NOT EXISTS bank_holidays (
+  id          TEXT PRIMARY KEY,
+  year        INTEGER NOT NULL,
+  date        TEXT NOT NULL,          -- YYYY-MM-DD
+  name        TEXT NOT NULL,          -- e.g. "New Year's Day", "Eid al-Fitr", etc.
+  notes       TEXT,
+  is_active   INTEGER NOT NULL DEFAULT 1,
+  created_at  BIGINT NOT NULL,
+  updated_at  BIGINT NOT NULL,
+  CONSTRAINT uq_bank_holiday_date UNIQUE (date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bank_holidays_year ON bank_holidays(year);
+CREATE INDEX IF NOT EXISTS idx_bank_holidays_date ON bank_holidays(date);
+
+-- Migration 019 (DDL; its permission rows are in seed.sql)
+CREATE TABLE IF NOT EXISTS complaints (
+  id                  TEXT PRIMARY KEY,
+  reference_number    TEXT NOT NULL UNIQUE,      -- e.g. CMP-2026-0001
+  employee_id         TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  category            TEXT NOT NULL,
+  subject             TEXT NOT NULL,
+  description         TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'SUBMITTED', -- SUBMITTED | UNDER_REVIEW | IN_PROGRESS | RESOLVED | CLOSED
+  priority            TEXT NOT NULL DEFAULT 'NORMAL',     -- LOW | NORMAL | HIGH | URGENT
+  hr_notes            TEXT,
+  resolution_notes    TEXT,
+  resolved_at         BIGINT,
+  resolved_by         TEXT,
+  created_at          BIGINT NOT NULL,
+  updated_at          BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_complaints_employee ON complaints(employee_id);
+CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints(status);
+CREATE INDEX IF NOT EXISTS idx_complaints_category ON complaints(category);
+CREATE INDEX IF NOT EXISTS idx_complaints_created ON complaints(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS complaint_attachments (
+  id                  TEXT PRIMARY KEY,
+  complaint_id        TEXT NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+  file_name           TEXT NOT NULL,
+  file_size           BIGINT NOT NULL,
+  mime_type           TEXT NOT NULL,
+  storage_key         TEXT NOT NULL,
+  storage_provider    TEXT NOT NULL DEFAULT 'local',
+  created_at          BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_complaint_attachments_complaint ON complaint_attachments(complaint_id);
 
 -- Migration 020
 CREATE TABLE IF NOT EXISTS workstation_live_streams (
@@ -1474,6 +1531,33 @@ CREATE TABLE IF NOT EXISTS document_download_grants (
 );
 CREATE INDEX IF NOT EXISTS idx_doc_grants_expires ON document_download_grants (expires_at);
 
+-- Workstation screenshots. Production got these from the runtime DDL in
+-- routes/desktop.js and routes/screenshots.js (ensureScreenshotsTable), so they
+-- were never in this file and every fresh schema's heartbeat failed on the
+-- missing employees.screenshot_* columns.
+CREATE TABLE IF NOT EXISTS workstation_screenshots (
+  id                  TEXT PRIMARY KEY,
+  employee_id         TEXT NOT NULL,
+  device_id           TEXT NOT NULL,
+  date_key            TEXT NOT NULL,
+  captured_at         BIGINT NOT NULL,
+  storage_path        TEXT NOT NULL,
+  file_size_bytes     BIGINT NOT NULL DEFAULT 0,
+  mime_type           TEXT NOT NULL DEFAULT 'image/jpeg',
+  active_app          TEXT,
+  window_title        TEXT,
+  capture_status      TEXT NOT NULL DEFAULT 'SUCCESS',
+  created_at          BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ws_shots_emp_date ON workstation_screenshots (employee_id, date_key);
+CREATE INDEX IF NOT EXISTS idx_ws_shots_captured ON workstation_screenshots (captured_at);
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_interval_minutes INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_mode TEXT NOT NULL DEFAULT 'ACTIVE_ONLY';
+-- Same story: read and written by every desktop heartbeat, created by nothing
+-- in the repo (see migration 025).
+ALTER TABLE workstation_sessions ADD COLUMN IF NOT EXISTS unverified_seconds BIGINT NOT NULL DEFAULT 0;
+
 -- Migration 022
 CREATE INDEX IF NOT EXISTS idx_payroll_adj_employee_type
   ON payroll_adjustments (employee_id, adjustment_type);
@@ -1484,3 +1568,53 @@ CREATE INDEX IF NOT EXISTS idx_absence_unpaid_lookup
 
 -- Migration 023
 ALTER TABLE app_releases ADD COLUMN IF NOT EXISTS sha256 TEXT;
+
+-- Migration 024 (DDL; its org_settings rows are in seed.sql)
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS cutoff_date TEXT;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS pay_date TEXT;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS auto_created INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS generated_at BIGINT;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS published_at BIGINT;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS published_by TEXT;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS paid_at BIGINT;
+CREATE INDEX IF NOT EXISTS idx_payroll_periods_status
+  ON payroll_periods (status, cutoff_date);
+
+ALTER TABLE payroll_adjustments ADD COLUMN IF NOT EXISTS review_level TEXT;
+ALTER TABLE payroll_adjustments ADD COLUMN IF NOT EXISTS review_reasons TEXT;
+
+CREATE TABLE IF NOT EXISTS payslips (
+  id                     TEXT PRIMARY KEY,
+  period_id              TEXT NOT NULL REFERENCES payroll_periods(id) ON DELETE CASCADE,
+  employee_id            TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  version                INTEGER NOT NULL DEFAULT 1,
+  status                 TEXT NOT NULL DEFAULT 'PUBLISHED',   -- PUBLISHED | SUPERSEDED
+  currency               TEXT,
+  exchange_rate          DOUBLE PRECISION,
+  monthly_salary         DOUBLE PRECISION,
+  daily_rate             DOUBLE PRECISION,
+  gross_baseline         DOUBLE PRECISION NOT NULL,
+  deductions_total       DOUBLE PRECISION NOT NULL DEFAULT 0, -- positive sum of the negative lines
+  adjustments_total      DOUBLE PRECISION NOT NULL DEFAULT 0, -- signed sum of every approved line
+  net_payable            DOUBLE PRECISION NOT NULL,           -- gross_baseline + adjustments_total
+  working_days           INTEGER,
+  full_period_days       INTEGER,
+  is_partial             INTEGER NOT NULL DEFAULT 0,
+  is_starter             INTEGER NOT NULL DEFAULT 0,
+  salary_effective_from  TEXT,
+  lines_json             TEXT NOT NULL DEFAULT '[]',
+  cutoff_date            TEXT,
+  pay_date               TEXT,
+  published_at           BIGINT NOT NULL,
+  published_by           TEXT NOT NULL,
+  paid_at                BIGINT,
+  content_hash           TEXT NOT NULL,
+  created_at             BIGINT NOT NULL,
+  CONSTRAINT uq_payslips_period_id_employee_id_version UNIQUE (period_id, employee_id, version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payslips_live_per_period
+  ON payslips (period_id, employee_id) WHERE status = 'PUBLISHED';
+CREATE INDEX IF NOT EXISTS idx_payslips_employee
+  ON payslips (employee_id, status, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payslips_period
+  ON payslips (period_id, status);

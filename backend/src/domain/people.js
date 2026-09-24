@@ -489,6 +489,8 @@ async function myEmployeeProfile(employeeId) {
     officeName: office?.name || null,
     timeZone: office?.time_zone || 'Asia/Karachi',
     active: !!emp.active,
+    workMode: emp.work_mode || 'IN_OFFICE',
+    remoteAllowed: !!emp.remote_allowed,
     employment: er ? {
       jobTitle: er.job_title,
       employmentType: er.employment_type,
@@ -497,13 +499,17 @@ async function myEmployeeProfile(employeeId) {
       contractEndDate: er.contract_end_date,
       noticePeriodDays: er.notice_period_days,
       holidayEntitlementDays: er.holiday_entitlement_days,
+      workingPatternId: er.working_pattern_id || null,
     } : null,
     schedule: {
+      patternId: wp?.id || null,
+      patternName: wp?.name || 'Standard Shift',
       startTime: wp?.start_time || '11:00',
       endTime: wp?.end_time || '19:00',
       graceMinutes: wp?.grace_minutes ?? 10,
-      breakMinutes: wp?.break_minutes ?? 30,
-      workDays: wp?.work_days || 'MON,TUE,WED,THU,FRI',
+      breakMinutes: wp?.permitted_break_minutes ?? 30,
+      dayEquivalentMinutes: wp?.day_equivalent_minutes ?? 450,
+      workDays: wp?.working_days || 'mon,tue,wed,thu,fri',
     },
     personal: p ? {
       dateOfBirth: p.date_of_birth,

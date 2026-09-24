@@ -16,6 +16,8 @@ const L = require('../domain/leave');
 const T = require('../util/time');
 const { config } = require('../config');
 const liveFrame = require('../lib/liveFrame');
+const liveDoorbell = require('../lib/liveDoorbell');
+const liveView = require('../domain/liveView');
 
 router.use(requireAdmin);
 
@@ -525,6 +527,32 @@ router.get('/anomalies', async (req, res) => {
 // Workstation Live Screen Telemetry (Admin On-Demand)
 // ---------------------------------------------------------------------------
 
+// A live-view session, as the viewer sees it:
+//
+//   request-stream  -> writes the request (the lease) and rings the laptop's
+//                      doorbell (lib/liveDoorbell.js) so it starts at once
+//   live-frame      -> polled ~1/s by the viewer; renews the lease, returns the
+//                      latest frame, or -- when there isn't one -- a `phase`
+//                      saying exactly why, instead of an endless spinner
+//   stop-stream     -> ends the lease; the agent learns on its next frame
+//
+// Phases: LIVE | STARTING (laptop acknowledged, first frame on its way) |
+// WAITING (laptop hasn't checked in yet) | OFFLINE | PAUSED_BREAK |
+// OUTSIDE_HOURS | ENDED.
+
+const LEASE_RENEW_EVERY_MS = 5 * 1000;
+const FRAME_FRESH_MS = 10 * 1000;
+
+function liveStoreWarning(frameStore) {
+  // The in-memory fallback can't carry a frame from the instance the agent
+  // uploaded to over to the one the viewer is polling -- on Vercel that is
+  // most requests, which looks exactly like "the stream never starts".
+  if (frameStore === 'memory' && process.env.VERCEL) {
+    return 'LIVE_STORE_NOT_SHARED';
+  }
+  return null;
+}
+
 router.post('/workstations/:deviceId/request-stream', async (req, res) => {
   const { deviceId } = req.params;
   const nowMs = T.now();
@@ -535,20 +563,7 @@ router.post('/workstations/:deviceId/request-stream', async (req, res) => {
       return res.status(404).json({ status: 'ERROR', message: 'Workstation device not found or revoked.' });
     }
 
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS workstation_live_streams (
-        device_id           TEXT PRIMARY KEY,
-        employee_id         TEXT NOT NULL,
-        requested_at        BIGINT NOT NULL,
-        last_frame_at       BIGINT,
-        frame_base64        TEXT,
-        status              TEXT NOT NULL DEFAULT 'ACTIVE',
-        updated_at          BIGINT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_live_stream_updated ON workstation_live_streams (updated_at);
-      CREATE INDEX IF NOT EXISTS idx_live_stream_requested ON workstation_live_streams (requested_at);
-    `);
-
+    await liveView.ensureLiveStreamTable();
     await db.prepare(`
       INSERT INTO workstation_live_streams (device_id, employee_id, requested_at, last_frame_at, frame_base64, status, updated_at)
       VALUES (?, ?, ?, NULL, NULL, 'ACTIVE', ?)
@@ -558,7 +573,21 @@ router.post('/workstations/:deviceId/request-stream', async (req, res) => {
         updated_at = EXCLUDED.updated_at
     `).run(deviceId, dev.employee_id, nowMs, nowMs);
 
-    res.json({ status: 'SUCCESS', message: 'Live screen stream requested successfully.' });
+    // A new session starts clean: no acknowledgement or frame left over from
+    // the last one to make the viewer think the laptop has already answered.
+    await liveFrame.clearFrame(deviceId);
+    liveView.forget(deviceId);
+
+    const rang = await liveDoorbell.ring(deviceId);
+    const frameStore = liveFrame.storeKind();
+
+    res.json({
+      status: 'SUCCESS',
+      message: 'Live screen stream requested successfully.',
+      doorbell: rang ? 'SENT' : (liveDoorbell.isConfigured() ? 'FAILED' : 'UNAVAILABLE'),
+      frameStore,
+      warning: liveStoreWarning(frameStore),
+    });
   } catch (err) {
     console.error('[admin/request-stream] error:', err);
     res.status(500).json({ status: 'ERROR', message: err.message });
@@ -568,59 +597,80 @@ router.post('/workstations/:deviceId/request-stream', async (req, res) => {
 router.get('/workstations/:deviceId/live-frame', async (req, res) => {
   const { deviceId } = req.params;
   const nowMs = T.now();
+  // The viewer sends the timestamp of the frame it is showing; if nothing
+  // newer exists the image is left out, so a static screen costs a few bytes
+  // a second instead of the whole JPEG again.
+  const since = Number(req.query.since) || 0;
+  const frameStore = liveFrame.storeKind();
 
   try {
+    // Keep the request alive while the viewer is open -- a conditional write
+    // at most every few seconds, not an UPDATE on every poll.
+    await liveView.ensureLiveStreamTable();
+    await db.prepare(`
+      UPDATE workstation_live_streams SET requested_at = ?, updated_at = ?
+      WHERE device_id = ? AND status = 'ACTIVE' AND requested_at < ?
+    `).run(nowMs, nowMs, deviceId, nowMs - LEASE_RENEW_EVERY_MS);
+
+    const state = await liveFrame.getState(deviceId);
+    const frameAt = state.frame ? (state.frame.at || nowMs) : null;
+    const lastActivityAt = Math.max(frameAt || 0, state.aliveAt || 0) || null;
+    const agent = state.agent ? { version: state.agent.version || null, doorbell: Boolean(state.agent.doorbell) } : null;
+
+    if (state.frame && lastActivityAt && nowMs - lastActivityAt < FRAME_FRESH_MS) {
+      const unchanged = Boolean(since && frameAt <= since);
+      return res.json({
+        status: 'SUCCESS',
+        phase: 'LIVE',
+        active: true,
+        frameBase64: unchanged ? null : state.frame.img,
+        unchanged,
+        lastFrameAt: frameAt,
+        lastActivityAt,
+        isBreak: false,
+        breakMessage: null,
+        agent,
+        frameStore,
+      });
+    }
+
+    // No live frame: work out why, so the viewer can say so.
     const dev = await db.prepare('SELECT employee_id FROM devices WHERE id = ?').get(deviceId);
     if (!dev) {
       return res.status(404).json({ status: 'ERROR', message: 'Workstation device not found.' });
     }
 
-    const employeeId = dev.employee_id;
+    const [streamRow, permission, lastSeenAt] = await Promise.all([
+      db.prepare('SELECT requested_at, status FROM workstation_live_streams WHERE device_id = ?').get(deviceId),
+      liveView.permission(dev.employee_id, deviceId, nowMs),
+      liveView.lastHeartbeatAt(dev.employee_id, deviceId),
+    ]);
 
-    // Check if employee is on break or outside hours
-    const activeBreak = await db.prepare(
-      'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
-    ).get(employeeId);
-
-    // Only small metadata (last_frame_at/status) lives in Postgres now --
-    // the frame bytes themselves are in Redis (lib/liveFrame.js), since a
-    // base64 screenshot read back on every ~300ms dashboard poll is exactly
-    // the kind of payload that blows a Supabase egress quota.
-    const streamRow = await db.prepare(
-      'SELECT employee_id, requested_at, last_frame_at, status FROM workstation_live_streams WHERE device_id = ?'
-    ).get(deviceId);
-
-    // Keep requested_at renewed while admin is actively polling
-    if (streamRow && streamRow.status === 'ACTIVE') {
-      await db.prepare('UPDATE workstation_live_streams SET requested_at = ?, updated_at = ? WHERE device_id = ?')
-        .run(nowMs, nowMs, deviceId);
-    }
-
-    const frameBase64 = await liveFrame.getFrame(deviceId);
-    const isFrameValid = Boolean(
-      frameBase64 &&
-      (frameBase64.startsWith('/9j/') ||
-       frameBase64.startsWith('iVBOR') ||
-       frameBase64.startsWith('data:image/')) &&
-      frameBase64.length > 200
-    );
-
-    const hasRecentFrame = Boolean(
-      streamRow &&
-      streamRow.last_frame_at &&
-      isFrameValid &&
-      (nowMs - Number(streamRow.last_frame_at) < 15000)
-    );
+    let phase;
+    if (!streamRow || streamRow.status !== 'ACTIVE') phase = 'ENDED';
+    else if (permission.onBreak) phase = 'PAUSED_BREAK';
+    else if (permission.outsideWorkingHours) phase = 'OUTSIDE_HOURS';
+    else if (!lastSeenAt || nowMs - lastSeenAt > liveView.OFFLINE_AFTER_MS) phase = 'OFFLINE';
+    else if (state.ackAt) phase = 'STARTING';
+    else phase = 'WAITING';
 
     res.json({
       status: 'SUCCESS',
-      active: Boolean(hasRecentFrame && !activeBreak),
-      frameBase64: hasRecentFrame && !activeBreak ? frameBase64 : null,
-      lastFrameAt: streamRow ? streamRow.last_frame_at : null,
-      requestedAt: streamRow ? streamRow.requested_at : null,
+      phase,
+      active: false,
+      frameBase64: null,
+      lastFrameAt: frameAt,
+      lastActivityAt,
+      requestedAt: streamRow ? Number(streamRow.requested_at) || null : null,
       streamStatus: streamRow ? streamRow.status : 'OFFLINE',
-      isBreak: Boolean(activeBreak),
-      breakMessage: activeBreak ? 'Employee is currently on break. Screen monitoring is paused for privacy.' : null,
+      ackAt: state.ackAt,
+      lastSeenAt,
+      isBreak: permission.onBreak,
+      breakMessage: permission.onBreak ? 'Employee is currently on break. Screen monitoring is paused for privacy.' : null,
+      agent,
+      doorbellConfigured: liveDoorbell.isConfigured(),
+      frameStore,
+      warning: liveStoreWarning(frameStore),
     });
   } catch (err) {
     console.error('[admin/live-frame] error:', err);
@@ -639,6 +689,7 @@ router.post('/workstations/:deviceId/stop-stream', async (req, res) => {
       WHERE device_id = ?
     `).run(nowMs, deviceId);
     await liveFrame.clearFrame(deviceId);
+    liveView.forget(deviceId);
 
     res.json({ status: 'SUCCESS', message: 'Stream stopped.' });
   } catch (err) {

@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type { AppReleaseItem, OtaConfig } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
+import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, SirenIcon, XIcon } from './icons';
 
 export function OtaPanel() {
   const [releases, setReleases] = useState<AppReleaseItem[]>([]);
@@ -168,7 +169,11 @@ export function OtaPanel() {
             )}
           </div>
           <p className="mt-2 text-[11px] text-slate-400">
-            {latestAndroid?.mandatory ? '🚨 Mandatory update enforced' : '🟢 Standard update available'}
+            {latestAndroid?.mandatory ? (
+              <><SirenIcon className="inline-block h-3.5 w-3.5" /> Mandatory update enforced</>
+            ) : (
+              <><span className="inline-block h-2 w-2 rounded-full bg-emerald-400 align-middle" /> Standard update available</>
+            )}
           </p>
         </div>
 
@@ -197,13 +202,13 @@ export function OtaPanel() {
 
       {error && (
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs font-semibold text-rose-300">
-          ⚠️ {error}
+          <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {error}
         </div>
       )}
 
       {success && (
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs font-semibold text-emerald-300">
-          ✅ {success}
+          <CheckCircleIcon className="inline-block h-3.5 w-3.5" /> {success}
         </div>
       )}
 
@@ -263,14 +268,14 @@ export function OtaPanel() {
                       {(r.platform === 'android' || r.platform === 'universal') && (
                         r.sha256 ? (
                           <div className="mt-0.5 text-[9px] font-mono text-emerald-400/80" title={r.sha256}>
-                            sha256 ✓ {r.sha256.slice(0, 10)}…
+                            sha256 <CheckIcon className="inline-block h-3 w-3" /> {r.sha256.slice(0, 10)}…
                           </div>
                         ) : (
                           <button
                             onClick={() => handleSetChecksum(r)}
                             className="mt-0.5 text-[9px] font-bold text-rose-400 hover:text-rose-300 underline decoration-dotted"
                           >
-                            ⚠️ no checksum — phones will refuse this update. Click to add.
+                            <AlertTriangleIcon className="inline-block h-3 w-3" /> no checksum — phones will refuse this update. Click to add.
                           </button>
                         )
                       )}
@@ -295,7 +300,7 @@ export function OtaPanel() {
                         }`}
                         title="Click to toggle mandatory vs optional"
                       >
-                        {r.mandatory ? '🚨 Mandatory' : 'Optional'}
+                        {r.mandatory ? <><SirenIcon className="inline-block h-3 w-3" /> Mandatory</> : 'Optional'}
                       </button>
                     </td>
                     <td className="py-3.5 px-4 text-slate-400 text-[11px]">
@@ -415,7 +420,7 @@ export function OtaPanel() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-bold text-white">Register App Release</h3>
               <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">
-                ✕
+                <XIcon className="h-4 w-4" />
               </button>
             </div>
 

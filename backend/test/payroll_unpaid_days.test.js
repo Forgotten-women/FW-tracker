@@ -31,14 +31,26 @@ async function makeEmployee(id, startDate) {
   return id;
 }
 
-// A rolling "current" period ending today, so anything seeded "now" (e.g. via
-// attendance.adjustBalance, which always timestamps created_at = T.now())
-// falls inside balanceAsOf()'s window -- a hardcoded historical period would
-// not see deficit seeded by a test run long after that period supposedly
-// ended. Comfortably wide (starts a year back) so it always contains the
-// employee's start date below.
-const PERIOD_START = T.dateKey(T.now() - 365 * 24 * 60 * 60 * 1000);
-const PERIOD_END = T.dateKey();
+// Every period gets a calendar month of its own: the schema allows one payroll
+// period per exact date range (uq_payroll_periods_start_date_end_date), and
+// several tests below create two. The months run from the current one
+// forward, so every window ends on or after today - anything seeded "now"
+// (e.g. via attendance.adjustBalance, which always timestamps created_at =
+// T.now()) falls inside balanceAsOf()'s window, where a hardcoded historical
+// period would not see deficit seeded by a test run long after that period
+// supposedly ended. Records dated TODAY are still counted by a later month,
+// because the unclaimed-source queries are deliberately unbounded below.
+const TODAY = T.dateKey();
+let monthOffset = 0;
+function nextMonth() {
+  const [y, m] = TODAY.split('-').map(Number);
+  const first = new Date(Date.UTC(y, m - 1 + monthOffset++, 1));
+  const yy = first.getUTCFullYear();
+  const mm = first.getUTCMonth() + 1;
+  const pad = n => String(n).padStart(2, '0');
+  const last = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  return { startDate: `${yy}-${pad(mm)}-01`, endDate: `${yy}-${pad(mm)}-${pad(last)}` };
+}
 
 // ---------------------------------------------------------------------------
 // Full period: monthly salary as the baseline, no deductions
@@ -48,7 +60,7 @@ test('a full-period employee with nothing to deduct is paid the whole monthly sa
   const emp = await makeEmployee('emp_full_clean', '2020-01-01');
   await PR.setSalary({ employeeId: emp, amount: 2000, effectiveFrom: '2020-01-01', reason: 'Start', actor: 'user:hr' });
 
-  const period = await PR.createPeriod({ name: 'Clean period', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const period = await PR.createPeriod({ name: 'Clean period', ...nextMonth(), actor: 'user:hr' });
   const sheet = await PR.preparePeriod(period.id);
   const row = sheet.employees.find(e => e.employeeId === emp);
 
@@ -67,9 +79,9 @@ test('a full-period employee with nothing to deduct is paid the whole monthly sa
 test('a 500-minute deficit deducts exactly one whole day from a full period', async () => {
   const emp = await makeEmployee('emp_deficit_pay', '2020-01-01');
   await PR.setSalary({ employeeId: emp, amount: 2000, effectiveFrom: '2020-01-01', reason: 'Start', actor: 'user:hr' });
-  await A.adjustBalance({ employeeId: emp, dateKey: PERIOD_END, minutes: 500, reason: 'Seeded for test', actor: 'test' });
+  await A.adjustBalance({ employeeId: emp, dateKey: TODAY, minutes: 500, reason: 'Seeded for test', actor: 'test' });
 
-  const period = await PR.createPeriod({ name: 'Deficit period', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const period = await PR.createPeriod({ name: 'Deficit period', ...nextMonth(), actor: 'user:hr' });
   const before = await PR.preparePeriod(period.id);
   const rowBefore = before.employees.find(e => e.employeeId === emp);
 
@@ -96,6 +108,9 @@ test('a 500-minute deficit deducts exactly one whole day from a full period', as
   await PR.decideAdjustment({
     adjustmentId: adjRow.id, decision: 'APPROVED', notes: 'Confirmed with employee', actor: 'user:hr',
   });
+  // An employee only sees a period once it is final; for a manual period
+  // that means closed.
+  await PR.closePeriod({ periodId: period.id, actor: 'user:hr' });
 
   const stmts = await PR.employeeStatements(emp);
   // employeeStatements is gated on an org setting the test DB may not have
@@ -115,9 +130,9 @@ test('a 500-minute deficit deducts exactly one whole day from a full period', as
 test('a rejected deficit deduction is terminal -- it does not resurface next period', async () => {
   const emp = await makeEmployee('emp_deficit_reject', '2020-01-01');
   await PR.setSalary({ employeeId: emp, amount: 1500, effectiveFrom: '2020-01-01', reason: 'Start', actor: 'user:hr' });
-  await A.adjustBalance({ employeeId: emp, dateKey: PERIOD_END, minutes: 480, reason: 'Seeded for test', actor: 'test' });
+  await A.adjustBalance({ employeeId: emp, dateKey: TODAY, minutes: 480, reason: 'Seeded for test', actor: 'test' });
 
-  const p1 = await PR.createPeriod({ name: 'Reject period 1', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const p1 = await PR.createPeriod({ name: 'Reject period 1', ...nextMonth(), actor: 'user:hr' });
   await PR.generatePeriodDeductions({ periodId: p1.id, actor: 'user:hr' });
 
   const adj = await db.prepare(
@@ -131,7 +146,7 @@ test('a rejected deficit deduction is terminal -- it does not resurface next per
 
   // A second period, still ending "today" so it would see the same lifetime
   // balance if the rejection were not terminal.
-  const p2 = await PR.createPeriod({ name: 'Reject period 2', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const p2 = await PR.createPeriod({ name: 'Reject period 2', ...nextMonth(), actor: 'user:hr' });
   const gen2 = await PR.generatePeriodDeductions({ periodId: p2.id, actor: 'user:hr' });
   assert.equal(gen2.createdCount, 0, 'the rejected whole-day must not be re-proposed in a later period');
 
@@ -153,9 +168,9 @@ test('an HR-confirmed unpaid absence deducts one day and stamps consequences_app
     INSERT INTO absence_records
       (id, employee_id, date_key, absence_type, detected_at, status, treat_as_unpaid, deduct_annual_leave, create_warning_trigger)
     VALUES (?,?,?,?,?, 'CONFIRMED', 1, 0, 0)
-  `).run(absenceId, emp, PERIOD_END, 'NO_SHOW', T.now());
+  `).run(absenceId, emp, TODAY, 'NO_SHOW', T.now());
 
-  const period = await PR.createPeriod({ name: 'Absence period', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const period = await PR.createPeriod({ name: 'Absence period', ...nextMonth(), actor: 'user:hr' });
   const gen = await PR.generatePeriodDeductions({ periodId: period.id, actor: 'user:hr' });
 
   const created = gen.created.find(c => c.adjustmentType === PR.UNAUTHORISED_ABSENCE_UNPAID);
@@ -174,7 +189,7 @@ test('an HR-confirmed unpaid absence deducts one day and stamps consequences_app
   assert.ok(afterApproval.consequences_applied_at, 'approval stamps the absence record');
 
   // Not re-proposed in a later period.
-  const period2 = await PR.createPeriod({ name: 'Absence period 2', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const period2 = await PR.createPeriod({ name: 'Absence period 2', ...nextMonth(), actor: 'user:hr' });
   const gen2 = await PR.generatePeriodDeductions({ periodId: period2.id, actor: 'user:hr' });
   assert.equal(gen2.created.filter(c => c.adjustmentType === PR.UNAUTHORISED_ABSENCE_UNPAID).length, 0);
 });
@@ -192,9 +207,9 @@ test('an approved unpaid-leave request deducts its full day count', async () => 
     INSERT INTO leave_requests
       (id, employee_id, leave_type_id, start_date, end_date, day_portion, total_days, status, submitted_at, decided_at, created_at)
     VALUES (?,?, 'unpaid', ?, ?, 'FULL_DAY', 2, 'APPROVED', ?, ?, ?)
-  `).run(requestId, emp, PERIOD_END, PERIOD_END, T.now(), T.now(), T.now());
+  `).run(requestId, emp, TODAY, TODAY, T.now(), T.now(), T.now());
 
-  const period = await PR.createPeriod({ name: 'Unpaid leave period', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const period = await PR.createPeriod({ name: 'Unpaid leave period', ...nextMonth(), actor: 'user:hr' });
   const gen = await PR.generatePeriodDeductions({ periodId: period.id, actor: 'user:hr' });
 
   const created = gen.created.find(c => c.adjustmentType === PR.UNPAID_LEAVE_DEDUCTION);
@@ -206,12 +221,12 @@ test('an approved unpaid-leave request deducts its full day count', async () => 
   assert.equal(adjRow.calculated_amount, -PR.money(1200 * 12 / 52 / 5 * 2));
 
   // A leave request on a PAID type must never be picked up.
-  const period2 = await PR.createPeriod({ name: 'Unpaid leave period control', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const period2 = await PR.createPeriod({ name: 'Unpaid leave period control', ...nextMonth(), actor: 'user:hr' });
   await db.prepare(`
     INSERT INTO leave_requests
       (id, employee_id, leave_type_id, start_date, end_date, day_portion, total_days, status, submitted_at, decided_at, created_at)
     VALUES ('lr_paid_control', ?, 'annual', ?, ?, 'FULL_DAY', 1, 'APPROVED', ?, ?, ?)
-  `).run(emp, PERIOD_END, PERIOD_END, T.now(), T.now(), T.now());
+  `).run(emp, TODAY, TODAY, T.now(), T.now(), T.now());
   const gen2 = await PR.generatePeriodDeductions({ periodId: period2.id, actor: 'user:hr' });
   assert.equal(gen2.created.filter(c => c.adjustmentType === PR.UNPAID_LEAVE_DEDUCTION).length, 0,
     'a paid leave type must not be treated as an unpaid day');
@@ -222,9 +237,11 @@ test('an approved unpaid-leave request deducts its full day count', async () => 
 // ---------------------------------------------------------------------------
 
 test('a starter with a confirmed unpaid absence in their first period is paid fewer days', async () => {
-  // Starts a fixed weekday well inside the rolling period so the day-rate
-  // clamp logic exercises the "isPartialPeriod" branch.
-  const startDate = T.dateKey(T.now() - 10 * 24 * 60 * 60 * 1000);
+  // A fixed past month rather than the rolling ones above: starting on Monday
+  // 16 March 2026 is always part-way through the period, so the day-rate
+  // clamp logic exercises the "isPartialPeriod" branch. Nothing here depends
+  // on the deficit ledger's timing, so the window need not reach today.
+  const startDate = '2026-03-16';
   const emp = await makeEmployee('emp_starter_unpaid', startDate);
   await PR.setSalary({ employeeId: emp, amount: 2000, effectiveFrom: startDate, reason: 'Start', actor: 'user:hr' });
 
@@ -233,9 +250,11 @@ test('a starter with a confirmed unpaid absence in their first period is paid fe
     INSERT INTO absence_records
       (id, employee_id, date_key, absence_type, detected_at, status, treat_as_unpaid, deduct_annual_leave, create_warning_trigger)
     VALUES (?,?,?,?,?, 'CONFIRMED', 1, 0, 0)
-  `).run(absenceId, emp, PERIOD_END, 'NO_SHOW', T.now());
+  `).run(absenceId, emp, '2026-03-17', 'NO_SHOW', T.now());
 
-  const period = await PR.createPeriod({ name: 'Starter unpaid period', startDate: PERIOD_START, endDate: PERIOD_END, actor: 'user:hr' });
+  const period = await PR.createPeriod({
+    name: 'Starter unpaid period', startDate: '2026-03-01', endDate: '2026-03-31', actor: 'user:hr',
+  });
   const sheet = await PR.preparePeriod(period.id);
   const row = sheet.employees.find(e => e.employeeId === emp);
 

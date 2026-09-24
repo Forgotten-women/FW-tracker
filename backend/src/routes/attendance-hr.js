@@ -16,6 +16,7 @@ const importer = require('../domain/import');
 const rbac = require('../domain/rbac');
 const P = require('../domain/presence');
 const N = require('../domain/notifications');
+const PR = require('../domain/payroll');
 const events = require('../events');
 const T = require('../util/time');
 
@@ -35,12 +36,15 @@ router.get('/home-summary', requireDevice, async (req, res) => {
     const day = await A.deriveDay(employeeId, dateKey, nowMs);
 
     // 2. Run companion metrics in parallel reusing pre-derived `day`
-    const [lateness, balance, workingHours, correctionRows, notifsResult] = await Promise.all([
+    const [lateness, balance, workingHours, correctionRows, notifsResult, latestPayslip] = await Promise.all([
       A.latenessStatus(employeeId, dateKey),
       A.balanceFor(employeeId),
       A.calculateWorkingHoursMetrics(employeeId, dateKey, day),
       db.prepare('SELECT * FROM attendance_corrections WHERE employee_id = ? ORDER BY requested_at DESC LIMIT 20').all(employeeId),
       N.listForEmployee(employeeId, { includeDismissed: false }).catch(() => ({ unreadCount: 0, notifications: [] })),
+      // One indexed query, so the phone can spot a newly published payslip
+      // on every poll without fetching its statements.
+      PR.latestPayslipFor(employeeId).catch(() => null),
     ]);
 
     // 3. Fast history: Today reuses day.presence directly. Past 6 days loaded from attendance_days cache.
@@ -119,6 +123,7 @@ router.get('/home-summary', requireDevice, async (req, res) => {
       history: historyDays,
       corrections,
       unreadNotificationsCount: notifsResult.unreadCount || 0,
+      latestPayslip,
       serverTimeMs: nowMs,
     });
   } catch (err) {

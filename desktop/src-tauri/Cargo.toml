@@ -18,6 +18,16 @@ chrono = "0.4"
 dirs = "5.0"
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
 uuid = { version = "1.7", features = ["v4"] }
+# Live screen view (live.rs, capture.rs): native capture + JPEG instead of a
+# PowerShell process per session, and a Supabase Realtime WebSocket so a
+# viewer request reaches the laptop instantly instead of on a 20s poll.
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+base64 = "0.22"
+# 0.20 on purpose: it uses rustls 0.21 (ring) like reqwest 0.11 above. Newer
+# releases default to aws-lc-rs, which needs CMake + NASM to build on Windows.
+tokio-tungstenite = { version = "0.20", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = [

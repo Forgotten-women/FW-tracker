@@ -2,9 +2,41 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
-import type { EmployeeDay, WorkstationItem, AppUsageItem, LiveFrameResponse, ScreenshotItem, EmployeeScreenshotsResponse } from '../lib/types';
+import type { EmployeeDay, WorkstationItem, AppUsageItem, ScreenshotItem, EmployeeScreenshotsResponse } from '../lib/types';
 import { Badge, Button } from './primitives';
 import { ManualTimeModal } from './ManualTimeModal';
+import { LiveScreenViewer } from './LiveScreenViewer';
+import {
+  AlertTriangleIcon,
+  BotIcon,
+  BriefcaseIcon,
+  BrowserIcon,
+  CalendarIcon,
+  CameraIcon,
+  ChartBarIcon,
+  ChatBubbleIcon,
+  CheckCircleIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  CodeIcon,
+  CoffeeIcon,
+  DownloadIcon,
+  FilmIcon,
+  GitBranchIcon,
+  GlobeIcon,
+  HourglassIcon,
+  LaptopIcon,
+  LockIcon,
+  MailIcon,
+  RefreshIcon,
+  ScaleIcon,
+  TimerIcon,
+  TrashIcon,
+  VideoIcon,
+  XIcon,
+  ZoomInIcon,
+} from './icons';
 
 interface EmployeeDetailDrawerProps {
   employee: EmployeeDay | null;
@@ -35,22 +67,22 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
   const lower = (appName || '').toLowerCase();
 
   if (lower.includes('youtube')) {
-    return { label: 'Streaming (Web)', icon: '🎬', badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
+    return { label: 'Streaming (Web)', icon: <FilmIcon className="h-5 w-5" />, badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
   }
   if (lower.includes('whatsapp') || lower.includes('web.whatsapp')) {
-    return { label: 'WhatsApp Web', icon: '💬', badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+    return { label: 'WhatsApp Web', icon: <ChatBubbleIcon className="h-5 w-5" />, badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
   }
   if (lower.includes('github') || lower.includes('gitlab')) {
-    return { label: 'Code Repository', icon: '🐙', badgeClass: 'text-purple-400 bg-purple-500/10 border-purple-500/20' };
+    return { label: 'Code Repository', icon: <GitBranchIcon className="h-5 w-5" />, badgeClass: 'text-purple-400 bg-purple-500/10 border-purple-500/20' };
   }
   if (lower.includes('chatgpt') || lower.includes('openai') || lower.includes('claude') || lower.includes('gemini')) {
-    return { label: 'AI Portal', icon: '🤖', badgeClass: 'text-teal-400 bg-teal-500/10 border-teal-500/20' };
+    return { label: 'AI Portal', icon: <BotIcon className="h-5 w-5" />, badgeClass: 'text-teal-400 bg-teal-500/10 border-teal-500/20' };
   }
   if (lower.includes('mail.google') || lower.includes('gmail')) {
-    return { label: 'Email (Web)', icon: '✉️', badgeClass: 'text-red-400 bg-red-500/10 border-red-500/20' };
+    return { label: 'Email (Web)', icon: <MailIcon className="h-5 w-5" />, badgeClass: 'text-red-400 bg-red-500/10 border-red-500/20' };
   }
   if (lower.includes('linkedin')) {
-    return { label: 'Professional Network', icon: '💼', badgeClass: 'text-blue-400 bg-blue-500/10 border-blue-500/20' };
+    return { label: 'Professional Network', icon: <BriefcaseIcon className="h-5 w-5" />, badgeClass: 'text-blue-400 bg-blue-500/10 border-blue-500/20' };
   }
   if (
     explicitCategory === 'WEBSITE' ||
@@ -63,7 +95,7 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
     lower.includes('.ai') ||
     lower.includes('.co')
   ) {
-    return { label: 'Website / Portal', icon: '🌐', badgeClass: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20' };
+    return { label: 'Website / Portal', icon: <GlobeIcon className="h-5 w-5" />, badgeClass: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20' };
   }
   if (
     lower.includes('code') ||
@@ -75,7 +107,7 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
     lower.includes('dbeaver') ||
     lower.includes('postman')
   ) {
-    return { label: 'Development', icon: '⚡', badgeClass: 'text-sky-400 bg-sky-500/10 border-sky-500/20' };
+    return { label: 'Development', icon: <CodeIcon className="h-5 w-5" />, badgeClass: 'text-sky-400 bg-sky-500/10 border-sky-500/20' };
   }
   if (
     lower.includes('chrome') ||
@@ -85,7 +117,7 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
     lower.includes('safari') ||
     lower.includes('brave')
   ) {
-    return { label: 'Web Browser', icon: '🌍', badgeClass: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
+    return { label: 'Web Browser', icon: <BrowserIcon className="h-5 w-5" />, badgeClass: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
   }
   if (
     lower.includes('teams') ||
@@ -95,7 +127,7 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
     lower.includes('outlook') ||
     lower.includes('discord')
   ) {
-    return { label: 'Communication', icon: '💬', badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+    return { label: 'Communication', icon: <ChatBubbleIcon className="h-5 w-5" />, badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
   }
   if (
     lower.includes('excel') ||
@@ -105,12 +137,12 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
     lower.includes('notion') ||
     lower.includes('figma')
   ) {
-    return { label: 'Productivity', icon: '📊', badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
+    return { label: 'Productivity', icon: <ChartBarIcon className="h-5 w-5" />, badgeClass: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
   }
   if (lower.includes('spotify') || lower.includes('netflix')) {
-    return { label: 'Media', icon: '🎬', badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
+    return { label: 'Media', icon: <FilmIcon className="h-5 w-5" />, badgeClass: 'text-rose-400 bg-rose-500/10 border-rose-500/20' };
   }
-  return { label: 'Application', icon: '💻', badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
+  return { label: 'Application', icon: <LaptopIcon className="h-5 w-5" />, badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
 }
 
 export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefresh }: EmployeeDetailDrawerProps) {
@@ -121,12 +153,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
   const [generatingPairing, setGeneratingPairing] = useState(false);
   const [isManualTimeModalOpen, setIsManualTimeModalOpen] = useState(false);
 
-  // Live Screen View State
+  // Live Screen View State (the session itself lives in LiveScreenViewer)
   const [isLiveScreenOpen, setIsLiveScreenOpen] = useState(false);
-  const [liveFrame, setLiveFrame] = useState<LiveFrameResponse | null>(null);
-  const [liveStreamLoading, setLiveStreamLoading] = useState(false);
-  const [liveStreamError, setLiveStreamError] = useState<string | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const handlePairDevice = async () => {
     if (!onOpenPairing || !employee || generatingPairing) return;
@@ -143,8 +171,6 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
       api.stopLiveStream(workstation.deviceId).catch(() => {});
     }
     setIsLiveScreenOpen(false);
-    setLiveFrame(null);
-    setLiveStreamError(null);
     onClose();
   }, [isLiveScreenOpen, workstation?.deviceId, onClose]);
 
@@ -157,7 +183,6 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
             api.stopLiveStream(workstation.deviceId).catch(() => {});
           }
           setIsLiveScreenOpen(false);
-          setLiveFrame(null);
         } else {
           handleCloseDrawer();
         }
@@ -311,7 +336,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
   }, [employee?.employeeId, selectedShotDate, loadTelemetry, loadEmployeeScreenshots]);
 
   // Live Screen Handlers
-  const handleOpenLiveScreen = async () => {
+  const handleOpenLiveScreen = () => {
     if (!workstation?.deviceId) return;
     const confirmed = window.confirm(
       `Start live screen viewing for ${employee?.employeeName || 'this employee'}? ` +
@@ -319,71 +344,12 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     );
     if (!confirmed) return;
     setIsLiveScreenOpen(true);
-    setLiveStreamLoading(true);
-    setLiveStreamError(null);
-    try {
-      await api.requestLiveStream(workstation.deviceId);
-    } catch (err: any) {
-      console.error('Failed to request live stream:', err);
-      setLiveStreamError(err?.message || 'Failed to start live stream');
-    } finally {
-      setLiveStreamLoading(false);
-    }
   };
 
+  // LiveScreenViewer stops the stream itself when it closes.
   const handleCloseLiveScreen = useCallback(() => {
-    if (workstation?.deviceId) {
-      api.stopLiveStream(workstation.deviceId).catch(() => {});
-    }
     setIsLiveScreenOpen(false);
-    setLiveFrame(null);
-    setLiveStreamError(null);
-    setIsFullscreen(false);
-  }, [workstation?.deviceId]);
-
-  // Poll live screen frame when modal is open
-  useEffect(() => {
-    if (!isLiveScreenOpen || !workstation?.deviceId) return;
-
-    let isMounted = true;
-    let pollCount = 0;
-    const pollFrame = async () => {
-      try {
-        pollCount++;
-        const frame = await api.fetchLiveFrame(workstation.deviceId);
-        if (isMounted) {
-          setLiveFrame(frame);
-          if (frame.active) {
-            setLiveStreamError(null);
-          } else if (!frame.isBreak && pollCount > 10) {
-            // Only timeout after at least ~10 seconds of polling with no
-            // active frame -- and then actually stop polling. This used to
-            // only set an error message while leaving the interval running
-            // indefinitely, so an admin who left this view open (or switched
-            // tabs) kept hammering the backend/desktop agent with no cap for
-            // as long as the drawer stayed open.
-            setLiveStreamError('Live stream ended or timed out.');
-            clearInterval(interval);
-          }
-        }
-      } catch (err: any) {
-        if (isMounted) {
-          console.error('Error fetching live frame:', err);
-        }
-      }
-    };
-
-    pollFrame();
-    // Matches the desktop agent's ~1 FPS capture rate (main.rs) -- polling
-    // faster than frames are actually produced only burns extra Redis
-    // commands/bandwidth (see backend/src/lib/liveFrame.js) for no benefit.
-    const interval = setInterval(pollFrame, 1000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [isLiveScreenOpen, workstation?.deviceId]);
+  }, []);
 
   if (!employee) return null;
 
@@ -537,7 +503,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-300 opacity-75" />
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
                       </span>
-                      <span>📹 Live Screen</span>
+                      <VideoIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span>Live Screen</span>
                     </button>
                   )}
 
@@ -548,7 +515,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/30 px-3.5 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95 shadow-sm"
                     title="HR Direct Attendance & Time Adjustment"
                   >
-                    <span>⏱️ Add Manual Time</span>
+                    <TimerIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span>Add Manual Time</span>
                   </button>
 
                   {/* Screenshots Quick Button */}
@@ -562,7 +530,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     }`}
                     title="Configure screenshots & view capture gallery"
                   >
-                    <span>📸 Screenshots</span>
+                    <CameraIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span>Screenshots</span>
                     {shotEnabled && (
                       <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
                     )}
@@ -573,13 +542,13 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                 <div className="flex items-center gap-2 flex-wrap">
                   {isLate && (
                     <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)] whitespace-nowrap">
-                      <span>⚠️</span> Late (+{employee.lateMinutes}m)
+                      <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" /> Late (+{employee.lateMinutes}m)
                     </span>
                   )}
 
                   {employee.onBreak && (
                     <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)] whitespace-nowrap">
-                      <span>☕</span> On Break ({employee.activeBreakMinutes ?? 0}m)
+                      <CoffeeIcon className="h-3.5 w-3.5 shrink-0" /> On Break ({employee.activeBreakMinutes ?? 0}m)
                     </span>
                   )}
                 </div>
@@ -589,7 +558,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
               {isLate && (
                 <div className="mt-4 flex items-center justify-between rounded-xl bg-rose-500/10 border border-rose-500/25 px-3.5 py-2 text-xs text-rose-300">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm">⚠️</span>
+                    <AlertTriangleIcon className="h-4 w-4 shrink-0" />
                     <div>
                       <strong className="font-semibold">Late Arrival Policy Exception:</strong> Arrived at{' '}
                       <span className="font-mono text-white">{employee.firstCheckIn}</span> (Official window opens 11:00 AM).
@@ -605,7 +574,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
               <div className="mt-4 pt-4 border-t border-white/8">
                 <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <span>⏱️</span> Daily Shift Target (7h 30m / day)
+                    <TimerIcon className="h-3.5 w-3.5 shrink-0" /> Daily Shift Target (7h 30m / day)
                   </span>
                   <span className="font-mono font-bold text-emerald-400">
                     {employee.timeWorkedFormatted}{' '}
@@ -626,9 +595,9 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   <span>Target: 7h 30m required</span>
                   <span>
                     {remainingMinutes > 0 ? (
-                      <span className="text-amber-400 font-medium">⏳ {remainingFormatted} remaining</span>
+                      <span className="text-amber-400 font-medium"><HourglassIcon className="inline-block h-3.5 w-3.5" /> {remainingFormatted} remaining</span>
                     ) : (
-                      <span className="text-emerald-400 font-bold">✅ Target Achieved</span>
+                      <span className="text-emerald-400 font-bold"><CheckCircleIcon className="inline-block h-3.5 w-3.5" /> Target Achieved</span>
                     )}
                   </span>
                 </div>
@@ -689,7 +658,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
-                🕒 Work Sessions ({employee.sessions?.length || 0})
+                <ClockIcon className="inline-block h-3.5 w-3.5" /> Work Sessions ({employee.sessions?.length || 0})
               </button>
 
               <button
@@ -701,7 +670,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
-                💻 Workstation Telemetry
+                <LaptopIcon className="h-3.5 w-3.5 shrink-0" /> Workstation Telemetry
                 {workstation && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
               </button>
 
@@ -714,7 +683,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
-                📊 App & Web Activity ({apps.length})
+                <ChartBarIcon className="h-3.5 w-3.5 shrink-0" /> App & Web Activity ({apps.length})
               </button>
 
               <button
@@ -726,7 +695,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
-                ⚖️ Policy & Deficit
+                <ScaleIcon className="inline-block h-3.5 w-3.5" /> Policy & Deficit
               </button>
 
               <button
@@ -738,7 +707,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
-                📸 Screenshots
+                <CameraIcon className="h-3.5 w-3.5 shrink-0" /> Screenshots
                 {shotEnabled ? (
                   <span className="rounded-full bg-sky-500/20 px-1.5 py-0.2 text-[9px] font-bold text-sky-300 border border-sky-500/30">
                     Active ({shotsData?.screenshots?.length || 0})
@@ -918,7 +887,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
             {activeTab === 'apps' && (
               <div className="space-y-5">
                 <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/20 p-3 text-[11px] text-indigo-300 flex items-start gap-2">
-                  <span className="text-sm">🔒</span>
+                  <LockIcon className="h-4 w-4 shrink-0" />
                   <div>
                     <strong>Domain & Software Telemetry:</strong> Active window titles and browser URLs are inspected natively during office hours. Telemetry pauses automatically during official breaks.
                   </div>
@@ -939,7 +908,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="text-base">🌐</span>
+                          <GlobeIcon className="h-4 w-4 shrink-0" />
                           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
                             Websites Visited Today ({websiteItems.length})
                           </h4>
@@ -1001,7 +970,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="text-base">💻</span>
+                          <LaptopIcon className="h-4 w-4 shrink-0" />
                           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
                             Desktop Software Used Today ({desktopItems.length})
                           </h4>
@@ -1125,7 +1094,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   <div className="flex items-center justify-between pb-3 border-b border-white/8 flex-wrap gap-2">
                     <div>
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span>📸</span> Screen Surveillance Policy
+                        <CameraIcon className="h-4 w-4 shrink-0" /> Screen Surveillance Policy
                       </h4>
                       <p className="text-xs text-slate-400">
                         Periodic background screen capture configured for {employee.employeeName}.
@@ -1152,7 +1121,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
 
                   {shotConfigSuccess && (
                     <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold animate-fade-in flex items-center gap-2">
-                      <span>✅</span> {shotConfigSuccess}
+                      <CheckCircleIcon className="h-4 w-4 shrink-0" /> {shotConfigSuccess}
                     </div>
                   )}
 
@@ -1243,7 +1212,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900/60 p-3.5 rounded-2xl border border-white/5">
                   <div className="flex items-center gap-3 flex-wrap">
                     <label className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-                      <span>📅 Date:</span>
+                      <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span>Date:</span>
                       <input
                         type="date"
                         value={selectedShotDate}
@@ -1267,7 +1237,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                       className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer text-xs"
                       title="Refresh Gallery"
                     >
-                      🔄
+                      <RefreshIcon className="h-4 w-4" />
                     </button>
 
                     {shotsData && (
@@ -1315,7 +1285,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   </div>
                 ) : !shotsData?.screenshots || shotsData.screenshots.length === 0 ? (
                   <div className="py-16 text-center space-y-2 border border-dashed border-white/10 rounded-2xl glass-panel">
-                    <div className="text-3xl">📷</div>
+                    <CameraIcon className="mx-auto h-8 w-8" />
                     <h4 className="text-sm font-bold text-white">No Screenshots for {selectedShotDate}</h4>
                     <p className="text-xs text-slate-400 max-w-sm mx-auto">
                       {shotEnabled
@@ -1357,7 +1327,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                               className="p-1 rounded-md bg-black/75 hover:bg-rose-900/90 text-slate-400 hover:text-rose-200 text-xs transition cursor-pointer"
                               title="Delete from S3"
                             >
-                              🗑
+                              <TrashIcon className="h-4 w-4" />
                             </button>
                           </div>
 
@@ -1377,7 +1347,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                             />
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                               <span className="p-1 rounded-lg bg-black/75 text-white text-[11px] font-semibold backdrop-blur-sm">
-                                🔍 Expand
+                                <ZoomInIcon className="inline-block h-3.5 w-3.5" /> Expand
                               </span>
                             </div>
                           </div>
@@ -1434,152 +1404,13 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
       </div>
 
       {/* Real-time Workstation Live Screen Modal */}
-      {isLiveScreenOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
-          <div
-            className={`w-full ${
-              isFullscreen ? 'max-w-7xl h-[95vh]' : 'max-w-4xl max-h-[90vh]'
-            } flex flex-col rounded-2xl bg-slate-950 border border-white/15 shadow-2xl overflow-hidden transition-all duration-300`}
-          >
-            {/* Live Modal Header */}
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 bg-slate-900/90">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
-                  </span>
-                  <span className="text-xs font-black tracking-wider uppercase text-rose-400 font-mono">
-                    LIVE WORKSTATION MONITOR
-                  </span>
-                </div>
-                <span className="text-slate-500">•</span>
-                <div className="text-xs font-bold text-white truncate">
-                  {employee.employeeName}
-                </div>
-                {workstation?.model && (
-                  <span className="hidden sm:inline-block text-[11px] font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-white/5">
-                    {workstation.model}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsFullscreen(!isFullscreen)}
-                  className="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer text-xs font-semibold border border-white/5"
-                  title={isFullscreen ? 'Exit Fullscreen' : 'Expand View'}
-                >
-                  {isFullscreen ? '⤓ Normal' : '⤢ Expand'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCloseLiveScreen}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
-                  title="Close Live Screen"
-                >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Live Stream Viewport */}
-            <div className="flex-1 bg-black flex items-center justify-center p-4 min-h-[380px] relative overflow-hidden">
-              {/* Privacy Barrier (Break Mode) */}
-              {liveFrame?.isBreak ? (
-                <div className="max-w-md text-center p-8 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 space-y-3 shadow-2xl animate-fade-in">
-                  <div className="text-4xl">☕</div>
-                  <h3 className="text-base font-bold text-white">Employee Currently on Break</h3>
-                  <p className="text-xs text-amber-300/90 leading-relaxed">
-                    {liveFrame.breakMessage || 'Workstation screen capture is automatically suspended at the hardware level during official breaks to protect privacy.'}
-                  </p>
-                  <div className="inline-flex items-center gap-1.5 text-[11px] font-mono text-amber-400/80 bg-amber-950/40 px-3 py-1 rounded-full border border-amber-500/20">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    <span>Stream resumes automatically once break ends</span>
-                  </div>
-                </div>
-              ) : (liveFrame?.frameBase64 && (liveFrame.frameBase64.startsWith('data:') || liveFrame.frameBase64.startsWith('/9j/') || liveFrame.frameBase64.startsWith('iVBOR')) && liveFrame.frameBase64.length > 200) ? (
-                <div className="relative max-h-full max-w-full flex items-center justify-center">
-                  <img
-                    src={
-                      liveFrame.frameBase64.startsWith('data:')
-                        ? liveFrame.frameBase64
-                        : `data:image/jpeg;base64,${liveFrame.frameBase64}`
-                    }
-                    alt={`Real-time screen of ${employee.employeeName}`}
-                    className="rounded-lg shadow-2xl object-contain max-h-[72vh] w-auto max-w-full border border-white/10"
-                    onError={() => {
-                      setLiveStreamError('Workstation screen frame could not be decoded.');
-                    }}
-                  />
-                  <div className="absolute top-2 left-2 flex items-center gap-2 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-md text-[10px] font-mono text-slate-300 border border-white/10">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>STREAMING LIVE</span>
-                    {liveFrame.lastFrameAt && (
-                      <span className="text-slate-400">
-                        ({Math.max(0, Math.round((Date.now() - liveFrame.lastFrameAt) / 1000))}s ago)
-                      </span>
-                    )}
-                  </div>
-
-                  {liveFrame.lastFrameAt && (Date.now() - liveFrame.lastFrameAt > 4000) && (
-                    <div className="absolute bottom-4 inset-x-4 max-w-md mx-auto flex items-center justify-between p-3 rounded-xl bg-amber-950/90 border border-amber-500/40 text-amber-200 shadow-2xl backdrop-blur-md animate-fade-in">
-                      <div className="flex items-center gap-2 text-xs">
-                        <span>⚠️</span>
-                        <span>Frame delivery paused ({Math.round((Date.now() - liveFrame.lastFrameAt) / 1000)}s ago).</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleOpenLiveScreen}
-                        className="px-2.5 py-1 rounded-lg bg-amber-500 text-on-bright font-bold text-[11px] hover:bg-amber-400 transition cursor-pointer"
-                      >
-                        Reconnect
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : liveStreamLoading || (isLiveScreenOpen && !liveStreamError) ? (
-                <div className="text-center space-y-3 p-8 animate-fade-in">
-                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-rose-500 border-t-transparent mx-auto" />
-                  <p className="text-sm font-semibold text-white">Connecting to workstation agent…</p>
-                  <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                    Awaiting live ephemeral frame from employee laptop. The desktop agent polls every 2-3 seconds.
-                  </p>
-                </div>
-              ) : (
-                <div className="text-center space-y-3 p-8 animate-fade-in">
-                  <div className="text-3xl">⚠️</div>
-                  <p className="text-sm font-semibold text-rose-400">
-                    {liveStreamError || 'No live screen feed available.'}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleOpenLiveScreen}
-                    className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition cursor-pointer"
-                  >
-                    Retry Connection
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Live Modal Footer */}
-            <div className="px-5 py-3 border-t border-white/10 bg-slate-950 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
-              <div className="flex items-center gap-2">
-                <span className="text-emerald-400">🔒</span>
-                <span>
-                  <strong>Zero-Storage Protocol:</strong> Ephemeral in-memory frames only. Zero screenshots or recordings are saved to disk or database.
-                </span>
-              </div>
-              <Button size="sm" variant="secondary" onClick={handleCloseLiveScreen}>
-                Close Viewer
-              </Button>
-            </div>
-          </div>
-        </div>
+      {isLiveScreenOpen && workstation?.deviceId && (
+        <LiveScreenViewer
+          deviceId={workstation.deviceId}
+          employeeName={employee.employeeName}
+          model={workstation.model}
+          onClose={handleCloseLiveScreen}
+        />
       )}
 
       {/* Full-Resolution Screenshot Lightbox Modal */}
@@ -1590,7 +1421,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 bg-slate-900/90">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>📸</span> Workstation Capture
+                  <CameraIcon className="h-4 w-4 shrink-0" /> Workstation Capture
                 </span>
                 <span className="text-slate-500">•</span>
                 <span className="text-xs font-mono font-bold text-sky-400">
@@ -1615,7 +1446,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition flex items-center gap-1 border border-white/5"
                   title="Open/Download full size"
                 >
-                  <span>⬇️</span> Download
+                  <DownloadIcon className="h-3.5 w-3.5 shrink-0" /> Download
                 </a>
 
                 <button
@@ -1624,7 +1455,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 text-xs font-bold transition border border-rose-500/30 cursor-pointer"
                   title="Delete from S3"
                 >
-                  🗑 Delete
+                  <TrashIcon className="inline-block h-3.5 w-3.5" /> Delete
                 </button>
 
                 <button
@@ -1633,7 +1464,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
                   title="Close (Esc)"
                 >
-                  ✕
+                  <XIcon className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -1660,7 +1491,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                       className="absolute left-6 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white text-lg border border-white/20 transition cursor-pointer shadow-lg"
                       title="Previous"
                     >
-                      ‹
+                      <ChevronLeftIcon className="h-5 w-5" />
                     </button>
                   )}
 
@@ -1675,7 +1506,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                       className="absolute right-6 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white text-lg border border-white/20 transition cursor-pointer shadow-lg"
                       title="Next"
                     >
-                      ›
+                      <ChevronRightIcon className="h-5 w-5" />
                     </button>
                   )}
                 </>

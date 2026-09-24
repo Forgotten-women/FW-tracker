@@ -70,8 +70,31 @@ pub struct HeartbeatResponse {
     pub outside_working_hours: Option<bool>,
     #[serde(default)]
     pub live_stream_requested: Option<bool>,
+    // Instant live-view doorbell subscription (backend lib/liveDoorbell.js).
+    // Absent from older backends, null when the server hasn't configured it.
+    #[serde(default)]
+    pub live_view: Option<LiveViewConfig>,
     pub today: SessionStats,
     pub policy: PolicySettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeConfig {
+    pub url: String,
+    pub api_key: String,
+    pub topic: String,
+    #[serde(default)]
+    pub event: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveViewConfig {
+    #[serde(default)]
+    pub protocol: u32,
+    #[serde(default)]
+    pub realtime: Option<RealtimeConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -276,26 +299,83 @@ pub async fn send_break(cfg: &AppConfig, on_break: bool) -> Result<serde_json::V
     res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
 }
 
-pub async fn send_stream_frame(cfg: &AppConfig, frame_base64: &str) -> Result<(), String> {
-    if cfg.token.is_empty() || frame_base64.is_empty() {
-        return Ok(());
+// Set once at start-up from tauri.conf.json's version (Cargo.toml's package
+// version is not kept in step with releases), and sent with the live-view
+// calls so the dashboard can tell an old agent's slow start from a fault.
+static AGENT_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_agent_version(version: String) {
+    let _ = AGENT_VERSION.set(version);
+}
+
+pub fn agent_version() -> &'static str {
+    AGENT_VERSION.get().map(|s| s.as_str()).unwrap_or("unknown")
+}
+
+// One client (and so one pooled TLS connection) for the live-view calls:
+// at ~1 request a second a fresh reqwest::Client per call meant a fresh TLS
+// handshake per frame.
+fn live_http() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FrameReply {
+    #[serde(default)]
+    pub status: String,
+    /// Whether anyone is still watching. None from a backend older than this
+    /// agent, in which case the caller falls back to stream-status checks.
+    #[serde(default, rename = "continue")]
+    pub keep_going: Option<bool>,
+}
+
+/// Sends a frame, or a keepalive when `frame_base64` is None (screen unchanged).
+pub async fn send_stream_frame(cfg: &AppConfig, frame_base64: Option<&str>) -> Result<FrameReply, String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
     }
 
-    let client = reqwest::Client::new();
     let url = format!("{}/api/desktop/stream-frame", cfg.server_url.trim_end_matches('/'));
+    let body = match frame_base64 {
+        Some(frame) => serde_json::json!({ "frameBase64": frame }),
+        None => serde_json::json!({ "keepalive": true }),
+    };
 
-    let body = serde_json::json!({
-        "frameBase64": frame_base64,
-    });
-
-    let _ = client
+    let res = live_http()
         .post(&url)
         .header("Authorization", format!("Bearer {}", cfg.token))
         .header("X-Device-Id", &cfg.device_id)
+        .header("X-Agent-Version", agent_version())
         .json(&body)
         .send()
-        .await;
+        .await
+        .map_err(|e| e.to_string())?;
 
+    // 413 = frame too big; still a well-formed reply saying whether to go on.
+    res.json::<FrameReply>().await.map_err(|e| e.to_string())
+}
+
+/// Tells the backend this agent listens on the doorbell (see live.rs).
+pub async fn send_live_hello(cfg: &AppConfig, doorbell: bool, capture: &str) -> Result<(), String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    let url = format!("{}/api/desktop/live-hello", cfg.server_url.trim_end_matches('/'));
+    live_http()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .header("X-Device-Id", &cfg.device_id)
+        .header("X-Agent-Version", agent_version())
+        .json(&serde_json::json!({ "doorbell": doorbell, "capture": capture }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -356,13 +436,13 @@ pub async fn check_stream_status(cfg: &AppConfig) -> Result<StreamStatusResponse
         return Err("Not enrolled".to_string());
     }
 
-    let client = reqwest::Client::new();
     let url = format!("{}/api/desktop/stream-status", cfg.server_url.trim_end_matches('/'));
 
-    let res = client
+    let res = live_http()
         .get(&url)
         .header("Authorization", format!("Bearer {}", cfg.token))
         .header("X-Device-Id", &cfg.device_id)
+        .header("X-Agent-Version", agent_version())
         .send()
         .await
         .map_err(|e| e.to_string())?;

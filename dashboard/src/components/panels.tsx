@@ -15,6 +15,19 @@ import { Badge, Button, Empty, Input, Panel, STATUS_META } from './primitives';
 import { SetSalaryModal } from './PayrollPanel';
 import { ManualTimeModal } from './ManualTimeModal';
 import { ThemeSwitcher } from './ThemeSwitcher';
+import {
+  AlertTriangleIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CoffeeIcon,
+  HourglassIcon,
+  LockIcon,
+  ShieldCheckIcon,
+  TimerIcon,
+  XIcon,
+} from './icons';
 
 // --- header ----------------------------------------------------------------
 
@@ -183,7 +196,7 @@ export function WarningBar({ summary }: { summary: DashboardSummary }) {
       <div className="mx-6 mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-200 shadow-lg shadow-amber-500/5">
         <div className="flex items-start gap-3">
           <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
-            ⚠️
+            <AlertTriangleIcon className="h-4 w-4" />
           </div>
           <div>
             <strong>{bssidListed} access point radio(s) listed, not yet enforced.</strong>{' '}
@@ -201,7 +214,7 @@ export function WarningBar({ summary }: { summary: DashboardSummary }) {
     <div className="mx-6 mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-200 shadow-lg shadow-amber-500/5">
       <div className="flex items-start gap-3">
         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400">
-          ⚠️
+          <AlertTriangleIcon className="h-4 w-4" />
         </div>
         <div>
           No office BSSIDs configured — presence is verified by source IP only. Run{' '}
@@ -391,7 +404,7 @@ export function PresenceGrid({
                 onClick={() => setSearchQuery('')}
                 className="absolute right-2.5 top-2 text-xs text-slate-500 hover:text-slate-300"
               >
-                ✕
+                <XIcon className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -432,7 +445,7 @@ export function PresenceGrid({
               : 'bg-slate-900/80 text-amber-400 hover:bg-slate-800'
           }`}
         >
-          <span>☕</span>
+          <CoffeeIcon className="h-3.5 w-3.5 shrink-0" />
           On Break ({breakCount})
         </button>
         <button
@@ -444,7 +457,7 @@ export function PresenceGrid({
               : 'bg-slate-900/80 text-rose-400 hover:bg-slate-800'
           }`}
         >
-          <span>⚠️</span>
+          <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
           Late ({lateCount})
         </button>
         <button
@@ -522,7 +535,7 @@ export function PresenceGrid({
                   <div className="flex items-center gap-1.5 flex-wrap justify-end">
                     {((e.lateMinutes ?? 0) > 0 || e.isLate) && (
                       <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_8px_rgba(244,63,94,0.2)]">
-                        <span>⚠️</span> Late (+{e.lateMinutes}m)
+                        <AlertTriangleIcon className="h-3 w-3 shrink-0" /> Late (+{e.lateMinutes}m)
                       </span>
                     )}
                     <Badge tone={meta.tone} dot size="sm">
@@ -535,7 +548,7 @@ export function PresenceGrid({
                 {((e.lateMinutes ?? 0) > 0 || e.isLate) && (
                   <div className="mt-3 flex items-center justify-between rounded-xl bg-rose-500/10 border border-rose-500/25 px-3 py-1.5 text-xs text-rose-300">
                     <span className="font-semibold flex items-center gap-1.5">
-                      <span>⚠️</span> Late Arrival (Policy Flag)
+                      <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" /> Late Arrival (Policy Flag)
                     </span>
                     <span className="font-mono font-bold text-rose-400">
                       +{e.lateMinutes}m deficit
@@ -547,7 +560,7 @@ export function PresenceGrid({
                 {e.onBreak && (
                   <div className="mt-3 flex items-center justify-between rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-1.5 text-xs text-amber-300">
                     <span className="font-semibold flex items-center gap-1.5">
-                      <span>☕</span> On Official Break
+                      <CoffeeIcon className="h-3.5 w-3.5 shrink-0" /> On Official Break
                     </span>
                     <span className="font-mono font-bold">
                       {e.activeBreakMinutes ?? 0}m active
@@ -711,7 +724,7 @@ export function AttendanceTable({
               className="rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition"
               title="Previous Day"
             >
-              ◀
+              <ChevronLeftIcon className="h-4 w-4" />
             </button>
             <input
               type="date"
@@ -724,7 +737,7 @@ export function AttendanceTable({
               className="rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition"
               title="Next Day"
             >
-              ▶
+              <ChevronRightIcon className="h-4 w-4" />
             </button>
             {!isToday && (
               <Button
@@ -770,7 +783,7 @@ export function AttendanceTable({
               size="sm"
               onClick={() => setIsManualModalOpen(true)}
               className="border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20"
-              icon={<span>⏱️</span>}
+              icon={<TimerIcon className="h-3.5 w-3.5" />}
             >
               Add Manual Time
             </Button>
@@ -781,7 +794,7 @@ export function AttendanceTable({
       <div className="mb-3 px-3.5 py-2.5 rounded-xl bg-teal-500/10 border border-teal-500/20 text-xs text-teal-300 flex flex-wrap items-center justify-between gap-2 shadow-sm">
         <div className="flex items-center gap-2">
           <span className="text-teal-400 font-bold flex items-center gap-1.5">
-            <span>⏱️</span> Required Working Time:
+            <TimerIcon className="h-3.5 w-3.5 shrink-0" /> Required Working Time:
           </span>
           <span className="font-semibold text-white">7 hours 30 minutes / day</span>
           <span className="text-teal-400/80">(37.5 hours / week)</span>
@@ -843,7 +856,7 @@ export function AttendanceTable({
                         </span>
                         {((a.lateMinutes ?? 0) > 0 || (a as any).isLate) && (
                           <div className="text-[10px] text-rose-400 font-bold flex items-center gap-0.5">
-                            <span>⚠️</span> +{a.lateMinutes ?? 0}m late
+                            <AlertTriangleIcon className="h-3 w-3 shrink-0" /> +{a.lateMinutes ?? 0}m late
                           </div>
                         )}
                       </td>
@@ -869,11 +882,11 @@ export function AttendanceTable({
                         <div className="mt-1">
                           {isTargetMet ? (
                             <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/20">
-                              ✓ 8h 00m met {extraMins > 0 ? `(+${Math.floor(extraMins / 60)}h ${extraMins % 60}m)` : ''}
+                              <CheckIcon className="h-3 w-3 shrink-0" /> 8h 00m met {extraMins > 0 ? `(+${Math.floor(extraMins / 60)}h ${extraMins % 60}m)` : ''}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 border border-amber-500/20">
-                              ⏳ Short: {Math.floor(shortMins / 60)}h {shortMins % 60}m of 8h 00m
+                              <HourglassIcon className="h-3 w-3 shrink-0" /> Short: {Math.floor(shortMins / 60)}h {shortMins % 60}m of 8h 00m
                             </span>
                           )}
                         </div>
@@ -886,7 +899,7 @@ export function AttendanceTable({
                       <td className="px-3 py-3.5">
                         {a.onBreak ? (
                           <span className="font-bold text-amber-400">
-                            ☕ On break ({a.activeBreakMinutes ?? 0}m)
+                            <CoffeeIcon className="inline-block h-3.5 w-3.5" /> On break ({a.activeBreakMinutes ?? 0}m)
                           </span>
                         ) : a.breakMinutes ? (
                           <span className="text-slate-300">{a.breakMinutes}m</span>
@@ -908,7 +921,7 @@ export function AttendanceTable({
                           <span className="text-slate-400">0m</span>
                         )}
                         {((a.lateMinutes ?? 0) > 0 || (a as any).isLate) && (
-                          <div className="text-[10px] text-rose-400 font-semibold">⚠️ Late arrival</div>
+                          <div className="text-[10px] text-rose-400 font-semibold"><AlertTriangleIcon className="inline-block h-3 w-3" /> Late arrival</div>
                         )}
                       </td>
                       <td className="px-3 py-3.5 text-center">
@@ -1011,11 +1024,11 @@ export function AttendanceTable({
                     <td className="px-3 py-3.5">
                       {h.totalMinutes >= 480 ? (
                         <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/20">
-                          ✓ 8h 00m met {h.totalMinutes > 480 ? `(+${Math.floor((h.totalMinutes - 480) / 60)}h ${(h.totalMinutes - 480) % 60}m)` : ''}
+                          <CheckIcon className="h-3 w-3 shrink-0" /> 8h 00m met {h.totalMinutes > 480 ? `(+${Math.floor((h.totalMinutes - 480) / 60)}h ${(h.totalMinutes - 480) % 60}m)` : ''}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 border border-amber-500/20">
-                          ⏳ Short: {Math.floor((480 - h.totalMinutes) / 60)}h {(480 - h.totalMinutes) % 60}m
+                          <HourglassIcon className="h-3 w-3 shrink-0" /> Short: {Math.floor((480 - h.totalMinutes) / 60)}h {(480 - h.totalMinutes) % 60}m
                         </span>
                       )}
                     </td>
@@ -1237,7 +1250,7 @@ export function TeamPanel({
                                 : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
                             }`}
                           >
-                            {e.appTrackingEnabled !== false ? '🛡️ App Tracking: ON' : '🔒 BYOD: App Tracking OFF'}
+                            {e.appTrackingEnabled !== false ? <><ShieldCheckIcon className="inline-block h-3 w-3" /> App Tracking: ON</> : <><LockIcon className="inline-block h-3 w-3" /> BYOD: App Tracking OFF</>}
                           </button>
                         </div>
                         <span className="text-xs text-slate-400 block truncate">{e.role}</span>
@@ -1460,7 +1473,7 @@ export function CodeModal({
         </div>
 
         <p className="mb-6 text-xs text-slate-400">
-          {copied ? '✅ Copied to clipboard!' : `Single use · Valid until ${expires}. Enter in mobile app.`}
+          {copied ? <><CheckCircleIcon className="inline-block h-3.5 w-3.5" /> Copied to clipboard!</> : `Single use · Valid until ${expires}. Enter in mobile app.`}
         </p>
 
         <Button variant="accent" onClick={onClose} size="lg" className="w-full">
@@ -1995,7 +2008,7 @@ export function EmployeeProfileModal({
 
               {startDateSuccess && (
                 <div className="mt-2 text-[11px] font-medium text-emerald-400">
-                  ✓ {startDateSuccess}
+                  <CheckIcon className="inline-block h-3.5 w-3.5" /> {startDateSuccess}
                 </div>
               )}
             </div>
@@ -2113,7 +2126,7 @@ export function ManageDevicesModal({
   const handleRevokeSingle = async (device: EmployeeDeviceItem) => {
     const modelName = device.model || device.label || 'Unknown Device';
     const warningMsg = device.isRecentlyActive
-      ? `⚠️ WARNING: This device was ACTIVE RECENTLY (${device.lastSeen})!\n\nAre you sure you want to unpair "${modelName}"? It appears to be this employee's active phone.\n\n`
+      ? `WARNING: This device was ACTIVE RECENTLY (${device.lastSeen})!\n\nAre you sure you want to unpair "${modelName}"? It appears to be this employee's active phone.\n\n`
       : `Last active: ${device.lastSeen}.\n\nAre you sure you want to unpair "${modelName}" (${device.platform.toUpperCase()})?\n\n`;
 
     const ok = window.confirm(

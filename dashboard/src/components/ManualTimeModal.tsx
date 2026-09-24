@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { api } from '@/lib/api';
+import { PlusIcon, TimerIcon, XIcon } from './icons';
 
 interface ManualTimeModalProps {
   isOpen: boolean;
@@ -64,7 +65,7 @@ export function ManualTimeModal({
       <div className="w-full max-w-md rounded-2xl border border-indigo-500/30 bg-slate-900/95 p-6 shadow-2xl shadow-indigo-950/50">
         <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
           <div className="flex items-center gap-2">
-            <span className="text-xl">⏱️</span>
+            <TimerIcon className="h-5 w-5 shrink-0" />
             <div>
               <h3 className="text-sm font-extrabold text-white">HR Manual Time Adjustment</h3>
               <p className="text-[11px] text-slate-400">Directly credit worked minutes without requiring dispute appeal</p>
@@ -75,7 +76,7 @@ export function ManualTimeModal({
             onClick={onClose}
             className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition"
           >
-            ✕
+            <XIcon className="h-4 w-4" />
           </button>
         </div>
 
@@ -158,7 +159,7 @@ export function ManualTimeModal({
               disabled={loading}
               className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-on-accent px-4 py-2 text-xs font-bold transition shadow-lg shadow-indigo-950/40 disabled:opacity-50"
             >
-              {loading ? 'Applying...' : '➕ Credit Manual Time'}
+              {loading ? 'Applying...' : <><PlusIcon className="inline-block h-3.5 w-3.5" /> Credit Manual Time</>}
             </button>
           </div>
         </form>

@@ -47,6 +47,7 @@ import type {
   ComplaintRecord,
   ComplaintStatus,
   LiveFrameResponse,
+  LiveStreamRequestResponse,
 } from './types';
 
 
@@ -748,12 +749,15 @@ export const api = {
     request<{ status: string; dateKey: string; workstations: WorkstationItem[] }>('/api/admin/workstations'),
 
   requestLiveStream: (deviceId: string) =>
-    request<{ status: string; message: string }>(`/api/admin/workstations/${encodeURIComponent(deviceId)}/request-stream`, {
+    request<LiveStreamRequestResponse>(`/api/admin/workstations/${encodeURIComponent(deviceId)}/request-stream`, {
       method: 'POST',
     }),
 
-  fetchLiveFrame: (deviceId: string) =>
-    request<LiveFrameResponse>(`/api/admin/workstations/${encodeURIComponent(deviceId)}/live-frame`),
+  /** `since` = timestamp of the frame already on screen; the image is omitted if nothing newer exists. */
+  fetchLiveFrame: (deviceId: string, since?: number | null) =>
+    request<LiveFrameResponse>(
+      `/api/admin/workstations/${encodeURIComponent(deviceId)}/live-frame${since ? `?since=${since}` : ''}`,
+    ),
 
   stopLiveStream: (deviceId: string) =>
     request<{ status: string; message: string }>(`/api/admin/workstations/${encodeURIComponent(deviceId)}/stop-stream`, {

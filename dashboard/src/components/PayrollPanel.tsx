@@ -17,6 +17,18 @@ import type {
   PayrollPeriod,
   StarterCalculation,
 } from '@/lib/types';
+import {
+  AlertTriangleIcon,
+  BriefcaseIcon,
+  CurrencyExchangeIcon,
+  EyeIcon,
+  HandIcon,
+  InfoIcon,
+  LockIcon,
+  PencilIcon,
+  RocketIcon,
+  SettingsIcon,
+} from './icons';
 
 // ---------------------------------------------------------------------------
 // Currency helpers
@@ -84,7 +96,7 @@ function ExchangeRateModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-xl">💱</span>
+          <CurrencyExchangeIcon className="h-5 w-5 shrink-0" />
           <h2 className="text-base font-bold text-white">GBP / PKR Conversion Rate</h2>
         </div>
         <p className="mb-4 text-xs text-slate-400">
@@ -609,7 +621,7 @@ function ProposeAdjModal({
           </button>
         </div>
         <p className="mt-3 text-[11px] text-slate-500">
-          ℹ️ Proposed adjustments affect nothing until approved by an authorised HR user.
+          <InfoIcon className="inline-block h-3.5 w-3.5" /> Proposed adjustments affect nothing until approved by an authorised HR user.
         </p>
       </div>
     </div>
@@ -801,7 +813,7 @@ function StarterLeaverPreview({
                 : 'border-slate-700 bg-slate-900 text-slate-400 hover:bg-slate-800'
             }`}
           >
-            {m === 'STARTER' ? '🚀 New Starter' : '👋 Leaver'}
+            {m === 'STARTER' ? <><RocketIcon className="inline-block h-3.5 w-3.5" /> New Starter</> : <><HandIcon className="inline-block h-3.5 w-3.5" /> Leaver</>}
           </button>
         ))}
       </div>
@@ -860,7 +872,7 @@ function StarterLeaverPreview({
                 <p className="text-sm text-slate-400">This employee did not start during the selected period.</p>
               )}
               {starterCalc.applicable && starterCalc.blocked && (
-                <p className="text-sm text-rose-400">⚠️ {starterCalc.reason}</p>
+                <p className="text-sm text-rose-400"><AlertTriangleIcon className="inline-block h-4 w-4" /> {starterCalc.reason}</p>
               )}
               {starterCalc.applicable && !starterCalc.blocked && (
                 <div className="space-y-1 text-xs">
@@ -883,7 +895,7 @@ function StarterLeaverPreview({
           {mode === 'LEAVER' && leaverCalc && (
             <>
               {leaverCalc.blocked && (
-                <p className="text-sm text-rose-400">⚠️ {leaverCalc.message ?? leaverCalc.reason}</p>
+                <p className="text-sm text-rose-400"><AlertTriangleIcon className="inline-block h-4 w-4" /> {leaverCalc.message ?? leaverCalc.reason}</p>
               )}
               {!leaverCalc.blocked && (
                 <div className="space-y-1 text-xs">
@@ -901,7 +913,7 @@ function StarterLeaverPreview({
                       )}
                     </>
                   )}
-                  <p className="pt-1 text-[11px] text-amber-400/80">⚠️ These are calculations only. No changes made until HR approves.</p>
+                  <p className="pt-1 text-[11px] text-amber-400/80"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> These are calculations only. No changes made until HR approves.</p>
                   <button
                     type="button"
                     onClick={handlePropose}
@@ -1054,11 +1066,12 @@ function PeriodDetailView({
                 className="flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/50 px-2.5 py-1.5 text-xs font-mono text-indigo-300 transition"
               >
                 <span>£1 = ₨{periodRate.toFixed(2)}</span>
-                <span className="text-[10px] text-indigo-400">✏️</span>
+                <PencilIcon className="h-3 w-3 shrink-0 text-indigo-400" />
               </button>
             ) : (
               <span className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs font-mono text-slate-400">
-                <span>🔒 £1 = ₨{periodRate.toFixed(2)}</span>
+                <LockIcon className="h-3.5 w-3.5 shrink-0" />
+                <span>£1 = ₨{periodRate.toFixed(2)}</span>
               </span>
             )}
           </div>
@@ -1094,7 +1107,7 @@ function PeriodDetailView({
       </div>
 
       {error && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">⚠️ {error}</div>
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {error}</div>
       )}
 
       {loading ? (
@@ -1106,7 +1119,7 @@ function PeriodDetailView({
           {/* Prepare Sheet */}
           <SectionCard title={`Preparation Sheet — ${sheet.period?.name ?? period.name}`}>
             <div className="mb-3 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-4 py-2 text-xs text-indigo-300">
-              ℹ️ {sheet.note}
+              <InfoIcon className="inline-block h-3.5 w-3.5" /> {sheet.note}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -1162,7 +1175,7 @@ function PeriodDetailView({
                         </td>
                         <td className="py-2.5 text-right font-mono">
                           {emp.leave.blocked ? (
-                            <span className="text-amber-400 text-xs">⚠️ {emp.leave.reason || 'Blocked'}</span>
+                            <span className="text-amber-400 text-xs"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {emp.leave.reason || 'Blocked'}</span>
                           ) : (
                             <span className={emp.leave.isNegative ? 'text-rose-400 font-bold' : 'text-slate-300'}>
                               {emp.leave.available ?? '—'}d
@@ -1201,17 +1214,17 @@ function PeriodDetailView({
                           <div className="flex flex-col gap-0.5">
                             {emp.isStarter && (
                               <span className="text-sky-400 font-medium text-[11px]">
-                                🟢 Starter ({emp.starter?.eligibleWorkingDays}/{emp.fullPeriodDays} days)
+                                <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 align-middle" /> Starter ({emp.starter?.eligibleWorkingDays}/{emp.fullPeriodDays} days)
                               </span>
                             )}
                             {emp.attendanceDeficit.needsHrDecision && (
                               <span className="text-amber-400 text-[11px]">
-                                ⚠️ Deficit ({emp.attendanceDeficit.wholeDayEquivalents}d) — pending decision
+                                <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> Deficit ({emp.attendanceDeficit.wholeDayEquivalents}d) — pending decision
                               </span>
                             )}
                             {emp.leave.isNegative && (
                               <span className="text-rose-400 text-[11px]">
-                                🔴 Negative leave balance
+                                <span className="inline-block h-2 w-2 rounded-full bg-rose-400 align-middle" /> Negative leave balance
                               </span>
                             )}
                             {!emp.isStarter && !emp.attendanceDeficit.needsHrDecision && !emp.leave.isNegative && (
@@ -1361,7 +1374,7 @@ function PeriodDetailView({
             {closeError && <div className="mb-3 text-xs text-rose-400">{closeError}</div>}
             {pendingAdjCount > 0 && (
               <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                ⚠️ There are {pendingAdjCount} pending adjustment(s). The backend will reject the close request until all are decided.
+                <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> There are {pendingAdjCount} pending adjustment(s). The backend will reject the close request until all are decided.
               </div>
             )}
             <div className="flex gap-3">
@@ -1559,7 +1572,7 @@ export function PayrollPanel() {
               className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/80 hover:bg-slate-800 px-3 py-1.5 text-xs font-mono text-indigo-300 transition"
             >
               <span>£1 = ₨{pkrRate.toFixed(2)}</span>
-              <span className="text-[10px] text-slate-500">⚙️</span>
+              <SettingsIcon className="h-3 w-3 shrink-0 text-slate-500" />
             </button>
           </div>
           <button
@@ -1583,7 +1596,7 @@ export function PayrollPanel() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-sheet px-4 py-3 shadow-md">
         <div className="flex items-center gap-3">
           <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${showSalaryToEmployees ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-            {showSalaryToEmployees ? '👁️' : '🔒'}
+            {showSalaryToEmployees ? <EyeIcon className="h-5 w-5" /> : <LockIcon className="h-5 w-5" />}
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -1609,13 +1622,13 @@ export function PayrollPanel() {
               : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
           }`}
         >
-          {togglingVisibility ? 'Updating…' : (showSalaryToEmployees ? '🔒 Hide From Staff' : '👁️ Enable Staff View')}
+          {togglingVisibility ? 'Updating…' : (showSalaryToEmployees ? <><LockIcon className="h-3.5 w-3.5 shrink-0" /> Hide From Staff</> : <><EyeIcon className="h-3.5 w-3.5 shrink-0" /> Enable Staff View</>)}
         </button>
       </div>
 
       {currency === 'PKR' && (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-300">
-          <span>💱 PKR conversions use the current exchange rate <strong>£1.00 = ₨{pkrRate.toFixed(2)}</strong>.</span>
+          <span><CurrencyExchangeIcon className="inline-block h-3.5 w-3.5" /> PKR conversions use the current exchange rate <strong>£1.00 = ₨{pkrRate.toFixed(2)}</strong>.</span>
           <button
             type="button"
             onClick={() => setShowRateModal(true)}
@@ -1627,7 +1640,7 @@ export function PayrollPanel() {
       )}
 
       {error && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300">⚠️ {error}</div>
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-300"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {error}</div>
       )}
 
       {loading ? (
@@ -1640,7 +1653,7 @@ export function PayrollPanel() {
           <SectionCard title={`Open Periods (${openPeriods.length})`}>
             {openPeriods.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-10">
-                <div className="text-4xl">💼</div>
+                <BriefcaseIcon className="h-10 w-10" />
                 <p className="text-sm text-slate-400">No open payroll periods. Create one to start preparation.</p>
                 <button
                   type="button"

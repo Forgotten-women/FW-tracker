@@ -9,6 +9,8 @@ const jobs = require('./jobs');
 const arpSensor = require('./sensors/arp');
 const { requireAdmin, consumeSseTicket } = require('./middleware/auth');
 const { wrapRouter } = require('./util/async-routes');
+const liveFrame = require('./lib/liveFrame');
+const liveDoorbell = require('./lib/liveDoorbell');
 
 const app = express();
 
@@ -86,6 +88,9 @@ const healthHandler = async (req, res) => {
       events: totalEvents,
       sseClients: events.clientCount(),
       bssidVerification: config.bssidEnforced ? 'enforced' : 'not-configured',
+      // Booleans only, no secrets: whether live screen frames can cross serverless
+      // instances (Redis) and whether laptops get an instant start (Realtime).
+      liveView: { frameStore: liveFrame.storeKind(), doorbell: liveDoorbell.isConfigured() },
     });
   } catch (err) {
     res.status(200).json({
@@ -147,6 +152,7 @@ app.use('/api/leave', require('./routes/leave'));              // leave engine
 app.use('/api/payroll', require('./routes/payroll'));          // payroll preparation
 app.use('/api/hr', require('./routes/hr'));                    // advanced HR alerts & reviews
 app.use('/api/people', require('./routes/people'));            // master record & org structure
+app.use('/api/shifts', require('./routes/shifts'));            // HR shift & working patterns admin
 app.use('/api/documents', require('./routes/documents'));       // document vault
 app.use('/api/complaints', require('./routes/complaints'));     // employee complaints & concerns
 app.use('/api/notifications', require('./routes/notifications')); // notifications

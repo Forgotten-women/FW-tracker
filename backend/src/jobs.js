@@ -13,6 +13,7 @@ const W = require('./domain/warnings');
 const L = require('./domain/leave');
 const AL = require('./domain/alerts');
 const N = require('./domain/notifications');
+const PR = require('./domain/payroll');
 const schedule = require('./domain/schedule');
 const events = require('./events');
 const T = require('./util/time');
@@ -240,6 +241,36 @@ async function notifyHrAlerts(nowMs = T.now()) {
     if (r.notified) console.log(`[jobs] ${r.notified} HR alert(s) notified`);
   } catch (err) {
     console.error('[jobs] HR alert notification failed:', err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Monthly payroll run
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens the calendar month's payroll period and, on the first tick after its
+ * cut-off, generates the deductions and hands the run to HR for review. It
+ * never approves anything: approval is always a person (payroll.approve, see
+ * approveRun() in domain/payroll.js).
+ *
+ * Deliberately NOT gated by an in-memory "already ran today" key like the
+ * jobs around it: on Vercel that key is per-instance and nearly always cold,
+ * and the job does not need one. Its idempotency lives in the database - the
+ * unique constraint on a period's dates, and a conditional OPEN -> IN_REVIEW
+ * transition under an advisory lock - so two instances ticking at once cannot
+ * both act. An ordinary tick costs two indexed SELECTs.
+ */
+async function payrollRun(nowMs = T.now()) {
+  try {
+    const r = await PR.runPayrollAutomation({ nowMs });
+    if (r.opened.created) console.log(`[jobs] payroll period opened: ${r.opened.name} (cut-off ${r.opened.cutoffDate})`);
+    for (const g of r.generated) {
+      console.log(`[jobs] payroll run ready for review: ${g.name} - ${g.createdCount} deduction(s) generated, `
+        + `${g.attentionCount} need a decision`);
+    }
+  } catch (err) {
+    console.error('[jobs] payroll run failed:', err.message);
   }
 }
 
@@ -477,8 +508,8 @@ let timer = null;
 
 /**
  * The full maintenance sweep: rollover, MAC-binding expiry, transitions,
- * warnings, absence scan, reminders, leave accrual, HR alerts, retention,
- * backup. Shared between the self-hosted setInterval loop below (every 60s;
+ * warnings, absence scan, reminders, leave accrual, HR alerts, payroll run,
+ * retention, backup. Shared between the self-hosted setInterval loop below (every 60s;
  * each individual job's own idempotency guard makes the extra calls cheap
  * no-ops) and the Vercel Cron endpoint (backend/src/routes/cron.js), which
  * has no persistent process to run a loop in and instead calls this once
@@ -498,6 +529,9 @@ async function runMaintenanceTick(nowMs = T.now()) {
     await sendBreakReminders(nowMs);
     await accrueLeave(nowMs);
     await notifyHrAlerts(nowMs);
+    // After rollover and the absence scan, so the day before the cut-off is
+    // settled and its suspected no-shows are on the preflight.
+    await payrollRun(nowMs);
     await retention(nowMs);
     void await nightlyBackup(nowMs);
   } catch (err) {
@@ -522,4 +556,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, nightlyBackup, sendAttendanceReminders, runMaintenanceTick };
+module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, payrollRun, nightlyBackup, sendAttendanceReminders, runMaintenanceTick };

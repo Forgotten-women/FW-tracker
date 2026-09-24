@@ -66,6 +66,10 @@ test('Employee Payroll Statements Domain & Policy Gating', async (t) => {
     actor: 'admin',
   });
 
+  // Employees see a month only once it is final. This is a manual (legacy)
+  // period without payslips, so final means closed, and it is computed live.
+  await PR.closePeriod({ periodId: period.id, actor: 'admin' });
+
   await t.test('1. Statements are locked when show_salary_to_employees is 0', async () => {
     await db.prepare("INSERT INTO org_settings (key, value, updated_at) VALUES ('show_salary_to_employees', '0', ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at")
       .run(T.now());

@@ -9,6 +9,22 @@ import {
   EmployeeDocumentItem,
   AdminEmployee,
 } from '../lib/types';
+import {
+  AlertTriangleIcon,
+  BoltIcon,
+  CheckIcon,
+  CloudIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  HourglassIcon,
+  IdCardIcon,
+  PaperclipIcon,
+  PartyPopperIcon,
+  RefreshIcon,
+  TrashIcon,
+  UploadIcon,
+  XIcon,
+} from './icons';
 
 export default function DocumentVaultPanel() {
   const [activeTab, setActiveTab] = useState<'queue' | 'kyc' | 'explorer'>('queue');
@@ -235,10 +251,10 @@ export default function DocumentVaultPanel() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
         <div>
           <div className="flex items-center gap-3">
-            <span className="text-2xl">📁</span>
+            <FolderIcon className="h-6 w-6 shrink-0" />
             <h2 className="text-xl font-bold text-slate-100">Document Vault & Staff KYC Repository</h2>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800/60">
-              ☁️ Supabase Cloud Storage
+              <CloudIcon className="inline-block h-3.5 w-3.5" /> Supabase Cloud Storage
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
@@ -261,7 +277,7 @@ export default function DocumentVaultPanel() {
             disabled={loading}
             className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition"
           >
-            {loading ? 'Refreshing...' : '↻ Refresh'}
+            {loading ? 'Refreshing...' : <><RefreshIcon className="inline-block h-4 w-4" /> Refresh</>}
           </button>
         </div>
       </div>
@@ -286,7 +302,8 @@ export default function DocumentVaultPanel() {
         <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4">
           <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Storage Engine</div>
           <div className="text-lg font-bold text-sky-400 mt-1 flex items-center gap-1.5">
-            <span>⚡ AWS / Supabase</span>
+            <BoltIcon className="h-5 w-5 shrink-0" />
+            <span>AWS / Supabase</span>
           </div>
           <div className="text-xs text-slate-500 mt-0.5">Private encrypted bucket</div>
         </div>
@@ -302,7 +319,8 @@ export default function DocumentVaultPanel() {
               : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
           }`}
         >
-          <span>⏳ Verification Queue</span>
+          <HourglassIcon className="h-4 w-4 shrink-0" />
+          <span>Verification Queue</span>
           {pendingDocs.length > 0 && (
             <span className="px-2 py-0.5 text-xs bg-amber-500 text-on-bright font-bold rounded-full">
               {pendingDocs.length}
@@ -318,7 +336,8 @@ export default function DocumentVaultPanel() {
               : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
           }`}
         >
-          <span>🪪 Staff KYC Matrix</span>
+          <IdCardIcon className="h-4 w-4 shrink-0" />
+          <span>Staff KYC Matrix</span>
         </button>
 
         <button
@@ -329,7 +348,8 @@ export default function DocumentVaultPanel() {
               : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
           }`}
         >
-          <span>📂 Document Vault Explorer</span>
+          <FolderOpenIcon className="h-4 w-4 shrink-0" />
+          <span>Document Vault Explorer</span>
         </button>
       </div>
 
@@ -353,7 +373,7 @@ export default function DocumentVaultPanel() {
 
           {pendingDocs.length === 0 ? (
             <div className="p-8 text-center bg-slate-950/40 border border-slate-800 rounded-lg">
-              <span className="text-3xl">🎉</span>
+              <PartyPopperIcon className="mx-auto h-8 w-8" />
               <p className="text-slate-300 font-medium mt-2">All submissions verified!</p>
               <p className="text-xs text-slate-500 mt-1">No documents are currently awaiting HR review.</p>
             </div>
@@ -385,7 +405,8 @@ export default function DocumentVaultPanel() {
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-200">{doc.title}</div>
                         <div className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">
-                          <span>📎 {doc.filename}</span>
+                          <PaperclipIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span>{doc.filename}</span>
                           <button
                             onClick={() => handleDownload(doc.id)}
                             className="text-xs text-indigo-400 hover:text-indigo-300 underline font-medium"
@@ -408,7 +429,7 @@ export default function DocumentVaultPanel() {
                             disabled={actionLoading}
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded text-xs font-bold transition shadow-sm"
                           >
-                            ✓ Verify
+                            <CheckIcon className="inline-block h-3.5 w-3.5" /> Verify
                           </button>
                           <button
                             onClick={() => {
@@ -418,7 +439,7 @@ export default function DocumentVaultPanel() {
                             disabled={actionLoading}
                             className="px-3 py-1.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded text-xs font-bold transition shadow-sm"
                           >
-                            ✕ Reject
+                            <XIcon className="inline-block h-3.5 w-3.5" /> Reject
                           </button>
                           <button
                             onClick={() => handleDelete(doc.id, doc.title)}
@@ -426,7 +447,7 @@ export default function DocumentVaultPanel() {
                             className="px-2.5 py-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded text-xs font-bold transition border border-slate-700 hover:border-rose-700/50"
                             title="Delete document"
                           >
-                            🗑️
+                            <TrashIcon className="h-4 w-4" />
                           </button>
                         </div>
                       </td>
@@ -542,7 +563,7 @@ export default function DocumentVaultPanel() {
 
             {employeeDocs.length === 0 ? (
               <div className="p-8 text-center bg-slate-950/40 border border-slate-800 rounded-lg">
-                <span className="text-3xl">📂</span>
+                <FolderOpenIcon className="mx-auto h-8 w-8" />
                 <p className="text-slate-300 font-medium mt-2">No documents uploaded yet</p>
                 <p className="text-xs text-slate-500 mt-1">
                   Upload employee CV, NIC card, contract, or utility bill using the button above.
@@ -571,10 +592,10 @@ export default function DocumentVaultPanel() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="font-medium text-slate-200">{doc.title}</div>
-                          <div className="text-xs text-slate-400 mt-0.5">📎 {doc.filename || 'File'}</div>
+                          <div className="text-xs text-slate-400 mt-0.5"><PaperclipIcon className="inline-block h-3.5 w-3.5" /> {doc.filename || 'File'}</div>
                           {doc.rejectionReason && (
                             <div className="text-xs text-rose-400 mt-1 bg-rose-950/40 p-1.5 rounded border border-rose-900/50">
-                              ⚠️ Feedback: {doc.rejectionReason}
+                              <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> Feedback: {doc.rejectionReason}
                             </div>
                           )}
                         </td>
@@ -585,17 +606,17 @@ export default function DocumentVaultPanel() {
                         <td className="px-4 py-3">
                           {doc.verificationStatus === 'VERIFIED' && (
                             <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800/60">
-                              ✓ Verified
+                              <CheckIcon className="inline-block h-3.5 w-3.5" /> Verified
                             </span>
                           )}
                           {doc.verificationStatus === 'PENDING_VERIFICATION' && (
                             <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-950 text-amber-400 border border-amber-800/60">
-                              ⏳ Pending Review
+                              <HourglassIcon className="inline-block h-3.5 w-3.5" /> Pending Review
                             </span>
                           )}
                           {doc.verificationStatus === 'REJECTED' && (
                             <span className="px-2 py-0.5 rounded text-xs font-semibold bg-rose-950 text-rose-400 border border-rose-800/60">
-                              ✕ Rejected
+                              <XIcon className="inline-block h-3.5 w-3.5" /> Rejected
                             </span>
                           )}
                         </td>
@@ -616,7 +637,7 @@ export default function DocumentVaultPanel() {
                                 className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded text-xs font-bold transition"
                                 title="Verify document"
                               >
-                                ✓
+                                <CheckIcon className="h-4 w-4" />
                               </button>
                             )}
                             <button
@@ -624,7 +645,7 @@ export default function DocumentVaultPanel() {
                               className="px-2.5 py-1.5 bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 rounded text-xs font-bold transition border border-slate-700 hover:border-rose-700/50"
                               title="Delete document"
                             >
-                              🗑️
+                              <TrashIcon className="h-4 w-4" />
                             </button>
                           </div>
                         </td>
@@ -643,7 +664,7 @@ export default function DocumentVaultPanel() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <span className="text-rose-400">✕</span> Reject Document Submission
+              <XIcon className="h-5 w-5 shrink-0 text-rose-400" /> Reject Document Submission
             </h3>
             <p className="text-xs text-slate-400">
               Provide specific feedback explaining why this document cannot be verified (e.g. blurry image, utility bill expired, missing back side of CNIC). The employee will receive this feedback on their mobile app to re-upload.
@@ -686,13 +707,13 @@ export default function DocumentVaultPanel() {
           <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>📁</span> Upload Document to Vault
+                <UploadIcon className="h-5 w-5 shrink-0" /> Upload Document to Vault
               </h3>
               <button
                 onClick={() => setIsUploadOpen(false)}
                 className="text-slate-400 hover:text-white text-lg font-bold"
               >
-                ✕
+                <XIcon className="h-5 w-5" />
               </button>
             </div>
 
@@ -812,7 +833,7 @@ export default function DocumentVaultPanel() {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <span>🪪</span> KYC Checklist: {kycDetailModal.employeeName}
+                  <IdCardIcon className="h-5 w-5 shrink-0" /> KYC Checklist: {kycDetailModal.employeeName}
                 </h3>
                 <span className="text-xs text-slate-400">
                   Role: {kycDetailModal.employeeRole} · Completion: {kycDetailModal.completionPercentage}%
@@ -822,7 +843,7 @@ export default function DocumentVaultPanel() {
                 onClick={() => setKycDetailModal(null)}
                 className="text-slate-400 hover:text-white text-lg font-bold"
               >
-                ✕
+                <XIcon className="h-5 w-5" />
               </button>
             </div>
 
@@ -840,26 +861,26 @@ export default function DocumentVaultPanel() {
                       <div className="font-semibold text-slate-200 text-sm">{item.name}</div>
                       <div className="text-xs text-slate-400">{item.description}</div>
                       {item.filename && (
-                        <div className="text-xs text-indigo-400 mt-0.5">📎 {item.filename}</div>
+                        <div className="text-xs text-indigo-400 mt-0.5"><PaperclipIcon className="inline-block h-3.5 w-3.5" /> {item.filename}</div>
                       )}
                       {item.rejectionReason && (
-                        <div className="text-xs text-rose-400 mt-1">⚠️ {item.rejectionReason}</div>
+                        <div className="text-xs text-rose-400 mt-1"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {item.rejectionReason}</div>
                       )}
                     </div>
                     <div>
                       {item.status === 'VERIFIED' && (
                         <span className="px-2.5 py-1 rounded text-xs font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                          ✓ Verified
+                          <CheckIcon className="inline-block h-3.5 w-3.5" /> Verified
                         </span>
                       )}
                       {item.status === 'PENDING_VERIFICATION' && (
                         <span className="px-2.5 py-1 rounded text-xs font-bold bg-amber-950 text-amber-400 border border-amber-800">
-                          ⏳ Pending Review
+                          <HourglassIcon className="inline-block h-3.5 w-3.5" /> Pending Review
                         </span>
                       )}
                       {item.status === 'REJECTED' && (
                         <span className="px-2.5 py-1 rounded text-xs font-bold bg-rose-950 text-rose-400 border border-rose-800">
-                          ✕ Rejected
+                          <XIcon className="inline-block h-3.5 w-3.5" /> Rejected
                         </span>
                       )}
                       {item.status === 'MISSING' && (

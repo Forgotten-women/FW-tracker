@@ -14,6 +14,7 @@ import type {
 import { Badge, Button, Empty, STATUS_META } from '@/components/primitives';
 import { AttendanceCorrectionsPanel } from '@/components/panels';
 import { OverviewHero, type HeroFilter } from '@/components/OverviewHero';
+import { XIcon } from '@/components/icons';
 
 const LaptopIcon = ({ className = 'h-3 w-3' }: { className?: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -316,7 +317,7 @@ export function UnifiedWorkforcePanel({
                   aria-label="Clear search"
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer"
                 >
-                  ✕
+                  <XIcon className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>

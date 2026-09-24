@@ -2,6 +2,9 @@
 //
 // Every response here is a CALCULATION. Nothing in this router changes anyone's
 // pay: adjustments are proposed, and a separate call by a person approves them.
+// The monthly run is the same rule in bulk - the tick prepares a run, and only
+// POST /periods/:id/approve-run, by a person holding payroll.approve, turns it
+// into payslips.
 
 const express = require('express');
 const router = express.Router();
@@ -11,6 +14,21 @@ const { requireDevice, requirePermission, requireEmployeeAccess, requireUserOrAd
 const PR = require('../domain/payroll');
 const rbac = require('../domain/rbac');
 const T = require('../util/time');
+
+/**
+ * The { status: 'ERROR', message } body every route here returns. A payroll
+ * run error also carries its code, its HTTP status and any detail (the
+ * blocking preflight, the lines still undecided) the dashboard needs to show
+ * why.
+ */
+function sendError(res, err, fallbackStatus = 400) {
+  if (err instanceof PR.PayrollRunError) {
+    return res.status(err.httpStatus || fallbackStatus).json({
+      status: 'ERROR', code: err.code, message: err.message, ...(err.details || {}),
+    });
+  }
+  return res.status(fallbackStatus).json({ status: 'ERROR', message: err.message });
+}
 
 // ---------------------------------------------------------------------------
 // Employee self-service: Monthly Statements & Period History
@@ -30,6 +48,20 @@ router.get('/mine/statements', requireDevice, async (req, res) => {
       status: 'ERROR',
       message: err.message || 'Failed to load payroll statements',
     });
+  }
+});
+
+// One of the caller's own published payslips. Scoped to the device's employee,
+// so there is no way to ask for anyone else's.
+router.get('/mine/payslips/:periodId', requireDevice, async (req, res) => {
+  try {
+    const payslip = await PR.employeePayslip(req.auth.employeeId, req.params.periodId);
+    if (!payslip) {
+      return res.status(404).json({ status: 'ERROR', message: 'No published payslip for that period.' });
+    }
+    res.json({ status: 'SUCCESS', payslip });
+  } catch (err) {
+    sendError(res, err, 500);
   }
 });
 
@@ -131,6 +163,14 @@ router.get('/periods', requirePermission('payroll.read'), async (req, res) => {
       exchangeRate: p.exchange_rate || 350.0,
       approvedBy: p.approved_by,
       approvedAt: p.approved_at ? T.displayTime(p.approved_at) : null,
+      // The monthly run. Timestamps are epoch ms; null until they happen.
+      cutoffDate: p.cutoff_date || null,
+      payDate: p.pay_date || null,
+      autoCreated: !!p.auto_created,
+      generatedAt: p.generated_at || null,
+      publishedAt: p.published_at || null,
+      publishedBy: p.published_by || null,
+      paidAt: p.paid_at || null,
     })),
   });
 });
@@ -142,6 +182,8 @@ router.post('/periods', requirePermission('payroll.approve'), async (req, res) =
       startDate: req.body?.startDate,
       endDate: req.body?.endDate,
       exchangeRate: req.body?.exchangeRate,
+      cutoffDate: req.body?.cutoffDate ?? null,
+      payDate: req.body?.payDate ?? null,
       actor: getActor(req),
     });
     res.status(201).json({ status: 'SUCCESS', period: p });
@@ -198,6 +240,84 @@ router.post('/periods/:id/close', requirePermission('payroll.approve'), async (r
     res.json({ status: 'SUCCESS', ...await PR.closePeriod({ periodId: req.params.id, actor: getActor(req) }) });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The monthly run: review, approve, pay
+// ---------------------------------------------------------------------------
+
+// What would make approving this run wrong right now. Read-only.
+router.get('/periods/:id/preflight', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+    const checks = await PR.payrollPreflight(req.params.id);
+    res.json({
+      status: 'SUCCESS',
+      periodId: req.params.id,
+      blocking: checks.some(c => c.severity === 'BLOCKING'),
+      // Counts are the whole run's, since approval publishes the whole run;
+      // the named items are limited to employees the caller may see.
+      preflight: checks.map(c => ({ ...c, items: c.items.filter(i => !i.employeeId || visible.has(i.employeeId)) })),
+    });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// The sheet a run is approved from. Read-only.
+router.get('/periods/:id/review', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+    const sheet = await PR.reviewPeriod(req.params.id, { visibleEmployeeIds: visible });
+    res.json({
+      status: 'SUCCESS',
+      ...sheet,
+      preflight: sheet.preflight.map(c => ({ ...c, items: c.items.filter(i => !i.employeeId || visible.has(i.employeeId)) })),
+    });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// Approving a run is a person's decision about every line in it: ROUTINE
+// lines are approved in bulk under the required note, ATTENTION lines must
+// each be decided (before, or in `decisions`), and blockers need an explicit
+// waiver. Refused, it changes nothing.
+router.post('/periods/:id/approve-run', requirePermission('payroll.approve'), async (req, res) => {
+  try {
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+    const r = await PR.approveRun({
+      periodId: req.params.id,
+      note: req.body?.note,
+      decisions: req.body?.decisions ?? [],
+      waiveBlockers: req.body?.waiveBlockers === true,
+      waiverNote: req.body?.waiverNote ?? null,
+      actor: getActor(req),
+      visibleEmployeeIds: visible,
+    });
+    res.json({ status: 'SUCCESS', ...r });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+router.post('/periods/:id/mark-paid', requirePermission('payroll.approve'), async (req, res) => {
+  try {
+    const r = await PR.markPaid({ periodId: req.params.id, actor: getActor(req), note: req.body?.note ?? null });
+    res.json({ status: 'SUCCESS', ...r });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+router.get('/periods/:id/payslips', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+    const r = await PR.listPayslips(req.params.id);
+    res.json({ status: 'SUCCESS', period: r.period, payslips: r.payslips.filter(p => visible.has(p.employeeId)) });
+  } catch (err) {
+    sendError(res, err);
   }
 });
 

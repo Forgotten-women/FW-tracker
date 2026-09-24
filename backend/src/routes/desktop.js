@@ -16,6 +16,8 @@ const schedule = require('../domain/schedule');
 const T = require('../util/time');
 const { config } = require('../config');
 const liveFrame = require('../lib/liveFrame');
+const liveDoorbell = require('../lib/liveDoorbell');
+const liveView = require('../domain/liveView');
 
 async function getOrgSetting(key, defaultValue) {
   try {
@@ -461,6 +463,12 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     appTrackingEnabled,
     outsideWorkingHours,
     liveStreamRequested,
+    // Where to listen for an instant live-view request (see lib/liveDoorbell.js).
+    // null when Supabase Realtime isn't configured: the agent then keeps polling.
+    liveView: {
+      protocol: 2,
+      realtime: liveDoorbell.clientConfigFor(deviceId),
+    },
     shiftWindow: {
       isWorkingDay: sched.isWorkingDay,
       startTime: sched.startTime,
@@ -857,40 +865,43 @@ router.get('/status', requireDevice, async (req, res) => {
   });
 });
 
+// Base64 JPEG ceiling for one live frame. The agent targets well under this;
+// the cap keeps one oversized frame from blowing Upstash's per-request limit.
+const MAX_FRAME_BASE64_CHARS = 900 * 1024;
+
+function agentVersionOf(req) {
+  const v = String(req.get('x-agent-version') || '').trim();
+  return /^[0-9A-Za-z.+-]{1,32}$/.test(v) ? v : null;
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/desktop/stream-status
-// Fast polling endpoint (every 3-5s) to detect HR screen streaming requests
+// Asked by the agent when its doorbell rings (agent v1.0.32+), or on a timer
+// by older agents, to find out whether HR is actually waiting for a stream.
 // ---------------------------------------------------------------------------
 router.get('/stream-status', requireDevice, async (req, res) => {
   const { employeeId, deviceId } = req.auth;
   const nowMs = T.now();
 
   try {
-    await ensureLiveStreamTable();
-    const row = await db.prepare(
-      "SELECT requested_at FROM workstation_live_streams WHERE device_id = ? AND status = 'ACTIVE' AND requested_at > ?"
-    ).get(deviceId, nowMs - 25000);
+    // Always fresh here: this is the call that starts a stream, so a lease
+    // cached from before the request was made must not answer "no".
+    const [requested, permission] = await Promise.all([
+      liveView.leaseActive(deviceId, nowMs, { fresh: true }),
+      liveView.permission(employeeId, deviceId, nowMs),
+    ]);
+    const liveStreamRequested = Boolean(requested && permission.isPermitted);
 
-    // Check if employee is on break or outside office hours
-    const activeBreak = await db.prepare(
-      'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
-    ).get(employeeId);
-
-    const dateKey = T.dateKey(nowMs);
-    const sched = await schedule.resolve(employeeId, dateKey);
-    const shiftStartThreshold = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
-    const shiftEndThreshold = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
-    const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
-
-    const isPermitted = !activeBreak && isWithinWorkingHours;
-    const liveStreamRequested = Boolean(row && isPermitted);
+    // "Laptop notified" for the viewer -- only when there is a request, so the
+    // idle polls of older agents don't spend Redis commands.
+    if (requested) await liveFrame.setAck(deviceId, nowMs);
 
     res.json({
       status: 'SUCCESS',
       liveStreamRequested,
-      isPermitted,
-      onBreak: Boolean(activeBreak),
-      outsideWorkingHours: !isWithinWorkingHours,
+      isPermitted: permission.isPermitted,
+      onBreak: permission.onBreak,
+      outsideWorkingHours: permission.outsideWorkingHours,
     });
   } catch (err) {
     res.json({ status: 'SUCCESS', liveStreamRequested: false });
@@ -898,61 +909,77 @@ router.get('/stream-status', requireDevice, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/desktop/live-hello
+// The agent reports what it supports when its doorbell subscription comes up,
+// so the viewer can say "this laptop runs an older agent" instead of spinning.
+// ---------------------------------------------------------------------------
+router.post('/live-hello', requireDevice, async (req, res) => {
+  const { deviceId } = req.auth;
+  const body = req.body || {};
+  await liveFrame.setAgentInfo(deviceId, {
+    version: agentVersionOf(req),
+    doorbell: Boolean(body.doorbell),
+    capture: typeof body.capture === 'string' ? body.capture.slice(0, 24) : null,
+  });
+  res.json({ status: 'SUCCESS' });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/desktop/stream-frame
-// Ingests real-time transient screen frames from the workstation agent
+// Ingests real-time transient screen frames from the workstation agent.
+//
+// Body: { frameBase64 } for a new frame, or { keepalive: true } when the
+// screen hasn't changed since the last frame. The response's `continue` tells
+// the agent whether anyone is still watching, so it needs no separate status
+// polling while streaming and stops within a frame of the viewer closing.
 // ---------------------------------------------------------------------------
 router.post('/stream-frame', requireDevice, async (req, res) => {
   const { employeeId, deviceId } = req.auth;
-  const { frameBase64 } = req.body || {};
+  const { frameBase64, keepalive } = req.body || {};
   const nowMs = T.now();
 
-  if (!frameBase64 || typeof frameBase64 !== 'string') {
-    return res.status(400).json({ status: 'ERROR', message: 'frameBase64 string is required.' });
-  }
-
-  const cleanFrame = frameBase64.trim();
-  const isValidImage = (cleanFrame.startsWith('/9j/') || cleanFrame.startsWith('iVBOR') || cleanFrame.startsWith('data:image/')) && cleanFrame.length > 200;
-  if (!isValidImage) {
-    return res.status(400).json({ status: 'ERROR', message: 'Invalid or unsupported image frame format.' });
-  }
-
-  // Privacy Safeguard: reject frames immediately if employee is on break or outside office hours
-  const activeBreak = await db.prepare(
-    'SELECT id FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
-  ).get(employeeId);
-
-  const dateKey = T.dateKey(nowMs);
-  const sched = await schedule.resolve(employeeId, dateKey);
-  const shiftStartThreshold = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
-  const shiftEndThreshold = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
-  const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
-
-  if (activeBreak || !isWithinWorkingHours) {
-    return res.json({
-      status: 'PAUSED',
-      reason: activeBreak ? 'ON_BREAK' : 'OUTSIDE_HOURS',
-      message: 'Workstation screen telemetry paused for privacy.'
-    });
+  let cleanFrame = null;
+  if (!keepalive) {
+    if (!frameBase64 || typeof frameBase64 !== 'string') {
+      return res.status(400).json({ status: 'ERROR', message: 'frameBase64 string is required.' });
+    }
+    cleanFrame = frameBase64.trim();
+    const isValidImage = (cleanFrame.startsWith('/9j/') || cleanFrame.startsWith('iVBOR') || cleanFrame.startsWith('data:image/')) && cleanFrame.length > 200;
+    if (!isValidImage) {
+      return res.status(400).json({ status: 'ERROR', message: 'Invalid or unsupported image frame format.' });
+    }
+    if (cleanFrame.length > MAX_FRAME_BASE64_CHARS) {
+      return res.status(413).json({ status: 'ERROR', message: 'Frame too large; send a smaller or lower-quality frame.', continue: true });
+    }
   }
 
   try {
-    // The frame bytes themselves go to Redis, not Postgres -- see
-    // lib/liveFrame.js for why. This row only tracks small, byte-cheap
-    // metadata (last_frame_at/status), which the dashboard's live-frame
-    // response still relies on for freshness/status display.
-    await liveFrame.setFrame(deviceId, cleanFrame);
+    // Privacy Safeguard: reject frames immediately if employee is on break or outside office hours
+    const permission = await liveView.permission(employeeId, deviceId, nowMs);
+    if (!permission.isPermitted) {
+      await liveFrame.clearFrame(deviceId);
+      return res.json({
+        status: 'PAUSED',
+        continue: false,
+        reason: permission.onBreak ? 'ON_BREAK' : 'OUTSIDE_HOURS',
+        message: 'Workstation screen telemetry paused for privacy.'
+      });
+    }
 
-    await ensureLiveStreamTable();
-    await db.prepare(`
-      INSERT INTO workstation_live_streams (device_id, employee_id, requested_at, last_frame_at, frame_base64, status, updated_at)
-      VALUES (?, ?, ?, ?, NULL, 'ACTIVE', ?)
-      ON CONFLICT (device_id) DO UPDATE SET
-        last_frame_at = EXCLUDED.last_frame_at,
-        status = 'ACTIVE',
-        updated_at = EXCLUDED.updated_at
-    `).run(deviceId, employeeId, nowMs, nowMs, nowMs);
+    const watching = await liveView.leaseActive(deviceId, nowMs);
+    if (!watching) {
+      await liveFrame.clearFrame(deviceId);
+      return res.json({ status: 'SUCCESS', continue: false });
+    }
 
-    res.json({ status: 'SUCCESS' });
+    // The frame bytes go to Redis, never Postgres -- see lib/liveFrame.js.
+    if (cleanFrame) {
+      await liveFrame.setFrame(deviceId, cleanFrame, nowMs);
+    } else {
+      await liveFrame.markAlive(deviceId, nowMs);
+    }
+
+    res.json({ status: 'SUCCESS', continue: true });
   } catch (err) {
     console.error('[desktop/stream-frame] error:', err);
     res.status(500).json({ status: 'ERROR', message: err.message });
