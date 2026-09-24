@@ -25,8 +25,15 @@ import type {
   NotificationItem,
   NotificationsResponse,
   PayrollAdjustment,
+  PayrollApproveRunRequest,
+  PayrollApproveRunResult,
+  PayrollGenerateResult,
+  PayrollMarkPaidResult,
+  PayrollPayslipsResponse,
   PayrollPeriod,
   PayrollPrepareSheet,
+  PayrollPreflightResponse,
+  PayrollReviewSheet,
   PendingVerificationDoc,
   PresenceStatus,
   SalaryRecord,
@@ -57,6 +64,26 @@ const KEY_STORAGE = 'office_tracker_admin_key';
 
 export class UnauthorizedError extends Error {}
 export class NotConfiguredError extends Error {}
+
+/**
+ * Any other refused request. Still an Error with the server's message, so
+ * existing callers are unchanged; it also keeps the HTTP status and the parsed
+ * body, since some routes (the payroll run) put a machine-readable `code` and
+ * details such as the lines still undecided next to the message.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly body: Record<string, unknown> | null;
+
+  constructor(message: string, status: number, body: Record<string, unknown> | null) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+    this.code = body && typeof body.code === 'string' ? body.code : null;
+  }
+}
 
 export function getKey(): string {
   if (typeof window === 'undefined') return '';
@@ -116,7 +143,11 @@ async function request<T>(
 
   const body = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(body?.message ?? `Request failed (HTTP ${res.status})`);
+    throw new ApiError(
+      body?.message ?? `Request failed (HTTP ${res.status})`,
+      res.status,
+      body && typeof body === 'object' ? body : null,
+    );
   }
   return body as T;
 }
@@ -591,10 +622,22 @@ export const api = {
   payrollPeriods: () =>
     request<{ status: string; periods: PayrollPeriod[] }>('/api/payroll/periods'),
 
-  createPayrollPeriod: (name: string, startDate: string, endDate: string, exchangeRate?: number) =>
+  // cutoffDate and payDate are optional on a manual period: without a
+  // cut-off its deductions run to its end date.
+  createPayrollPeriod: (
+    name: string,
+    startDate: string,
+    endDate: string,
+    exchangeRate?: number,
+    options: { cutoffDate?: string | null; payDate?: string | null } = {},
+  ) =>
     request<{ status: string; period: PayrollPeriod }>('/api/payroll/periods', {
       method: 'POST',
-      body: JSON.stringify({ name, startDate, endDate, exchangeRate }),
+      body: JSON.stringify({
+        name, startDate, endDate, exchangeRate,
+        cutoffDate: options.cutoffDate ?? null,
+        payDate: options.payDate ?? null,
+      }),
     }),
 
   updatePeriodExchangeRate: (periodId: string, exchangeRate: number) =>
@@ -615,6 +658,47 @@ export const api = {
     request<{ status: string; period: PayrollPeriod }>(
       `/api/payroll/periods/${encodeURIComponent(periodId)}/close`,
       { method: 'POST' },
+    ),
+
+  // ---- The monthly run: review, approve, pay ------------------------------
+  // Refusals throw ApiError; its `body` is a PayrollRunErrorBody.
+
+  /** Read-only: rows, ROUTINE/ATTENTION lines, employee flags, totals and the preflight. */
+  payrollReview: (periodId: string) =>
+    request<{ status: string } & PayrollReviewSheet>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/review`,
+    ),
+
+  /** Read-only: what would make approving this run wrong right now. */
+  payrollPreflight: (periodId: string) =>
+    request<{ status: string } & PayrollPreflightResponse>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/preflight`,
+    ),
+
+  /** Creates PROPOSED lines for anything new; safe to repeat. Needs payroll.approve. */
+  generatePayrollDeductions: (periodId: string) =>
+    request<{ status: string } & PayrollGenerateResult>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/generate-deductions`,
+      { method: 'POST' },
+    ),
+
+  /** IN_REVIEW (or OPEN, generated first) -> PUBLISHED, writing every payslip. */
+  approvePayrollRun: (periodId: string, body: PayrollApproveRunRequest) =>
+    request<{ status: string } & PayrollApproveRunResult>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/approve-run`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
+  /** PUBLISHED -> PAID, once the money has gone out. */
+  markPayrollPaid: (periodId: string, note: string | null) =>
+    request<{ status: string } & PayrollMarkPaidResult>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/mark-paid`,
+      { method: 'POST', body: JSON.stringify({ note }) },
+    ),
+
+  payrollPayslips: (periodId: string) =>
+    request<{ status: string } & PayrollPayslipsResponse>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/payslips`,
     ),
 
   payrollAdjustments: (periodId: string) =>

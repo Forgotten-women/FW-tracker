@@ -9,6 +9,7 @@ import '../services/api_client.dart';
 import '../services/notification_service.dart';
 import '../services/offline_queue.dart';
 import '../services/ota_service.dart';
+import '../services/payslip_watcher.dart';
 import '../widgets/glass/glass.dart';
 import '../widgets/update_dialog.dart';
 import '../theme.dart';
@@ -71,6 +72,9 @@ class _MainShellState extends State<MainShell> {
     if (clean.contains('LEAVE')) {
       setState(() => _index = 1);
     } else if (clean.contains('SALARY') || clean.contains('PAYROLL') || clean.contains('PAY')) {
+      // Includes PayslipWatcher's 'PAYSLIP'. The salary tab was built at
+      // launch, so ask it to reload: the payslip may be newer than its data.
+      PayslipWatcher.refreshRequests.value++;
       setState(() => _index = 2);
     } else if (clean.contains('WARN')) {
       setState(() => _index = 3);

@@ -302,6 +302,13 @@ input:focus {
   letter-spacing: 1px;
 }
 
+.credit-note {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #fbbf24;
+}
+
 .break-countdown-wrap {
   margin-top: 12px;
   padding-top: 10px;

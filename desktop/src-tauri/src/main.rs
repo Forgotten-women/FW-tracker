@@ -2,8 +2,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod autostart;
+mod capture;
 mod client;
 mod db;
+mod live;
 mod single_instance;
 mod tracker {
     pub mod idle;
@@ -15,13 +17,17 @@ mod tray;
 
 use client::{AppConfig, HeartbeatPayload, HeartbeatResponse};
 use db::OfflineStore;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 static IS_MANUAL_BREAK: AtomicBool = AtomicBool::new(false);
+// Active seconds counted locally since the last delivered heartbeat. The
+// widget shows server-credited time plus this, so it never runs ahead of what
+// the server will actually record and then snaps back.
+static PENDING_ACTIVE_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 const CAPTURE_SCRIPT: &str = include_str!("../../capture-screen.ps1");
 
@@ -128,6 +134,7 @@ async fn get_app_status(state: State<'_, AppState>) -> Result<serde_json::Value,
         "isManualBreak": is_break,
         "lockState": lock_state,
         "idleSeconds": idle_secs,
+        "pendingActiveSeconds": PENDING_ACTIVE_SECONDS.load(Ordering::SeqCst),
         "latest": resp,
     }))
 }
@@ -203,6 +210,38 @@ async fn checkout_shift(state: State<'_, AppState>) -> Result<serde_json::Value,
     }
 }
 
+/// Tray "Exit". The agent can be closed -- it's the employee's machine -- but
+/// the stop is put on the record first so HR sees a gap with a reason, not
+/// silently missing data. It starts again at the next sign-in (autostart.rs).
+/// A clean exit also means no config write is cut off half-way, which used to
+/// be able to wipe the device's pairing.
+fn request_exit(app: tauri::AppHandle) {
+    let window = app.get_window("main");
+    tauri::api::dialog::ask(
+        window.as_ref(),
+        "Exit Office Tracker?",
+        "Office Tracker records your working time on this laptop. If you exit, HR will see that \
+         the agent was stopped at this time, and nothing is recorded until it runs again \
+         (it starts automatically the next time you sign in).\n\nExit anyway?",
+        move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let cfg = app.state::<AppState>().config.lock().unwrap().clone();
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(4),
+                    client::send_agent_stopped(&cfg, "Exited from the tray menu"),
+                )
+                .await;
+                client::save_config(&cfg);
+                app.exit(0);
+            });
+        },
+    );
+}
+
 fn main() {
     let instance_role = single_instance::check_single_instance();
     let single_instance_listener = match instance_role {
@@ -231,6 +270,7 @@ fn main() {
             app_tracking_enabled: Some(true),
             outside_working_hours: Some(false),
             live_stream_requested: Some(false),
+            credit_state: None,
             live_view: None,
             today: client::SessionStats {
                 date_key: initial_config.cached_date_key.clone(),
@@ -274,6 +314,7 @@ fn main() {
         ])
         .setup(move |app| {
             let app_handle = app.handle();
+            client::set_agent_version(app.package_info().version.to_string());
             single_instance::start_listener(single_instance_listener, app_handle.clone());
 
             // On macOS: always show window on launch! On Windows: show if not enrolled
@@ -344,127 +385,12 @@ fn main() {
                 }
             });
 
-            // Dedicated Live Screen Stream Worker (~1 FPS while actively watched)
-            //
-            // Idle check_interval is deliberately long (20s, not 1s): this
-            // loop runs continuously for every enrolled device for as long as
-            // the app is open, 24/7, regardless of whether anyone is ever
-            // watching -- at 1s across ~19 workstations that was ~1.6M
-            // requests/day against the Postgres-backed stream-status check
-            // alone, which was the single largest contributor to a Supabase
-            // egress quota breach. Watching a screen live is a deliberate,
-            // occasional HR action, not something that needs sub-few-second
-            // discovery latency, so a 20s worst-case delay before streaming
-            // starts is an acceptable trade for cutting that request volume
-            // ~20x. The 2s in-stream interval is unchanged since it only
-            // runs while a device is actually being watched.
-            let app_handle_stream = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut is_streaming = false;
-                let mut last_status_check = std::time::Instant::now() - Duration::from_secs(10);
-
-                #[cfg(target_os = "windows")]
-                let mut ps_child: Option<(std::process::Child, std::io::BufReader<std::process::ChildStdout>, std::io::LineWriter<std::process::ChildStdin>)> = None;
-
-                loop {
-                    let state = app_handle_stream.state::<AppState>();
-                    let cfg = state.config.lock().unwrap().clone();
-
-                    if cfg.token.is_empty() {
-                        sleep(Duration::from_secs(3)).await;
-                        continue;
-                    }
-
-                    let check_interval = if is_streaming { Duration::from_secs(2) } else { Duration::from_secs(20) };
-                    if last_status_check.elapsed() >= check_interval {
-                        last_status_check = std::time::Instant::now();
-                        if let Ok(status) = client::check_stream_status(&cfg).await {
-                            is_streaming = status.live_stream_requested && status.is_permitted && !status.on_break && !status.outside_working_hours;
-                        }
-                    }
-
-                    if is_streaming {
-                        let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
-                        if !is_break {
-                            let mut frame_opt = None;
-
-                            #[cfg(target_os = "windows")]
-                            {
-                                use std::io::{BufRead, Write};
-                                use std::os::windows::process::CommandExt;
-
-                                if ps_child.is_none() {
-                                    let script_path = std::env::current_exe()
-                                        .ok()
-                                        .and_then(|p| p.parent().map(|d| d.join("capture-screen.ps1")))
-                                        .filter(|p| p.exists())
-                                        .unwrap_or_else(|| {
-                                            let temp_script = std::env::temp_dir().join("ot_capture_screen.ps1");
-                                            let _ = std::fs::write(&temp_script, CAPTURE_SCRIPT);
-                                            temp_script
-                                        });
-
-                                    if let Ok(mut cmd) = std::process::Command::new("powershell")
-                                        .args([
-                                            "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                                            "-File", script_path.to_str().unwrap_or("capture-screen.ps1"),
-                                            "-Loop"
-                                        ])
-                                        .stdin(std::process::Stdio::piped())
-                                        .stdout(std::process::Stdio::piped())
-                                        .creation_flags(0x08000000)
-                                        .spawn()
-                                    {
-                                        let stdin = cmd.stdin.take().map(std::io::LineWriter::new);
-                                        let stdout = cmd.stdout.take().map(std::io::BufReader::new);
-                                        if let (Some(in_writer), Some(out_reader)) = (stdin, stdout) {
-                                            ps_child = Some((cmd, out_reader, in_writer));
-                                        }
-                                    }
-                                }
-
-                                if let Some((_, ref mut reader, ref mut writer)) = ps_child {
-                                    if writeln!(writer, "CAPTURE").is_ok() && writer.flush().is_ok() {
-                                        let mut line = String::new();
-                                        if reader.read_line(&mut line).is_ok() {
-                                            let trimmed = line.trim().to_string();
-                                            if (trimmed.starts_with("/9j/") || trimmed.starts_with("iVBOR")) && trimmed.len() > 100 {
-                                                frame_opt = Some(trimmed);
-                                            }
-                                        }
-                                    } else {
-                                        ps_child = None;
-                                    }
-                                }
-                            }
-
-                            if frame_opt.is_none() {
-                                frame_opt = capture_screen_frame();
-                            }
-
-                            if let Some(frame) = frame_opt {
-                                let _ = client::send_stream_frame(&cfg, Some(frame.as_str())).await;
-                            }
-                        }
-                        // ~1 FPS: plenty for spot-checking a screen, and a
-                        // quarter of the command/bandwidth cost of the
-                        // previous 4 FPS against the Redis-backed frame
-                        // store this now writes to (see backend/routes/desktop.js).
-                        sleep(Duration::from_millis(1000)).await;
-                    } else {
-                        #[cfg(target_os = "windows")]
-                        {
-                            if let Some((mut child, _, mut writer)) = ps_child.take() {
-                                use std::io::Write;
-                                let _ = writeln!(writer, "QUIT");
-                                let _ = writer.flush();
-                                let _ = child.kill();
-                            }
-                        }
-                        sleep(Duration::from_millis(1000)).await;
-                    }
-                }
-            });
+            // Live screen view + instant break sync (live.rs): the doorbell
+            // WebSocket, the stream worker it wakes, and the break-state
+            // refresh it triggers when the phone starts or ends a break.
+            tauri::async_runtime::spawn(live::run_doorbell(app_handle.clone()));
+            tauri::async_runtime::spawn(live::run_stream_worker(app_handle.clone()));
+            tauri::async_runtime::spawn(live::run_break_sync(app_handle.clone()));
 
             // Dedicated Periodic Screenshot Task (Customizable HR Interval + Self-Healing Watchdog)
             let app_handle_shots = app_handle.clone();
@@ -590,6 +516,7 @@ fn main() {
                             app_breakdown: None,
                         };
                         if let Ok(resp) = client::send_heartbeat(&cfg, payload).await {
+                            live::on_heartbeat(&resp);
                             *state.latest_response.lock().unwrap() = Some(resp.clone());
                             let mut cfg_to_save = cfg.clone();
                             cfg_to_save.cached_active_seconds = resp.today.active_seconds;
@@ -665,6 +592,8 @@ fn main() {
                         }
                     }
 
+                    PENDING_ACTIVE_SECONDS.store(accumulated_active, Ordering::SeqCst);
+
                     // Check for unapproved process anomalies (e.g. mouse jigglers / unknown apps)
                     let approved_csv = {
                         let resp = state.latest_response.lock().unwrap();
@@ -709,6 +638,7 @@ fn main() {
                                 accumulated_active = 0;
                                 accumulated_idle = 0;
                                 app_breakdown.clear();
+                                PENDING_ACTIVE_SECONDS.store(0, Ordering::SeqCst);
 
                                 let local_is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
                                 let mut final_resp = resp.clone();
@@ -723,6 +653,7 @@ fn main() {
                                     IS_MANUAL_BREAK.store(final_resp.today.on_break, Ordering::SeqCst);
                                 }
 
+                                live::on_heartbeat(&final_resp);
                                 *state.latest_response.lock().unwrap() = Some(final_resp.clone());
                                 let mut cfg_to_save = cfg.clone();
                                 cfg_to_save.cached_active_seconds = final_resp.today.active_seconds;

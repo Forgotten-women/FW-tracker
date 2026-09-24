@@ -209,6 +209,10 @@ class PingResult {
   final String serverTime;
   final Attendance attendance;
 
+  /// The open break, including one started on the laptop. Null when the
+  /// server didn't say (older backend), so reminders are left as they are.
+  final ActiveBreakInfo? breakState;
+
   const PingResult({
     required this.accepted,
     required this.duplicates,
@@ -216,6 +220,7 @@ class PingResult {
     required this.verified,
     required this.serverTime,
     required this.attendance,
+    this.breakState,
   });
 
   factory PingResult.fromJson(Map<String, dynamic> json) => PingResult(
@@ -227,6 +232,15 @@ class PingResult {
         attendance: json['attendance'] == null
             ? Attendance.empty()
             : Attendance.fromJson(json['attendance'] as Map<String, dynamic>),
+        breakState: json['breakState'] is Map<String, dynamic>
+            ? ActiveBreakInfo(
+                onBreak: (json['breakState'] as Map<String, dynamic>)['onBreak'] as bool? ?? false,
+                startedAtMs: ((json['breakState'] as Map<String, dynamic>)['startedAtMs'] as num?)?.toInt(),
+                dueBackAtMs: ((json['breakState'] as Map<String, dynamic>)['dueBackAtMs'] as num?)?.toInt(),
+                permittedMinutes:
+                    ((json['breakState'] as Map<String, dynamic>)['permittedMinutes'] as num?)?.toInt() ?? 30,
+              )
+            : null,
       );
 }
 

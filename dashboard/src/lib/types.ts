@@ -512,15 +512,31 @@ export interface SalaryBlocked {
   message: string;
 }
 
+/**
+ * OPEN -> IN_REVIEW -> PUBLISHED -> PAID is the automated monthly run;
+ * OPEN -> CLOSED is a legacy manual period. PUBLISHED, PAID and CLOSED are
+ * final: nothing in them can be proposed, regenerated, re-rated or decided.
+ */
+export type PayrollPeriodStatus = 'OPEN' | 'IN_REVIEW' | 'PUBLISHED' | 'PAID' | 'CLOSED';
+
+/** A row of GET /api/payroll/periods. Run timestamps are epoch ms. */
 export interface PayrollPeriod {
   id: string;
   name: string;
   from: string;
   to: string;
   exchangeRate?: number;
-  status: 'OPEN' | 'DRAFT' | 'CLOSED';
+  status: PayrollPeriodStatus;
   approvedBy: string | null;
+  // T.displayTime() on this route: a time of day only, not a date.
   approvedAt: string | null;
+  cutoffDate: string | null;
+  payDate: string | null;
+  autoCreated: boolean;
+  generatedAt: number | null;
+  publishedAt: number | null;
+  publishedBy: string | null;
+  paidAt: number | null;
 }
 
 export interface PayrollEmployee {
@@ -568,7 +584,7 @@ export interface PayrollAdjustment {
   type: string;
   calculated: { days: number | null; amount: number | null };
   approved: { days: number | null; amount: number | null } | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: PayrollLineStatus;
   explanation: string | null;
   approvedBy: string | null;
   approvedAt: string | null;
@@ -604,6 +620,302 @@ export interface LeaverCalculation {
     excessDeduction: number | null;
   };
   estimatedFinalPay?: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Payroll: the monthly run (review, approve, pay). Shapes are exactly what
+// backend/src/routes/payroll.js and domain/payroll.js return.
+// ---------------------------------------------------------------------------
+
+export type PayrollLineStatus = 'PROPOSED' | 'APPROVED' | 'REJECTED';
+
+/** null only on rows from before migration 024 that were never classified. */
+export type PayrollReviewLevel = 'ROUTINE' | 'ATTENTION';
+
+/** presentPeriod(): the period as the review sheet and payslips list return it. */
+export interface PayrollRunPeriod {
+  id: string;
+  name: string;
+  from: string;
+  to: string;
+  status: PayrollPeriodStatus;
+  exchangeRate: number;
+  cutoffDate: string | null;
+  payDate: string | null;
+  autoCreated: boolean;
+  generatedAt: number | null;
+  publishedAt: number | null;
+  publishedBy: string | null;
+  paidAt: number | null;
+  approvedBy: string | null;
+  approvedAt: number | null;
+}
+
+export type PayrollPreflightCode =
+  | 'PENDING_CORRECTIONS'
+  | 'PENDING_ABSENCE_REVIEWS'
+  | 'PENDING_LEAVE_REQUESTS'
+  | 'NEW_DEDUCTIONS_SINCE_GENERATION'
+  | 'NOT_YET_GENERATED'
+  | 'NO_SALARY';
+
+export type PayrollPreflightSeverity = 'BLOCKING' | 'WARNING' | 'INFO';
+
+export interface PayrollPreflightItem {
+  employeeId: string;
+  employeeName: string | null;
+  ref: string | null;
+  date: string | null;
+  detail: string;
+}
+
+/**
+ * One failing check. count is the whole run's; items are limited to the
+ * employees the caller may see, so there can be fewer items than count.
+ */
+export interface PayrollPreflightCheck {
+  code: PayrollPreflightCode;
+  severity: PayrollPreflightSeverity;
+  count: number;
+  message: string;
+  items: PayrollPreflightItem[];
+}
+
+export interface PayrollPreflightResponse {
+  periodId: string;
+  blocking: boolean;
+  preflight: PayrollPreflightCheck[];
+}
+
+/** presentAdjustment(): one line on the review sheet. approvedAt is epoch ms here. */
+export interface PayrollReviewLine {
+  id: string;
+  type: string;
+  status: PayrollLineStatus;
+  calculatedAmount: number;
+  approvedAmount: number | null;
+  explanation: string;
+  calculatedDays: number;
+  approvedDays: number | null;
+  sourceReference: string | null;
+  reviewLevel: PayrollReviewLevel | null;
+  reviewReasons: string[];
+  approvedBy: string | null;
+  approvedAt: number | null;
+}
+
+export type PayrollEmployeeFlagCode =
+  | 'STARTER'
+  | 'LEAVER'
+  | 'LEAVER_AFTER_CUTOFF'
+  | 'SALARY_CHANGED_IN_PERIOD'
+  | 'NET_CHANGE_OVER_15_PERCENT';
+
+export interface PayrollEmployeeFlag {
+  code: PayrollEmployeeFlagCode;
+  message: string;
+  // NET_CHANGE_OVER_15_PERCENT only.
+  previousNet?: number;
+  changePercent?: number;
+}
+
+export interface PayrollReviewEmployee {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string | null;
+  salary: { monthly: number; daily: number; annual: number; currency: string };
+  isPartialPeriod: boolean;
+  workingDaysCount: number;
+  fullPeriodDays: number;
+  grossBaseline: number;
+  calculatedPeriodGross: number;
+  /** The last date this row's deductions count: cut-off, period end, or a leaver's last day. */
+  deductionsThrough: string;
+  isStarter: boolean;
+  starter: { startDate: string; eligibleWorkingDays: number; calculatedGross: number } | null;
+  unpaidDays: {
+    deficitDays: number;
+    deficitAmount: number;
+    deficitAdjustmentId: string | null;
+    deficitStatus: PayrollLineStatus | null;
+    absenceDays: number;
+    absenceAmount: number;
+    absenceRecordIds: string[];
+    leaveDays: number;
+    leaveAmount: number;
+    leaveRequestIds: string[];
+    totalDays: number;
+    totalAmount: number;
+  };
+  netPayable: { amount: number; basis: 'PROVISIONAL' | 'PARTIALLY_DECIDED' | 'DECIDED' };
+  attendanceDeficit: {
+    wholeDayEquivalents: number;
+    carryForwardMinutes: number;
+    valueIfDeducted: number;
+    needsHrDecision: boolean;
+  };
+  leave: { blocked: true; reason: string } | { blocked?: undefined; available: number; isNegative: boolean };
+  adjustments: PayrollReviewLine[];
+  /** Gross + approved lines + undecided lines at their calculated figure. */
+  expectedNetPayable: number;
+  employeeFlags: PayrollEmployeeFlag[];
+}
+
+/** Left out of the run: no salary on record, or not employed on any day of it. */
+export interface PayrollExcludedEmployee {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string | null;
+  reason: string;
+  message: string;
+}
+
+/** Summed across employees as raw numbers, whatever each one's salary currency. */
+export interface PayrollReviewTotals {
+  employees: number;
+  gross: number;
+  deductions: number;
+  net: number;
+  routineCount: number;
+  attentionCount: number;
+  pendingCount: number;
+  decidedCount: number;
+}
+
+export interface PayrollReviewSheet {
+  period: PayrollRunPeriod;
+  totals: PayrollReviewTotals;
+  preflight: PayrollPreflightCheck[];
+  employees: PayrollReviewEmployee[];
+  excluded: PayrollExcludedEmployee[];
+  note: string;
+}
+
+/** An explicit decision on one line, sent with approve-run. */
+export interface PayrollRunDecision {
+  adjustmentId: string;
+  decision: 'APPROVED' | 'REJECTED';
+  approvedAmount?: number;
+  approvedDays?: number;
+  notes?: string;
+}
+
+export interface PayrollApproveRunRequest {
+  note: string;
+  decisions: PayrollRunDecision[];
+  waiveBlockers?: boolean;
+  waiverNote?: string | null;
+}
+
+export interface PayrollApproveRunResult {
+  periodId: string;
+  periodStatus: 'PUBLISHED';
+  publishedAt: number;
+  publishedBy: string;
+  payslipCount: number;
+  excludedCount: number;
+  totals: { gross: number; deductions: number; net: number };
+  decided: { explicit: number; routineApproved: number };
+  waivedBlockers: PayrollPreflightCode[];
+}
+
+export interface PayrollMarkPaidResult {
+  periodId: string;
+  periodStatus: 'PAID';
+  paidAt: number;
+  payslipsMarked: number;
+}
+
+export interface PayrollGenerateResult {
+  periodId: string;
+  createdCount: number;
+  created: { employeeId: string; adjustmentType: string; id: string; status: PayrollLineStatus }[];
+  employees: number;
+  classification: { routine: number; attention: number };
+}
+
+export interface PayslipLine {
+  adjustmentId: string;
+  type: string;
+  label: string;
+  explanation: string;
+  days: number | null;
+  amount: number;
+  sourceReference: string | null;
+  date: string | null;
+}
+
+/** presentPayslip(). Written once at publish; integrityOk re-checks its hash. */
+export interface Payslip {
+  id: string;
+  periodId: string;
+  periodName: string | null;
+  employeeId: string;
+  employeeName: string | null;
+  employeeNumber: string | null;
+  version: number;
+  status: 'PUBLISHED' | 'SUPERSEDED';
+  payslipStatus: 'PUBLISHED' | 'PAID';
+  currency: string;
+  exchangeRate: number;
+  monthlySalary: number;
+  dailyRate: number;
+  grossBaseline: number;
+  deductionsTotal: number;
+  adjustmentsTotal: number;
+  netPayable: number;
+  workingDays: number;
+  fullPeriodDays: number;
+  isPartial: boolean;
+  isStarter: boolean;
+  salaryEffectiveFrom: string | null;
+  lines: PayslipLine[];
+  cutoffDate: string | null;
+  payDate: string | null;
+  publishedAt: number;
+  publishedBy: string;
+  paidAt: number | null;
+  contentHash: string;
+  integrityOk: boolean;
+}
+
+export interface PayrollPayslipsResponse {
+  period: PayrollRunPeriod;
+  payslips: Payslip[];
+}
+
+/** One entry of an ATTENTION_UNDECIDED refusal's `undecided` list. */
+export interface PayrollUndecidedLine {
+  adjustmentId: string;
+  employeeId: string;
+  employeeName: string;
+  type: string;
+  calculatedAmount: number;
+  calculatedDays: number;
+  reviewLevel: PayrollReviewLevel | null;
+  reviewReasons: string[];
+}
+
+export type PayrollRunErrorCode =
+  | 'NOTE_REQUIRED'
+  | 'WAIVER_NOTE_REQUIRED'
+  | 'BAD_REQUEST'
+  | 'NOT_FOUND'
+  | 'ALREADY_FINAL'
+  | 'FORBIDDEN'
+  | 'PREFLIGHT_BLOCKED'
+  | 'ATTENTION_UNDECIDED'
+  | 'NOT_PUBLISHED';
+
+/** The { status: 'ERROR' } body of a refused run call, with its details spread in. */
+export interface PayrollRunErrorBody {
+  status: 'ERROR';
+  code?: PayrollRunErrorCode;
+  message: string;
+  undecided?: PayrollUndecidedLine[];
+  preflight?: PayrollPreflightCheck[];
+  // requirePermission()'s 403.
+  missing?: string[];
 }
 
 export interface AppReleaseItem {
@@ -664,7 +976,9 @@ export interface WorkstationItem {
   platform: string;
   model: string;
   label: string;
-  status: 'ACTIVE' | 'IDLE' | 'ON_BREAK' | 'AWAY' | 'OFFLINE';
+  // AGENT_STOPPED: the employee chose Exit on the laptop agent (it is logged in
+  // the movements feed with the time); OUTSIDE_HOURS: outside their shift.
+  status: 'ACTIVE' | 'IDLE' | 'ON_BREAK' | 'AWAY' | 'OFFLINE' | 'AGENT_STOPPED' | 'OUTSIDE_HOURS';
   activeMinutes: number;
   verifiedActiveMinutes?: number;
   unverifiedMinutes?: number;

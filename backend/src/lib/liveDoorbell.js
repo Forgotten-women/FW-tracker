@@ -22,7 +22,12 @@
 
 const crypto = require('crypto');
 
+// 'live' = HR opened the live viewer. 'sync' = the employee's break changed on
+// another device, so the agent should refresh its break state now rather than
+// on its next minutely heartbeat. Either way the agent only re-reads over its
+// normal authenticated API.
 const EVENT = 'live';
+const SYNC_EVENT = 'sync';
 
 function projectUrl() {
   return String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
@@ -61,7 +66,7 @@ function clientConfigFor(deviceId) {
 }
 
 /** Rings the device's doorbell. Resolves true if Supabase accepted the message. */
-async function ring(deviceId) {
+async function ring(deviceId, event = EVENT) {
   if (!isConfigured()) return false;
   try {
     const res = await fetch(`${projectUrl()}/realtime/v1/api/broadcast`, {
@@ -72,7 +77,7 @@ async function ring(deviceId) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        messages: [{ topic: topicFor(deviceId), event: EVENT, payload: { at: Date.now() } }],
+        messages: [{ topic: topicFor(deviceId), event, payload: { at: Date.now() } }],
       }),
       signal: AbortSignal.timeout(3000),
     });
@@ -87,4 +92,27 @@ async function ring(deviceId) {
   }
 }
 
-module.exports = { isConfigured, topicFor, clientConfigFor, ring };
+/**
+ * Tells every desktop agent of an employee (except the one that made the
+ * change) that their break state changed. Best-effort and bounded: a failure
+ * only means the laptop catches up on its next heartbeat instead.
+ */
+async function ringDesktopsOf(employeeId, { exceptDeviceId = null } = {}) {
+  if (!isConfigured()) return 0;
+  const { db } = require('../db');
+  let devices = [];
+  try {
+    devices = await db.prepare(`
+      SELECT id FROM devices
+      WHERE employee_id = ? AND revoked_at IS NULL
+        AND (device_type = 'desktop' OR LOWER(platform) IN ('windows', 'macos', 'darwin', 'linux'))
+    `).all(employeeId);
+  } catch (_) {
+    return 0;
+  }
+  const targets = devices.map(d => d.id).filter(id => id !== exceptDeviceId);
+  const results = await Promise.all(targets.map(id => ring(id, SYNC_EVENT)));
+  return results.filter(Boolean).length;
+}
+
+module.exports = { isConfigured, topicFor, clientConfigFor, ring, ringDesktopsOf, SYNC_EVENT };

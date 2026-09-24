@@ -134,6 +134,18 @@ mod tests {
         assert_ne!(fa, fingerprint(&a));
     }
 
+    // Needs a real display: `cargo test -- --ignored captures_the_real_screen`.
+    #[test]
+    #[ignore]
+    fn captures_the_real_screen() {
+        let started = std::time::Instant::now();
+        let frame = capture_live_frame().expect("native capture works on this machine");
+        let took = started.elapsed();
+        assert!(frame.jpeg_base64.starts_with("/9j/"));
+        assert!(frame.jpeg_base64.len() < 900 * 1024, "under the backend's frame cap");
+        println!("captured {} KB of base64 in {:?}", frame.jpeg_base64.len() / 1024, took);
+    }
+
     #[test]
     fn encodes_a_valid_jpeg() {
         let img = image::RgbImage::from_pixel(32, 32, image::Rgb([10, 120, 200]));

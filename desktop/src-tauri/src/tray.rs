@@ -39,7 +39,9 @@ pub fn handle_tray_event(app: &AppHandle, event: SystemTrayEvent) {
                 let _ = app.emit_all("toggle-break", ());
             }
             "quit" => {
-                std::process::exit(0);
+                // Not std::process::exit: that killed the process mid-write
+                // of config.json and could wipe the device's pairing.
+                crate::request_exit(app.clone());
             }
             _ => {}
         },

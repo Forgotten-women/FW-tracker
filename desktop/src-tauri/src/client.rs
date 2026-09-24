@@ -70,6 +70,10 @@ pub struct HeartbeatResponse {
     pub outside_working_hours: Option<bool>,
     #[serde(default)]
     pub live_stream_requested: Option<bool>,
+    // COUNTED | UNVERIFIED | OUTSIDE_HOURS | ON_BREAK | IDLE | AWAY (older
+    // backends omit it). Passed through to the widget as-is.
+    #[serde(default)]
+    pub credit_state: Option<String>,
     // Instant live-view doorbell subscription (backend lib/liveDoorbell.js).
     // Absent from older backends, null when the server hasn't configured it.
     #[serde(default)]
@@ -162,17 +166,50 @@ pub fn offline_db_path() -> PathBuf {
     dir
 }
 
-pub fn load_config() -> AppConfig {
-    if let Ok(data) = fs::read_to_string(config_path()) {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        AppConfig::default()
-    }
+fn backup_config_path() -> PathBuf {
+    config_path().with_file_name("config.backup.json")
 }
 
+fn read_config(path: &PathBuf) -> Option<AppConfig> {
+    let data = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// The device's pairing lives here. Losing it means the employee has to be
+/// given a new enrolment code, so a damaged main file falls back to the
+/// backup copy -- the pairing only goes when the app's data folder does.
+pub fn load_config() -> AppConfig {
+    let main = read_config(&config_path());
+    if let Some(cfg) = main.as_ref().filter(|c| !c.token.is_empty()) {
+        return cfg.clone();
+    }
+    if let Some(backup) = read_config(&backup_config_path()).filter(|c| !c.token.is_empty()) {
+        eprintln!("[config] main config unreadable or unpaired; restored pairing from backup");
+        save_config(&backup);
+        return backup;
+    }
+    main.unwrap_or_default()
+}
+
+// Written after every heartbeat. A plain fs::write truncates the file first,
+// so an exit (or crash, or power cut) landing mid-write left an empty or
+// half-written config.json -- which read back as "not paired" and sent the
+// employee back to the enrolment screen. Write a temp file and rename it into
+// place instead (the rename replaces the file in one step), and keep a copy.
 pub fn save_config(cfg: &AppConfig) {
-    if let Ok(json) = serde_json::to_string_pretty(cfg) {
-        let _ = fs::write(config_path(), json);
+    let Ok(json) = serde_json::to_string_pretty(cfg) else { return };
+    let path = config_path();
+    let tmp = path.with_extension("json.tmp");
+    if fs::write(&tmp, &json).is_ok() && fs::rename(&tmp, &path).is_ok() {
+        if !cfg.token.is_empty() {
+            let backup = backup_config_path();
+            let backup_tmp = backup.with_extension("json.tmp");
+            if fs::write(&backup_tmp, &json).is_ok() {
+                let _ = fs::rename(&backup_tmp, &backup);
+            }
+        }
+    } else {
+        let _ = fs::remove_file(&tmp);
     }
 }
 
@@ -359,6 +396,59 @@ pub async fn send_stream_frame(cfg: &AppConfig, frame_base64: Option<&str>) -> R
 
     // 413 = frame too big; still a well-formed reply saying whether to go on.
     res.json::<FrameReply>().await.map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BreakState {
+    #[serde(default)]
+    pub on_break: bool,
+    #[serde(default)]
+    pub break_already_taken: bool,
+    #[serde(default)]
+    pub break_started_at: Option<u64>,
+    #[serde(default)]
+    pub break_permitted_minutes: Option<u32>,
+    #[serde(default)]
+    pub break_remaining_seconds: Option<i64>,
+}
+
+/// Read-only break state, fetched when the phone changes the break (live.rs).
+pub async fn fetch_break_state(cfg: &AppConfig) -> Result<BreakState, String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    let url = format!("{}/api/desktop/break-state", cfg.server_url.trim_end_matches('/'));
+    let res = live_http()
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .header("X-Device-Id", &cfg.device_id)
+        .header("X-Agent-Version", agent_version())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("break-state HTTP {}", res.status()));
+    }
+    res.json::<BreakState>().await.map_err(|e| e.to_string())
+}
+
+/// Puts an Exit on the record before the agent closes (see tray.rs).
+pub async fn send_agent_stopped(cfg: &AppConfig, reason: &str) -> Result<(), String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    let url = format!("{}/api/desktop/agent-stopped", cfg.server_url.trim_end_matches('/'));
+    live_http()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .header("X-Device-Id", &cfg.device_id)
+        .header("X-Agent-Version", agent_version())
+        .json(&serde_json::json!({ "reason": reason }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Tells the backend this agent listens on the doorbell (see live.rs).

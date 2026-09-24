@@ -72,6 +72,7 @@ const shiftWorkedValue = document.getElementById('shift-worked-value');
 const shiftProgressFill = document.getElementById('shift-progress-fill');
 const shiftRemText = document.getElementById('shift-rem-text');
 const activeTimer = document.getElementById('active-timer');
+const creditNote = document.getElementById('credit-note');
 const statBreak = document.getElementById('stat-break');
 const statIdle = document.getElementById('stat-idle');
 const statusBanner = document.getElementById('status-banner');
@@ -91,6 +92,11 @@ const breakCountdownFooter = document.getElementById('break-countdown-footer');
 const breakPermittedPill = document.getElementById('break-permitted-pill');
 
 let isOnBreakState = false;
+// Whether the server is crediting this laptop's time right now. The timer only
+// ticks while it is: ticking through time the server never credits (outside
+// hours, not yet on office Wi-Fi) is what made it run ahead for hours and then
+// snap back to the real figure.
+let creditCounting = true;
 let breakStartedAtMs = null;
 let breakPermittedMins = 30;
 
@@ -232,31 +238,30 @@ async function refreshStatus() {
         const serverActive = data.latest.today.activeSeconds || 0;
 
         // Date rollover: if the day changed overnight or across midnight, reset to today's active seconds
-        if (serverDateKey && lastSyncedDateKey && serverDateKey !== lastSyncedDateKey) {
-          console.log(`[desktop] Day changed from ${lastSyncedDateKey} to ${serverDateKey}. Resetting active counter.`);
-          currentActiveSecs = serverActive;
-          lastSyncedServerSecs = serverActive;
-          lastSyncedDateKey = serverDateKey;
-          saveLocalProgress(currentActiveSecs, serverDateKey);
-        } else if (lastSyncedServerSecs === -1) {
-          currentActiveSecs = Math.max(currentActiveSecs, serverActive);
-          lastSyncedServerSecs = serverActive;
-          lastSyncedDateKey = serverDateKey || todayDateStr;
-          saveLocalProgress(currentActiveSecs, lastSyncedDateKey);
-        } else if (serverActive > lastSyncedServerSecs) {
-          currentActiveSecs = Math.max(currentActiveSecs, serverActive);
-          lastSyncedServerSecs = serverActive;
-          saveLocalProgress(currentActiveSecs, serverDateKey);
-        } else if (serverActive < lastSyncedServerSecs && serverActive > 0) {
-          currentActiveSecs = serverActive;
-          lastSyncedServerSecs = serverActive;
-          saveLocalProgress(currentActiveSecs, serverDateKey);
-        } else {
-          // If local timer drifted ahead of server by >90s, pull back to server active time
-          if (serverActive > 0 && currentActiveSecs > serverActive + 90) {
-            currentActiveSecs = serverActive;
-            saveLocalProgress(currentActiveSecs, serverDateKey);
-          }
+        // What the server has credited, plus what the agent has counted since
+        // its last heartbeat -- but only while the server is crediting at all.
+        // (creditState is absent from older backends: treat that as counting.)
+        const creditState = data.latest.creditState || null;
+        creditCounting = !creditState || creditState === 'COUNTED';
+        const pending = creditCounting ? (Number(data.pendingActiveSeconds) || 0) : 0;
+        currentActiveSecs = serverActive + pending;
+        lastSyncedServerSecs = serverActive;
+        lastSyncedDateKey = serverDateKey || todayDateStr;
+        saveLocalProgress(currentActiveSecs, lastSyncedDateKey);
+
+        if (creditNote) {
+          const unverified = Number(data.latest.today.unverifiedSeconds) || 0;
+          const notes = {
+            OUTSIDE_HOURS: 'Outside your working hours, so this time is not counted.',
+            UNVERIFIED: unverified > 0
+              ? `Not on the office network yet: ${formatHMS(unverified)} is held and will be added once you are verified.`
+              : 'Not on the office network yet, so time is held until you are verified.',
+            IDLE: 'No activity for a while, so this time is counted as idle.',
+            AWAY: 'Screen locked, so this time is not counted as active.',
+          };
+          const note = notes[creditState] || '';
+          creditNote.textContent = note;
+          creditNote.classList.toggle('hidden', !note);
         }
 
         const breakMins = Math.floor((data.latest.today.breakSeconds || 0) / 60);
@@ -378,6 +383,14 @@ async function refreshStatus() {
               breakToggleBtn.disabled = true;
               breakToggleBtn.classList.add('disabled');
             }
+          } else if (data.latest.workstationStatus === 'OUTSIDE_HOURS') {
+            statusBanner.className = 'status-banner away';
+            statusText.textContent = '🌙 Outside working hours';
+            if (!isTogglingBreak) {
+              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.disabled = true;
+              breakToggleBtn.classList.add('disabled');
+            }
           } else {
             statusBanner.className = 'status-banner';
             statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
@@ -424,7 +437,7 @@ timerInterval = setInterval(() => {
 
   if (isOnBreakState) {
     updateBreakCountdown();
-  } else if (statusBanner && !statusBanner.classList.contains('away') && !statusBanner.classList.contains('offline')) {
+  } else if (creditCounting && statusBanner && !statusBanner.classList.contains('away') && !statusBanner.classList.contains('offline')) {
     currentActiveSecs++;
     if (activeTimer) {
       activeTimer.textContent = formatHMS(currentActiveSecs);

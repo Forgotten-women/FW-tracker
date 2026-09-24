@@ -590,7 +590,22 @@ const selectPayrollEmployees = db.prepare(`
   ORDER BY e.name, e.id
 `);
 
+const selectPaidEmployees = db.prepare(`
+  SELECT DISTINCT e.id, e.name, e.employee_number FROM payslips ps
+  JOIN employees e ON e.id = ps.employee_id
+  WHERE ps.period_id = ?
+  ORDER BY e.name, e.id
+`);
+
+// A published month is about the people who were paid in it. Listing whoever
+// is active today instead would add a later starter to a month they were never
+// part of (and drop someone who has since left). Legacy CLOSED periods from
+// before payslips existed have none, so they keep the live list.
 async function payrollEmployees(period) {
+  if (isFinal(period.status)) {
+    const paid = await selectPaidEmployees.all(period.id);
+    if (paid.length > 0) return paid;
+  }
   return await selectPayrollEmployees.all(period.start_date, period.end_date);
 }
 
@@ -1172,10 +1187,17 @@ const DEFICIT_REASON = 'Derived from accumulated lateness/early departures';
 const MAX_ROUTINE_DAYS = 3;
 const MAX_ROUTINE_SHARE = 0.20;
 
+// A change means a salary that REPLACED an earlier one. A starter's first
+// salary record also falls inside their first period, but that is the
+// starter flag's business, not a pay change.
 const selectSalaryChangeInPeriod = db.prepare(`
-  SELECT effective_from FROM salary_history
-  WHERE employee_id = ? AND effective_from > ? AND effective_from <= ?
-  ORDER BY effective_from ASC LIMIT 1
+  SELECT s.effective_from FROM salary_history s
+  WHERE s.employee_id = ? AND s.effective_from > ? AND s.effective_from <= ?
+    AND EXISTS (
+      SELECT 1 FROM salary_history earlier
+      WHERE earlier.employee_id = s.employee_id AND earlier.effective_from < s.effective_from
+    )
+  ORDER BY s.effective_from ASC LIMIT 1
 `);
 
 /** The employee-level reasons that make every one of their lines ATTENTION. */

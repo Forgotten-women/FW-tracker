@@ -28,11 +28,15 @@
     <!-- android_alarm_manager_plus: wakes the presence service back up at
          11:00 AM daily even after Android has fully killed it overnight
          (RECEIVE_BOOT_COMPLETED above only covers a device reboot, not
-         every morning). Declared per the plugin's own setup instructions;
-         SCHEDULE_EXACT_ALARM is unused at runtime (alarms are scheduled
-         inexact, see presence_service.dart) but targetSdk 31+ expects it
-         declared regardless. -->
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+         every morning). Declared per the plugin's own setup instructions.
+         Exact alarms are also what break reminders use (notification_service
+         .dart syncBreakReminders): "10 minutes left" must fire on time, with no
+         network, even in Doze. USE_EXACT_ALARM is granted automatically on
+         Android 13+; SCHEDULE_EXACT_ALARM covers Android 12. (Play policy
+         limits USE_EXACT_ALARM to alarm-type apps; this app ships by private
+         OTA, and falls back to inexact alarms if exact ones are refused.) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
 
     <application
         android:label="Office Tracker"
@@ -78,6 +82,22 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- flutter_local_notifications: delivers zonedSchedule() notifications
+             (break reminders), and re-arms them after a reboot or app update. -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
 

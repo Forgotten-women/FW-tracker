@@ -4,6 +4,8 @@
 // field falls back rather than throwing, so a server change surfaces as a
 // blank field, never a crashed screen.
 
+import 'payroll.dart';
+
 // ---------------------------------------------------------------------------
 // Leave
 // ---------------------------------------------------------------------------
@@ -1028,6 +1030,25 @@ class PayrollPeriodStatement {
   final List<PeriodAdjustmentItem> adjustments;
   final String? effectiveFrom;
 
+  // Payslip fields (the monthly run). All null for a legacy CLOSED period,
+  // which was finalised before payslips existed: payslipStatus null is how
+  // the backend says "legacy, computed".
+  final String? payslipId;
+  final int? payslipVersion;
+
+  /// 'PUBLISHED' | 'PAID', or null for a legacy period.
+  final String? payslipStatus;
+  final String? payDate;
+  final String? cutoffDate;
+
+  /// Epoch ms.
+  final int? publishedAt;
+  final int? paidAt;
+  final double? deductionsTotal;
+
+  /// Rich line items; null for a legacy period (see [adjustments]).
+  final List<PayslipLine>? lines;
+
   const PayrollPeriodStatement({
     required this.periodId,
     required this.name,
@@ -1046,7 +1067,24 @@ class PayrollPeriodStatement {
     required this.netPayable,
     required this.adjustments,
     this.effectiveFrom,
+    this.payslipId,
+    this.payslipVersion,
+    this.payslipStatus,
+    this.payDate,
+    this.cutoffDate,
+    this.publishedAt,
+    this.paidAt,
+    this.deductionsTotal,
+    this.lines,
   });
+
+  /// A published (or paid) payslip, as opposed to a legacy CLOSED period.
+  bool get isPayslip => payslipStatus != null;
+  bool get isPaid => payslipStatus == 'PAID';
+
+  /// The payslip's lines, or a legacy period's approved adjustments.
+  List<PayslipLine> get displayLines =>
+      lines ?? adjustments.map(PayslipLine.fromLegacyAdjustment).toList();
 
   factory PayrollPeriodStatement.fromJson(Map<String, dynamic> json) {
     return PayrollPeriodStatement(
@@ -1069,6 +1107,15 @@ class PayrollPeriodStatement {
           .map((a) => PeriodAdjustmentItem.fromJson(a as Map<String, dynamic>))
           .toList(),
       effectiveFrom: json['effectiveFrom'] as String?,
+      payslipId: json['payslipId']?.toString(),
+      payslipVersion: (json['payslipVersion'] as num?)?.toInt(),
+      payslipStatus: json['payslipStatus'] as String?,
+      payDate: json['payDate'] as String?,
+      cutoffDate: json['cutoffDate'] as String?,
+      publishedAt: parseEpochMs(json['publishedAt']),
+      paidAt: parseEpochMs(json['paidAt']),
+      deductionsTotal: (json['deductionsTotal'] as num?)?.toDouble(),
+      lines: PayslipLine.listFromJson(json['lines']),
     );
   }
 }
@@ -1077,17 +1124,35 @@ class EmployeePayrollStatement {
   final bool enabled;
   final String? message;
   final SalaryInfo? currentSalary;
+
+  /// Published/paid payslips plus legacy CLOSED periods, newest first.
   final List<PayrollPeriodStatement> periods;
+
+  /// This month so far; null unless HR has enabled it.
+  final PayrollEstimate? estimate;
+  final LatestPayslip? latestPayslip;
 
   const EmployeePayrollStatement({
     required this.enabled,
     this.message,
     this.currentSalary,
     this.periods = const [],
+    this.estimate,
+    this.latestPayslip,
   });
 
   factory EmployeePayrollStatement.fromJson(Map<String, dynamic> json) {
     final enabled = json['enabled'] == true;
+    final periods = (json['periods'] as List<dynamic>? ?? [])
+        .map((p) => PayrollPeriodStatement.fromJson(p as Map<String, dynamic>))
+        .toList();
+    // The backend already sorts newest first; this keeps it so if it ever
+    // doesn't. Stable, so equal start dates keep the server's order.
+    final indexed = periods.asMap().entries.toList()
+      ..sort((a, b) {
+        final byDate = b.value.startDate.compareTo(a.value.startDate);
+        return byDate != 0 ? byDate : a.key.compareTo(b.key);
+      });
     return EmployeePayrollStatement(
       enabled: enabled,
       message: json['message'] as String?,
@@ -1097,9 +1162,10 @@ class EmployeePayrollStatement {
               ...(json['currentSalary'] as Map<String, dynamic>),
             })
           : null,
-      periods: (json['periods'] as List<dynamic>? ?? [])
-          .map((p) => PayrollPeriodStatement.fromJson(p as Map<String, dynamic>))
-          .toList(),
+      periods: indexed.map((e) => e.value).toList(),
+      // Only ever shown while salaries are visible.
+      estimate: enabled ? PayrollEstimate.fromJson(json['estimate']) : null,
+      latestPayslip: enabled ? LatestPayslip.fromJson(json['latestPayslip']) : null,
     );
   }
 }

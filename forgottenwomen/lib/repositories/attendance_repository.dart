@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/attendance.dart';
+import '../models/payroll.dart';
 import '../services/api_client.dart';
 import '../services/notification_service.dart';
 import '../services/offline_queue.dart';
+import '../services/payslip_watcher.dart';
 
 class AttendanceRepository {
   final ApiClient apiClient;
@@ -48,7 +50,27 @@ class AttendanceRepository {
       // Non-fatal cache write failure
     }
 
-    return HomeSummary.fromJson(rawJson);
+    final summary = HomeSummary.fromJson(rawJson);
+    // Keeps the OS-scheduled break reminders in step with the server --
+    // including a break started or ended on the laptop.
+    final b = summary.todayDetails.breakInfo;
+    await NotificationService().syncBreakReminders(
+      onBreak: b.onBreak,
+      startedAtMs: b.startedAtMs,
+      dueBackAtMs: b.dueBackAtMs,
+      permittedMinutes: b.permittedMinutes,
+    );
+
+    // "Your <month> payslip is ready": latestPayslip rides on every home
+    // summary. Not awaited, so the name lookup never delays the dashboard.
+    if (rawJson.containsKey('latestPayslip')) {
+      unawaited(PayslipWatcher.observe(
+        LatestPayslip.fromJson(rawJson['latestPayslip']),
+        payslipFor: apiClient.fetchMyPayslip,
+        settlesSignal: true,
+      ));
+    }
+    return summary;
   }
 
   Future<void> _tryFlushQueue() async {
@@ -63,26 +85,20 @@ class AttendanceRepository {
 
   Future<BreakStartResult> startBreak() async {
     final res = await apiClient.startBreak();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
-      await prefs.setInt('break_started_at_ms', nowMs);
-      await prefs.setBool('break_5m_alerted', false);
-      await prefs.setBool('break_ended_alerted', false);
-    } catch (_) {}
+    // Scheduled with the OS right away, so the reminders fire on time even if
+    // the phone goes offline or the app is closed for the rest of the break.
+    await NotificationService().syncBreakReminders(
+      onBreak: true,
+      startedAtMs: DateTime.now().millisecondsSinceEpoch,
+      dueBackAtMs: res.dueBackAtMs > 0 ? res.dueBackAtMs : null,
+      permittedMinutes: res.permittedMinutes,
+    );
     return res;
   }
 
   Future<BreakEndResult> endBreak() async {
     final res = await apiClient.endBreak();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('break_started_at_ms');
-      await prefs.remove('break_5m_alerted');
-      await prefs.remove('break_ended_alerted');
-      await NotificationService().cancelNotification(9901);
-      await NotificationService().cancelNotification(9902);
-    } catch (_) {}
+    await NotificationService().cancelBreakReminders();
     return res;
   }
 

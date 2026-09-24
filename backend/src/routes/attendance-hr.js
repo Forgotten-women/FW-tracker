@@ -17,6 +17,7 @@ const rbac = require('../domain/rbac');
 const P = require('../domain/presence');
 const N = require('../domain/notifications');
 const PR = require('../domain/payroll');
+const liveDoorbell = require('../lib/liveDoorbell');
 const events = require('../events');
 const T = require('../util/time');
 
@@ -199,6 +200,9 @@ router.post('/break/start', requireDevice, async (req, res) => {
     `).run(nowMs, req.auth.employeeId, T.dateKey(nowMs));
   } catch (_) {}
 
+  // Show the break on the laptop now, not on its next heartbeat.
+  await liveDoorbell.ringDesktopsOf(req.auth.employeeId);
+
   res.status(201).json({
     status: 'SUCCESS',
     breakId: result.breakId,
@@ -245,6 +249,8 @@ router.post('/break/end', requireDevice, async (req, res) => {
       WHERE employee_id = ? AND session_date = ?
     `).run(nowMs, req.auth.employeeId, T.dateKey(nowMs));
   } catch (_) {}
+
+  await liveDoorbell.ringDesktopsOf(req.auth.employeeId);
 
   res.json({
     status: 'SUCCESS',

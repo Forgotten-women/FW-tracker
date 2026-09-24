@@ -677,6 +677,10 @@ export function WorkstationsPanel({
                             <Badge tone="warn">Locked (Away)</Badge>
                           ) : ws.status === 'IDLE' ? (
                             <Badge tone="warn">Idle (&gt;5m)</Badge>
+                          ) : ws.status === 'AGENT_STOPPED' ? (
+                            <Badge tone="danger">Agent stopped by user</Badge>
+                          ) : ws.status === 'OUTSIDE_HOURS' ? (
+                            <Badge tone="muted">Outside hours</Badge>
                           ) : (
                             <Badge tone="muted">Offline</Badge>
                           )}

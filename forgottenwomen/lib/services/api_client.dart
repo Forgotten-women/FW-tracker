@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/attendance.dart';
 import '../models/hr.dart';
+import '../models/payroll.dart';
 import 'pinned_http_client.dart';
 import 'server_time.dart';
 import 'token_store.dart';
@@ -605,6 +606,20 @@ class ApiClient {
             .get(await _uri('/api/payroll/mine/statements'), headers: await _authHeaders())
             .timeout(timeout);
         return EmployeePayrollStatement.fromJson(_decode(res));
+      });
+
+  /// One of this employee's own published payslips. The server scopes it to
+  /// the device's employee; 404 when there is no published payslip for that
+  /// period, 403 (code RESTRICTED) while salaries are hidden from employees.
+  Future<PayslipDetail> fetchMyPayslip(String periodId) => _guard(() async {
+        final res = await _http
+            .get(
+              await _uri('/api/payroll/mine/payslips/${Uri.encodeComponent(periodId)}'),
+              headers: await _authHeaders(),
+            )
+            .timeout(timeout);
+        final body = _decode(res);
+        return PayslipDetail.fromJson(body['payslip'] as Map<String, dynamic>? ?? const {});
       });
 
   /// Fetches complaint categories and statuses.

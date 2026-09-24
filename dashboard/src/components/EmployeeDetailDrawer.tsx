@@ -898,12 +898,14 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                                 ? 'ok'
                                 : workstation.status === 'ON_BREAK'
                                 ? 'warn'
+                                : workstation.status === 'AGENT_STOPPED'
+                                ? 'danger'
                                 : 'muted'
                             }
                             dot
                             size="md"
                           >
-                            {workstation.status}
+                            {workstation.status === 'AGENT_STOPPED' ? 'Agent stopped by user' : workstation.status}
                           </Badge>
 
                           {workstation.deviceId && (

@@ -253,7 +253,11 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const sessionId = `ws_${deviceId}_${dateKey}_${crypto.randomUUID().slice(0, 8)}`;
   const numActive = Math.max(0, parseInt(activeSeconds, 10) || 0);
   const numIdle = Math.max(0, parseInt(idleSeconds, 10) || 0);
-  const batchTotal = (numActive + numIdle) > 0 ? (numActive + numIdle) : 60;
+  // Explicit zeros are the agent's start-up / sync status probe and carry no
+  // time; only a heartbeat that omitted both fields falls back to 60s (the
+  // defaults above). This used to turn every probe into a phantom minute of
+  // break or idle time.
+  const batchTotal = numActive + numIdle;
 
   let effectiveActive = 0;
   let effectiveIdle = 0;
@@ -468,6 +472,15 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     locationVerdict,
     appTrackingEnabled,
     outsideWorkingHours,
+    // What this laptop's time is being booked as right now, so the widget can
+    // say plainly when it isn't counting (instead of ticking a local counter
+    // the server never credits, then snapping back to the real figure).
+    creditState: outsideWorkingHours ? 'OUTSIDE_HOURS'
+      : status === 'ON_BREAK' ? 'ON_BREAK'
+      : status === 'AWAY' ? 'AWAY'
+      : status === 'IDLE' ? 'IDLE'
+      : isVerifiedWork ? 'COUNTED'
+      : 'UNVERIFIED',
     liveStreamRequested,
     // Where to listen for an instant live-view request (see lib/liveDoorbell.js).
     // null when Supabase Realtime isn't configured: the agent then keeps polling.
@@ -740,6 +753,7 @@ router.post('/break', requireDevice, async (req, res) => {
     try {
       events.broadcast('PRESENCE_UPDATED', { employeeId, dateKey });
     } catch (_) {}
+    await liveDoorbell.ringDesktopsOf(employeeId, { exceptDeviceId: deviceId });
   } catch (err) {
     console.warn('[desktop/break] break state sync note:', err.message);
     return res.status(500).json({ status: 'ERROR', message: err.message });
@@ -753,6 +767,70 @@ router.post('/break', requireDevice, async (req, res) => {
     breakPermittedMinutes,
     breakDueBackAt,
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/desktop/break-state
+// Read-only: what the agent asks when its doorbell says the break changed on
+// another device (the phone). Writes nothing, unlike a heartbeat.
+// ---------------------------------------------------------------------------
+router.get('/break-state', requireDevice, async (req, res) => {
+  const { employeeId } = req.auth;
+  const nowMs = T.now();
+  const dateKey = T.dateKey(nowMs);
+  try {
+    const [open, taken, sched] = await Promise.all([
+      db.prepare('SELECT * FROM break_records WHERE employee_id = ? AND ended_at IS NULL').get(employeeId),
+      db.prepare('SELECT id FROM break_records WHERE employee_id = ? AND date_key = ? AND ended_at IS NOT NULL LIMIT 1').get(employeeId, dateKey),
+      schedule.resolve(employeeId, dateKey),
+    ]);
+    const permitted = open ? (open.permitted_minutes || 30) : (sched.permittedBreakMinutes || 30);
+    res.json({
+      status: 'SUCCESS',
+      onBreak: Boolean(open),
+      breakAlreadyTaken: Boolean(taken) && !open,
+      breakStartedAt: open ? Number(open.started_at) : null,
+      breakPermittedMinutes: permitted,
+      breakDueBackAt: open ? Number(open.started_at) + permitted * 60 * 1000 : null,
+      breakRemainingSeconds: open
+        ? Math.max(0, permitted * 60 - Math.round((nowMs - Number(open.started_at)) / 1000))
+        : null,
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/desktop/agent-stopped
+// Sent by the agent when someone chooses Exit. The agent may be closed -- it
+// is the employee's machine -- but the gap must be on the record rather than
+// looking like missing data: it lands in the movements feed HR already reads,
+// and the day's workstation status says the agent was stopped.
+// ---------------------------------------------------------------------------
+router.post('/agent-stopped', requireDevice, async (req, res) => {
+  const { employeeId, employeeName, deviceId } = req.auth;
+  const nowMs = T.now();
+  const dateKey = T.dateKey(nowMs);
+  const reason = String((req.body && req.body.reason) || 'Exited from the tray menu').slice(0, 200);
+  try {
+    await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+      .run(nowMs, 'DESKTOP_AGENT_STOPPED', employeeId, employeeName, reason);
+    await db.prepare(`
+      UPDATE workstation_sessions SET status = 'AGENT_STOPPED', updated_at = ?
+      WHERE device_id = ? AND session_date = ?
+    `).run(nowMs, deviceId, dateKey);
+    await audit({
+      actor: `device:${deviceId}`, action: 'DESKTOP_AGENT_STOPPED',
+      targetType: 'employee', targetId: employeeId, note: reason,
+    });
+    try {
+      require('../events').broadcast('PRESENCE_UPDATED', { employeeId, dateKey });
+    } catch (_) {}
+    res.json({ status: 'SUCCESS' });
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 // ---------------------------------------------------------------------------

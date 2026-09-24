@@ -42,6 +42,7 @@ const HELLO_EVERY: Duration = Duration::from_secs(10 * 60);
 
 struct Hub {
     ring: Notify,
+    break_changed: Notify,
     config_changed: Notify,
     realtime: Mutex<Option<RealtimeConfig>>,
     doorbell_up: AtomicBool,
@@ -53,6 +54,7 @@ fn hub() -> &'static Hub {
     static HUB: OnceLock<Hub> = OnceLock::new();
     HUB.get_or_init(|| Hub {
         ring: Notify::new(),
+        break_changed: Notify::new(),
         config_changed: Notify::new(),
         realtime: Mutex::new(None),
         doorbell_up: AtomicBool::new(false),
@@ -214,8 +216,13 @@ async fn listen(rt: &RealtimeConfig, cfg: &AppConfig, last_hello: &mut Option<In
                                     let _ = client::send_live_hello(&cfg, true, "native").await;
                                 });
                             }
-                        } else if ev == "broadcast" && on_topic && v["payload"]["event"].as_str() == Some(event) {
-                            hub().ring.notify_one();
+                        } else if ev == "broadcast" && on_topic {
+                            match v["payload"]["event"].as_str() {
+                                Some(e) if e == event => hub().ring.notify_one(),
+                                // The break changed on another device (the phone).
+                                Some("sync") => hub().break_changed.notify_one(),
+                                _ => {}
+                            }
                         } else if (ev == "phx_error" || ev == "phx_close") && on_topic {
                             return Err(format!("channel {ev}"));
                         }
@@ -227,6 +234,54 @@ async fn listen(rt: &RealtimeConfig, cfg: &AppConfig, last_hello: &mut Option<In
                     _ => {}
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Break sync
+// ---------------------------------------------------------------------------
+
+/// When the phone starts or ends a break, the backend rings the doorbell with
+/// "sync"; re-read the break state (read-only, books no time) and show it now
+/// instead of on the next minutely heartbeat.
+pub async fn run_break_sync(app: AppHandle) {
+    loop {
+        hub().break_changed.notified().await;
+        // Coalesce a start+end in quick succession into one read.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+
+        let cfg = current_config(&app);
+        let state = match client::fetch_break_state(&cfg).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[live] break sync failed: {e}");
+                continue;
+            }
+        };
+
+        crate::IS_MANUAL_BREAK.store(state.on_break, Ordering::SeqCst);
+        hub().server_break.store(state.on_break, Ordering::SeqCst);
+
+        let app_state = app.state::<crate::AppState>();
+        let updated = {
+            let mut guard = app_state.latest_response.lock().unwrap();
+            if let Some(ref mut r) = *guard {
+                r.today.on_break = state.on_break;
+                r.today.break_already_taken = state.break_already_taken;
+                r.today.break_started_at = state.break_started_at;
+                if state.break_permitted_minutes.is_some() {
+                    r.today.break_permitted_minutes = state.break_permitted_minutes;
+                }
+                r.today.break_remaining_seconds = state.break_remaining_seconds;
+                r.workstation_status = if state.on_break { "ON_BREAK".to_string() } else { "ACTIVE".to_string() };
+                Some(r.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(resp) = updated {
+            let _ = app.emit_all("heartbeat-updated", resp);
         }
     }
 }

@@ -55,6 +55,22 @@ async function emitTransition(employeeId, employeeName, before, after, nowMs) {
 // Accepts either a single observation or a batch. The app buffers heartbeats
 // locally while the server is unreachable and replays them with their ORIGINAL
 // timestamps; recordEvent dedupes, so replay is idempotent.
+const selectOpenBreak = db.prepare(
+  'SELECT started_at, permitted_minutes FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
+);
+
+async function openBreakState(employeeId) {
+  try {
+    const open = await selectOpenBreak.get(employeeId);
+    if (!open) return { onBreak: false };
+    const permittedMinutes = Number(open.permitted_minutes) || 30;
+    const startedAtMs = Number(open.started_at);
+    return { onBreak: true, startedAtMs, permittedMinutes, dueBackAtMs: startedAtMs + permittedMinutes * 60 * 1000 };
+  } catch (_) {
+    return null; // unknown: the phone leaves its reminders as they are
+  }
+}
+
 router.post('/ping', requireDevice, async (req, res) => {
   const { employeeId, deviceId, employeeName, employeeRole } = req.auth;
   const nowMs = T.now();
@@ -143,6 +159,10 @@ router.post('/ping', requireDevice, async (req, res) => {
     // attendance, instead of leaving them to find out from a payslip.
     presenceContinues: binding.bound,
     bindingState: binding.reason,
+    // The open break, if any -- including one started on the laptop -- so the
+    // phone can schedule its break-ending reminders locally (they then fire
+    // with no network at all).
+    breakState: await openBreakState(employeeId),
   });
 });
 

@@ -1568,6 +1568,11 @@ CREATE INDEX IF NOT EXISTS idx_payroll_adj_type_source
 CREATE INDEX IF NOT EXISTS idx_absence_unpaid_lookup
   ON absence_records (employee_id, status, treat_as_unpaid, consequences_applied_at);
 
+-- Migration 024 (configurable shifts and work mode)
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_mode TEXT NOT NULL DEFAULT 'IN_OFFICE';
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS remote_allowed INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_employees_work_mode ON employees(work_mode);
+
 -- Migration 023
 ALTER TABLE app_releases ADD COLUMN IF NOT EXISTS sha256 TEXT;
 
