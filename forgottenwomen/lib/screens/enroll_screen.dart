@@ -8,6 +8,7 @@ import '../services/device_probe.dart';
 import '../services/presence_service.dart';
 import '../services/token_store.dart';
 import '../theme.dart';
+import '../widgets/glass/glass.dart';
 
 class EnrollScreen extends StatefulWidget {
   final VoidCallback onEnrolled;
@@ -119,8 +120,8 @@ class _EnrollScreenState extends State<EnrollScreen> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
-        title: const Text(
+        backgroundColor: AppColors.sheet,
+        title: Text(
           'Backend Server URL',
           style: TextStyle(color: AppColors.textLight, fontSize: 18, fontWeight: FontWeight.bold),
         ),
@@ -128,7 +129,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'Specify the office attendance backend address.',
               style: TextStyle(color: AppColors.textMuted, fontSize: 13),
             ),
@@ -136,10 +137,10 @@ class _EnrollScreenState extends State<EnrollScreen> {
             TextField(
               controller: tempController,
               autocorrect: false,
-              style: const TextStyle(color: AppColors.textLight, fontSize: 14),
+              style: TextStyle(color: AppColors.textLight, fontSize: 14),
               decoration: InputDecoration(
                 labelText: 'Server URL',
-                labelStyle: const TextStyle(color: AppColors.textMuted),
+                labelStyle: TextStyle(color: AppColors.textMuted),
                 hintText: TokenStore.defaultServerUrl,
                 filled: true,
                 fillColor: AppColors.bgDark,
@@ -153,8 +154,8 @@ class _EnrollScreenState extends State<EnrollScreen> {
               onPressed: () {
                 tempController.text = TokenStore.defaultServerUrl;
               },
-              icon: const Icon(Icons.restore, size: 16, color: AppColors.teal),
-              label: const Text(
+              icon: Icon(Icons.restore, size: 16, color: AppColors.teal),
+              label: Text(
                 'Reset to Production Cloud',
                 style: TextStyle(color: AppColors.teal, fontSize: 12),
               ),
@@ -164,7 +165,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.teal),
@@ -186,9 +187,9 @@ class _EnrollScreenState extends State<EnrollScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return GlassScaffold(
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Pair this device',
           style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textLight),
         ),
@@ -202,7 +203,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
         actions: [
           if (kDebugMode)
             IconButton(
-              icon: const Icon(Icons.settings_outlined, color: AppColors.textMuted),
+              icon: Icon(Icons.settings_outlined, color: AppColors.textMuted),
               tooltip: 'Server settings',
               onPressed: _showServerDialog,
             ),
@@ -231,10 +232,10 @@ class _EnrollScreenState extends State<EnrollScreen> {
                           color: AppColors.teal.withOpacity(0.12),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.badge_outlined, size: 36, color: AppColors.teal),
+                        child: Icon(Icons.badge_outlined, size: 36, color: AppColors.teal),
                       ),
                       const SizedBox(height: 16),
-                      const Text(
+                      Text(
                         'Office Tracker',
                         style: TextStyle(
                           fontSize: 20,
@@ -243,7 +244,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      const Text(
+                      Text(
                         'Enter the pairing code shown on your admin dashboard.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: AppColors.textMuted, fontSize: 13),
@@ -253,7 +254,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
                         controller: _codeController,
                         textCapitalization: TextCapitalization.characters,
                         autocorrect: false,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           letterSpacing: 3,
                           fontWeight: FontWeight.bold,
@@ -262,22 +263,22 @@ class _EnrollScreenState extends State<EnrollScreen> {
                         textAlign: TextAlign.center,
                         decoration: InputDecoration(
                           labelText: 'Pairing code',
-                          labelStyle: const TextStyle(color: AppColors.textMuted),
+                          labelStyle: TextStyle(color: AppColors.textMuted),
                           hintText: 'e.g. WKYJ-UPNM',
                           hintStyle: TextStyle(color: AppColors.textMuted.withOpacity(0.4)),
                           filled: true,
                           fillColor: AppColors.bgDark,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.border),
+                            borderSide: BorderSide(color: AppColors.border),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.border),
+                            borderSide: BorderSide(color: AppColors.border),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                            borderSide: BorderSide(color: AppColors.primary, width: 1.5),
                           ),
                         ),
                       ),
@@ -300,13 +301,13 @@ class _EnrollScreenState extends State<EnrollScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline, color: AppColors.danger, size: 20),
+                        Icon(Icons.error_outline, color: AppColors.danger, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _error!,
-                            style: const TextStyle(
-                              color: Color(0xFFFCA5A5),
+                            style: TextStyle(
+                              color: AppColors.danger,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
@@ -332,7 +333,7 @@ class _EnrollScreenState extends State<EnrollScreen> {
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: AppColors.onAccent,
                             ),
                           )
                         : const Icon(Icons.link),
@@ -353,19 +354,19 @@ class _EnrollScreenState extends State<EnrollScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
+                                Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
                                 const SizedBox(width: 6),
                                 Flexible(
                                   child: Text(
                                     _serverController.text.isNotEmpty
                                         ? _serverController.text
                                         : TokenStore.defaultServerUrl,
-                                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                                    style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                const Icon(Icons.edit_outlined, size: 12, color: AppColors.teal),
+                                Icon(Icons.edit_outlined, size: 12, color: AppColors.teal),
                               ],
                             ),
                           ),
@@ -375,12 +376,12 @@ class _EnrollScreenState extends State<EnrollScreen> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
+                              Icon(Icons.cloud_outlined, size: 14, color: AppColors.textMuted),
                               const SizedBox(width: 6),
                               Flexible(
                                 child: Text(
                                   TokenStore.defaultServerUrl,
-                                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
@@ -415,7 +416,7 @@ class _ConsentNotice extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
               Icon(Icons.privacy_tip_outlined, size: 18, color: AppColors.teal),
               SizedBox(width: 8),
@@ -430,7 +431,7 @@ class _ConsentNotice extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'While paired, this app reports the time you are connected to the '
             'office Wi-Fi network, so your working hours can be recorded.\n\n'
             'It records: connected Wi-Fi network name, access point identifier, '
@@ -451,7 +452,7 @@ class _ConsentNotice extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               dense: true,
               activeColor: AppColors.teal,
-              title: const Text(
+              title: Text(
                 'I understand and agree to pair this device',
                 style: TextStyle(
                   fontSize: 12,

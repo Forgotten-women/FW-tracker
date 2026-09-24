@@ -160,7 +160,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
         border: Border.all(color: AppColors.border, width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.5),
+            color: AppColors.shadow,
             blurRadius: 30,
             offset: const Offset(0, 10),
           ),
@@ -191,7 +191,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   children: [
                     Text(
                       isMandatory ? 'Required Update' : 'New Update Available',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: AppColors.textLight,
@@ -201,7 +201,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                     const SizedBox(height: 2),
                     Text(
                       info.versionName != null ? 'Version ${info.versionName}' : 'New Version Ready',
-                      style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                      style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                     ),
                   ],
                 ),
@@ -216,7 +216,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   ),
                   child: Text(
                     info.formattedFileSize,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       fontFamily: 'monospace',
                       fontWeight: FontWeight.bold,
@@ -238,7 +238,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'WHAT\'S NEW',
                     style: TextStyle(
                       fontSize: 11,
@@ -250,7 +250,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   const SizedBox(height: 6),
                   Text(
                     info.releaseNotes!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       color: AppColors.textLight,
                       height: 1.45,
@@ -271,13 +271,13 @@ class _UpdateDialogState extends State<UpdateDialog> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline, color: AppColors.danger, size: 20),
+                  Icon(Icons.error_outline, color: AppColors.danger, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       _errorMessage!,
-                      style: const TextStyle(
-                        color: Color(0xFFFCA5A5),
+                      style: TextStyle(
+                        color: AppColors.danger,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
@@ -297,11 +297,11 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   children: [
                     Text(
                       _statusText ?? 'Downloading…',
-                      style: const TextStyle(fontSize: 12, color: AppColors.textLight),
+                      style: TextStyle(fontSize: 12, color: AppColors.textLight),
                     ),
                     Text(
                       '$_progress%',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         fontFamily: 'monospace',
@@ -317,7 +317,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                     value: _progress > 0 ? _progress / 100.0 : null,
                     minHeight: 8,
                     backgroundColor: AppColors.surfaceLight,
-                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.teal),
+                    valueColor: AlwaysStoppedAnimation<Color>(AppColors.teal),
                   ),
                 ),
               ],
@@ -332,9 +332,9 @@ class _UpdateDialogState extends State<UpdateDialog> {
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        side: const BorderSide(color: AppColors.border),
+                        side: BorderSide(color: AppColors.border),
                       ),
-                      child: const Text('Later', style: TextStyle(color: AppColors.textMuted)),
+                      child: Text('Later', style: TextStyle(color: AppColors.textMuted)),
                     ),
                   ),
                   const SizedBox(width: 12),

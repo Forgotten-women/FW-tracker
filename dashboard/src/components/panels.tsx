@@ -14,6 +14,7 @@ import type {
 import { Badge, Button, Empty, Input, Panel, STATUS_META } from './primitives';
 import { SetSalaryModal } from './PayrollPanel';
 import { ManualTimeModal } from './ManualTimeModal';
+import { ThemeSwitcher } from './ThemeSwitcher';
 
 // --- header ----------------------------------------------------------------
 
@@ -65,11 +66,11 @@ export function Header({
   }, [tz]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/8 bg-slate-950/80 px-6 py-3.5 backdrop-blur-xl">
+    <header className="glass-panel rounded-2xl px-4 py-3 sm:px-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         {/* Brand & Location */}
         <div className="flex items-center gap-3.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-lg shadow-indigo-500/25 border border-indigo-400/30">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-gradient text-on-accent shadow-accent">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
                 strokeLinecap="round"
@@ -100,17 +101,19 @@ export function Header({
         {/* Global Stats Clock & Actions */}
         <div className="flex items-center gap-3.5">
           {/* Time & Timezone Pill */}
-          <div className="hidden sm:flex items-center gap-2.5 rounded-xl border border-white/8 bg-slate-900/80 px-3.5 py-1.5 shadow-inner">
+          <div className="hidden sm:flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/5 px-3.5 py-1.5">
             <div className="text-right">
               <div className="font-mono text-xs font-bold text-slate-200 tnum">
                 {clock || '--:--:--'}
               </div>
               <div className="text-[10px] text-slate-400">{date}</div>
             </div>
-            <span className="rounded-md bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-300">
+            <span className="rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-300">
               {tz}
             </span>
           </div>
+
+          <ThemeSwitcher />
 
           {/* Notifications Bell */}
           {onOpenNotifications && (
@@ -118,7 +121,8 @@ export function Header({
               type="button"
               onClick={onOpenNotifications}
               title="Notifications & Requests"
-              className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:border-indigo-500/50 hover:bg-slate-800 hover:text-white transition shadow-sm active:scale-95 cursor-pointer"
+              aria-label="Notifications"
+              className="glass-panel relative flex h-10 w-10 items-center justify-center rounded-xl text-slate-200 hover:text-white transition active:scale-95 cursor-pointer"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
@@ -129,7 +133,7 @@ export function Header({
                 />
               </svg>
               {unreadNotificationsCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white shadow-md ring-2 ring-[#07090E] animate-pulse">
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-on-accent shadow-md ring-2 ring-ink animate-pulse">
                   {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
                 </span>
               )}
@@ -401,7 +405,7 @@ export function PresenceGrid({
           onClick={() => setStatusFilter('ALL')}
           className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer ${
             statusFilter === 'ALL'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+              ? 'bg-indigo-600 text-on-accent shadow-md shadow-indigo-500/20'
               : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
           }`}
         >
@@ -412,7 +416,7 @@ export function PresenceGrid({
           onClick={() => setStatusFilter('IN_OFFICE')}
           className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
             statusFilter === 'IN_OFFICE'
-              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
+              ? 'bg-emerald-600 text-on-accent shadow-md shadow-emerald-500/20'
               : 'bg-slate-900/80 text-emerald-400 hover:bg-slate-800'
           }`}
         >
@@ -424,7 +428,7 @@ export function PresenceGrid({
           onClick={() => setStatusFilter('ON_BREAK')}
           className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
             statusFilter === 'ON_BREAK'
-              ? 'bg-amber-600 text-white shadow-md shadow-amber-500/20'
+              ? 'bg-amber-600 text-on-accent shadow-md shadow-amber-500/20'
               : 'bg-slate-900/80 text-amber-400 hover:bg-slate-800'
           }`}
         >
@@ -436,7 +440,7 @@ export function PresenceGrid({
           onClick={() => setStatusFilter('LATE')}
           className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
             statusFilter === 'LATE'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20'
+              ? 'bg-rose-600 text-on-accent shadow-md shadow-rose-500/20'
               : 'bg-slate-900/80 text-rose-400 hover:bg-slate-800'
           }`}
         >
@@ -496,7 +500,7 @@ export function PresenceGrid({
                 <div className="flex items-start justify-between gap-3">
                   {/* Avatar & Name */}
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 border border-white/10 text-xs font-bold text-white shadow-inner group-hover:border-cyan-500/40 transition">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 border border-white/10 text-xs font-bold text-on-accent shadow-inner group-hover:border-cyan-500/40 transition">
                       {initials}
                     </div>
                     <div className="min-w-0">

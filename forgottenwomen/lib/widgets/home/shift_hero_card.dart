@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../models/attendance.dart';
 import '../../theme.dart';
+import '../glass/glass.dart';
 
+/// Hero: live presence status, a progress ring for today's worked time
+/// against the daily target, and first-in / remaining / last-seen tiles.
 class ShiftHeroCard extends StatelessWidget {
   final TodayAttendanceDetails todayDetails;
   final DateTime liveNow;
@@ -29,7 +32,6 @@ class ShiftHeroCard extends StatelessWidget {
 
     Color statusTone;
     String statusLabel;
-
     if (onBreak) {
       statusTone = AppColors.amber;
       statusLabel = 'ON BREAK';
@@ -37,20 +39,21 @@ class ShiftHeroCard extends StatelessWidget {
       statusTone = AppColors.teal;
       statusLabel = isVerified ? 'IN OFFICE' : 'ON NETWORK';
     } else if (attendance.status == PresenceStatus.away) {
-      statusTone = const Color(0xFF64748B);
+      statusTone = AppColors.neutral;
       statusLabel = 'OFF-SITE';
     } else if (attendance.status == PresenceStatus.closed) {
-      statusTone = const Color(0xFF64748B);
+      statusTone = AppColors.neutral;
       statusLabel = 'SHIFT ENDED';
     } else {
-      statusTone = const Color(0xFF64748B);
+      statusTone = AppColors.neutral;
       statusLabel = 'NOT CHECKED IN';
     }
 
-    // Daily target is 8h 00m = 480 minutes
-    const int targetMinutes = 480;
+    final serverTarget = todayDetails.workingHours.daily.requiredMinutes;
+    final int targetMinutes = serverTarget > 0 ? serverTarget : 480;
 
-    // Real-time live worked time: increment with local clock when employee is active
+    // Tick the worked total forward with the local clock while the employee
+    // is present, so the ring moves between server syncs.
     int extraMinutes = 0;
     if (isPresent && !onBreak && serverTimeMs != null && serverTimeMs! > 0) {
       final elapsedMs = liveNow.millisecondsSinceEpoch - serverTimeMs!;
@@ -61,258 +64,153 @@ class ShiftHeroCard extends StatelessWidget {
     final int workedMinutes = attendance.totalMinutes + extraMinutes;
     final double progress = (workedMinutes / targetMinutes).clamp(0.0, 1.0);
     final int percent = (progress * 100).round();
-
-    // Formatted worked time
-    final int hours = workedMinutes ~/ 60;
-    final int mins = workedMinutes % 60;
-    final String workedFormatted = '${hours}h ${mins.toString().padLeft(2, '0')}m';
-
-    // Remaining time to target
     final int remainingMinutes = (targetMinutes - workedMinutes).clamp(0, targetMinutes);
-    final int remHours = remainingMinutes ~/ 60;
-    final int remMins = remainingMinutes % 60;
-    final String remainingFormatted = remainingMinutes == 0
-        ? 'Target Completed! 🎉'
-        : '${remHours > 0 ? '${remHours}h ' : ''}${remMins}m remaining';
+    final bool targetMet = remainingMinutes == 0;
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            statusTone.withValues(alpha: 0.12),
-            AppColors.surfaceDark,
-            AppColors.surfaceDark,
-          ],
-        ),
-        border: Border.all(
-          color: statusTone.withValues(alpha: 0.35),
-          width: 1.2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Top Row: Status Pill & Date
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: statusTone.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: statusTone.withValues(alpha: 0.5)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: statusTone,
-                          boxShadow: [
-                            BoxShadow(
-                              color: statusTone.withValues(alpha: 0.8),
-                              blurRadius: 6,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        statusLabel,
-                        style: TextStyle(
-                          color: statusTone,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  _formatTodayHeader(liveNow),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
+    final ringColors = onBreak
+        ? [AppColors.amber, const Color(0xFFF97316), AppColors.amber]
+        : targetMet
+            ? [AppColors.teal, const Color(0xFF06B6D4), AppColors.teal]
+            : [AppColors.primary, AppColors.accentEnd, const Color(0xFFEC4899)];
 
-            // Time Worked Big Display
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  workedFormatted,
-                  style: const TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    letterSpacing: -1.0,
-                    height: 1.1,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.primaryLight.withValues(alpha: 0.3)),
-                  ),
-                  child: Text(
-                    '$percent%',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primaryLight,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Target: 8h 00m • $remainingFormatted',
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 16),
+    final String networkLabel = isVerified
+        ? 'Office Wi‑Fi'
+        : (networkSsid != null && networkSsid!.isNotEmpty ? networkSsid! : 'Not verified');
 
-            // Sleek Rounded Progress Bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                height: 8,
-                child: LinearProgressIndicator(
-                  value: progress,
-                  backgroundColor: AppColors.border,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    progress >= 1.0 ? AppColors.teal : AppColors.primaryLight,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-
-            // Punch in / out info chips
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppColors.bgDark.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _buildMetaChip(
-                      icon: Icons.login_rounded,
-                      label: 'First In',
-                      value: attendance.firstCheckIn.isEmpty
-                          ? '—'
-                          : attendance.firstCheckIn,
-                      valueColor: AppColors.teal,
-                    ),
-                  ),
-                  Container(
-                    width: 1,
-                    height: 24,
-                    color: AppColors.border,
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: _buildMetaChip(
-                        icon: Icons.access_time_rounded,
-                        label: 'Last Seen',
-                        value: attendance.lastActiveTime.isEmpty
-                            ? '—'
-                            : attendance.lastActiveTime,
-                        valueColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMetaChip({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color valueColor,
-  }) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: AppColors.textMuted),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return GlassCard(
+      blur: true,
+      strong: true,
+      radius: 28,
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      child: Column(
+        children: [
+          Row(
             children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textMuted,
-                ),
+              StatusPill(label: statusLabel, tone: statusTone),
+              const Spacer(),
+              Icon(
+                isVerified ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                size: 14,
+                color: AppColors.textSecondary,
               ),
-              Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: valueColor,
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  networkLabel,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ),
             ],
           ),
-        ),
-      ],
+          const SizedBox(height: 12),
+          ProgressRing(
+            progress: progress,
+            size: 196,
+            stroke: 14,
+            colors: ringColors,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  onBreak ? 'ON BREAK' : 'WORKED TODAY',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                    color: AppColors.textTertiary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _fmt(workedMinutes),
+                  style: monoStyle(fontSize: 32, letterSpacing: -1.2),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  targetMet ? 'Target reached' : 'of ${_fmt(targetMinutes)} · $percent%',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: targetMet ? AppColors.teal : AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _tile(
+                  'First in',
+                  attendance.firstCheckIn.isEmpty ? '—' : attendance.firstCheckIn,
+                  AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _tile(
+                  'Remaining',
+                  targetMet ? 'Done' : _fmt(remainingMinutes),
+                  targetMet ? AppColors.teal : AppColors.primaryLight,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _tile(
+                  'Last seen',
+                  attendance.lastActiveTime.isEmpty ? '—' : attendance.lastActiveTime,
+                  AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  String _formatTodayHeader(DateTime dt) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    final dayName = days[dt.weekday - 1];
-    final monthName = months[dt.month - 1];
-    return '$dayName, $monthName ${dt.day}';
+  Widget _tile(String label, String value, Color valueColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.cardRaised,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.glassBorder),
+      ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textTertiary,
+            ),
+          ),
+          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: valueColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
+
+  static String _fmt(int minutes) =>
+      '${minutes ~/ 60}h ${(minutes % 60).toString().padLeft(2, '0')}m';
 }

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dashboard/node_modules/next/dist/bin/next", "dev", "dashboard", "-p", "3100"],
+      "env": { "API_ORIGIN": "https://backend-ten-lyart-57.vercel.app" },
+      "port": 3100
+    }
+  ]
+}

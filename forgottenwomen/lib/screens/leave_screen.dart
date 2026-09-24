@@ -139,7 +139,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
     final booked = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surfaceDark,
+      backgroundColor: AppColors.sheet,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -152,7 +152,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
     final reported = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surfaceDark,
+      backgroundColor: AppColors.sheet,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -165,16 +165,16 @@ class _LeaveScreenState extends State<LeaveScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
-        title: const Text('Cancel Request?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: AppColors.sheet,
+        title: Text('Cancel Request?', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
         content: Text(
           'Are you sure you want to cancel this leave application (${r.type}: ${r.from} to ${r.to})?',
-          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+          style: TextStyle(color: AppColors.textMuted, fontSize: 13),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Keep', style: TextStyle(color: AppColors.textMuted)),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -196,14 +196,14 @@ class _LeaveScreenState extends State<LeaveScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bgDark,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppColors.surfaceDark,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Leave & Time Off', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.white)),
+        title: Text('Leave & Time Off', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.textPrimary)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white70),
+            icon: Icon(Icons.refresh, color: AppColors.textSecondary),
             onPressed: _loading ? null : _load,
           ),
         ],
@@ -212,8 +212,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
           ? FloatingActionButton.extended(
               onPressed: _openBooking,
               backgroundColor: AppColors.primary,
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text('Apply for Leave', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              icon: const Icon(Icons.add, color: AppColors.onAccent),
+              label: const Text('Apply for Leave', style: TextStyle(color: AppColors.onAccent, fontWeight: FontWeight.bold)),
             )
           : null,
       body: Column(
@@ -221,7 +221,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
           _tabSelector(),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                ? Center(child: CircularProgressIndicator(color: AppColors.primary))
                 : RefreshIndicator(
                     color: AppColors.primary,
                     onRefresh: _load,
@@ -258,12 +258,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.dashboard_outlined, size: 14, color: _selectedTab == 0 ? Colors.white : AppColors.textMuted),
+                        Icon(Icons.dashboard_outlined, size: 14, color: _selectedTab == 0 ? AppColors.onAccent : AppColors.textMuted),
                         const SizedBox(width: 4),
                         Text(
                           'Overview',
                           style: TextStyle(
-                            color: _selectedTab == 0 ? Colors.white : AppColors.textMuted,
+                            color: _selectedTab == 0 ? AppColors.onAccent : AppColors.textMuted,
                             fontWeight: _selectedTab == 0 ? FontWeight.bold : FontWeight.normal,
                             fontSize: 12,
                           ),
@@ -287,12 +287,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.calendar_month_outlined, size: 14, color: _selectedTab == 1 ? Colors.white : AppColors.textMuted),
+                        Icon(Icons.calendar_month_outlined, size: 14, color: _selectedTab == 1 ? AppColors.onAccent : AppColors.textMuted),
                         const SizedBox(width: 4),
                         Text(
                           'Statement',
                           style: TextStyle(
-                            color: _selectedTab == 1 ? Colors.white : AppColors.textMuted,
+                            color: _selectedTab == 1 ? AppColors.onAccent : AppColors.textMuted,
                             fontWeight: _selectedTab == 1 ? FontWeight.bold : FontWeight.normal,
                             fontSize: 12,
                           ),
@@ -316,12 +316,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.beach_access_outlined, size: 14, color: _selectedTab == 2 ? Colors.white : AppColors.textMuted),
+                        Icon(Icons.beach_access_outlined, size: 14, color: _selectedTab == 2 ? AppColors.onAccent : AppColors.textMuted),
                         const SizedBox(width: 4),
                         Text(
                           'Holidays (${_bankHolidays.length})',
                           style: TextStyle(
-                            color: _selectedTab == 2 ? Colors.white : AppColors.textMuted,
+                            color: _selectedTab == 2 ? AppColors.onAccent : AppColors.textMuted,
                             fontWeight: _selectedTab == 2 ? FontWeight.bold : FontWeight.normal,
                             fontSize: 12,
                           ),
@@ -348,7 +348,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
               const SizedBox(height: 16),
               _actionButtons(),
               const SizedBox(height: 24),
-              const Text(
+              Text(
                 'LEAVE APPLICATIONS & HISTORY',
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
               ),
@@ -361,7 +361,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
                       'No leave requests on record.\nTap "Apply for Leave" to submit a holiday or leave request.',
                       textAlign: TextAlign.center,
@@ -372,7 +372,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
               else
                 ..._requests.map(_requestRow),
               const SizedBox(height: 24),
-              const Text(
+              Text(
                 'SELF-REPORTED SICKNESS & ABSENCES',
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
               ),
@@ -385,7 +385,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
                       'No sickness reports or absences on record.\nUse "Report Sickness / Absence" above if unwell or experiencing an emergency.',
                       textAlign: TextAlign.center,
@@ -402,7 +402,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
 
   Widget _monthlyStatementTab() {
     if (_loadingMonthly && _monthlyReport == null) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
 
     final r = _monthlyReport;
@@ -413,12 +413,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.info_outline, size: 48, color: AppColors.amber),
+              Icon(Icons.info_outline, size: 48, color: AppColors.amber),
               const SizedBox(height: 12),
               Text(
                 r?.blockedMessage ?? 'Monthly leave statement is not available yet.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
               ),
             ],
           ),
@@ -466,7 +466,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
+              Row(
                 children: [
                   Icon(Icons.event_note, size: 16, color: AppColors.primaryLight),
                   SizedBox(width: 8),
@@ -477,7 +477,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 ],
               ),
               if (_loadingMonthly)
-                const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
+                SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
             ],
           ),
           const SizedBox(height: 10),
@@ -492,8 +492,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
               child: DropdownButton<String>(
                 value: r.monthKey.isNotEmpty ? r.monthKey : null,
                 isExpanded: true,
-                dropdownColor: AppColors.surfaceDark,
-                icon: const Icon(Icons.arrow_drop_down, color: AppColors.primaryLight),
+                dropdownColor: AppColors.sheet,
+                icon: Icon(Icons.arrow_drop_down, color: AppColors.primaryLight),
                 items: r.availableMonths.map((m) {
                   return DropdownMenuItem<String>(
                     value: m.monthKey,
@@ -502,7 +502,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                       children: [
                         Text(
                           m.label,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                          style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13),
                         ),
                         if (m.isCurrent)
                           Container(
@@ -511,7 +511,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                               color: AppColors.teal.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(4),
                             ),
-                            child: const Text(
+                            child: Text(
                               'Current',
                               style: TextStyle(color: AppColors.teal, fontSize: 10, fontWeight: FontWeight.bold),
                             ),
@@ -536,7 +536,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
             const SizedBox(height: 8),
             Text(
               'Work Anniversary Cycle: ${r.cycleStartDate} → ${r.cycleEndDate} (Renews: ${r.nextRenewalDate ?? '--'})',
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+              style: TextStyle(color: AppColors.textMuted, fontSize: 11),
             ),
           ],
         ],
@@ -560,7 +560,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
         border: Border.all(color: AppColors.primary.withOpacity(0.45)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: AppColors.shadow,
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -578,14 +578,14 @@ class _LeaveScreenState extends State<LeaveScreen> {
                   color: AppColors.primary.withOpacity(0.25),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.lightbulb_outline, size: 20, color: AppColors.primaryLight),
+                child: Icon(Icons.lightbulb_outline, size: 20, color: AppColors.primaryLight),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   r.summaryExplanation,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: AppColors.textPrimary,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     height: 1.4,
@@ -595,9 +595,9 @@ class _LeaveScreenState extends State<LeaveScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          const Divider(color: AppColors.border, height: 1),
+          Divider(color: AppColors.border, height: 1),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'This monthly statement updates automatically on the 1st of every month.',
             style: TextStyle(color: AppColors.textMuted, fontSize: 10.5),
           ),
@@ -610,7 +610,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'ENTITLEMENT & ACCRUAL SUMMARY',
           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
         ),
@@ -623,7 +623,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 value: '${d(r.annualEntitlementDays)}d',
                 subtext: 'Yearly base',
                 icon: Icons.flag_outlined,
-                color: Colors.white,
+                color: AppColors.textPrimary,
               ),
             ),
             const SizedBox(width: 10),
@@ -658,7 +658,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 value: '${d(r.remainingAnnualLeave)}d',
                 subtext: 'Total year remaining',
                 icon: Icons.event_available_outlined,
-                color: Colors.white,
+                color: AppColors.textPrimary,
               ),
             ),
           ],
@@ -694,7 +694,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w500),
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w500),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -710,7 +710,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
           const SizedBox(height: 2),
           Text(
             subtext,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 10),
           ),
         ],
       ),
@@ -728,7 +728,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'LEAVE USAGE BREAKDOWN',
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
           ),
@@ -740,7 +740,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
             monthValue: '${d(r.monthPaidLeaveUsed)}d this month',
             cycleValue: '${d(r.cyclePaidLeaveUsed)}d cycle total',
           ),
-          const Divider(color: AppColors.border, height: 20),
+          Divider(color: AppColors.border, height: 20),
           _usageRow(
             icon: Icons.money_off_csred_outlined,
             iconColor: AppColors.amber,
@@ -749,7 +749,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
             cycleValue: '${d(r.cycleUnpaidLeaveTaken)}d cycle total',
           ),
           if (r.approvedCarryForwardDays > 0) ...[
-            const Divider(color: AppColors.border, height: 20),
+            Divider(color: AppColors.border, height: 20),
             _usageRow(
               icon: Icons.forward_outlined,
               iconColor: AppColors.primaryLight,
@@ -785,9 +785,9 @@ class _LeaveScreenState extends State<LeaveScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+              Text(title, style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
               const SizedBox(height: 2),
-              Text(cycleValue, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+              Text(cycleValue, style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
             ],
           ),
         ),
@@ -818,10 +818,14 @@ class _LeaveScreenState extends State<LeaveScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'REQUESTED LEAVE SUFFICIENCY',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+              Expanded(
+                child: Text(
+                  'REQUESTED LEAVE SUFFICIENCY',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -838,7 +842,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      isOk ? 'Sufficient Entitlement' : 'Advance / Overdraft Needed',
+                      isOk ? 'Sufficient' : 'Advance Needed',
                       style: TextStyle(
                         color: isOk ? AppColors.teal : AppColors.amber,
                         fontSize: 10,
@@ -853,13 +857,13 @@ class _LeaveScreenState extends State<LeaveScreen> {
           const SizedBox(height: 10),
           Text(
             suff.message,
-            style: const TextStyle(color: Colors.white, fontSize: 12.5, height: 1.4),
+            style: TextStyle(color: AppColors.textPrimary, fontSize: 12.5, height: 1.4),
           ),
           if (suff.pendingRequests.isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Divider(color: AppColors.border, height: 1),
+            Divider(color: AppColors.border, height: 1),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'PENDING APPLICATIONS EVALUATED:',
               style: TextStyle(color: AppColors.textMuted, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8),
             ),
@@ -870,13 +874,17 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '${p.startDate} → ${p.endDate} (${p.typeName})',
-                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    Expanded(
+                      child: Text(
+                        '${p.startDate} → ${p.endDate} (${p.typeName})',
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       '${d(p.days)} days',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                      style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 11),
                     ),
                   ],
                 ),
@@ -904,11 +912,15 @@ class _LeaveScreenState extends State<LeaveScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'LEAVE ADJUSTMENTS IN THIS MONTH',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+              Expanded(
+                child: Text(
+                  'LEAVE ADJUSTMENTS IN THIS MONTH',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              if (r.totalMonthAdjustments != 0)
+              if (r.totalMonthAdjustments != 0) ...[
+                const SizedBox(width: 8),
                 Text(
                   r.totalMonthAdjustments > 0 ? '+${d(r.totalMonthAdjustments)}d' : '${d(r.totalMonthAdjustments)}d',
                   style: TextStyle(
@@ -917,6 +929,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                     fontSize: 11,
                   ),
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 10),
@@ -927,7 +940,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 color: AppColors.bgDark,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   Icon(Icons.tune_outlined, size: 16, color: AppColors.textMuted),
                   SizedBox(width: 8),
@@ -973,12 +986,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
                         children: [
                           Text(
                             a.description,
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                            style: TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w500),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'Date: ${a.date}${a.createdBy != null ? ' • by ${a.createdBy}' : ''}',
-                            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 10),
                           ),
                         ],
                       ),
@@ -1003,8 +1016,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 backgroundColor: AppColors.amber.withOpacity(0.05),
               ),
-              icon: const Icon(Icons.sick_outlined, size: 16, color: AppColors.amber),
-              label: const Text(
+              icon: Icon(Icons.sick_outlined, size: 16, color: AppColors.amber),
+              label: Text(
                 'Report Sickness / Absence',
                 style: TextStyle(color: AppColors.amber, fontWeight: FontWeight.bold, fontSize: 12),
               ),
@@ -1021,7 +1034,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppColors.danger.withOpacity(0.4)),
         ),
-        child: Text(msg, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+        child: Text(msg, style: TextStyle(color: AppColors.danger, fontSize: 12)),
       );
 
   Widget _balanceCard(LeaveBalance b) {
@@ -1035,12 +1048,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.info_outline, color: AppColors.amber),
+            Icon(Icons.info_outline, color: AppColors.amber),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 b.blockedMessage ?? 'Your leave balance is not available yet.',
-                style: const TextStyle(fontSize: 12, color: AppColors.amber, height: 1.4),
+                style: TextStyle(fontSize: 12, color: AppColors.amber, height: 1.4),
               ),
             ),
           ],
@@ -1061,7 +1074,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
         border: Border.all(color: AppColors.primary.withOpacity(0.35)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: AppColors.shadow,
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -1073,11 +1086,15 @@ class _LeaveScreenState extends State<LeaveScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'AVAILABLE LEAVE',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+              Expanded(
+                child: Text(
+                  'AVAILABLE LEAVE',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: AppColors.textMuted),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              if (renewal != null)
+              if (renewal != null) ...[
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
@@ -1087,9 +1104,10 @@ class _LeaveScreenState extends State<LeaveScreen> {
                   ),
                   child: Text(
                     'Renews: $renewal',
-                    style: const TextStyle(color: AppColors.primaryLight, fontSize: 10, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: AppColors.primaryLight, fontSize: 10, fontWeight: FontWeight.bold),
                   ),
                 ),
+              ],
             ],
           ),
           if (cycleStart != null && cycleEnd != null)
@@ -1097,7 +1115,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 'Work Anniversary Cycle: $cycleStart → $cycleEnd',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 10),
               ),
             ),
           const SizedBox(height: 8),
@@ -1107,22 +1125,22 @@ class _LeaveScreenState extends State<LeaveScreen> {
             children: [
               Text(
                 d(b.available),
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: AppColors.textPrimary,
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                   letterSpacing: -0.5,
                 ),
               ),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 'days available',
                 style: TextStyle(color: AppColors.teal, fontWeight: FontWeight.bold, fontSize: 14),
               ),
             ],
           ),
           if (b.isNegative)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 4),
               child: Text(
                 '⚠️ Negative balance: Leave taken in advance of monthly accruals.',
@@ -1140,12 +1158,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.amber),
+                  Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.amber),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       '${d(b.dueToExpire)} days due to expire at cycle end. Management can approve up to 5 days to carry forward.',
-                      style: const TextStyle(color: AppColors.amber, fontSize: 11, height: 1.3),
+                      style: TextStyle(color: AppColors.amber, fontSize: 11, height: 1.3),
                     ),
                   ),
                 ],
@@ -1175,7 +1193,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                const Divider(color: AppColors.border, height: 1),
+                Divider(color: AppColors.border, height: 1),
                 const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -1199,9 +1217,9 @@ class _LeaveScreenState extends State<LeaveScreen> {
 
   Widget _metric(String label, String value) => Column(
         children: [
-          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+          Text(value, style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
           const SizedBox(height: 2),
-          Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
         ],
       );
 
@@ -1238,10 +1256,10 @@ class _LeaveScreenState extends State<LeaveScreen> {
               children: [
                 Text(
                   '${r.type} · ${r.days.toStringAsFixed(r.days == r.days.roundToDouble() ? 0 : 1)} day(s)',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
                 ),
                 const SizedBox(height: 2),
-                Text('${r.from} → ${r.to}', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                Text('${r.from} → ${r.to}', style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
               ],
             ),
           ),
@@ -1312,12 +1330,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
                   children: [
                     Text(
                       '${a.absenceType} · ${a.date}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       a.reason?.isNotEmpty == true ? a.reason! : 'No explanation provided',
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 11),
                     ),
                   ],
                 ),
@@ -1337,12 +1355,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
             const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(Icons.attach_file, size: 14, color: AppColors.primaryLight),
+                Icon(Icons.attach_file, size: 14, color: AppColors.primaryLight),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     'Attached Evidence: ${a.documentTitle}',
-                    style: const TextStyle(color: AppColors.primaryLight, fontSize: 11),
+                    style: TextStyle(color: AppColors.primaryLight, fontSize: 11),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -1353,7 +1371,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
             const SizedBox(height: 6),
             Text(
               'HR Note: "${a.reviewNotes}"',
-              style: const TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 11, fontStyle: FontStyle.italic),
             ),
           ],
         ],
@@ -1372,17 +1390,17 @@ class _LeaveScreenState extends State<LeaveScreen> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                const Color(0xFF4F46E5).withOpacity(0.25),
+                AppColors.primary.withOpacity(0.25),
                 AppColors.surfaceDark,
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.4)),
+            border: Border.all(color: AppColors.primary.withOpacity(0.4)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: AppColors.shadow,
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -1396,20 +1414,20 @@ class _LeaveScreenState extends State<LeaveScreen> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1).withOpacity(0.25),
+                      color: AppColors.primary.withOpacity(0.25),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.beach_access, size: 20, color: Color(0xFFA5B4FC)),
+                    child: Icon(Icons.beach_access, size: 20, color: AppColors.primaryLight),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Annual Bank Holidays Policy',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppColors.textPrimary,
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1417,8 +1435,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
                         const SizedBox(height: 2),
                         Text(
                           '5 Designated Organisation Public Holidays ($year)',
-                          style: const TextStyle(
-                            color: Color(0xFFA5B4FC),
+                          style: TextStyle(
+                            color: AppColors.primaryLight,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                           ),
@@ -1445,9 +1463,9 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Our organisation designates exactly 5 approved public holidays each year. These dates are approved in advance and have special entitlement rules:',
-                style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4),
               ),
               const SizedBox(height: 10),
               _policyBullet(Icons.check_circle_outline, 'Paid Day Off: 7.5h credited to your monthly required working hours target.'),
@@ -1467,14 +1485,14 @@ class _LeaveScreenState extends State<LeaveScreen> {
           children: [
             Text(
               'DESIGNATED HOLIDAYS (${_bankHolidays.length})',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
                 letterSpacing: 1.1,
                 color: AppColors.textMuted,
               ),
             ),
-            const Text(
+            Text(
               'Visible in Advance',
               style: TextStyle(fontSize: 11, color: AppColors.textMuted),
             ),
@@ -1490,7 +1508,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border),
             ),
-            child: const Center(
+            child: Center(
               child: Text(
                 'No bank holidays found for this year.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13),
@@ -1511,12 +1529,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 14, color: const Color(0xFFA5B4FC)),
+        Icon(icon, size: 14, color: AppColors.primaryLight),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.3),
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5, height: 1.3),
           ),
         ),
       ],
@@ -1530,7 +1548,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
       decoration: BoxDecoration(
         color: AppColors.surfaceDark,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.25)),
+        border: Border.all(color: AppColors.primary.withOpacity(0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1540,13 +1558,13 @@ class _LeaveScreenState extends State<LeaveScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF6366F1).withOpacity(0.2),
+                  color: AppColors.primary.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '#$index',
-                  style: const TextStyle(
-                    color: Color(0xFFA5B4FC),
+                  style: TextStyle(
+                    color: AppColors.primaryLight,
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1556,8 +1574,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
               Expanded(
                 child: Text(
                   h.name,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: AppColors.textPrimary,
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1570,7 +1588,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(color: AppColors.teal.withOpacity(0.3)),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.check, size: 11, color: AppColors.teal),
@@ -1591,12 +1609,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.calendar_today_outlined, size: 13, color: AppColors.textMuted),
+              Icon(Icons.calendar_today_outlined, size: 13, color: AppColors.textMuted),
               const SizedBox(width: 6),
               Text(
                 h.date,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: AppColors.textPrimary,
                   fontFamily: 'monospace',
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -1605,7 +1623,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
               const SizedBox(width: 8),
               Text(
                 '·  ${h.weekday}',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12),
               ),
             ],
           ),
@@ -1613,23 +1631,23 @@ class _LeaveScreenState extends State<LeaveScreen> {
             const SizedBox(height: 6),
             Text(
               h.notes!,
-              style: const TextStyle(color: Colors.white60, fontSize: 11),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
             ),
           ],
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.04),
+              color: AppColors.overlay(0.04),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.star_outline, size: 12, color: Color(0xFFA5B4FC)),
+                Icon(Icons.star_outline, size: 12, color: AppColors.primaryLight),
                 SizedBox(width: 5),
                 Text(
                   '0 Annual Leave Deducted · 7.5h Monthly Target Credit',
-                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 10.5),
                 ),
               ],
             ),
@@ -1746,7 +1764,7 @@ class _BookingSheetState extends State<_BookingSheet> {
         bottom: MediaQuery.of(context).viewInsets.bottom + 20,
       ),
       child: _loadingTypes
-          ? const Padding(
+          ? Padding(
               padding: EdgeInsets.all(40),
               child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
             )
@@ -1757,22 +1775,22 @@ class _BookingSheetState extends State<_BookingSheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Apply for Leave', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Text('Apply for Leave', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                     IconButton(
-                      icon: const Icon(Icons.close, color: AppColors.textMuted),
+                      icon: Icon(Icons.close, color: AppColors.textMuted),
                       onPressed: () => Navigator.pop(context),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                const Text('Leave Category', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                Text('Leave Category', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<LeaveType>(
                   value: _type,
-                  dropdownColor: AppColors.surfaceDark,
+                  dropdownColor: AppColors.sheet,
                   decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
                   items: _types
-                      .map((t) => DropdownMenuItem(value: t, child: Text(t.name, style: const TextStyle(color: Colors.white, fontSize: 13))))
+                      .map((t) => DropdownMenuItem(value: t, child: Text(t.name, style: TextStyle(color: AppColors.textPrimary, fontSize: 13))))
                       .toList(),
                   onChanged: (t) {
                     setState(() => _type = t);
@@ -1788,14 +1806,14 @@ class _BookingSheetState extends State<_BookingSheet> {
                   ],
                 ),
                 const SizedBox(height: 14),
-                const Text('Reason / Explanation', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                Text('Reason / Explanation', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: _reason,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: _type?.requiresEvidence == true ? 'Reason (required)' : 'Reason (optional)',
-                    hintStyle: const TextStyle(color: Colors.white30),
+                    hintStyle: TextStyle(color: AppColors.textTertiary),
                   ),
                   maxLines: 2,
                 ),
@@ -1805,7 +1823,7 @@ class _BookingSheetState extends State<_BookingSheet> {
                 ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+                  Text(_error!, style: TextStyle(color: AppColors.danger, fontSize: 12)),
                 ],
                 const SizedBox(height: 20),
                 SizedBox(
@@ -1814,7 +1832,7 @@ class _BookingSheetState extends State<_BookingSheet> {
                     onPressed: (_submitting || _preview == null) ? null : _submit,
                     style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
                     child: _submitting
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: AppColors.onAccent, strokeWidth: 2))
                         : const Text('Submit Application to HR', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
@@ -1826,7 +1844,7 @@ class _BookingSheetState extends State<_BookingSheet> {
   Widget _dateField(String label, DateTime? value, VoidCallback onTap) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text(label, style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           InkWell(
             onTap: onTap,
@@ -1840,8 +1858,8 @@ class _BookingSheetState extends State<_BookingSheet> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(value == null ? 'Select Date' : _fmt(value), style: TextStyle(color: value == null ? AppColors.textMuted : Colors.white, fontSize: 13)),
-                  const Icon(Icons.calendar_today, size: 14, color: AppColors.primaryLight),
+                  Text(value == null ? 'Select Date' : _fmt(value), style: TextStyle(color: value == null ? AppColors.textMuted : AppColors.textPrimary, fontSize: 13)),
+                  Icon(Icons.calendar_today, size: 14, color: AppColors.primaryLight),
                 ],
               ),
             ),
@@ -1863,7 +1881,7 @@ class _BookingSheetState extends State<_BookingSheet> {
         children: [
           Text(
             '${p.requestedDays.toStringAsFixed(p.requestedDays == p.requestedDays.roundToDouble() ? 0 : 1)} working day(s) requested',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
           ),
           const SizedBox(height: 2),
           Text(
@@ -1872,7 +1890,7 @@ class _BookingSheetState extends State<_BookingSheet> {
           ),
           if (p.warning != null) ...[
             const SizedBox(height: 6),
-            Text(p.warning!, style: const TextStyle(fontSize: 11, color: AppColors.amber)),
+            Text(p.warning!, style: TextStyle(fontSize: 11, color: AppColors.amber)),
           ],
         ],
       ),
@@ -1973,40 +1991,40 @@ class _ReportAbsenceSheetState extends State<_ReportAbsenceSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Report Sickness / Absence',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
               ),
               IconButton(
-                icon: const Icon(Icons.close, color: AppColors.textMuted),
+                icon: Icon(Icons.close, color: AppColors.textMuted),
                 onPressed: () => Navigator.pop(context),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Submitting a self-report notifies HR immediately so your absence is recorded and not treated as an unexcused no-show.',
             style: TextStyle(color: AppColors.textMuted, fontSize: 11, height: 1.4),
           ),
           const SizedBox(height: 16),
-          const Text('Absence Category', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('Absence Category', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
             value: _absenceType,
-            dropdownColor: AppColors.surfaceDark,
+            dropdownColor: AppColors.sheet,
             decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
-            items: const [
-              DropdownMenuItem(value: 'SICK', child: Text('🤒 Sickness / Flu', style: TextStyle(color: Colors.white, fontSize: 13))),
-              DropdownMenuItem(value: 'MEDICAL', child: Text('🏥 Medical Appointment', style: TextStyle(color: Colors.white, fontSize: 13))),
-              DropdownMenuItem(value: 'EMERGENCY', child: Text('🚨 Urgent Emergency', style: TextStyle(color: Colors.white, fontSize: 13))),
-              DropdownMenuItem(value: 'OTHER', child: Text('📋 Other Unplanned Absence', style: TextStyle(color: Colors.white, fontSize: 13))),
+            items: [
+              DropdownMenuItem(value: 'SICK', child: Text('🤒 Sickness / Flu', style: TextStyle(color: AppColors.textPrimary, fontSize: 13))),
+              DropdownMenuItem(value: 'MEDICAL', child: Text('🏥 Medical Appointment', style: TextStyle(color: AppColors.textPrimary, fontSize: 13))),
+              DropdownMenuItem(value: 'EMERGENCY', child: Text('🚨 Urgent Emergency', style: TextStyle(color: AppColors.textPrimary, fontSize: 13))),
+              DropdownMenuItem(value: 'OTHER', child: Text('📋 Other Unplanned Absence', style: TextStyle(color: AppColors.textPrimary, fontSize: 13))),
             ],
             onChanged: (val) {
               if (val != null) setState(() => _absenceType = val);
             },
           ),
           const SizedBox(height: 14),
-          const Text('Absence Date', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('Absence Date', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           InkWell(
             onTap: _pickDate,
@@ -2020,36 +2038,36 @@ class _ReportAbsenceSheetState extends State<_ReportAbsenceSheet> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(_fmt(_date), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-                  const Icon(Icons.calendar_today, size: 14, color: AppColors.primaryLight),
+                  Text(_fmt(_date), style: TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
+                  Icon(Icons.calendar_today, size: 14, color: AppColors.primaryLight),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 14),
-          const Text('Reason & Symptoms (Required)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('Reason & Symptoms (Required)', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           TextField(
             controller: _reason,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-            decoration: const InputDecoration(
+            style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
+            decoration: InputDecoration(
               hintText: 'e.g. High fever and nausea, unable to come to the office today...',
-              hintStyle: TextStyle(color: Colors.white30),
+              hintStyle: TextStyle(color: AppColors.textTertiary),
             ),
             maxLines: 2,
           ),
           if (!_loadingDocs && _documents.isNotEmpty) ...[
             const SizedBox(height: 14),
-            const Text('Attach Evidence / Certificate (Optional)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+            Text('Attach Evidence / Certificate (Optional)', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
             DropdownButtonFormField<String?>(
               value: _selectedDocumentId,
-              dropdownColor: AppColors.surfaceDark,
+              dropdownColor: AppColors.sheet,
               decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
               items: [
-                const DropdownMenuItem(value: null, child: Text('None / Will provide later', style: TextStyle(color: AppColors.textMuted, fontSize: 13))),
+                DropdownMenuItem(value: null, child: Text('None / Will provide later', style: TextStyle(color: AppColors.textMuted, fontSize: 13))),
                 ..._documents.map(
-                  (d) => DropdownMenuItem(value: d.id, child: Text(d.title, style: const TextStyle(color: Colors.white, fontSize: 13))),
+                  (d) => DropdownMenuItem(value: d.id, child: Text(d.title, style: TextStyle(color: AppColors.textPrimary, fontSize: 13))),
                 ),
               ],
               onChanged: (id) => setState(() => _selectedDocumentId = id),
@@ -2057,7 +2075,7 @@ class _ReportAbsenceSheetState extends State<_ReportAbsenceSheet> {
           ],
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+            Text(_error!, style: TextStyle(color: AppColors.danger, fontSize: 12)),
           ],
           const SizedBox(height: 20),
           SizedBox(

@@ -16,6 +16,7 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('dotenv.load notice: $e');
   }
+  await ThemeController.instance.load();
   try {
     await NotificationService().initialize();
   } catch (e) {
@@ -48,7 +49,27 @@ class _OfficeTrackerAppState extends State<OfficeTrackerApp> {
   @override
   void initState() {
     super.initState();
+    ThemeController.instance.addListener(_onThemeChanged);
     _check();
+  }
+
+  @override
+  void dispose() {
+    ThemeController.instance.removeListener(_onThemeChanged);
+    super.dispose();
+  }
+
+  // AppColors getters are read inside build(), so widgets only pick up a new
+  // palette when they rebuild. Marking every element dirty repaints the whole
+  // tree once, keeping all State (blocs, scroll positions, open tabs) intact.
+  void _onThemeChanged() {
+    void markAll(Element e) {
+      e.markNeedsBuild();
+      e.visitChildren(markAll);
+    }
+
+    (context as Element).visitChildren(markAll);
+    setState(() {});
   }
 
   Future<void> _check() async {
@@ -84,7 +105,7 @@ class _OfficeTrackerAppState extends State<OfficeTrackerApp> {
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       home: switch (_enrolled) {
-        null => const Scaffold(
+        null => Scaffold(
             body: Center(child: CircularProgressIndicator(color: AppColors.teal)),
           ),
         false => EnrollScreen(onEnrolled: () => setState(() => _enrolled = true)),

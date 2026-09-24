@@ -1,41 +1,111 @@
 @import "tailwindcss";
+@import "./theme-palette.css";
 
+/* Tokens default to the dark theme; html[data-theme="light"] (below) and
+   theme-palette.css (generated) redefine them for light mode. The theme and
+   accent attributes are set on <html> before first paint by the inline
+   script in layout.tsx and kept in sync by ThemeSwitcher. */
 @theme {
-  --color-ink: #07090E;
-  --color-canvas: #0B0F19;
-  --color-surface: #111827;
-  --color-surface-hover: #1A2234;
-  --color-raised: #1E293B;
-  --color-raised-hover: #2D3A4F;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
+
+  --color-ink: #070a14;
+  --color-canvas: #0b0f19;
+  --color-surface: rgba(255, 255, 255, 0.05);
+  --color-surface-hover: rgba(255, 255, 255, 0.08);
+  --color-raised: rgba(255, 255, 255, 0.07);
+  --color-raised-hover: rgba(255, 255, 255, 0.11);
+  --color-sheet: #121727;
   --color-line: rgba(255, 255, 255, 0.08);
   --color-line-subtle: rgba(255, 255, 255, 0.04);
   --color-line-strong: rgba(255, 255, 255, 0.14);
 
-  --color-brand: #10B981;
-  --color-brand-light: #34D399;
+  /* Text on a solid accent/teal/rose fill (always white) and on a bright
+     emerald/amber fill (always dark) — independent of theme. */
+  --color-on-accent: #ffffff;
+  --color-on-bright: #0b1020;
+
+  --color-brand: #10b981;
+  --color-brand-light: #34d399;
   --color-brand-dim: rgba(16, 185, 129, 0.15);
   --color-brand-glow: rgba(16, 185, 129, 0.35);
 
-  --color-accent: #6366F1;
-  --color-accent-light: #818CF8;
-  --color-accent-dim: rgba(99, 102, 241, 0.15);
-  --color-accent-glow: rgba(99, 102, 241, 0.35);
+  --color-accent: var(--color-indigo-500);
+  --color-accent-light: var(--color-indigo-400);
+  --color-accent-dim: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);
+  --color-accent-glow: color-mix(in oklab, var(--color-indigo-500) 35%, transparent);
 
-  --color-warn: #F59E0B;
-  --color-warn-light: #FBBF24;
+  --color-warn: #f59e0b;
+  --color-warn-light: #fbbf24;
   --color-warn-dim: rgba(245, 158, 11, 0.15);
 
-  --color-danger: #F43F5E;
-  --color-danger-light: #FB7185;
+  --color-danger: #f43f5e;
+  --color-danger-light: #fb7185;
   --color-danger-dim: rgba(244, 63, 94, 0.15);
 
-  --color-info: #0EA5E9;
+  --color-info: #0ea5e9;
   --color-info-dim: rgba(14, 165, 233, 0.15);
 
-  --color-text: #F8FAFC;
-  --color-text-secondary: #CBD5E1;
-  --color-muted: #94A3B8;
-  --color-dim: #64748B;
+  --color-text: #f4f5fb;
+  --color-text-secondary: #cbd5e1;
+  --color-muted: #a3a8c3;
+  --color-dim: #6f7592;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --color-ink: #eef0fa;
+  --color-canvas: #f5f6fc;
+  --color-surface: rgba(255, 255, 255, 0.62);
+  --color-surface-hover: rgba(255, 255, 255, 0.85);
+  --color-raised: rgba(20, 23, 41, 0.045);
+  --color-raised-hover: rgba(20, 23, 41, 0.08);
+  --color-sheet: #fcfcff;
+  --color-line: rgba(20, 23, 41, 0.1);
+  --color-line-subtle: rgba(20, 23, 41, 0.05);
+  --color-line-strong: rgba(20, 23, 41, 0.18);
+
+  --color-brand: #059669;
+  --color-brand-light: #047857;
+  --color-brand-dim: rgba(5, 150, 105, 0.12);
+  --color-warn: #d97706;
+  --color-warn-light: #b45309;
+  --color-warn-dim: rgba(217, 119, 6, 0.12);
+  --color-danger: #e11d48;
+  --color-danger-light: #be123c;
+  --color-danger-dim: rgba(225, 29, 72, 0.1);
+  --color-info: #0284c7;
+  --color-info-dim: rgba(2, 132, 199, 0.12);
+
+  --color-text: #141729;
+  --color-text-secondary: #3f455c;
+  --color-muted: #5b6078;
+  --color-dim: #8c91a8;
+
+  --glass-fill-top: rgba(255, 255, 255, 0.82);
+  --glass-fill-bottom: rgba(255, 255, 255, 0.58);
+  --glass-border: rgba(255, 255, 255, 0.9);
+  --glass-highlight: rgba(255, 255, 255, 1);
+  --glass-shadow: 0 10px 30px rgba(49, 46, 129, 0.1), 0 2px 6px rgba(49, 46, 129, 0.06);
+  --orb-2: color-mix(in oklab, var(--color-pink-500) 24%, transparent);
+  --orb-3: color-mix(in oklab, var(--color-teal-500) 24%, transparent);
+  --orb-1-strength: 32%;
+  --scrollbar: rgba(20, 23, 41, 0.16);
+  --scrollbar-hover: rgba(20, 23, 41, 0.28);
+}
+
+:root {
+  color-scheme: dark;
+  --glass-fill-top: rgba(255, 255, 255, 0.075);
+  --glass-fill-bottom: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 12px 34px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --orb-2: color-mix(in oklab, var(--color-purple-500) 26%, transparent);
+  --orb-3: color-mix(in oklab, var(--color-teal-500) 20%, transparent);
+  --orb-1-strength: 38%;
+  --scrollbar: rgba(255, 255, 255, 0.12);
+  --scrollbar-hover: rgba(255, 255, 255, 0.22);
 }
 
 @layer base {
@@ -43,51 +113,86 @@
     border-color: var(--color-line);
   }
 
-  html,
-  body {
+  html {
     background-color: var(--color-ink);
     color: var(--color-text);
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum';
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Refined scrollbar styling */
+  /* Transparent so the fixed ambient orbs (body::before, z-index -1) paint
+     between the html canvas colour and the page content. */
+  body {
+    background: transparent;
+    color: var(--color-text);
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(640px circle at 6% -4%, color-mix(in oklab, var(--color-indigo-500) var(--orb-1-strength), transparent), transparent 62%),
+      radial-gradient(720px circle at 102% 34%, var(--orb-2), transparent 62%),
+      radial-gradient(760px circle at 18% 104%, var(--orb-3), transparent 62%);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-indigo-500) 35%, transparent);
+  }
+
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--scrollbar);
     border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.22);
+    background: var(--scrollbar-hover);
+    background-clip: padding-box;
   }
 }
 
-/* Glassmorphism & Surface Utilities */
-.glass-panel {
-  background: rgba(17, 24, 39, 0.72);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+/* Frosted glass surfaces. In the components layer so utilities
+   (border-*, hover:*, shadow-*) can still refine a glass element. */
+@layer components {
+  .glass-panel {
+    background: linear-gradient(135deg, var(--glass-fill-top), var(--glass-fill-bottom));
+    backdrop-filter: blur(22px) saturate(170%);
+    -webkit-backdrop-filter: blur(22px) saturate(170%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), inset 0 1px 0 0 var(--glass-highlight);
+  }
+
+  .glass-panel-elevated {
+    background: linear-gradient(135deg, var(--glass-fill-top), var(--glass-fill-bottom)), var(--color-sheet);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32), inset 0 1px 0 0 var(--glass-highlight);
+  }
 }
 
-.glass-panel-elevated {
-  background: rgba(26, 34, 52, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+/* Accent gradient fill (active tabs, primary actions, brand mark) */
+.bg-accent-gradient {
+  background-image: linear-gradient(135deg, var(--color-indigo-500), var(--accent-end));
+}
+.shadow-accent {
+  box-shadow: 0 10px 24px -6px color-mix(in oklab, var(--color-indigo-500) 55%, transparent);
 }
 
 .glow-accent {
-  box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 25px -5px color-mix(in oklab, var(--color-indigo-500) 30%, transparent);
 }
 
 .glow-brand {
@@ -99,20 +204,18 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Subtitle gradient text */
 .gradient-text-accent {
-  background: linear-gradient(135deg, #FFFFFF 0%, #CBD5E1 50%, #818CF8 100%);
+  background: linear-gradient(135deg, var(--color-text) 0%, var(--color-text-secondary) 45%, var(--color-indigo-400) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .gradient-text-brand {
-  background: linear-gradient(135deg, #FFFFFF 0%, #E2E8F0 40%, #34D399 100%);
+  background: linear-gradient(135deg, var(--color-text) 0%, var(--color-text-secondary) 40%, var(--color-emerald-400) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-/* Smooth Transitions */
 .interactive-hover {
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -120,7 +223,6 @@
   transform: translateY(-1px);
 }
 
-/* Wide content scrolling container */
 .scroll-x {
   overflow-x: auto;
 }
@@ -153,3 +255,8 @@
   animation: fadeIn 0.2s ease-out forwards;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .interactive-hover:hover {
+    transform: none;
+  }
+}

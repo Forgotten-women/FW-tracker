@@ -83,9 +83,9 @@ class _SalaryScreenState extends State<SalaryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bgDark,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Column(
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Salary & Statements', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
@@ -95,18 +95,18 @@ class _SalaryScreenState extends State<SalaryScreen> {
         actions: [
           IconButton(
             icon: _refreshing
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
                   )
-                : const Icon(Icons.refresh, color: Colors.white70),
+                : Icon(Icons.refresh, color: AppColors.textSecondary),
             onPressed: _refreshing ? null : () => _loadStatements(isRefresh: true),
           ),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? Center(child: CircularProgressIndicator(color: AppColors.primary))
           : RefreshIndicator(
               color: AppColors.teal,
               onRefresh: () => _loadStatements(isRefresh: true),
@@ -132,7 +132,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'MONTHLY PAYROLL STATEMENTS',
                           style: TextStyle(
                             fontSize: 11,
@@ -150,7 +150,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                           ),
                           child: Text(
                             '${_statement!.periods.length} Periods',
-                            style: const TextStyle(fontSize: 11, color: AppColors.primaryLight, fontWeight: FontWeight.bold),
+                            style: TextStyle(fontSize: 11, color: AppColors.primaryLight, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
@@ -179,10 +179,10 @@ class _SalaryScreenState extends State<SalaryScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: AppColors.amber, size: 20),
+          Icon(Icons.warning_amber_rounded, color: AppColors.amber, size: 20),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(msg, style: const TextStyle(color: AppColors.amber, fontSize: 12)),
+            child: Text(msg, style: TextStyle(color: AppColors.amber, fontSize: 12)),
           ),
         ],
       ),
@@ -207,18 +207,18 @@ class _SalaryScreenState extends State<SalaryScreen> {
               shape: BoxShape.circle,
               border: Border.all(color: AppColors.amber.withValues(alpha: 0.3)),
             ),
-            child: const Icon(Icons.cloud_off_rounded, color: AppColors.amber, size: 36),
+            child: Icon(Icons.cloud_off_rounded, color: AppColors.amber, size: 36),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Unable to Load Statements',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+            style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 8),
           Text(
             msg,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 20),
           FilledButton.icon(
@@ -227,7 +227,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
             label: const Text('Try Again'),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: AppColors.onAccent,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             ),
           ),
@@ -254,18 +254,18 @@ class _SalaryScreenState extends State<SalaryScreen> {
               shape: BoxShape.circle,
               border: Border.all(color: AppColors.border),
             ),
-            child: const Icon(Icons.lock_outline_rounded, color: AppColors.textMuted, size: 36),
+            child: Icon(Icons.lock_outline_rounded, color: AppColors.textMuted, size: 36),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Compensation Restricted',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+            style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 8),
           Text(
             customMessage ?? 'Salary figures and period statements are restricted by company HR policy.',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 16),
           Container(
@@ -275,7 +275,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppColors.border),
             ),
-            child: const Row(
+            child: Row(
               children: [
                 Icon(Icons.info_outline, color: AppColors.primaryLight, size: 14),
                 SizedBox(width: 8),
@@ -315,7 +315,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Row(
                   children: [
                     Icon(Icons.account_balance_wallet_outlined, color: AppColors.primaryLight, size: 18),
@@ -345,7 +345,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                 ),
                 child: Text(
                   cur,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.teal,
                     fontWeight: FontWeight.bold,
                     fontSize: 10,
@@ -357,15 +357,15 @@ class _SalaryScreenState extends State<SalaryScreen> {
           const SizedBox(height: 14),
           Text(
             _formatCurrency(salary.monthly, cur),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 30,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: AppColors.textPrimary,
               letterSpacing: -0.5,
             ),
           ),
           const SizedBox(height: 4),
-          const Text('Gross Monthly Salary', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          Text('Gross Monthly Salary', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(12),
@@ -391,9 +391,9 @@ class _SalaryScreenState extends State<SalaryScreen> {
   Widget _buildMetricCol(String label, String value) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+        Text(value, style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+        Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
       ],
     );
   }
@@ -406,14 +406,14 @@ class _SalaryScreenState extends State<SalaryScreen> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
-      child: const Center(
+      child: Center(
         child: Column(
           children: [
             Icon(Icons.calendar_today_outlined, color: AppColors.textMuted, size: 32),
             SizedBox(height: 10),
             Text(
               'No Payroll Periods Available',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
             ),
             SizedBox(height: 4),
             Text(
@@ -454,8 +454,8 @@ class _SalaryScreenState extends State<SalaryScreen> {
                   Expanded(
                     child: Text(
                       p.name,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
                       ),
@@ -500,7 +500,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
               const SizedBox(height: 4),
               Text(
                 '${p.startDate} → ${p.endDate}',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
               ),
               const SizedBox(height: 12),
 
@@ -522,12 +522,12 @@ class _SalaryScreenState extends State<SalaryScreen> {
                             p.workingDaysCount > 0
                                 ? 'Period Base (${p.workingDaysCount} working days)'
                                 : 'Period Base Gross',
-                            style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text(_formatCurrency(p.basePayable, cur), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(_formatCurrency(p.basePayable, cur), style: TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
                       ],
                     ),
                     if (hasAdjustments) ...[
@@ -557,17 +557,17 @@ class _SalaryScreenState extends State<SalaryScreen> {
                         ],
                       ),
                     ],
-                    const Divider(height: 16, thickness: 1, color: AppColors.border),
+                    Divider(height: 16, thickness: 1, color: AppColors.border),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'Total Calculated Statement',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         Text(
                           _formatCurrency(p.netPayable, cur),
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.teal,
                             fontWeight: FontWeight.bold,
                             fontSize: 15,
@@ -586,9 +586,9 @@ class _SalaryScreenState extends State<SalaryScreen> {
                 children: [
                   Text(
                     'Conversion Rate: £1.00 = ₨${p.exchangeRate.toStringAsFixed(2)}',
-                    style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 10),
                   ),
-                  const Row(
+                  Row(
                     children: [
                       Text(
                         'View breakdown',
@@ -611,7 +611,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
     final cur = p.currency;
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surfaceDark,
+      backgroundColor: AppColors.sheet,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -643,9 +643,9 @@ class _SalaryScreenState extends State<SalaryScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(p.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                      Text(p.name, style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
                       const SizedBox(height: 2),
-                      Text('${p.startDate} to ${p.endDate}', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                      Text('${p.startDate} to ${p.endDate}', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -688,7 +688,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                   _buildDetailRow('Period Base Calculated', _formatCurrency(p.basePayable, cur), isBold: true),
                   const SizedBox(height: 8),
                   _buildDetailRow('Locked Exchange Rate', '£1.00 = ₨${p.exchangeRate.toStringAsFixed(2)}'),
-                  const Divider(height: 20, thickness: 1, color: AppColors.border),
+                  Divider(height: 20, thickness: 1, color: AppColors.border),
                   _buildDetailRow(
                     'Net Calculated Total',
                     _formatCurrency(p.netPayable, cur),
@@ -701,7 +701,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
             const SizedBox(height: 20),
 
             // Itemized Adjustments
-            const Text(
+            Text(
               'APPROVED ADJUSTMENTS & OVERTIME',
               style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1),
             ),
@@ -714,7 +714,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.border),
                 ),
-                child: const Text(
+                child: Text(
                   'No manual adjustments or overtime added for this period.',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
@@ -737,10 +737,10 @@ class _SalaryScreenState extends State<SalaryScreen> {
                             children: [
                               Text(
                                 a.type.replaceAll('_', ' '),
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                               ),
                               if (a.explanation.isNotEmpty)
-                                Text(a.explanation, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                                Text(a.explanation, style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
                             ],
                           ),
                         ),
@@ -769,7 +769,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
           child: Text(
             label,
             style: TextStyle(
-              color: isBold ? Colors.white : AppColors.textMuted,
+              color: isBold ? AppColors.textPrimary : AppColors.textMuted,
               fontSize: 12,
               fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
             ),
@@ -781,7 +781,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
           value,
           textAlign: TextAlign.right,
           style: TextStyle(
-            color: valueColor ?? (isBold ? Colors.white : Colors.white70),
+            color: valueColor ?? (isBold ? AppColors.textPrimary : AppColors.textSecondary),
             fontSize: isBold ? 14 : 12,
             fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
           ),

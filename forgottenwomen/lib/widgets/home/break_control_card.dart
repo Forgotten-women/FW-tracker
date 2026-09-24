@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../models/attendance.dart';
 import '../../theme.dart';
+import '../glass/glass.dart';
 
+/// Idle: four one-tap quick actions (break, clock out, dispute, concerns).
+/// On break: a live countdown card with the end-break action.
 class BreakControlCard extends StatelessWidget {
   final ActiveBreakInfo breakInfo;
   final DateTime liveNow;
@@ -10,6 +13,7 @@ class BreakControlCard extends StatelessWidget {
   final VoidCallback onToggleBreak;
   final VoidCallback onClockOut;
   final VoidCallback onOpenDispute;
+  final VoidCallback onOpenConcerns;
 
   const BreakControlCard({
     super.key,
@@ -19,146 +23,89 @@ class BreakControlCard extends StatelessWidget {
     required this.onToggleBreak,
     required this.onClockOut,
     required this.onOpenDispute,
+    required this.onOpenConcerns,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (breakInfo.onBreak) {
-      return _buildActiveBreakCard(context);
-    }
-    return _buildIdleActionHub(context);
+    if (breakInfo.onBreak) return _buildActiveBreakCard();
+    return _buildQuickActions();
   }
 
-  Widget _buildActiveBreakCard(BuildContext context) {
+  Widget _buildActiveBreakCard() {
     final int startedMs = breakInfo.startedAtMs ?? liveNow.millisecondsSinceEpoch;
-    final int nowMs = liveNow.millisecondsSinceEpoch;
-    final int elapsedSeconds = ((nowMs - startedMs) / 1000).floor().clamp(0, 999999);
-
+    final int elapsedSeconds =
+        ((liveNow.millisecondsSinceEpoch - startedMs) / 1000).floor().clamp(0, 999999);
     final int permittedSeconds = breakInfo.permittedMinutes * 60;
     final int remainingSeconds = permittedSeconds - elapsedSeconds;
     final bool isOverdue = remainingSeconds < 0;
 
-    final String countdownText;
-    if (!isOverdue) {
-      final int m = remainingSeconds ~/ 60;
-      final int s = remainingSeconds % 60;
-      countdownText = '${m}m ${s.toString().padLeft(2, '0')}s';
-    } else {
-      final int overdueSec = -remainingSeconds;
-      final int m = overdueSec ~/ 60;
-      final int s = overdueSec % 60;
-      countdownText = '+${m}m ${s.toString().padLeft(2, '0')}s EXCEEDED';
-    }
-
-    final double breakProgress = (elapsedSeconds / permittedSeconds).clamp(0.0, 1.0);
+    final int shown = isOverdue ? -remainingSeconds : remainingSeconds;
+    final String countdown =
+        '${isOverdue ? '+' : ''}${shown ~/ 60}:${(shown % 60).toString().padLeft(2, '0')}';
+    final double progress =
+        permittedSeconds > 0 ? (elapsedSeconds / permittedSeconds).clamp(0.0, 1.0) : 1.0;
     final Color tone = isOverdue ? AppColors.danger : AppColors.amber;
 
-    return Container(
+    return GlassCard(
+      radius: 24,
+      borderColor: tone.withValues(alpha: 0.45),
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: tone.withValues(alpha: 0.5), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: tone.withValues(alpha: 0.18),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
       child: Column(
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: tone.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
+              ProgressRing(
+                progress: progress,
+                size: 64,
+                stroke: 7,
+                colors: [tone, tone],
+                trackColor: tone.withValues(alpha: 0.16),
                 child: Icon(Icons.coffee_rounded, color: tone, size: 22),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Active Break Session',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        Text(
-                          breakInfo.dueBackDisplay != null
-                              ? 'Due: ${breakInfo.dueBackDisplay}'
-                              : '30m Allowance',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: tone,
-                          ),
-                        ),
-                      ],
+                    Text(
+                      isOverdue ? 'Break exceeded' : 'On break',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                     const SizedBox(height: 2),
+                    Text(countdown, style: monoStyle(fontSize: 26, color: tone, letterSpacing: -0.8)),
                     Text(
-                      countdownText,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: tone,
-                        letterSpacing: -0.5,
-                      ),
+                      breakInfo.dueBackDisplay != null
+                          ? 'Due back at ${breakInfo.dueBackDisplay}'
+                          : '${breakInfo.permittedMinutes}m allowance',
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-
-          // Linear countdown bar
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: SizedBox(
-              height: 6,
-              child: LinearProgressIndicator(
-                value: breakProgress,
-                backgroundColor: AppColors.border,
-                valueColor: AlwaysStoppedAnimation<Color>(tone),
-              ),
-            ),
-          ),
           const SizedBox(height: 16),
-
-          // Primary End Break Button
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 50,
             child: FilledButton.icon(
               onPressed: isSubmitting ? null : onToggleBreak,
               icon: isSubmitting
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onAccent),
                     )
-                  : const Icon(Icons.stop_circle_outlined, size: 20),
-              label: Text(
-                isSubmitting ? 'Ending Break...' : 'End Break & Resume Work',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-              ),
+                  : const Icon(Icons.play_arrow_rounded, size: 22),
+              label: Text(isSubmitting ? 'Ending break…' : 'End break and resume'),
               style: FilledButton.styleFrom(
                 backgroundColor: tone,
-                foregroundColor: isOverdue ? Colors.white : Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                foregroundColor: AppColors.onAccent,
               ),
             ),
           ),
@@ -167,103 +114,80 @@ class BreakControlCard extends StatelessWidget {
     );
   }
 
-  Widget _buildIdleActionHub(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'QUICK ACTIONS',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.1,
-              color: AppColors.textMuted,
+  Widget _buildQuickActions() {
+    return Row(
+      children: [
+        Expanded(
+          child: _action(
+            label: isSubmitting ? 'Starting…' : 'Break',
+            icon: Icons.coffee_rounded,
+            colors: const [Color(0xFFFBBF24), Color(0xFFF59E0B)],
+            onTap: isSubmitting ? null : onToggleBreak,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _action(
+            label: 'Clock out',
+            icon: Icons.logout_rounded,
+            colors: const [Color(0xFFFB7185), Color(0xFFE11D48)],
+            onTap: isSubmitting ? null : onClockOut,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _action(
+            label: 'Dispute',
+            icon: Icons.edit_note_rounded,
+            colors: [AppColors.primary, AppColors.accentEnd],
+            onTap: onOpenDispute,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _action(
+            label: 'Concerns',
+            icon: Icons.shield_outlined,
+            colors: const [Color(0xFF2DD4BF), Color(0xFF0D9488)],
+            onTap: onOpenConcerns,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _action({
+    required String label,
+    required IconData icon,
+    required List<Color> colors,
+    required VoidCallback? onTap,
+  }) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: GlassCard(
+        radius: 20,
+        onTap: onTap,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        child: Column(
+          children: [
+            Opacity(
+              opacity: onTap == null ? 0.5 : 1,
+              child: GradientIconTile(icon: icon, colors: colors, size: 42),
             ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              // Start Break Action
-              Expanded(
-                child: SizedBox(
-                  height: 46,
-                  child: FilledButton.icon(
-                    onPressed: isSubmitting ? null : onToggleBreak,
-                    icon: isSubmitting
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.coffee_outlined, size: 18),
-                    label: const FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        'Take Break',
-                        maxLines: 1,
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      backgroundColor: AppColors.amber,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
               ),
-              const SizedBox(width: 8),
-
-              // Clock Out Action
-              Expanded(
-                child: SizedBox(
-                  height: 46,
-                  child: OutlinedButton.icon(
-                    onPressed: isSubmitting ? null : onClockOut,
-                    icon: const Icon(Icons.logout_rounded, size: 16, color: AppColors.danger),
-                    label: const FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        'Clock Out',
-                        maxLines: 1,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                          color: AppColors.danger,
-                        ),
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      side: BorderSide(color: AppColors.danger.withValues(alpha: 0.5)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // Dispute Action
-              IconButton(
-                onPressed: onOpenDispute,
-                tooltip: 'File Attendance Dispute',
-                icon: const Icon(Icons.rate_review_outlined, color: AppColors.primaryLight, size: 20),
-                style: IconButton.styleFrom(
-                  backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }

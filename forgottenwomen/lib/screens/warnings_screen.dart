@@ -63,23 +63,23 @@ class _WarningsScreenState extends State<WarningsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
-        title: const Text('Acknowledge Receipt', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+        backgroundColor: AppColors.sheet,
+        title: Text('Acknowledge Receipt', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'This records that you have received this formal notice. It does not imply agreement. You may optionally add a comment for HR review.',
               style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
             ),
             const SizedBox(height: 14),
             TextField(
               controller: controller,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: const InputDecoration(
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
+              decoration: InputDecoration(
                 hintText: 'Optional statement / response...',
-                hintStyle: TextStyle(color: Colors.white30),
+                hintStyle: TextStyle(color: AppColors.textTertiary),
               ),
               maxLines: 2,
             ),
@@ -88,7 +88,7 @@ class _WarningsScreenState extends State<WarningsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Not Now', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Not Now', style: TextStyle(color: AppColors.textMuted)),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -113,20 +113,20 @@ class _WarningsScreenState extends State<WarningsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bgDark,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppColors.surfaceDark,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Disciplinary & Standing', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.white)),
+        title: Text('Disciplinary & Standing', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.textPrimary)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white70),
+            icon: Icon(Icons.refresh, color: AppColors.textSecondary),
             onPressed: _loading ? null : _load,
           ),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? Center(child: CircularProgressIndicator(color: AppColors.primary))
           : RefreshIndicator(
               color: AppColors.primary,
               onRefresh: _load,
@@ -145,14 +145,14 @@ class _WarningsScreenState extends State<WarningsScreen> {
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(color: AppColors.danger.withOpacity(0.4)),
                           ),
-                          child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+                          child: Text(_error!, style: TextStyle(color: AppColors.danger, fontSize: 12)),
                         )
                       else if (_view != null) ...[
                         _bandCard(_view!),
                         const SizedBox(height: 16),
                         _latenessCard(_view!.lateness),
                         const SizedBox(height: 24),
-                        const Text(
+                        Text(
                           'FORMAL NOTICES & WARNINGS',
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
                         ),
@@ -165,7 +165,7 @@ class _WarningsScreenState extends State<WarningsScreen> {
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: AppColors.border),
                             ),
-                            child: const Center(
+                            child: Center(
                               child: Text(
                                 'No formal warnings or disciplinary records.\nYour attendance standing is clear.',
                                 textAlign: TextAlign.center,
@@ -201,7 +201,7 @@ class _WarningsScreenState extends State<WarningsScreen> {
         border: Border.all(color: fg.withOpacity(0.4)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.25),
+            color: AppColors.shadow,
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -221,7 +221,7 @@ class _WarningsScreenState extends State<WarningsScreen> {
               children: [
                 Text(
                   'ATTENDANCE STANDING',
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: AppColors.textMuted),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -253,10 +253,10 @@ class _WarningsScreenState extends State<WarningsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Lateness Occurrences',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -280,7 +280,7 @@ class _WarningsScreenState extends State<WarningsScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          Text(s.message, style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4)),
+          Text(s.message, style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4)),
         ],
       ),
     );
@@ -293,7 +293,7 @@ class _WarningsScreenState extends State<WarningsScreen> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.border),
         ),
-        child: Text(text, style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+        child: Text(text, style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
       );
 
   Widget _warningCard(FormalWarning w) {
@@ -315,7 +315,7 @@ class _WarningsScreenState extends State<WarningsScreen> {
             children: [
               Text(
                 w.levelLabel[0].toUpperCase() + w.levelLabel.substring(1),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
               ),
               if (expired || withdrawn)
                 Container(
@@ -327,15 +327,15 @@ class _WarningsScreenState extends State<WarningsScreen> {
                   ),
                   child: Text(
                     withdrawn ? 'Withdrawn' : 'Expired',
-                    style: const TextStyle(fontSize: 10, color: AppColors.textMuted),
+                    style: TextStyle(fontSize: 10, color: AppColors.textMuted),
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 4),
-          Text('Issued On: ${w.issuedOn}', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+          Text('Issued On: ${w.issuedOn}', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
           const SizedBox(height: 10),
-          Text(w.explanation, style: const TextStyle(fontSize: 13, height: 1.4, color: Colors.white70)),
+          Text(w.explanation, style: TextStyle(fontSize: 13, height: 1.4, color: AppColors.textSecondary)),
           if (w.acknowledgementRequired) ...[
             const SizedBox(height: 14),
             SizedBox(
@@ -351,9 +351,9 @@ class _WarningsScreenState extends State<WarningsScreen> {
             const SizedBox(height: 10),
             Row(
               children: [
-                const Icon(Icons.check_circle, color: AppColors.teal, size: 14),
+                Icon(Icons.check_circle, color: AppColors.teal, size: 14),
                 const SizedBox(width: 6),
-                Text('Receipt acknowledged on ${w.acknowledgedAt}', style: const TextStyle(fontSize: 11, color: AppColors.teal)),
+                Text('Receipt acknowledged on ${w.acknowledgedAt}', style: TextStyle(fontSize: 11, color: AppColors.teal)),
               ],
             ),
           ],

@@ -9,6 +9,7 @@ import '../services/api_client.dart';
 import '../services/notification_service.dart';
 import '../services/offline_queue.dart';
 import '../services/ota_service.dart';
+import '../widgets/glass/glass.dart';
 import '../widgets/update_dialog.dart';
 import '../theme.dart';
 import 'documents_screen.dart';
@@ -108,109 +109,74 @@ class _MainShellState extends State<MainShell> {
               unreadCount = homeState.summary.unreadNotificationsCount;
             }
 
+            final navItems = [
+              const GlassNavItem(icon: Icons.home_outlined, activeIcon: Icons.home_rounded, label: 'Home'),
+              const GlassNavItem(icon: Icons.event_available_outlined, activeIcon: Icons.event_available_rounded, label: 'Leave'),
+              const GlassNavItem(icon: Icons.account_balance_wallet_outlined, activeIcon: Icons.account_balance_wallet_rounded, label: 'Salary'),
+              GlassNavItem(icon: Icons.gavel_outlined, activeIcon: Icons.gavel_rounded, label: 'Warnings', badge: unreadCount),
+              const GlassNavItem(icon: Icons.folder_outlined, activeIcon: Icons.folder_rounded, label: 'Documents'),
+            ];
+
             return LayoutBuilder(
               builder: (context, constraints) {
                 final isWide = constraints.maxWidth >= 720;
 
                 if (isWide) {
-                  return Scaffold(
-                    body: Row(
-                      children: [
-                        NavigationRail(
-                          selectedIndex: _index,
-                          onDestinationSelected: (i) => setState(() => _index = i),
-                          labelType: NavigationRailLabelType.all,
-                          backgroundColor: AppColors.surfaceDark,
-                          indicatorColor: AppColors.teal.withValues(alpha: 0.15),
-                          destinations: [
-                            const NavigationRailDestination(
-                              icon: Icon(Icons.home_outlined),
-                              selectedIcon: Icon(Icons.home, color: AppColors.teal),
-                              label: Text('Home'),
-                            ),
-                            const NavigationRailDestination(
-                              icon: Icon(Icons.event_available_outlined),
-                              selectedIcon: Icon(Icons.event_available, color: AppColors.teal),
-                              label: Text('Leave'),
-                            ),
-                            const NavigationRailDestination(
-                              icon: Icon(Icons.account_balance_wallet_outlined),
-                              selectedIcon: Icon(Icons.account_balance_wallet, color: AppColors.teal),
-                              label: Text('Salary'),
-                            ),
-                            NavigationRailDestination(
-                              icon: unreadCount > 0
-                                  ? Badge.count(
-                                      count: unreadCount,
-                                      backgroundColor: AppColors.amber,
-                                      textColor: Colors.black,
-                                      child: const Icon(Icons.gavel_outlined),
-                                    )
-                                  : const Icon(Icons.gavel_outlined),
-                              selectedIcon: const Icon(Icons.gavel, color: AppColors.teal),
-                              label: const Text('Warnings'),
-                            ),
-                            const NavigationRailDestination(
-                              icon: Icon(Icons.folder_outlined),
-                              selectedIcon: Icon(Icons.folder, color: AppColors.teal),
-                              label: Text('Documents'),
-                            ),
-                          ],
-                        ),
-                        const VerticalDivider(thickness: 1, width: 1, color: AppColors.border),
-                        Expanded(
-                          child: Center(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 800),
-                              child: IndexedStack(index: _index, children: tabs),
+                  return AmbientBackground(
+                    child: Scaffold(
+                      backgroundColor: Colors.transparent,
+                      body: Row(
+                        children: [
+                          NavigationRail(
+                            selectedIndex: _index,
+                            onDestinationSelected: (i) => setState(() => _index = i),
+                            labelType: NavigationRailLabelType.all,
+                            destinations: [
+                              for (final item in navItems)
+                                NavigationRailDestination(
+                                  icon: item.badge > 0
+                                      ? Badge.count(
+                                          count: item.badge,
+                                          backgroundColor: AppColors.danger,
+                                          textColor: AppColors.onAccent,
+                                          child: Icon(item.icon),
+                                        )
+                                      : Icon(item.icon),
+                                  selectedIcon: Icon(item.activeIcon),
+                                  label: Text(item.label),
+                                ),
+                            ],
+                          ),
+                          VerticalDivider(thickness: 1, width: 1, color: AppColors.border),
+                          Expanded(
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 800),
+                                child: IndexedStack(index: _index, children: tabs),
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   );
                 }
 
-                return Scaffold(
-                  body: IndexedStack(index: _index, children: tabs),
-                  bottomNavigationBar: NavigationBar(
-                    selectedIndex: _index,
-                    onDestinationSelected: (i) => setState(() => _index = i),
-                    indicatorColor: AppColors.teal.withValues(alpha: 0.15),
-                    destinations: [
-                      const NavigationDestination(
-                        icon: Icon(Icons.home_outlined),
-                        selectedIcon: Icon(Icons.home, color: AppColors.teal),
-                        label: 'Home',
+                // The nav floats over the ambient background rather than over
+                // tab content (no extendBody), so lists never scroll behind it
+                // and need no per-screen bottom padding.
+                return AmbientBackground(
+                  child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    body: IndexedStack(index: _index, children: tabs),
+                    bottomNavigationBar: SafeArea(
+                      top: false,
+                      child: GlassNavBar(
+                        currentIndex: _index,
+                        onTap: (i) => setState(() => _index = i),
+                        items: navItems,
                       ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.event_available_outlined),
-                        selectedIcon: Icon(Icons.event_available, color: AppColors.teal),
-                        label: 'Leave',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.account_balance_wallet_outlined),
-                        selectedIcon: Icon(Icons.account_balance_wallet, color: AppColors.teal),
-                        label: 'Salary',
-                      ),
-                      NavigationDestination(
-                        icon: unreadCount > 0
-                            ? Badge.count(
-                                count: unreadCount,
-                                backgroundColor: AppColors.amber,
-                                textColor: Colors.black,
-                                child: const Icon(Icons.gavel_outlined),
-                              )
-                            : const Icon(Icons.gavel_outlined),
-                        selectedIcon: const Icon(Icons.gavel, color: AppColors.teal),
-                        label: 'Warnings',
-                      ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.folder_outlined),
-                        selectedIcon: Icon(Icons.folder, color: AppColors.teal),
-                        label: 'Documents',
-                      ),
-                    ],
+                    ),
                   ),
                 );
               },

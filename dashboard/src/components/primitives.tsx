@@ -90,17 +90,17 @@ export function Panel({
 }) {
   return (
     <section
-      className={`glass-panel rounded-2xl p-6 transition-all duration-300 min-w-0 ${className}`}
+      className={`glass-panel rounded-3xl p-6 transition-all duration-300 min-w-0 ${className}`}
     >
-      <header className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-4">
-        <div className="flex items-center gap-3">
+      <header className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-white/8 pb-4">
+        <div className="flex items-center gap-3.5">
           {icon && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800/80 border border-white/8 text-indigo-400 shadow-inner">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent-gradient text-on-accent shadow-accent">
               {icon}
             </div>
           )}
           <div>
-            <h2 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
+            <h2 className="text-base font-extrabold tracking-tight text-white flex items-center gap-2">
               {title}
             </h2>
             {subtitle && (
@@ -111,7 +111,7 @@ export function Panel({
 
         <div className="flex flex-wrap items-center gap-3">
           {note && (
-            <span className="text-xs text-slate-400 bg-slate-800/40 px-2.5 py-1 rounded-lg border border-white/5">
+            <span className="text-xs text-slate-400 bg-white/5 px-2.5 py-1 rounded-lg border border-white/8">
               {note}
             </span>
           )}
@@ -146,15 +146,15 @@ export function Button({
 
   const variants = {
     primary:
-      'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20 font-bold border border-emerald-400/30',
+      'bg-emerald-500 hover:bg-emerald-400 text-on-bright shadow-lg shadow-emerald-500/20 font-bold border border-emerald-400/30',
     accent:
-      'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 font-bold border border-indigo-500/40',
+      'bg-accent-gradient text-on-accent shadow-accent font-bold border border-white/10 hover:brightness-110',
     success:
-      'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 border border-emerald-500/30',
+      'bg-emerald-600 hover:bg-emerald-500 text-on-accent shadow-lg shadow-emerald-600/20 border border-emerald-500/30',
     secondary:
-      'bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 border border-white/10 hover:border-white/20 shadow-sm hover:text-white',
+      'bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 hover:border-white/20 shadow-sm hover:text-white backdrop-blur-md',
     ghost:
-      'bg-transparent hover:bg-white/5 text-slate-400 hover:text-slate-100 border border-transparent hover:border-white/5',
+      'bg-transparent hover:bg-white/5 text-slate-400 hover:text-slate-100 border border-transparent hover:border-white/8',
     danger:
       'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:border-rose-500/50 shadow-sm shadow-rose-500/5',
   }[variant];
@@ -181,7 +181,7 @@ export function Input({
       )}
       <input
         {...props}
-        className={`w-full rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500/70 focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all ${
+        className={`w-full rounded-xl border border-white/10 bg-slate-900/70 px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500/70 focus:bg-slate-900 focus:outline-none focus:ring-4 focus:ring-indigo-500/15 transition-all ${
           icon ? 'pl-10' : ''
         } ${className}`}
       />

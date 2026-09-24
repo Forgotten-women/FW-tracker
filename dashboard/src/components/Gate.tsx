@@ -43,7 +43,7 @@ export function Gate({
   };
 
   return (
-    <div className="relative grid min-h-screen place-items-center overflow-hidden bg-[#07090E] p-6 text-slate-100 selection:bg-indigo-500 selection:text-white">
+    <div className="relative grid min-h-screen place-items-center overflow-hidden bg-transparent p-6 text-slate-100 selection:bg-indigo-500 selection:text-white">
       {/* Ambient background glows */}
       <div className="pointer-events-none absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-600/20 blur-[120px]" />
       <div className="pointer-events-none absolute -bottom-40 left-1/3 h-96 w-96 -translate-x-1/2 rounded-full bg-emerald-600/10 blur-[120px]" />
@@ -55,7 +55,7 @@ export function Gate({
         <div className="relative rounded-3xl border border-white/10 bg-slate-900/85 p-8 shadow-2xl backdrop-blur-2xl sm:p-10">
           {/* Header Brand */}
           <div className="flex flex-col items-center text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white shadow-xl shadow-indigo-500/30 border border-indigo-400/30">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-on-accent shadow-xl shadow-indigo-500/30 border border-indigo-400/30">
               <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
                   strokeLinecap="round"

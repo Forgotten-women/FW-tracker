@@ -82,7 +82,7 @@ function ExchangeRateModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-[#0F172A] p-6 shadow-2xl">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-xl">💱</span>
           <h2 className="text-base font-bold text-white">GBP / PKR Conversion Rate</h2>
@@ -116,7 +116,7 @@ function ExchangeRateModal({
           <button
             type="button"
             onClick={handleSave}
-            className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-600/30 transition"
+            className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-on-accent shadow-lg shadow-indigo-600/30 transition"
           >
             Apply Rate
           </button>
@@ -202,7 +202,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-[#141E33] shadow-xl overflow-hidden">
+    <div className="rounded-2xl border border-slate-800 bg-sheet shadow-xl overflow-hidden">
       <div className="border-b border-slate-800/80 px-5 py-4">
         <h3 className="text-sm font-bold text-white">{title}</h3>
       </div>
@@ -248,7 +248,7 @@ function CreatePeriodModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#0F172A] p-6 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
         <h2 className="mb-5 text-base font-bold text-white">Create Payroll Period</h2>
         {error && (
           <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-300">{error}</div>
@@ -302,7 +302,7 @@ function CreatePeriodModal({
             type="button"
             onClick={handleSubmit}
             disabled={loading}
-            className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition"
+            className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-on-accent transition"
           >
             {loading ? 'Creating…' : 'Create Period'}
           </button>
@@ -375,7 +375,7 @@ export function SetSalaryModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#0F172A] p-6 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
         <h2 className="mb-1 text-base font-bold text-white">Record Employee Salary</h2>
         <p className="mb-4 text-xs text-slate-400">
           Salaries are append-only. Historical payroll will preserve previous rates.
@@ -462,7 +462,7 @@ export function SetSalaryModal({
             type="button"
             onClick={handleSubmit}
             disabled={loading}
-            className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition shadow-lg shadow-indigo-600/30"
+            className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-on-accent transition shadow-lg shadow-indigo-600/30"
           >
             {loading ? 'Saving…' : 'Save Salary Record'}
           </button>
@@ -540,7 +540,7 @@ function ProposeAdjModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#0F172A] p-6 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
         <h2 className="mb-5 text-base font-bold text-white">Propose Payroll Adjustment</h2>
         {error && (
           <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-300">{error}</div>
@@ -596,7 +596,7 @@ function ProposeAdjModal({
             type="button"
             onClick={handleSubmit}
             disabled={loading}
-            className="flex-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition"
+            className="flex-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-on-accent transition"
           >
             {loading ? 'Proposing…' : 'Propose Adjustment'}
           </button>
@@ -653,7 +653,7 @@ function DecideAdjModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-[#0F172A] p-6 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl">
         <h2 className="mb-1 text-base font-bold text-white">Review Adjustment</h2>
         <p className="mb-4 text-xs text-slate-400">
           {adj.employeeName} {adj.employeeNumber && <span className="font-mono text-indigo-400 font-bold">({adj.employeeNumber})</span>} · {adj.type}
@@ -845,7 +845,7 @@ function StarterLeaverPreview({
             type="button"
             onClick={run}
             disabled={loading}
-            className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition"
+            className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-on-accent transition"
           >
             {loading ? 'Calculating…' : 'Preview'}
           </button>
@@ -1038,7 +1038,7 @@ function PeriodDetailView({
                   onClick={() => onCurrencyChange(c)}
                   className={`rounded-md px-2.5 py-1 text-xs font-bold transition ${
                     currency === c
-                      ? 'bg-indigo-600 text-white shadow'
+                      ? 'bg-indigo-600 text-on-accent shadow'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -1254,7 +1254,7 @@ function PeriodDetailView({
                         setSetSalaryEmployeeId(b.employeeId);
                         setShowSetSalary(true);
                       }}
-                      className="rounded-lg bg-amber-500 hover:bg-amber-400 px-3.5 py-1.5 text-xs font-bold text-slate-950 shadow-md transition flex items-center gap-1.5"
+                      className="rounded-lg bg-amber-500 hover:bg-amber-400 px-3.5 py-1.5 text-xs font-bold text-on-bright shadow-md transition flex items-center gap-1.5"
                     >
                       <span>+ Record Salary</span>
                     </button>
@@ -1353,7 +1353,7 @@ function PeriodDetailView({
       {/* Close Period Confirmation */}
       {closingConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-rose-700/50 bg-[#0F172A] p-6 shadow-2xl">
+          <div className="w-full max-w-sm rounded-2xl border border-rose-700/50 bg-sheet p-6 shadow-2xl">
             <h2 className="mb-2 text-base font-bold text-white">Close Payroll Period?</h2>
             <p className="mb-4 text-xs text-slate-400">
               This is irreversible. All proposed adjustments must be decided first. Once closed, no new adjustments can be added.
@@ -1366,7 +1366,7 @@ function PeriodDetailView({
             )}
             <div className="flex gap-3">
               <button type="button" onClick={handleClose} disabled={closing}
-                className="flex-1 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition">
+                className="flex-1 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-on-accent transition">
                 {closing ? 'Closing…' : 'Yes, Close Period'}
               </button>
               <button type="button" onClick={() => setClosingConfirm(false)}
@@ -1544,7 +1544,7 @@ export function PayrollPanel() {
                   onClick={() => setCurrency(c)}
                   className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
                     currency === c
-                      ? 'bg-indigo-600 text-white shadow'
+                      ? 'bg-indigo-600 text-on-accent shadow'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -1572,7 +1572,7 @@ export function PayrollPanel() {
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition"
+            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-on-accent shadow-lg shadow-indigo-600/20 transition"
           >
             + New Period
           </button>
@@ -1580,7 +1580,7 @@ export function PayrollPanel() {
       </div>
 
       {/* Employee Mobile Salary Visibility Setting Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-[#0F172A] px-4 py-3 shadow-md">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-sheet px-4 py-3 shadow-md">
         <div className="flex items-center gap-3">
           <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${showSalaryToEmployees ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
             {showSalaryToEmployees ? '👁️' : '🔒'}
@@ -1645,7 +1645,7 @@ export function PayrollPanel() {
                 <button
                   type="button"
                   onClick={() => setShowCreate(true)}
-                  className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition"
+                  className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-on-accent transition"
                 >
                   + Create First Period
                 </button>

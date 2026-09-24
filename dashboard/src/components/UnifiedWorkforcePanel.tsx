@@ -13,6 +13,27 @@ import type {
 } from '@/lib/types';
 import { Badge, Button, Empty, STATUS_META } from '@/components/primitives';
 import { AttendanceCorrectionsPanel } from '@/components/panels';
+import { OverviewHero, type HeroFilter } from '@/components/OverviewHero';
+
+const LaptopIcon = ({ className = 'h-3 w-3' }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h12a2 2 0 012 2v9H4V6zm-2 12h20" />
+  </svg>
+);
+const CoffeeIcon = ({ className = 'h-3 w-3' }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M17 8h1a4 4 0 010 8h-1M3 8h14v9a4 4 0 01-4 4H7a4 4 0 01-4-4V8zm3-6v2m4-2v2m4-2v2" />
+  </svg>
+);
+
+const FILTER_LABEL: Record<HeroFilter, string> = {
+  ALL: 'Everyone',
+  IN_OFFICE: 'In office',
+  WORKSTATION: 'Laptops active',
+  ON_BREAK: 'On break',
+  LATE: 'Late / deficit',
+  AWAY: 'Away / out',
+};
 
 interface UnifiedWorkforcePanelProps {
   summary: DashboardSummary;
@@ -40,9 +61,7 @@ export function UnifiedWorkforcePanel({
 }: UnifiedWorkforcePanelProps) {
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<
-    'ALL' | 'IN_OFFICE' | 'WORKSTATION' | 'ON_BREAK' | 'LATE' | 'AWAY'
-  >('ALL');
+  const [statusFilter, setStatusFilter] = useState<HeroFilter>('ALL');
 
   // Workstation and app telemetry cache
   const [workstations, setWorkstations] = useState<WorkstationItem[]>([]);
@@ -207,106 +226,24 @@ export function UnifiedWorkforcePanel({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 1. EXECUTIVE KPI SUMMARY STRIP */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {/* Total Workforce */}
-        <div className="rounded-2xl border border-white/8 bg-slate-900/60 p-4 shadow-xl backdrop-blur-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400">Total Enrolled</span>
-            <span className="text-base">👥</span>
-          </div>
-          <div className="mt-2 text-2xl font-black tracking-tight text-white">
-            {allTodayEmployees.length}
-          </div>
-          <div className="mt-1 text-[11px] text-slate-400">Team members</div>
-        </div>
-
-        {/* In Office */}
-        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/20 p-4 shadow-xl backdrop-blur-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-emerald-300">In Office</span>
-            <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400" />
-          </div>
-          <div className="mt-2 text-2xl font-black tracking-tight text-emerald-400">
-            {inOfficeCount}
-          </div>
-          <div className="mt-1 text-[11px] text-emerald-300/80">Presence verified</div>
-        </div>
-
-        {/* Active Workstations */}
-        <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/20 p-4 shadow-xl backdrop-blur-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-cyan-300">Laptops Active</span>
-            <span className="text-base">💻</span>
-          </div>
-          <div className="mt-2 text-2xl font-black tracking-tight text-cyan-400">
-            {workstationActiveCount}
-          </div>
-          <div className="mt-1 text-[11px] text-cyan-300/80">Typing / Working</div>
-        </div>
-
-        {/* On Break */}
-        <div className="rounded-2xl border border-amber-500/20 bg-amber-950/20 p-4 shadow-xl backdrop-blur-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-amber-300">On Break</span>
-            <span className="text-base">☕</span>
-          </div>
-          <div className="mt-2 text-2xl font-black tracking-tight text-amber-400">
-            {breakCount}
-          </div>
-          <div className="mt-1 text-[11px] text-amber-300/80">Authorised pause</div>
-        </div>
-
-        {/* Late Arrival / Deficit */}
-        <div className="rounded-2xl border border-rose-500/20 bg-rose-950/20 p-4 shadow-xl backdrop-blur-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-rose-300">Late / Deficit</span>
-            <span className="text-base">⚠️</span>
-          </div>
-          <div className="mt-2 text-2xl font-black tracking-tight text-rose-400">
-            {lateCount}
-          </div>
-          <div className="mt-1 text-[11px] text-rose-300/80">Policy flagged</div>
-        </div>
-
-        {/* Away / Offline */}
-        <div className="rounded-2xl border border-slate-700/40 bg-slate-900/40 p-4 shadow-xl backdrop-blur-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400">Away / Out</span>
-            <span className="text-base">🌐</span>
-          </div>
-          <div className="mt-2 text-2xl font-black tracking-tight text-slate-300">
-            {awayCount}
-          </div>
-          <div className="mt-1 text-[11px] text-slate-400">Not in office</div>
-        </div>
-      </div>
-
-      {/* 2. PENDING CORRECTIONS ALERT BANNER */}
-      {pendingCorrections.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 shadow-xl">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-lg text-amber-300">
-              ⚠️
-            </div>
-            <div>
-              <div className="text-sm font-bold text-amber-200">
-                {pendingCorrections.length} Attendance Correction Request{pendingCorrections.length > 1 ? 's' : ''} Awaiting Review
-              </div>
-              <p className="text-xs text-amber-300/80">
-                Staff have submitted manual time adjustments or forgotten punch amendments.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowCorrections(!showCorrections)}
-            className="rounded-xl border border-amber-500/40 bg-amber-500/20 px-3.5 py-1.5 text-xs font-bold text-amber-200 hover:bg-amber-500/30 transition cursor-pointer"
-          >
-            {showCorrections ? 'Hide Correction Requests' : 'Review & Decide'}
-          </button>
-        </div>
-      )}
+      {/* 1. OVERVIEW HERO: live presence ring + filterable KPI tiles */}
+      <OverviewHero
+        summary={summary}
+        total={allTodayEmployees.length}
+        inOffice={inOfficeCount}
+        laptopsActive={workstationActiveCount}
+        onBreak={breakCount}
+        late={lateCount}
+        away={awayCount}
+        pendingCorrections={pendingCorrections.length}
+        activeFilter={statusFilter}
+        onFilter={(f) => {
+          setSelectedDate(summary.currentDateKey);
+          setStatusFilter(f);
+        }}
+        onReviewCorrections={() => setShowCorrections((v) => !v)}
+        correctionsOpen={showCorrections}
+      />
 
       {/* Collapsible Corrections Panel */}
       {showCorrections && pendingCorrections.length > 0 && (
@@ -318,35 +255,39 @@ export function UnifiedWorkforcePanel({
       )}
 
       {/* 3. MASTER WORKFORCE CONTROL BAR */}
-      <div className="rounded-2xl border border-white/8 bg-slate-900/80 p-4 shadow-xl backdrop-blur-xl">
+      <div className="glass-panel rounded-2xl p-3.5">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
           {/* Left: View Mode Toggle & Search */}
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
             {/* View Mode Switcher */}
-            <div className="flex items-center rounded-xl border border-white/10 bg-slate-950/80 p-1 shadow-inner">
+            <div className="flex items-center rounded-xl border border-white/10 bg-white/5 p-1" role="group" aria-label="View mode">
               <button
                 type="button"
                 onClick={() => setViewMode('CARDS')}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
                   viewMode === 'CARDS'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    ? 'bg-accent-gradient text-on-accent shadow-accent'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <span>🗂️</span>
-                <span>Cards View</span>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z" />
+                </svg>
+                <span>Cards</span>
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('TABLE')}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
                   viewMode === 'TABLE'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    ? 'bg-accent-gradient text-on-accent shadow-accent'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <span>📋</span>
-                <span>Table Ledger</span>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                <span>Table</span>
               </button>
             </div>
 
@@ -357,10 +298,11 @@ export function UnifiedWorkforcePanel({
                 placeholder="Search name, role, ID, laptop..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/80 pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500 focus:outline-none transition shadow-inner"
+                aria-label="Search employees"
+                className="w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-8 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-500/70 focus:outline-none focus:ring-4 focus:ring-indigo-500/15 transition"
               />
               <svg
-                className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-500"
+                className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -369,8 +311,10 @@ export function UnifiedWorkforcePanel({
               </svg>
               {searchQuery && (
                 <button
+                  type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer"
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer"
                 >
                   ✕
                 </button>
@@ -381,19 +325,20 @@ export function UnifiedWorkforcePanel({
           {/* Right: Date Selector & CSV Export */}
           <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-end">
             {/* Historical Date Picker */}
-            <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-950/80 px-2.5 py-1 text-xs text-slate-300">
+            <div className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-300">
               <span className="text-slate-500">Date:</span>
               <input
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                className="bg-transparent text-xs text-slate-200 focus:outline-none"
+                aria-label="Attendance date"
+                className="bg-transparent text-xs text-slate-100 focus:outline-none"
               />
               {selectedDate !== summary.currentDateKey && (
                 <button
                   type="button"
                   onClick={() => setSelectedDate(summary.currentDateKey)}
-                  className="rounded bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/30 transition cursor-pointer"
+                  className="rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/25 transition cursor-pointer"
                   title="Reset to today"
                 >
                   Today
@@ -417,79 +362,30 @@ export function UnifiedWorkforcePanel({
           </div>
         </div>
 
-        {/* Status Filter Chips (For Today's view) */}
+        {/* Active filter (set from the hero tiles above) */}
         {!isHistorical && (
-          <div className="mt-3.5 flex flex-wrap items-center gap-1.5 border-t border-white/8 pt-3">
-            <button
-              type="button"
-              onClick={() => setStatusFilter('ALL')}
-              className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer ${
-                statusFilter === 'ALL'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
-                  : 'bg-slate-950/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              All ({allTodayEmployees.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('IN_OFFICE')}
-              className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'IN_OFFICE'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
-                  : 'bg-slate-950/60 text-emerald-400 hover:bg-slate-800'
-              }`}
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              In Office ({inOfficeCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('WORKSTATION')}
-              className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'WORKSTATION'
-                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-500/20'
-                  : 'bg-slate-950/60 text-cyan-400 hover:bg-slate-800'
-              }`}
-            >
-              <span>💻</span>
-              Workstation Active ({workstationActiveCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('ON_BREAK')}
-              className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'ON_BREAK'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-500/20'
-                  : 'bg-slate-950/60 text-amber-400 hover:bg-slate-800'
-              }`}
-            >
-              <span>☕</span>
-              On Break ({breakCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('LATE')}
-              className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                statusFilter === 'LATE'
-                  ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20'
-                  : 'bg-slate-950/60 text-rose-400 hover:bg-slate-800'
-              }`}
-            >
-              <span>⚠️</span>
-              Late Arrival ({lateCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('AWAY')}
-              className={`rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer ${
-                statusFilter === 'AWAY'
-                  ? 'bg-slate-700 text-white shadow-md'
-                  : 'bg-slate-950/60 text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              Away / Out ({awayCount})
-            </button>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/8 pt-3 text-xs">
+            <span className="text-slate-400">
+              Showing <strong className="font-mono text-slate-100 tnum">{filteredTodayEmployees.length}</strong> of{' '}
+              <span className="font-mono tnum">{allTodayEmployees.length}</span>
+              {statusFilter !== 'ALL' && (
+                <>
+                  {' '}·{' '}
+                  <span className="rounded-md bg-indigo-500/15 px-1.5 py-0.5 font-bold text-indigo-300">
+                    {FILTER_LABEL[statusFilter]}
+                  </span>
+                </>
+              )}
+            </span>
+            {statusFilter !== 'ALL' && (
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALL')}
+                className="font-semibold text-slate-400 hover:text-slate-100 transition cursor-pointer"
+              >
+                Clear filter
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -497,7 +393,7 @@ export function UnifiedWorkforcePanel({
       {/* 4. WORKFORCE ROSTER CONTENT */}
       {isHistorical ? (
         /* Historical Attendance Ledger */
-        <div className="rounded-2xl border border-white/8 bg-slate-900/60 p-6 shadow-xl backdrop-blur-xl">
+        <div className="glass-panel rounded-3xl p-6">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-base font-bold text-white">
               Historical Attendance Ledger for {selectedDate}
@@ -520,7 +416,7 @@ export function UnifiedWorkforcePanel({
           ) : (
             <div className="overflow-x-auto rounded-xl border border-white/8">
               <table className="w-full min-w-[760px] border-collapse text-left text-xs">
-                <thead className="bg-slate-950 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/8">
+                <thead className="bg-white/5 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/8">
                   <tr>
                     <th className="px-4 py-3.5">Employee</th>
                     <th className="px-3 py-3.5">First In</th>
@@ -556,10 +452,10 @@ export function UnifiedWorkforcePanel({
                             onBreak: false,
                           } as unknown as EmployeeDay);
                         }}
-                        className="hover:bg-cyan-500/[0.04] transition-colors cursor-pointer group"
+                        className="hover:bg-indigo-500/[0.05] transition-colors cursor-pointer group"
                       >
                         <td className="px-4 py-3.5">
-                          <span className="font-bold text-white group-hover:text-cyan-300 transition block">
+                          <span className="font-bold text-white group-hover:text-indigo-300 transition block">
                             {h.employeeName}
                           </span>
                           <span className="text-[11px] text-slate-400">{h.role}</span>
@@ -581,7 +477,7 @@ export function UnifiedWorkforcePanel({
                         <td className="px-4 py-3.5 text-right">
                           <button
                             type="button"
-                            className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300 group-hover:bg-cyan-500/20 transition"
+                            className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-bold text-indigo-300 group-hover:bg-indigo-500/20 transition"
                           >
                             <span>Details</span>
                             <span>→</span>
@@ -599,11 +495,15 @@ export function UnifiedWorkforcePanel({
         /* CARDS VIEW (Clean, informative, modern cards) */
         <div>
           {filteredTodayEmployees.length === 0 ? (
-            <div className="rounded-2xl border border-white/8 bg-slate-900/60 p-12 text-center text-slate-400">
-              <span className="text-3xl block mb-2">🔍</span>
+            <div className="glass-panel rounded-3xl p-12 text-center text-slate-400">
+              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-400">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </span>
               <p className="font-semibold text-white">No employees match this filter</p>
               <p className="text-xs text-slate-500 mt-1">
-                Try selecting a different status chip or clearing your search.
+                Pick a different tile above, or clear your search.
               </p>
             </div>
           ) : (
@@ -629,21 +529,21 @@ export function UnifiedWorkforcePanel({
                   <div
                     key={e.employeeId}
                     onClick={() => onSelectEmployee(e)}
-                    className="group relative rounded-2xl border border-white/8 bg-slate-900/70 p-5 shadow-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-500/40 hover:bg-slate-900/90 hover:shadow-cyan-500/10 cursor-pointer overflow-hidden"
+                    className="glass-panel group relative rounded-3xl p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-500/40 cursor-pointer overflow-hidden"
                   >
                     {/* Top Header: Avatar, Name, Status Badge */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600/30 to-cyan-500/30 border border-white/10 font-bold text-sm text-cyan-300 shadow-inner group-hover:border-cyan-400/50 transition">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent-gradient font-extrabold text-sm text-on-accent shadow-accent">
                           {initials}
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <h4 className="font-bold text-sm text-white tracking-tight truncate group-hover:text-cyan-300 transition">
+                            <h4 className="font-bold text-sm text-white tracking-tight truncate group-hover:text-indigo-300 transition">
                               {e.employeeName}
                             </h4>
                             {e.employeeNumber && (
-                              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[9px] font-mono font-semibold text-slate-400 border border-slate-700">
+                              <span className="rounded-md bg-white/5 px-1.5 py-0.5 text-[9px] font-mono font-semibold text-slate-400 border border-white/10">
                                 {e.employeeNumber}
                               </span>
                             )}
@@ -658,7 +558,7 @@ export function UnifiedWorkforcePanel({
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         {e.onBreak ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold text-amber-300 shadow-sm animate-pulse">
-                            <span>☕</span>
+                            <CoffeeIcon />
                             <span>On Break</span>
                           </span>
                         ) : (
@@ -685,16 +585,16 @@ export function UnifiedWorkforcePanel({
                           <span className="text-slate-500 text-[10px]">/ 7h 30m</span>
                         </div>
                       </div>
-                      <div className="h-1.5 w-full rounded-full bg-slate-950 overflow-hidden border border-white/5">
+                      <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-gradient-to-r from-teal-500 to-cyan-400 transition-all duration-500"
+                          className="h-full rounded-full bg-accent-gradient transition-all duration-500"
                           style={{ width: `${targetPercent}%` }}
                         />
                       </div>
                     </div>
 
                     {/* Quick Metrics Ribbon (First In, Last Seen, Break) */}
-                    <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-slate-950/60 p-2.5 text-center border border-white/4">
+                    <div className="mt-3 grid grid-cols-3 gap-2 rounded-2xl bg-white/5 p-2.5 text-center border border-white/6">
                       <div>
                         <div className="text-[9px] uppercase font-bold text-slate-500">First In</div>
                         <div className="font-mono text-xs font-semibold text-slate-200 mt-0.5">
@@ -719,8 +619,8 @@ export function UnifiedWorkforcePanel({
                     <div className="mt-3 flex items-center justify-between pt-2 border-t border-white/6 text-[11px]">
                       <div className="flex items-center gap-2 truncate">
                         {ws ? (
-                          <span className="inline-flex items-center gap-1 font-mono text-[10px] text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20 truncate">
-                            <span>💻</span>
+                          <span className="inline-flex items-center gap-1 font-mono text-[10px] text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded-md border border-cyan-500/20 truncate">
+                            <LaptopIcon />
                             <span>{ws.model || 'Laptop'}</span>
                             <span className="text-cyan-400/60 capitalize">({ws.status.toLowerCase()})</span>
                           </span>
@@ -734,7 +634,7 @@ export function UnifiedWorkforcePanel({
                         )}
                       </div>
 
-                      <span className="shrink-0 text-cyan-400 text-xs font-bold group-hover:translate-x-0.5 transition-transform">
+                      <span className="shrink-0 text-indigo-400 text-xs font-bold group-hover:translate-x-0.5 transition-transform">
                         Details →
                       </span>
                     </div>
@@ -746,10 +646,10 @@ export function UnifiedWorkforcePanel({
         </div>
       ) : (
         /* TABLE LEDGER VIEW (Consolidated from Screenshot 2 & 3) */
-        <div className="rounded-2xl border border-white/8 bg-slate-900/60 p-4 shadow-xl backdrop-blur-xl">
+        <div className="glass-panel rounded-3xl p-4">
           <div className="overflow-x-auto rounded-xl border border-white/8">
             <table className="w-full min-w-[900px] border-collapse text-left text-xs">
-              <thead className="bg-slate-950 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/8">
+              <thead className="bg-white/5 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/8">
                 <tr>
                   <th className="px-4 py-3.5">Employee</th>
                   <th className="px-3 py-3.5">Live Status</th>
@@ -772,16 +672,16 @@ export function UnifiedWorkforcePanel({
                     <tr
                       key={e.employeeId}
                       onClick={() => onSelectEmployee(e)}
-                      className="hover:bg-cyan-500/[0.04] transition-colors cursor-pointer group"
+                      className="hover:bg-indigo-500/[0.05] transition-colors cursor-pointer group"
                     >
                       {/* Employee Info */}
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-2.5">
-                          <div className="h-7 w-7 rounded-lg bg-indigo-500/20 border border-white/10 flex items-center justify-center font-bold text-[10px] text-cyan-300">
+                          <div className="h-7 w-7 rounded-lg bg-accent-gradient flex items-center justify-center font-bold text-[10px] text-on-accent">
                             {e.employeeName.charAt(0)}
                           </div>
                           <div>
-                            <span className="font-bold text-white group-hover:text-cyan-300 transition block">
+                            <span className="font-bold text-white group-hover:text-indigo-300 transition block">
                               {e.employeeName}
                             </span>
                             <span className="text-[11px] text-slate-400">{e.role}</span>
@@ -794,7 +694,7 @@ export function UnifiedWorkforcePanel({
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {e.onBreak ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold text-amber-300 animate-pulse">
-                              <span>☕</span>
+                              <CoffeeIcon />
                               <span>On Break</span>
                             </span>
                           ) : (
@@ -845,7 +745,7 @@ export function UnifiedWorkforcePanel({
                         {ws ? (
                           <div>
                             <div className="font-mono text-[11px] text-cyan-300 font-semibold flex items-center gap-1">
-                              <span>💻</span>
+                              <LaptopIcon />
                               <span>{ws.model || 'Laptop'}</span>
                               <span className="text-slate-400 text-[10px] font-normal">({ws.platform})</span>
                             </div>
@@ -864,7 +764,7 @@ export function UnifiedWorkforcePanel({
                       <td className="px-4 py-3.5 text-right">
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300 group-hover:bg-cyan-500/20 group-hover:border-cyan-400 transition"
+                          className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-bold text-indigo-300 group-hover:bg-indigo-500/20 transition"
                         >
                           <span>Profile</span>
                           <span>→</span>

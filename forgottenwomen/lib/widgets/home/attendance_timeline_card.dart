@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/attendance.dart';
 import '../../theme.dart';
+import '../glass/glass.dart';
 
 class AttendanceTimelineCard extends StatelessWidget {
   final List<Attendance> history;
@@ -22,65 +23,42 @@ class AttendanceTimelineCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'ATTENDANCE LOG (PAST 7 DAYS)',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.1,
-                color: AppColors.textMuted,
-              ),
-            ),
-            TextButton.icon(
-              onPressed: onDisputeDay,
-              icon: const Icon(Icons.edit_note, size: 16, color: AppColors.primaryLight),
-              label: const Text(
-                'Dispute a Day',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.primaryLight,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (history.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceDark,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: const Center(
-              child: Text(
-                'No attendance history recorded yet.',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-              ),
-            ),
-          )
-        else
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: history.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final day = history[index];
-              final dispute = disputesByDate[day.date];
-              return _buildDayTile(context, day, dispute);
-            },
+        SectionLabel(
+          'Attendance log · past 7 days',
+          trailing: TextButton.icon(
+            onPressed: onDisputeDay,
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            icon: const Icon(Icons.edit_note_rounded, size: 16),
+            label: const Text('Dispute a day', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
           ),
+        ),
+        GlassCard(
+          radius: 22,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: history.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(22),
+                  child: Center(
+                    child: Text(
+                      'No attendance history recorded yet.',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                    ),
+                  ),
+                )
+              : Column(
+                  children: [
+                    for (var i = 0; i < history.length; i++) ...[
+                      if (i > 0) Divider(height: 1, indent: 14, endIndent: 14, color: AppColors.border),
+                      _buildDayRow(history[i], disputesByDate[history[i].date]),
+                    ],
+                  ],
+                ),
+        ),
       ],
     );
   }
 
-  Widget _buildDayTile(BuildContext context, Attendance day, CorrectionRequest? dispute) {
+  Widget _buildDayRow(Attendance day, CorrectionRequest? dispute) {
     final bool isPresent = day.totalMinutes > 0;
     final Color statusTone;
     final String statusText;
@@ -88,139 +66,114 @@ class AttendanceTimelineCard extends StatelessWidget {
     if (dispute != null) {
       if (dispute.isApproved) {
         statusTone = AppColors.teal;
-        statusText = 'DISPUTE RESOLVED';
+        statusText = 'Resolved';
       } else if (dispute.isRejected) {
         statusTone = AppColors.danger;
-        statusText = 'DISPUTE REJECTED';
+        statusText = 'Rejected';
       } else {
         statusTone = AppColors.amber;
-        statusText = 'DISPUTE PENDING';
+        statusText = 'Disputed';
       }
     } else if (day.status == PresenceStatus.inOffice) {
       statusTone = AppColors.teal;
-      statusText = 'PRESENT';
+      statusText = 'Present';
     } else if (day.status == PresenceStatus.gracePeriod) {
       statusTone = AppColors.amber;
-      statusText = 'GRACE';
+      statusText = 'Grace';
     } else if (isPresent) {
       statusTone = AppColors.teal;
-      statusText = 'LOGGED';
+      statusText = 'Logged';
     } else {
-      statusTone = const Color(0xFF64748B);
-      statusText = 'OFF / ABSENT';
+      statusTone = AppColors.neutral;
+      statusText = 'Off / absent';
     }
 
     return InkWell(
       onTap: () => onDayTapped(day),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceDark,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         child: Row(
           children: [
-            // Date Pill
             Container(
-              width: 52,
+              width: 46,
               padding: const EdgeInsets.symmetric(vertical: 6),
               decoration: BoxDecoration(
-                color: AppColors.bgDark,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.border),
+                color: AppColors.cardRaised,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.glassBorder),
               ),
               child: Column(
                 children: [
                   Text(
-                    _extractDayOfWeek(day.date),
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textMuted,
-                    ),
+                    _dayOfWeek(day.date),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textTertiary),
                   ),
                   Text(
-                    _extractDayNumber(day.date),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
+                    _dayNumber(day.date),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 14),
-
-            // Timestamps
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Flexible(
-                        child: Text(
-                          day.timeWorkedFormatted.isEmpty ? '0h 0m' : day.timeWorkedFormatted,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
+                      Text(
+                        day.timeWorkedFormatted.isEmpty ? '0h 0m' : day.timeWorkedFormatted,
+                        style: monoStyle(fontSize: 13.5),
                       ),
                       const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: statusTone.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: statusTone.withValues(alpha: 0.4)),
-                        ),
-                        child: Text(
-                          statusText,
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: statusTone,
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: statusTone.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: Text(
+                            statusText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: statusTone),
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
                     day.firstCheckIn.isEmpty && day.lastActiveTime.isEmpty
                         ? 'No punches recorded'
-                        : 'In: ${day.firstCheckIn.isEmpty ? "—" : day.firstCheckIn}  •  Out: ${day.lastActiveTime.isEmpty ? "—" : day.lastActiveTime}',
+                        : 'In ${day.firstCheckIn.isEmpty ? "—" : day.firstCheckIn}  ·  Out ${day.lastActiveTime.isEmpty ? "—" : day.lastActiveTime}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textMuted,
-                    ),
+                    style: TextStyle(fontSize: 11, color: AppColors.textTertiary),
                   ),
                   if (day.hasDeficit) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '⚠ ${_deficitSummary(day)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.amber,
-                      ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Icon(Icons.schedule_rounded, size: 12, color: AppColors.amber),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            _deficitSummary(day),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.amber),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ],
               ),
             ),
-
-            const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
+            Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary, size: 20),
           ],
         ),
       ),
@@ -246,14 +199,14 @@ class AttendanceTimelineCard extends StatelessWidget {
     return parts.join(' · ');
   }
 
-  String _extractDayOfWeek(String dateStr) {
+  String _dayOfWeek(String dateStr) {
     final dt = DateTime.tryParse(dateStr);
     if (dt == null) return '';
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return days[dt.weekday - 1];
   }
 
-  String _extractDayNumber(String dateStr) {
+  String _dayNumber(String dateStr) {
     final dt = DateTime.tryParse(dateStr);
     if (dt == null) return dateStr;
     return '${dt.day}';

@@ -2,174 +2,173 @@ import 'package:flutter/material.dart';
 
 import '../../models/attendance.dart';
 import '../../theme.dart';
+import '../glass/glass.dart';
 
+/// Two glass tiles: the deficit standing (today + all-time running balance)
+/// and this week's worked total with a Mon–Fri mini bar chart.
 class ProductivityMetricsCard extends StatelessWidget {
   final WorkingHoursMetrics workingHours;
   final DeficitBalance deficit;
   final VoidCallback onDeficitTapped;
+
+  /// Mon..Fri, each the share of that day's target worked (0..1), or null for
+  /// a day that hasn't happened yet.
+  final List<double?> weekProgress;
+
+  /// 0 = Monday … 4 = Friday; -1 on weekends.
+  final int todayIndex;
 
   const ProductivityMetricsCard({
     super.key,
     required this.workingHours,
     required this.deficit,
     required this.onDeficitTapped,
+    this.weekProgress = const [],
+    this.todayIndex = -1,
   });
 
   @override
   Widget build(BuildContext context) {
+    final int todayDeficit = deficit.todayBreakdown.totalMinutes;
     final bool hasDeficit = deficit.minutes > 0;
-    final Color deficitTone = hasDeficit ? AppColors.amber : AppColors.teal;
+    final Color tone = todayDeficit > 0 ? AppColors.amber : AppColors.teal;
 
-    final weeklyTarget = workingHours.weekly.formattedRequired != '0h 00m'
-        ? workingHours.weekly.formattedRequired
-        : '40h 00m';
+    final weekly = workingHours.weekly;
+    final String weeklyTarget =
+        weekly.formattedRequired != '0h 00m' ? weekly.formattedRequired : '40h 00m';
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Expanded(
-                child: Text(
-                  'WORKING HOURS & STANDING',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Window: ${workingHours.officeWindow}',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.textMuted,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // 2 Metric Cards side by side
-          Row(
-            children: [
-              // Deficit Balance Card (Tappable for breakdown)
-              Expanded(
-                child: InkWell(
-                  onTap: onDeficitTapped,
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: deficitTone.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: deficitTone.withValues(alpha: 0.25)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Deficit Balance',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: deficitTone,
-                              ),
-                            ),
-                            Icon(Icons.info_outline_rounded, size: 14, color: deficitTone),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          hasDeficit ? deficit.formatted : '0 mins',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: deficitTone,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          hasDeficit ? 'Tap for breakdown' : 'Standing: In Good Order',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // Weekly Progress Card
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.primaryLight.withValues(alpha: 0.25)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          Expanded(
+            child: GlassCard(
+              onTap: onDeficitTapped,
+              radius: 22,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      const Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'This Week',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.primaryLight,
-                            ),
-                          ),
-                          Icon(Icons.date_range_rounded, size: 14, color: AppColors.primaryLight),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        workingHours.weekly.formattedWorked.isEmpty
-                            ? '0h 0m'
-                            : workingHours.weekly.formattedWorked,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
+                      Expanded(
+                        child: Text(
+                          'Deficit',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Target: $weeklyTarget',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: AppColors.textMuted,
+                      _badge(todayDeficit > 0 ? 'Today' : 'On track', tone),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text('${todayDeficit}m', style: monoStyle(fontSize: 24, letterSpacing: -0.6)),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasDeficit ? 'today · ${deficit.formatted} all‑time' : 'today · none all‑time',
+                    maxLines: 2,
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textTertiary),
+                  ),
+                  const Spacer(),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Breakdown →',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.primaryLight),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: GlassCard(
+              radius: 22,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'This week',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
                         ),
+                      ),
+                      Text(
+                        'of $weeklyTarget',
+                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.textTertiary),
                       ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      weekly.formattedWorked.isEmpty ? '0h 00m' : weekly.formattedWorked,
+                      style: monoStyle(fontSize: 24, letterSpacing: -0.6),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(height: 36, child: _bars()),
+                ],
               ),
-            ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _bars() {
+    final values = weekProgress.length == 5 ? weekProgress : List<double?>.filled(5, null);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (var i = 0; i < 5; i++) ...[
+          if (i > 0) const SizedBox(width: 5),
+          Expanded(child: _bar(values[i], isToday: i == todayIndex)),
+        ],
+      ],
+    );
+  }
+
+  Widget _bar(double? v, {required bool isToday}) {
+    if (v == null) {
+      return Container(
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(5),
+        ),
+      );
+    }
+    final colors = isToday
+        ? const [Color(0xFFF472B6), Color(0xFFEC4899)]
+        : [AppColors.primary.withValues(alpha: 0.7), AppColors.primary];
+    return FractionallySizedBox(
+      heightFactor: v.clamp(0.12, 1.0),
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(5),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: colors,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _badge(String text, Color tone) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: tone),
       ),
     );
   }

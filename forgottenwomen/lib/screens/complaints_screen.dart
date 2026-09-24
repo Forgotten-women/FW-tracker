@@ -5,6 +5,7 @@ import '../models/hr.dart';
 import '../services/api_client.dart';
 import '../services/token_store.dart';
 import '../theme.dart';
+import '../widgets/glass/glass.dart';
 
 class ComplaintsScreen extends StatefulWidget {
   final ApiClient? api;
@@ -199,7 +200,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
+        backgroundColor: AppColors.sheet,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -210,16 +211,16 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                 color: AppColors.teal.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.check_circle_rounded, color: AppColors.teal, size: 48),
+              child: Icon(Icons.check_circle_rounded, color: AppColors.teal, size: 48),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Concern Submitted Confidentially',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: AppColors.textPrimary,
               ),
             ),
             const SizedBox(height: 10),
@@ -233,11 +234,11 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.tag_rounded, color: AppColors.primaryLight, size: 18),
+                  Icon(Icons.tag_rounded, color: AppColors.primaryLight, size: 18),
                   const SizedBox(width: 6),
                   Text(
                     result.referenceNumber,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'monospace',
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
@@ -251,10 +252,10 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             Text(
               result.message,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Only authorised HR and Management can access your submission.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11, color: AppColors.teal, fontWeight: FontWeight.w600),
@@ -291,7 +292,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
         minChildSize: 0.5,
         maxChildSize: 0.95,
         builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: AppColors.surfaceDark,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
@@ -317,7 +318,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                 children: [
                   Text(
                     complaint.referenceNumber,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -330,7 +331,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
               const SizedBox(height: 6),
               Text(
                 'Submitted on ${complaint.createdAtFormatted}',
-                style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                style: TextStyle(fontSize: 11, color: AppColors.textMuted),
               ),
               const SizedBox(height: 14),
 
@@ -345,12 +346,12 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.label_outline, size: 14, color: AppColors.textMuted),
+                    Icon(Icons.label_outline, size: 14, color: AppColors.textMuted),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         complaint.category,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       ),
                     ),
                   ],
@@ -361,7 +362,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
               // Subject & Description
               Text(
                 complaint.subject,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
               ),
               const SizedBox(height: 10),
               Container(
@@ -374,14 +375,14 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                 ),
                 child: Text(
                   complaint.description,
-                  style: const TextStyle(fontSize: 13, color: AppColors.textLight, height: 1.4),
+                  style: TextStyle(fontSize: 13, color: AppColors.textLight, height: 1.4),
                 ),
               ),
               const SizedBox(height: 16),
 
               // Attachments if any
               if (complaint.attachments.isNotEmpty) ...[
-                const Text(
+                Text(
                   'ATTACHED DOCUMENTS / SCREENSHOTS',
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.textMuted, letterSpacing: 1),
                 ),
@@ -396,14 +397,14 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.attach_file, color: AppColors.primaryLight, size: 18),
+                          Icon(Icons.attach_file, color: AppColors.primaryLight, size: 18),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(att.fileName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
-                                Text('${(att.fileSize / 1024).toStringAsFixed(1)} KB', style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                                Text(att.fileName, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                Text('${(att.fileSize / 1024).toStringAsFixed(1)} KB', style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
                               ],
                             ),
                           ),
@@ -425,7 +426,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
                           Icon(Icons.comment_outlined, color: AppColors.amber, size: 16),
                           SizedBox(width: 6),
@@ -435,7 +436,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                       const SizedBox(height: 6),
                       Text(
                         complaint.hrNotes!,
-                        style: const TextStyle(fontSize: 12, color: Colors.white, height: 1.4),
+                        style: TextStyle(fontSize: 12, color: AppColors.textPrimary, height: 1.4),
                       ),
                     ],
                   ),
@@ -458,7 +459,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Row(
+                          Row(
                             children: [
                               Icon(Icons.check_circle_outline, color: AppColors.teal, size: 16),
                               SizedBox(width: 6),
@@ -467,7 +468,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                           ),
                           Text(
                             complaint.resolvedAtFormatted ?? '',
-                            style: const TextStyle(fontSize: 11, color: AppColors.teal),
+                            style: TextStyle(fontSize: 11, color: AppColors.teal),
                           ),
                         ],
                       ),
@@ -475,7 +476,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                         const SizedBox(height: 6),
                         Text(
                           complaint.resolutionNotes!,
-                          style: const TextStyle(fontSize: 12, color: Colors.white70, height: 1.4),
+                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.4),
                         ),
                       ],
                     ],
@@ -537,14 +538,13 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bgDark,
+    return GlassScaffold(
       appBar: AppBar(
         title: const Text('Employee Concerns & Complaints'),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppColors.primary,
-          labelColor: Colors.white,
+          labelColor: AppColors.textPrimary,
           unselectedLabelColor: AppColors.textMuted,
           labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
           tabs: const [
@@ -579,7 +579,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
               ),
-              child: const Row(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 22),
@@ -593,7 +593,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: AppColors.textPrimary,
                           ),
                         ),
                         SizedBox(height: 4),
@@ -623,11 +623,11 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.person_outline, size: 16, color: AppColors.textMuted),
+                        Icon(Icons.person_outline, size: 16, color: AppColors.textMuted),
                         const SizedBox(width: 8),
                         Text(
                           _employeeName,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
                         ),
                       ],
                     ),
@@ -635,7 +635,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                       _employeeId != null && _employeeId!.isNotEmpty
                           ? 'ID: $_employeeId'
                           : 'Submitting as Self',
-                      style: const TextStyle(fontSize: 11, color: AppColors.teal, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 11, color: AppColors.teal, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -644,7 +644,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             ],
 
             // Category Dropdown
-            const Text(
+            Text(
               'Complaint Category',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textLight),
             ),
@@ -660,8 +660,8 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                 child: DropdownButton<String>(
                   value: _selectedCategory,
                   isExpanded: true,
-                  dropdownColor: AppColors.surfaceDark,
-                  style: const TextStyle(fontSize: 13, color: Colors.white),
+                  dropdownColor: AppColors.sheet,
+                  style: TextStyle(fontSize: 13, color: AppColors.textPrimary),
                   items: _categories.map((cat) {
                     return DropdownMenuItem<String>(
                       value: cat,
@@ -679,22 +679,22 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             const SizedBox(height: 16),
 
             // Subject / Title
-            const Text(
+            Text(
               'Subject / Title',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textLight),
             ),
             const SizedBox(height: 6),
             TextFormField(
               controller: _subjectController,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'e.g. Issue regarding overtime calculation...',
-                hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                hintStyle: TextStyle(color: AppColors.textTertiary, fontSize: 12),
                 filled: true,
                 fillColor: AppColors.surfaceDark,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.border)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.border)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.primary)),
               ),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) return 'Please enter a subject.';
@@ -704,7 +704,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             const SizedBox(height: 16),
 
             // Detailed Description
-            const Text(
+            Text(
               'Detailed Description',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textLight),
             ),
@@ -712,15 +712,15 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             TextFormField(
               controller: _descriptionController,
               maxLines: 5,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Please describe the situation, dates, persons involved (if any), and desired resolution...',
-                hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                hintStyle: TextStyle(color: AppColors.textTertiary, fontSize: 12),
                 filled: true,
                 fillColor: AppColors.surfaceDark,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.border)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.border)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.primary)),
               ),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) return 'Please enter a detailed description.';
@@ -733,14 +733,14 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   'Supporting Documents / Screenshots',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textLight),
                 ),
                 TextButton.icon(
                   onPressed: _pickAttachments,
-                  icon: const Icon(Icons.attach_file, size: 16, color: AppColors.primaryLight),
-                  label: const Text('Add File', style: TextStyle(fontSize: 12, color: AppColors.primaryLight)),
+                  icon: Icon(Icons.attach_file, size: 16, color: AppColors.primaryLight),
+                  label: Text('Add File', style: TextStyle(fontSize: 12, color: AppColors.primaryLight)),
                 ),
               ],
             ),
@@ -759,17 +759,17 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.insert_drive_file_outlined, color: AppColors.teal, size: 18),
+                      Icon(Icons.insert_drive_file_outlined, color: AppColors.teal, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           file.name,
-                          style: const TextStyle(fontSize: 12, color: Colors.white),
+                          style: TextStyle(fontSize: 12, color: AppColors.textPrimary),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.close, size: 16, color: AppColors.danger),
+                        icon: Icon(Icons.close, size: 16, color: AppColors.danger),
                         onPressed: () => _removeAttachment(idx),
                         constraints: const BoxConstraints(),
                         padding: EdgeInsets.zero,
@@ -791,7 +791,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onAccent),
                       )
                     : const Icon(Icons.send_rounded, size: 18),
                 label: Text(
@@ -812,7 +812,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
 
   Widget _buildMyConcernsTab() {
     if (_loadingList) {
-      return const Center(
+      return Center(
         child: CircularProgressIndicator(color: AppColors.primary),
       );
     }
@@ -824,12 +824,12 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: AppColors.danger, size: 40),
+              Icon(Icons.error_outline, color: AppColors.danger, size: 40),
               const SizedBox(height: 12),
               Text(
                 _listError!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
@@ -852,19 +852,19 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             children: [
               Container(
                 padding: const EdgeInsets.all(20),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AppColors.surfaceDark,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.folder_open_rounded, size: 40, color: AppColors.textMuted),
+                child: Icon(Icons.folder_open_rounded, size: 40, color: AppColors.textMuted),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'No Concerns Submitted',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.textPrimary),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'You have not submitted any complaints or concerns yet. Use the "Submit Concern" tab if you have any HR or workplace matter to raise confidentially.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
@@ -889,7 +889,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: AppColors.border),
+              side: BorderSide(color: AppColors.border),
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
@@ -904,7 +904,7 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                       children: [
                         Text(
                           c.referenceNumber,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -917,12 +917,12 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                     const SizedBox(height: 8),
                     Text(
                       c.subject,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       c.category,
-                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                      style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -930,10 +930,10 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                       children: [
                         Text(
                           c.createdAtFormatted,
-                          style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                          style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                         ),
                         if (c.hrNotes != null && c.hrNotes!.isNotEmpty)
-                          const Row(
+                          Row(
                             children: [
                               Icon(Icons.mark_chat_read_outlined, size: 14, color: AppColors.amber),
                               SizedBox(width: 4),
@@ -943,9 +943,9 @@ class _ComplaintsScreenState extends State<ComplaintsScreen> with SingleTickerPr
                         else if (c.attachments.isNotEmpty)
                           Row(
                             children: [
-                              const Icon(Icons.attach_file, size: 14, color: AppColors.textMuted),
+                              Icon(Icons.attach_file, size: 14, color: AppColors.textMuted),
                               const SizedBox(width: 2),
-                              Text('${c.attachments.length} file(s)', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                              Text('${c.attachments.length} file(s)', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
                             ],
                           ),
                       ],

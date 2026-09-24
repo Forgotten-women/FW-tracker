@@ -48,3 +48,4 @@ build/
 dist/
 *.md
 *.xlsx
+scratch/*

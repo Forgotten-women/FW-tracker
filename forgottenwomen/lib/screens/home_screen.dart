@@ -17,6 +17,9 @@ import '../widgets/home/break_control_card.dart';
 import '../widgets/home/home_skeleton_loader.dart';
 import '../widgets/home/productivity_metrics_card.dart';
 import '../widgets/home/shift_hero_card.dart';
+import '../widgets/home/today_timeline_card.dart';
+import '../widgets/home/week_strip.dart';
+import '../widgets/glass/glass.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
 import 'complaints_screen.dart';
@@ -64,99 +67,101 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _showDeficitDialog(BuildContext context, DeficitBalance deficit) {
     final b = deficit.todayBreakdown;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.pie_chart_outline_rounded, color: AppColors.amber, size: 22),
-            SizedBox(width: 10),
-            Text(
-              'Deficit Breakdown',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+
+    Widget tile(String label, String value, Color tone) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: tone.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
             ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppColors.bgDark,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                const SizedBox(height: 2),
+                Text(value, style: monoStyle(fontSize: 19, color: tone)),
+              ],
+            ),
+          ),
+        );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: AppColors.overlay(0.2), borderRadius: BorderRadius.circular(2)),
+                ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              const SizedBox(height: 16),
+              Text(
+                'Deficit breakdown',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 14),
+              Row(
                 children: [
-                  const Expanded(
-                    child: Text(
-                      'Total Accumulated Deficit (All-Time)',
-                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  tile('All-time balance', deficit.formatted, deficit.minutes > 0 ? AppColors.amber : AppColors.primaryLight),
+                  const SizedBox(width: 10),
+                  tile('Today so far', b.formatted, b.totalMinutes > 0 ? AppColors.amber : AppColors.teal),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "The all-time balance carries across every day, so it can be larger than today's "
+                'components below even on a perfect day, and smaller than their sum once HR approves an adjustment.',
+                style: TextStyle(fontSize: 11, color: AppColors.textTertiary, height: 1.35),
+              ),
+              const SizedBox(height: 14),
+              SectionLabel("Today's components"),
+              _buildDeficitRow('Late arrival', '${b.lateMinutes}m'),
+              _buildDeficitRow('Excess break', '${b.excessBreakMinutes}m'),
+              _buildDeficitRow('Early departure', '${b.earlyDepartureMinutes}m'),
+              _buildDeficitRow('Unauthorised absence', '${b.unauthorisedMissingMinutes}m'),
+              if (b.approvedAdjustmentMinutes > 0)
+                _buildDeficitRow('HR-approved adjustments', '−${b.approvedAdjustmentMinutes}m', isPositive: true),
+              Divider(height: 24, color: AppColors.border),
+              Text(
+                'Deficit builds when you work under the daily target or go over the 30-minute break. '
+                "Dispute it if it doesn't look right.",
+                style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      child: const Text('Close'),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    deficit.formatted,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.amber),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _openCorrectionForm();
+                      },
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      child: const Text('Dispute deficit'),
+                    ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Running balance carried across every day, not just today -- '
-              'it can be larger than today\'s components below even on a '
-              'perfect day, and smaller than their sum if HR has already '
-              'approved an adjustment.',
-              style: TextStyle(fontSize: 10, color: AppColors.textMuted, height: 1.3),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'TODAY\'S COMPONENTS',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: AppColors.textMuted),
-                ),
-                Text(
-                  'Today so far: ${b.formatted}',
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textMuted),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _buildDeficitRow('Late arrival time', '${b.lateMinutes} mins'),
-            _buildDeficitRow('Excess break time', '${b.excessBreakMinutes} mins'),
-            _buildDeficitRow('Early departure time', '${b.earlyDepartureMinutes} mins'),
-            _buildDeficitRow('Unauthorised absence', '${b.unauthorisedMissingMinutes} mins'),
-            if (b.approvedAdjustmentMinutes > 0)
-              _buildDeficitRow('HR Approved Adjustments', '-${b.approvedAdjustmentMinutes} mins', isPositive: true),
-            const Divider(height: 20, color: AppColors.border),
-            const Text(
-              'Deficit time accumulates when working less than 8h 00m or overstaying the 30-minute break. Submit a dispute if this is inaccurate.',
-              style: TextStyle(fontSize: 11, color: AppColors.textMuted, height: 1.4),
-            ),
-          ],
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close', style: TextStyle(color: AppColors.textMuted)),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _openCorrectionForm();
-            },
-            style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('Dispute Deficit'),
-          ),
-        ],
       ),
     );
   }
@@ -172,7 +177,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
             ),
           ),
           const SizedBox(width: 8),
@@ -180,10 +185,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: isPositive ? AppColors.teal : Colors.white,
+            style: monoStyle(
+              fontSize: 12.5,
+              color: isPositive ? AppColors.teal : AppColors.textPrimary,
             ),
           ),
         ],
@@ -195,17 +199,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
+        backgroundColor: AppColors.sheet,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text('Manual Clock Out', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text(
+        title: Text('Manual Clock Out', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+        content: Text(
           'This will conclude your working session for today. Use this if you are leaving the office premises.',
           style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -233,7 +237,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final submitted = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surfaceDark,
+      backgroundColor: AppColors.sheet,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -255,28 +259,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'File Attendance Dispute',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: AppColors.textPrimary,
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close, color: AppColors.textMuted),
+                          icon: Icon(Icons.close, color: AppColors.textMuted),
                           onPressed: () => Navigator.pop(ctx, false),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
-                    const Text(
+                    Text(
                       'Dispute an inaccurate clock-in, sensor glitch, or authorised absence. Preserved immutably for HR audit.',
                       style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
-                    const Divider(height: 24, color: AppColors.border),
+                    Divider(height: 24, color: AppColors.border),
 
-                    const Text('Affected Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Colors.white70)),
+                    Text('Affected Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.textSecondary)),
                     const SizedBox(height: 6),
                     InkWell(
                       onTap: () async {
@@ -303,29 +307,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(selectedDateKey, style: const TextStyle(fontSize: 13, color: Colors.white)),
-                            const Icon(Icons.calendar_today, size: 16, color: AppColors.primaryLight),
+                            Text(selectedDateKey, style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+                            Icon(Icons.calendar_today, size: 16, color: AppColors.primaryLight),
                           ],
                         ),
                       ),
                     ),
                     const SizedBox(height: 14),
 
-                    const Text('Dispute Reason Category', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Colors.white70)),
+                    Text('Dispute Reason Category', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.textSecondary)),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
                       initialValue: reasonCategory,
-                      dropdownColor: AppColors.surfaceDark,
+                      dropdownColor: AppColors.sheet,
                       decoration: const InputDecoration(
                         contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       ),
-                      items: const [
-                        DropdownMenuItem(value: 'Sensor Glitch / Failed Check-in', child: Text('Sensor Glitch / Failed Check-in', style: TextStyle(fontSize: 13, color: Colors.white))),
-                        DropdownMenuItem(value: 'Wi-Fi / Network Disconnection', child: Text('Wi-Fi / Network Disconnection', style: TextStyle(fontSize: 13, color: Colors.white))),
-                        DropdownMenuItem(value: 'Off-site Business Meeting', child: Text('Off-site Business Meeting', style: TextStyle(fontSize: 13, color: Colors.white))),
-                        DropdownMenuItem(value: 'Forgotten Phone / Device', child: Text('Forgotten Phone / Device', style: TextStyle(fontSize: 13, color: Colors.white))),
-                        DropdownMenuItem(value: 'Approved Overtime / Late Shift', child: Text('Approved Overtime / Late Shift', style: TextStyle(fontSize: 13, color: Colors.white))),
-                        DropdownMenuItem(value: 'Other Reason', child: Text('Other Reason', style: TextStyle(fontSize: 13, color: Colors.white))),
+                      items: [
+                        DropdownMenuItem(value: 'Sensor Glitch / Failed Check-in', child: Text('Sensor Glitch / Failed Check-in', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                        DropdownMenuItem(value: 'Wi-Fi / Network Disconnection', child: Text('Wi-Fi / Network Disconnection', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                        DropdownMenuItem(value: 'Off-site Business Meeting', child: Text('Off-site Business Meeting', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                        DropdownMenuItem(value: 'Forgotten Phone / Device', child: Text('Forgotten Phone / Device', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                        DropdownMenuItem(value: 'Approved Overtime / Late Shift', child: Text('Approved Overtime / Late Shift', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                        DropdownMenuItem(value: 'Other Reason', child: Text('Other Reason', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
                       ],
                       onChanged: (val) {
                         if (val != null) {
@@ -335,30 +339,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 14),
 
-                    const Text('Proposed Adjustment Minutes (optional)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Colors.white70)),
+                    Text('Proposed Adjustment Minutes (optional)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.textSecondary)),
                     const SizedBox(height: 6),
                     TextField(
                       controller: minutesController,
                       keyboardType: TextInputType.number,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
-                      decoration: const InputDecoration(
+                      style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                      decoration: InputDecoration(
                         hintText: 'e.g. 30',
-                        hintStyle: TextStyle(color: Colors.white30),
+                        hintStyle: TextStyle(color: AppColors.textTertiary),
                         suffixText: 'mins',
                         suffixStyle: TextStyle(color: AppColors.textMuted),
                       ),
                     ),
                     const SizedBox(height: 14),
 
-                    const Text('Detailed Explanation (Required)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Colors.white70)),
+                    Text('Detailed Explanation (Required)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.textSecondary)),
                     const SizedBox(height: 6),
                     TextField(
                       controller: reasonController,
                       maxLines: 3,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
-                      decoration: const InputDecoration(
+                      style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                      decoration: InputDecoration(
                         hintText: 'Explain what occurred and why attendance should be amended...',
-                        hintStyle: TextStyle(color: Colors.white30),
+                        hintStyle: TextStyle(color: AppColors.textTertiary),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -370,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         onPressed: () {
                           if (reasonController.text.trim().isEmpty) {
                             ScaffoldMessenger.of(ctx).showSnackBar(
-                              const SnackBar(
+                              SnackBar(
                                 content: Text('Please enter an explanation.'),
                                 backgroundColor: AppColors.danger,
                               ),
@@ -422,7 +426,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surfaceDark,
+      backgroundColor: AppColors.sheet,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -441,29 +445,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
+                      Text(
                         'My Attendance Disputes',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: AppColors.textPrimary,
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.close, color: AppColors.textMuted),
+                        icon: Icon(Icons.close, color: AppColors.textMuted),
                         onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'Track review status and feedback notes from HR regarding your dispute submissions.',
                     style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                   ),
-                  const Divider(height: 20, color: AppColors.border),
+                  Divider(height: 20, color: AppColors.border),
                   Expanded(
                     child: corrections.isEmpty
-                        ? const Center(
+                        ? Center(
                             child: Text(
                               'No disputes on record.',
                               style: TextStyle(color: AppColors.textMuted, fontSize: 13),
@@ -503,7 +507,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       children: [
                                         Text(
                                           c.date,
-                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
                                         ),
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -522,7 +526,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     const SizedBox(height: 8),
                                     Text(
                                       c.reason,
-                                      style: const TextStyle(fontSize: 12, color: Colors.white70),
+                                      style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                                     ),
                                     if (c.reviewNotes != null && c.reviewNotes!.isNotEmpty) ...[
                                       const SizedBox(height: 8),
@@ -536,12 +540,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         child: Row(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            const Icon(Icons.feedback_outlined, size: 14, color: AppColors.primaryLight),
+                                            Icon(Icons.feedback_outlined, size: 14, color: AppColors.primaryLight),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Text(
                                                 'HR Decision Note: ${c.reviewNotes}',
-                                                style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.white70),
+                                                style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.textSecondary),
                                               ),
                                             ),
                                           ],
@@ -569,11 +573,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
+        backgroundColor: AppColors.sheet,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text(
           'Timesheet: ${day.date}',
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
         ),
         content: SizedBox(
           width: double.maxFinite,
@@ -588,7 +592,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     child: Text(
                       'First In: ${day.firstCheckIn}',
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -597,16 +601,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       'Last Seen: ${day.lastActiveTime}',
                       textAlign: TextAlign.end,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
-              Text('Total Worked: ${day.timeWorkedFormatted}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+              Text('Total Worked: ${day.timeWorkedFormatted}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary)),
               if (day.hasDeficit) ...[
                 const SizedBox(height: 14),
-                const Text(
+                Text(
                   'DEFICIT BREAKDOWN',
                   style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: AppColors.textMuted),
                 ),
@@ -620,15 +624,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(height: 4),
                 _buildDeficitRow('Total deficit for this day', '${day.dailyDeficitMinutes} mins'),
               ],
-              const Divider(height: 20, color: AppColors.border),
+              Divider(height: 20, color: AppColors.border),
               if (existingDispute != null) ...[
-                const Text('Dispute History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
+                Text('Dispute History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.textPrimary)),
                 const SizedBox(height: 4),
-                Text('Status: ${existingDispute.status}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.amber)),
+                Text('Status: ${existingDispute.status}', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppColors.amber)),
                 const SizedBox(height: 2),
-                Text('Reason: ${existingDispute.reason}', style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                Text('Reason: ${existingDispute.reason}', style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
               ] else ...[
-                const Text(
+                Text(
                   'Was your check-in or hours recorded inaccurately? You can submit a formal dispute to HR for adjustment.',
                   style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                 ),
@@ -639,7 +643,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Close', style: TextStyle(color: AppColors.textMuted)),
           ),
           if (existingDispute == null)
             FilledButton(
@@ -692,7 +696,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (context, state) {
         if (state is HomeInitial || state is HomeLoading) {
           return Scaffold(
-            backgroundColor: AppColors.bgDark,
+            backgroundColor: Colors.transparent,
             appBar: _buildAppBar(context, null),
             body: const HomeSkeletonLoader(),
           );
@@ -700,7 +704,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
         if (state is HomeFailure) {
           return Scaffold(
-            backgroundColor: AppColors.bgDark,
+            backgroundColor: Colors.transparent,
             appBar: _buildAppBar(context, null),
             body: Center(
               child: Padding(
@@ -708,17 +712,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.danger),
+                    Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.danger),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       'Connection Failure',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       state.message,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                      style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 20),
                     FilledButton.icon(
@@ -748,8 +752,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             .where((c) => c.status == 'PENDING_HR' || c.status == 'PENDING')
             .length;
 
+        final int serverTarget = today.workingHours.daily.requiredMinutes;
+        final int dailyTarget = serverTarget > 0 ? serverTarget : 480;
+        final DateTime now = loaded.liveNow;
+        final String todayKey = WeekStrip.dateKey(now);
+        final daysByDate = <String, Attendance>{
+          for (final d in history) d.date: d,
+        };
+
+        // Mon–Fri bars: share of the daily target worked; null for days
+        // that haven't happened yet.
+        final weekProgress = <double?>[
+          for (final d in WeekStrip.weekdaysOf(now))
+            if (d.isAfter(now) && WeekStrip.dateKey(d) != todayKey)
+              null
+            else
+              (WeekStrip.dateKey(d) == todayKey
+                      ? today.attendance.totalMinutes
+                      : (daysByDate[WeekStrip.dateKey(d)]?.totalMinutes ?? 0)) /
+                  dailyTarget,
+        ];
+        final int todayIndex = now.weekday <= DateTime.friday ? now.weekday - 1 : -1;
+
+        String liveSessionDuration(WorkSession s) {
+          if (loaded.summary.serverTimeMs <= 0) return s.duration;
+          final elapsedMs = now.millisecondsSinceEpoch - loaded.summary.serverTimeMs;
+          final extra = (elapsedMs > 0 && elapsedMs < 12 * 3600 * 1000) ? elapsedMs ~/ 60000 : 0;
+          final mins = s.minutes + extra;
+          return mins > 0 ? '${mins ~/ 60}h ${(mins % 60).toString().padLeft(2, '0')}m' : s.duration;
+        }
+
         return Scaffold(
-          backgroundColor: AppColors.bgDark,
+          backgroundColor: Colors.transparent,
           appBar: _buildAppBar(
             context,
             loaded,
@@ -760,7 +794,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             children: [
               // Non-blocking top progress bar during background revalidation
               if (loaded.isRefreshing)
-                const LinearProgressIndicator(
+                LinearProgressIndicator(
                   minHeight: 2.5,
                   backgroundColor: Colors.transparent,
                   valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryLight),
@@ -779,23 +813,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 30),
                         children: [
-                          // Offline Warning Pill
                           if (loaded.isOffline) ...[
-                            Container(
+                            GlassCard(
+                              radius: 16,
+                              tint: AppColors.amber.withValues(alpha: 0.12),
+                              borderColor: AppColors.amber.withValues(alpha: 0.35),
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: AppColors.amber.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
-                              ),
-                              child: const Row(
+                              child: Row(
                                 children: [
                                   Icon(Icons.wifi_off_rounded, color: AppColors.amber, size: 18),
-                                  SizedBox(width: 10),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
-                                      'Offline mode: Displaying cached records. Syncing automatically when reconnected.',
-                                      style: TextStyle(color: AppColors.amber, fontSize: 11.5, fontWeight: FontWeight.w500),
+                                      "You're offline — showing saved records. They'll sync when you reconnect.",
+                                      style: TextStyle(color: AppColors.amber, fontSize: 11.5, fontWeight: FontWeight.w600),
                                     ),
                                   ),
                                 ],
@@ -804,16 +835,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             const SizedBox(height: 14),
                           ],
 
-                          // 1. Shift Hero Card (Glassmorphic + Live Timer + Target Progress)
+                          WeekStrip(
+                            today: loaded.liveNow,
+                            daysByDate: daysByDate,
+                            dailyTargetMinutes: dailyTarget,
+                            onDayTapped: (day) => _onDayTapped(day, corrections),
+                          ),
+                          const SizedBox(height: 14),
+
                           ShiftHeroCard(
                             todayDetails: today,
                             liveNow: loaded.liveNow,
-                            isVerified: true,
+                            // The server only reports IN_OFFICE once office
+                            // Wi-Fi has been verified; grace/away don't count.
+                            isVerified: today.attendance.status == PresenceStatus.inOffice,
                             serverTimeMs: loaded.summary.serverTimeMs,
                           ),
                           const SizedBox(height: 14),
 
-                          // 2. Break Control & Quick Action Card
                           BreakControlCard(
                             breakInfo: today.breakInfo,
                             liveNow: loaded.liveNow,
@@ -823,92 +862,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             },
                             onClockOut: _confirmClockOut,
                             onOpenDispute: () => _openCorrectionForm(),
-                          ),
-                          const SizedBox(height: 14),
-
-                          // 3. Productivity & Deficit Standing Card
-                          ProductivityMetricsCard(
-                            workingHours: today.workingHours,
-                            deficit: today.deficitBalance,
-                            onDeficitTapped: () => _showDeficitDialog(context, today.deficitBalance),
-                          ),
-                          const SizedBox(height: 14),
-
-                          // Confidential Concerns Quick Action Banner
-                          InkWell(
-                            borderRadius: BorderRadius.circular(16),
-                            onTap: () {
+                            onOpenConcerns: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
                               );
                             },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceDark,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary.withValues(alpha: 0.15),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  const Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Confidential Concerns & HR Issues',
-                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                                        ),
-                                        SizedBox(height: 2),
-                                        Text(
-                                          'Submit payroll, hours, or workplace concerns to HR',
-                                          style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
-                                ],
-                              ),
-                            ),
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 14),
 
-                          // 4. Today's Working Sessions (if any recorded)
+                          ProductivityMetricsCard(
+                            workingHours: today.workingHours,
+                            deficit: today.deficitBalance,
+                            onDeficitTapped: () => _showDeficitDialog(context, today.deficitBalance),
+                            weekProgress: weekProgress,
+                            todayIndex: todayIndex,
+                          ),
+                          const SizedBox(height: 14),
+
                           if (today.attendance.sessions.isNotEmpty) ...[
-                            const Text(
-                              'TODAY\'S WORKING SESSIONS',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1.1,
-                                color: AppColors.textMuted,
-                              ),
+                            TodayTimelineCard(
+                              sessions: today.attendance.sessions,
+                              liveDuration: liveSessionDuration,
                             ),
-                            const SizedBox(height: 8),
-                            ...today.attendance.sessions.map((s) {
-                              if (!s.open || loaded.summary.serverTimeMs <= 0) {
-                                return _buildSessionTile(s);
-                              }
-                              final elapsedMs = loaded.liveNow.millisecondsSinceEpoch - loaded.summary.serverTimeMs;
-                              final extraMins = (elapsedMs > 0 && elapsedMs < 12 * 3600 * 1000) ? (elapsedMs ~/ 60000) : 0;
-                              final liveMins = s.minutes + extraMins;
-                              final liveDuration = liveMins > 0 ? '${liveMins ~/ 60}h ${(liveMins % 60).toString().padLeft(2, '0')}m' : s.duration;
-                              return _buildSessionTile(s, liveDurationOverride: liveDuration);
-                            }),
                             const SizedBox(height: 20),
                           ],
 
-                          // 5. Past 7 Days Attendance Timeline
                           AttendanceTimelineCard(
                             history: history,
                             disputesByDate: disputesByDate,
@@ -937,12 +915,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final String displayName = loaded?.summary.todayDetails.employeeName.isNotEmpty == true
         ? loaded!.summary.todayDetails.employeeName
         : (_employeeName.isNotEmpty ? _employeeName : 'Employee Portal');
+    final String initials = displayName
+        .split(' ')
+        .where((w) => w.isNotEmpty)
+        .take(2)
+        .map((w) => w[0].toUpperCase())
+        .join();
+    final int hour = DateTime.now().hour;
+    final String greeting = hour < 12
+        ? 'Good morning'
+        : hour < 17
+            ? 'Good afternoon'
+            : 'Good evening';
+    final bool refreshing = loaded?.isRefreshing == true;
 
     return AppBar(
-      backgroundColor: AppColors.surfaceDark,
-      elevation: 0,
-      titleSpacing: 12,
-      title: GestureDetector(
+      backgroundColor: Colors.transparent,
+      toolbarHeight: 72,
+      titleSpacing: 16,
+      title: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const ProfileScreen()),
@@ -950,35 +942,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         },
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: AppColors.primary.withValues(alpha: 0.2),
-              child: Text(
-                displayName.isNotEmpty ? displayName.substring(0, 1).toUpperCase() : 'U',
-                style: const TextStyle(
-                  color: AppColors.primaryLight,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+            Container(
+              width: 46,
+              height: 46,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [AppColors.primary, AppColors.accentEnd, const Color(0xFFEC4899)],
+                ),
+              ),
+              child: Container(
+                decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.bg),
+                alignment: Alignment.center,
+                child: Text(
+                  initials.isEmpty ? 'U' : initials,
+                  style: TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.w800, fontSize: 15),
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
+                    greeting,
+                    maxLines: 1,
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500, color: AppColors.textSecondary),
+                  ),
+                  Text(
                     displayName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  const Text(
-                    'Staff Attendance',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ],
               ),
@@ -987,44 +990,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
       actions: [
-        // Dispute Badge Button
-        Stack(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.rate_review_outlined, color: Colors.white70, size: 20),
-              tooltip: 'My Disputes',
-              onPressed: onDisputesPressed,
-            ),
-            if (pendingDisputesCount > 0)
-              Positioned(
-                right: 8,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(color: AppColors.amber, shape: BoxShape.circle),
-                  child: Text(
-                    '$pendingDisputesCount',
-                    style: const TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-          ],
+        _glassAction(
+          icon: Icons.rate_review_outlined,
+          tooltip: 'My disputes',
+          badge: pendingDisputesCount,
+          onPressed: onDisputesPressed,
         ),
-
-        // Confidential Concerns Button
-        IconButton(
-          icon: const Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
-          tooltip: 'Confidential Concerns & Complaints',
-          onPressed: () async {
-            await Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
-            );
-          },
-        ),
-
-        // Settings Button
-        IconButton(
-          icon: const Icon(Icons.settings_outlined, color: Colors.white70, size: 20),
+        _glassAction(
+          icon: Icons.settings_outlined,
           tooltip: 'Settings',
           onPressed: () async {
             await Navigator.of(context).push(
@@ -1037,76 +1010,55 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             }
           },
         ),
-
-        // Refresh Button
-        IconButton(
-          icon: loaded?.isRefreshing == true
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.refresh, color: Colors.white70, size: 20),
+        _glassAction(
+          icon: Icons.refresh_rounded,
           tooltip: 'Refresh',
-          onPressed: loaded?.isRefreshing == true
+          busy: refreshing,
+          onPressed: refreshing
               ? null
               : () => context.read<HomeBloc>().add(const HomeRefreshRequested()),
         ),
+        const SizedBox(width: 12),
       ],
     );
   }
 
-  Widget _buildSessionTile(WorkSession s, {String? liveDurationOverride}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: s.open ? AppColors.teal : AppColors.textMuted,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Flexible(
-                  child: Text(
-                    '${s.from} → ${s.to}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ],
-            ),
+  Widget _glassAction({
+    required IconData icon,
+    required String tooltip,
+    VoidCallback? onPressed,
+    int badge = 0,
+    bool busy = false,
+  }) {
+    Widget child = busy
+        ? SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary),
+          )
+        : Icon(icon, size: 19, color: AppColors.textPrimary);
+    if (badge > 0) {
+      child = Badge(
+        label: Text('$badge'),
+        backgroundColor: AppColors.amber,
+        textColor: Colors.black,
+        child: child,
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: Tooltip(
+        message: tooltip,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: GlassCard(
+            radius: 15,
+            padding: EdgeInsets.zero,
+            onTap: onPressed,
+            child: Center(child: child),
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: AppColors.bgDark,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Text(
-              liveDurationOverride ?? s.duration,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.primaryLight, fontSize: 11, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

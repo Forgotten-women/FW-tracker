@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import '../models/hr.dart';
 import '../services/api_client.dart';
 import '../services/notification_service.dart';
+import '../theme.dart';
 
 class DocumentsScreen extends StatefulWidget {
   final ApiClient api;
@@ -91,9 +92,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           Navigator.pop(ctx);
           _loadData();
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text('Document update request submitted to HR!'),
-              backgroundColor: Color(0xFF10B981),
+              backgroundColor: AppColors.teal,
             ),
           );
         },
@@ -105,20 +106,20 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text('Delete Document?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: AppColors.sheet,
+        title: Text('Delete Document?', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
         content: Text(
           'Are you sure you want to delete "${doc.title}"? This file will be permanently removed.',
-          style: const TextStyle(color: Colors.white70, fontSize: 13),
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            child: Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF43F5E)),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             child: const Text('Delete'),
           ),
         ],
@@ -132,9 +133,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       _loadData();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('Document deleted.'),
-            backgroundColor: Color(0xFF10B981),
+            backgroundColor: AppColors.teal,
           ),
         );
       }
@@ -143,7 +144,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to delete: $e'),
-            backgroundColor: const Color(0xFFF43F5E),
+            backgroundColor: AppColors.danger,
           ),
         );
       }
@@ -155,32 +156,32 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Documents & Staff KYC',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.textPrimary),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white70),
+            icon: Icon(Icons.refresh, color: AppColors.textSecondary),
             onPressed: _loading ? null : _loadData,
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openRequestUpdateSheet(),
-        backgroundColor: const Color(0xFF4F46E5),
-        icon: const Icon(Icons.edit_note_outlined, color: Colors.white),
+        backgroundColor: AppColors.primary,
+        icon: const Icon(Icons.edit_note_outlined, color: AppColors.onAccent),
         label: const Text(
           'Request Doc Update',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppColors.onAccent, fontWeight: FontWeight.bold),
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF4F46E5)))
+          ? Center(child: CircularProgressIndicator(color: AppColors.primary))
           : _error != null
               ? Center(
                   child: Padding(
@@ -188,20 +189,20 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.error_outline, size: 48, color: Color(0xFFF43F5E)),
+                        Icon(Icons.error_outline, size: 48, color: AppColors.danger),
                         const SizedBox(height: 12),
                         Text(
                           _error!,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70, fontSize: 14),
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton(
                           onPressed: _loadData,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4F46E5),
+                            backgroundColor: AppColors.primary,
                           ),
-                          child: const Text('Retry', style: TextStyle(color: Colors.white)),
+                          child: const Text('Retry', style: TextStyle(color: AppColors.onAccent)),
                         ),
                       ],
                     ),
@@ -209,7 +210,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _loadData,
-                  color: const Color(0xFF4F46E5),
+                  color: AppColors.primary,
                   child: Align(
                     alignment: Alignment.topCenter,
                     child: ConstrainedBox(
@@ -219,26 +220,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         children: [
                           if (_checklist != null) _buildProgressCard(_checklist!),
                           const SizedBox(height: 20),
-                          const Text(
+                          Text(
                             'MANDATORY PERSONNEL KYC',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1.1,
-                              color: Colors.white54,
+                              color: AppColors.textSecondary,
                             ),
                           ),
                           const SizedBox(height: 10),
                           if (_checklist != null)
                             ..._checklist!.mandatoryChecklist.map((item) => _buildKycItemCard(item)),
                           const SizedBox(height: 24),
-                          const Text(
+                          Text(
                             'MY DOCUMENT VAULT',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1.1,
-                              color: Colors.white54,
+                              color: AppColors.textSecondary,
                             ),
                           ),
                           const SizedBox(height: 10),
@@ -246,15 +247,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1E293B),
+                                color: AppColors.card,
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white10),
+                                border: Border.all(color: AppColors.border),
                               ),
-                              child: const Center(
+                              child: Center(
                                 child: Text(
                                   'No documents uploaded yet.\nTap "Upload Document" to submit your CV, CNIC, or Utility Bill.',
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.5),
+                                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.5),
                                 ),
                               ),
                             )
@@ -272,25 +273,25 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     Color statusColor;
     String statusLabel;
     if (kyc.overallKycStatus == 'COMPLETE') {
-      statusColor = const Color(0xFF10B981);
+      statusColor = AppColors.teal;
       statusLabel = 'KYC Complete';
     } else if (kyc.overallKycStatus == 'PENDING_REVIEW') {
-      statusColor = const Color(0xFFF59E0B);
+      statusColor = AppColors.amber;
       statusLabel = 'Pending HR Review';
     } else {
-      statusColor = const Color(0xFFF43F5E);
+      statusColor = AppColors.danger;
       statusLabel = 'Incomplete KYC';
     }
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: statusColor.withOpacity(0.4)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: AppColors.shadow,
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -309,8 +310,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     Text(
                       kyc.employeeName,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
@@ -319,7 +320,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     Text(
                       kyc.employeeRole,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
                     ),
                   ],
                 ),
@@ -347,9 +348,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Staff Compliance Progress',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
               ),
               Text(
                 '${kyc.completionPercentage}%',
@@ -366,7 +367,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
               value: kyc.completionPercentage / 100,
-              backgroundColor: Colors.white10,
+              backgroundColor: AppColors.border,
               valueColor: AlwaysStoppedAnimation<Color>(statusColor),
               minHeight: 8,
             ),
@@ -375,9 +376,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildMiniMetric('${kyc.verifiedCount}', 'Verified', const Color(0xFF10B981)),
-              _buildMiniMetric('${kyc.pendingCount}', 'Pending', const Color(0xFFF59E0B)),
-              _buildMiniMetric('${kyc.missingCount}', 'Missing', const Color(0xFFF43F5E)),
+              _buildMiniMetric('${kyc.verifiedCount}', 'Verified', AppColors.teal),
+              _buildMiniMetric('${kyc.pendingCount}', 'Pending', AppColors.amber),
+              _buildMiniMetric('${kyc.missingCount}', 'Missing', AppColors.danger),
             ],
           ),
         ],
@@ -389,7 +390,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Column(
       children: [
         Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 14)),
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+        Text(label, style: TextStyle(color: AppColors.textSecondary, fontSize: 10)),
       ],
     );
   }
@@ -412,16 +413,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
 
     if (item.isVerified) {
-      badgeColor = const Color(0xFF10B981);
+      badgeColor = AppColors.teal;
       badgeText = 'VERIFIED';
     } else if (item.isPending) {
-      badgeColor = const Color(0xFFF59E0B);
+      badgeColor = AppColors.amber;
       badgeText = 'PENDING REVIEW';
     } else if (item.isRejected) {
-      badgeColor = const Color(0xFFF43F5E);
+      badgeColor = AppColors.danger;
       badgeText = 'REJECTED';
     } else {
-      badgeColor = const Color(0xFF64748B);
+      badgeColor = AppColors.neutral;
       badgeText = 'MISSING';
     }
 
@@ -429,12 +430,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: item.isRejected
-              ? const Color(0xFFF43F5E).withOpacity(0.6)
-              : Colors.white.withOpacity(0.08),
+              ? AppColors.danger.withOpacity(0.6)
+              : AppColors.overlay(0.08),
         ),
       ),
       child: Column(
@@ -445,10 +446,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4F46E5).withOpacity(0.15),
+                  color: AppColors.primary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, color: const Color(0xFF818CF8), size: 20),
+                child: Icon(icon, color: AppColors.primaryLight, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -457,8 +458,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   children: [
                     Text(
                       item.name,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
@@ -466,7 +467,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     const SizedBox(height: 2),
                     Text(
                       item.description,
-                      style: const TextStyle(color: Colors.white54, fontSize: 11),
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
                     ),
                   ],
                 ),
@@ -494,19 +495,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFF881337).withOpacity(0.4),
+                color: AppColors.danger.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFF43F5E).withOpacity(0.4)),
+                border: Border.all(color: AppColors.danger.withOpacity(0.4)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.warning_amber_rounded, color: Color(0xFFF43F5E), size: 16),
+                  Icon(Icons.warning_amber_rounded, color: AppColors.danger, size: 16),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'HR Feedback: ${item.rejectionReason}',
-                      style: const TextStyle(color: Color(0xFFFECDD3), fontSize: 11, height: 1.3),
+                      style: TextStyle(color: AppColors.danger, fontSize: 11, height: 1.3),
                     ),
                   ),
                 ],
@@ -522,14 +523,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   initialTypeId: item.typeId,
                   initialName: item.name,
                 ),
-                icon: const Icon(
+                icon: Icon(
                   Icons.edit_note,
                   size: 16,
-                  color: Color(0xFF818CF8),
+                  color: AppColors.primaryLight,
                 ),
                 label: Text(
                   item.isRejected ? 'Request Correction' : 'Request ${item.name} Update',
-                  style: const TextStyle(color: Color(0xFF818CF8), fontSize: 12, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: AppColors.primaryLight, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -544,13 +545,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: AppColors.overlay(0.08)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.insert_drive_file, color: Colors.white70, size: 24),
+          Icon(Icons.insert_drive_file, color: AppColors.textSecondary, size: 24),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -558,25 +559,25 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               children: [
                 Text(
                   doc.title,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   '${doc.type} · v${doc.version} · ${doc.uploadedAt}',
-                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
                 ),
               ],
             ),
           ),
           if (doc.isVerified)
-            const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 18)
+            Icon(Icons.check_circle, color: AppColors.teal, size: 18)
           else if (doc.isPending)
-            const Icon(Icons.hourglass_top, color: Color(0xFFF59E0B), size: 18)
+            Icon(Icons.hourglass_top, color: AppColors.amber, size: 18)
           else
-            const Icon(Icons.cancel, color: Color(0xFFF43F5E), size: 18),
+            Icon(Icons.cancel, color: AppColors.danger, size: 18),
           const SizedBox(width: 6),
           IconButton(
-            icon: const Icon(Icons.delete_outline, color: Colors.white38, size: 18),
+            icon: Icon(Icons.delete_outline, color: AppColors.textTertiary, size: 18),
             onPressed: () => _deleteDoc(doc),
             tooltip: 'Delete Document',
           ),
@@ -677,8 +678,8 @@ class _RequestDocumentUpdateSheetState extends State<_RequestDocumentUpdateSheet
         20,
         MediaQuery.of(context).viewInsets.bottom + 20,
       ),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E293B),
+      decoration: BoxDecoration(
+        color: AppColors.card,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SingleChildScrollView(
@@ -689,14 +690,14 @@ class _RequestDocumentUpdateSheetState extends State<_RequestDocumentUpdateSheet
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.edit_note, color: Color(0xFF818CF8), size: 22),
+                    Icon(Icons.edit_note, color: AppColors.primaryLight, size: 22),
                     SizedBox(width: 8),
                     Text(
                       'Request Document Update',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: AppColors.textPrimary,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
@@ -704,7 +705,7 @@ class _RequestDocumentUpdateSheetState extends State<_RequestDocumentUpdateSheet
                   ],
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white54),
+                  icon: Icon(Icons.close, color: AppColors.textSecondary),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -713,46 +714,46 @@ class _RequestDocumentUpdateSheetState extends State<_RequestDocumentUpdateSheet
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
+                color: AppColors.bg,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white10),
+                border: Border.all(color: AppColors.border),
               ),
-              child: const Row(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.shield_outlined, color: Color(0xFF10B981), size: 18),
+                  Icon(Icons.shield_outlined, color: AppColors.teal, size: 18),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Official KYC and personnel documents are securely uploaded and verified by HR. Submitting this request alerts HR to update or replace your verified file.',
-                      style: TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.4),
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5, height: 1.4),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Document Type',
-              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
+                color: AppColors.bg,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white12),
+                border: Border.all(color: AppColors.border),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _selectedTypeId,
                   isExpanded: true,
-                  dropdownColor: const Color(0xFF0F172A),
+                  dropdownColor: AppColors.sheet,
                   items: _categories.map((c) {
                     return DropdownMenuItem<String>(
                       value: c['id'],
-                      child: Text(c['name']!, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                      child: Text(c['name']!, style: TextStyle(color: AppColors.textPrimary, fontSize: 13)),
                     );
                   }).toList(),
                   onChanged: (val) {
@@ -766,30 +767,30 @@ class _RequestDocumentUpdateSheetState extends State<_RequestDocumentUpdateSheet
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'Reason / Notes for HR',
-              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             TextField(
               controller: _reasonController,
               maxLines: 3,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'e.g. My CNIC was renewed. I have provided the hardcopy / scanned copy to the HR office.',
-                hintStyle: const TextStyle(color: Colors.white30),
+                hintStyle: TextStyle(color: AppColors.textTertiary),
                 filled: true,
-                fillColor: const Color(0xFF0F172A),
+                fillColor: AppColors.bg,
                 contentPadding: const EdgeInsets.all(12),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Colors.white12),
+                  borderSide: BorderSide(color: AppColors.border),
                 ),
               ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: const TextStyle(color: Color(0xFFF43F5E), fontSize: 12)),
+              Text(_error!, style: TextStyle(color: AppColors.danger, fontSize: 12)),
             ],
             const SizedBox(height: 20),
             SizedBox(
@@ -798,18 +799,18 @@ class _RequestDocumentUpdateSheetState extends State<_RequestDocumentUpdateSheet
               child: ElevatedButton(
                 onPressed: _submitting ? null : _submitRequest,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4F46E5),
+                  backgroundColor: AppColors.primary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 child: _submitting
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        child: CircularProgressIndicator(color: AppColors.onAccent, strokeWidth: 2),
                       )
                     : const Text(
                         'Submit Request to HR',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: AppColors.onAccent, fontWeight: FontWeight.bold),
                       ),
               ),
             ),

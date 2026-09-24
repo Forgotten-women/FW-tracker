@@ -223,7 +223,7 @@ export function ComplaintsManagementPanel() {
                 onClick={() => setStatusFilter(st)}
                 className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
                   isActive
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    ? 'bg-indigo-600 text-on-accent shadow-md shadow-indigo-600/30'
                     : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
                 }`}
               >
@@ -600,7 +600,7 @@ export function ComplaintsManagementPanel() {
                   type="button"
                   disabled={updating}
                   onClick={() => handleUpdateComplaint(false)}
-                  className="rounded-xl border border-indigo-500/30 bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-500 disabled:opacity-50"
+                  className="rounded-xl border border-indigo-500/30 bg-indigo-600 px-4 py-2 text-xs font-semibold text-on-accent shadow-lg shadow-indigo-600/30 hover:bg-indigo-500 disabled:opacity-50"
                 >
                   {updating ? 'Saving...' : 'Save & Update'}
                 </button>
@@ -610,7 +610,7 @@ export function ComplaintsManagementPanel() {
                     type="button"
                     disabled={updating}
                     onClick={() => handleUpdateComplaint(true)}
-                    className="rounded-xl border border-emerald-500/30 bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 disabled:opacity-50"
+                    className="rounded-xl border border-emerald-500/30 bg-emerald-600 px-4 py-2 text-xs font-semibold text-on-accent shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 disabled:opacity-50"
                   >
                     {updating ? 'Resolving...' : 'Mark as Resolved'}
                   </button>

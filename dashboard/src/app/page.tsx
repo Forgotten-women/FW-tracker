@@ -187,7 +187,7 @@ export default function DashboardPage() {
 
   if (unlocked === undefined) {
     return (
-      <div className="grid min-h-screen place-items-center bg-[#07090E] text-sm text-slate-400">
+      <div className="grid min-h-screen place-items-center bg-transparent text-sm text-slate-400">
         <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl backdrop-blur-xl">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
           <span className="font-semibold text-slate-200">Authenticating HR Dashboard…</span>
@@ -299,53 +299,57 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#07090E] text-slate-100 selection:bg-indigo-500 selection:text-white">
-      {/* Global Header */}
-      <Header
-        summary={summary}
-        connection={connection}
-        onLock={() => lock('')}
-        unreadNotificationsCount={unreadNotificationsCount}
-        onOpenNotifications={() => setNotificationDrawerOpen(true)}
-      />
+    <div className="min-h-screen bg-transparent text-slate-100">
+      {/* Floating header + tab bar (glass, sticky) */}
+      <div className="sticky top-0 z-40 flex flex-col gap-2 px-4 pt-3 pb-2 sm:px-6">
+        <Header
+          summary={summary}
+          connection={connection}
+          onLock={() => lock('')}
+          unreadNotificationsCount={unreadNotificationsCount}
+          onOpenNotifications={() => setNotificationDrawerOpen(true)}
+        />
 
-      {/* Primary Navigation Tabs */}
-      <nav className="sticky top-[65px] z-30 border-b border-white/8 bg-slate-950/70 px-6 backdrop-blur-xl">
-        <div className="flex items-center justify-between overflow-x-auto py-2">
-          <div className="flex items-center gap-1.5">
-            {navTabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`relative flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold tracking-tight transition-all duration-200 cursor-pointer ${
-                    isActive
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/30'
-                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border border-transparent'
-                  }`}
-                >
-                  <span className={isActive ? 'text-white' : 'text-slate-400'}>{tab.icon}</span>
-                  <span>{tab.label}</span>
-                  {tab.badge !== undefined && tab.badge > 0 && (
-                    <span className="ml-1 rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-black text-white shadow-md">
-                      {tab.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        <nav aria-label="Dashboard sections" className="glass-panel rounded-2xl p-1.5">
+          <div className="flex items-center justify-between gap-3 overflow-x-auto">
+            <div className="flex items-center gap-1">
+              {navTabs.map((tab) => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`relative flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold tracking-tight transition-all duration-200 cursor-pointer ${
+                      isActive
+                        ? 'bg-accent-gradient text-on-accent shadow-accent'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
+                    }`}
+                  >
+                    <span className="shrink-0">{tab.icon}</span>
+                    <span className="whitespace-nowrap">{tab.label}</span>
+                    {tab.badge !== undefined && tab.badge > 0 && (
+                      <span
+                        className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-black ${
+                          isActive ? 'bg-on-accent/25 text-on-accent' : 'bg-rose-500 text-on-accent'
+                        }`}
+                      >
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
-          <div className="hidden items-center gap-3 lg:flex">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400 border border-emerald-500/20">
+            <span className="hidden shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400 border border-emerald-500/20 xl:inline-flex">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Office Beacon Active
+              Office beacon active
             </span>
           </div>
-        </div>
-      </nav>
+        </nav>
+      </div>
 
       {summary && <WarningBar summary={summary} />}
 
@@ -358,7 +362,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <main className="px-6 py-6">
+      <main className="px-4 pb-12 pt-4 sm:px-6">
         {!summary ? (
           <div className="flex h-64 flex-col items-center justify-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
@@ -529,9 +533,12 @@ export default function DashboardPage() {
 
       {/* Real-Time Toast Notification Banner for Incoming Requests */}
       {toastNotification && (
-        <div className="fixed bottom-6 right-6 z-50 flex max-w-md items-start gap-3.5 rounded-2xl border border-indigo-500/40 bg-slate-900/95 p-4 text-white shadow-2xl backdrop-blur-xl ring-1 ring-white/10 animate-in slide-in-from-bottom-5 duration-300">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-xl shadow-inner">
-            🔔
+        <div role="status"
+          className="glass-panel-elevated fixed bottom-6 right-6 z-50 flex max-w-md items-start gap-3.5 rounded-2xl border-indigo-500/40 p-4 text-white animate-in slide-in-from-bottom-5 duration-300">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-accent-gradient text-on-accent shadow-accent">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3A6 6 0 006 11v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
@@ -553,14 +560,14 @@ export default function DashboardPage() {
                   setNotificationDrawerOpen(true);
                   setToastNotification(null);
                 }}
-                className="rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-indigo-600/30 transition cursor-pointer"
+                className="rounded-xl bg-accent-gradient hover:brightness-110 px-3 py-1.5 text-xs font-bold text-on-accent shadow-accent transition cursor-pointer"
               >
                 Review Now
               </button>
               <button
                 type="button"
                 onClick={() => setToastNotification(null)}
-                className="rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition cursor-pointer"
+                className="rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition cursor-pointer"
               >
                 Dismiss
               </button>

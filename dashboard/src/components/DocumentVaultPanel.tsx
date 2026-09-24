@@ -252,7 +252,7 @@ export default function DocumentVaultPanel() {
               setUploadEmployeeId(selectedEmployeeId || (employees[0]?.id || ''));
               setIsUploadOpen(true);
             }}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-lg shadow-indigo-600/20"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-on-accent rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-lg shadow-indigo-600/20"
           >
             <span>+ Upload Document</span>
           </button>
@@ -298,13 +298,13 @@ export default function DocumentVaultPanel() {
           onClick={() => setActiveTab('queue')}
           className={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 ${
             activeTab === 'queue'
-              ? 'bg-indigo-600 text-white shadow-lg'
+              ? 'bg-indigo-600 text-on-accent shadow-lg'
               : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
           }`}
         >
           <span>⏳ Verification Queue</span>
           {pendingDocs.length > 0 && (
-            <span className="px-2 py-0.5 text-xs bg-amber-500 text-black font-bold rounded-full">
+            <span className="px-2 py-0.5 text-xs bg-amber-500 text-on-bright font-bold rounded-full">
               {pendingDocs.length}
             </span>
           )}
@@ -314,7 +314,7 @@ export default function DocumentVaultPanel() {
           onClick={() => setActiveTab('kyc')}
           className={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 ${
             activeTab === 'kyc'
-              ? 'bg-indigo-600 text-white shadow-lg'
+              ? 'bg-indigo-600 text-on-accent shadow-lg'
               : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
           }`}
         >
@@ -325,7 +325,7 @@ export default function DocumentVaultPanel() {
           onClick={() => setActiveTab('explorer')}
           className={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 ${
             activeTab === 'explorer'
-              ? 'bg-indigo-600 text-white shadow-lg'
+              ? 'bg-indigo-600 text-on-accent shadow-lg'
               : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
           }`}
         >
@@ -406,7 +406,7 @@ export default function DocumentVaultPanel() {
                           <button
                             onClick={() => handleVerify(doc.id)}
                             disabled={actionLoading}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition shadow-sm"
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded text-xs font-bold transition shadow-sm"
                           >
                             ✓ Verify
                           </button>
@@ -613,7 +613,7 @@ export default function DocumentVaultPanel() {
                             {doc.verificationStatus === 'PENDING_VERIFICATION' && (
                               <button
                                 onClick={() => handleVerify(doc.id)}
-                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition"
+                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded text-xs font-bold transition"
                                 title="Verify document"
                               >
                                 ✓
@@ -671,7 +671,7 @@ export default function DocumentVaultPanel() {
               <button
                 onClick={handleReject}
                 disabled={actionLoading || !rejectionReason.trim()}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-sm font-bold transition shadow-lg disabled:opacity-50"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-on-accent rounded-lg text-sm font-bold transition shadow-lg disabled:opacity-50"
               >
                 {actionLoading ? 'Rejecting...' : 'Confirm Rejection'}
               </button>
@@ -795,7 +795,7 @@ export default function DocumentVaultPanel() {
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold transition shadow-lg"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-on-accent rounded-lg text-sm font-bold transition shadow-lg"
                 >
                   {actionLoading ? 'Uploading to Supabase...' : 'Upload File'}
                 </button>

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/hr.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
+import '../widgets/glass/glass.dart';
 import 'complaints_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -62,8 +63,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bgDark,
+    return GlassScaffold(
       appBar: AppBar(
         title: const Text('My Profile'),
         elevation: 0,
@@ -76,7 +76,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
       body: _loading
-          ? const Center(
+          ? Center(
               child: CircularProgressIndicator(color: AppColors.primaryLight),
             )
           : _error != null
@@ -86,12 +86,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 48),
+                        Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 48),
                         const SizedBox(height: 12),
                         Text(
                           _error!,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                          style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                         ),
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
@@ -105,7 +105,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 )
               : RefreshIndicator(
                   color: AppColors.primaryLight,
-                  backgroundColor: AppColors.surfaceDark,
+                  backgroundColor: AppColors.sheet,
                   onRefresh: _loadProfile,
                   child: ListView(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
@@ -148,16 +148,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
               color: AppColors.primary.withOpacity(0.15),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
+            child: Icon(Icons.shield_outlined, color: AppColors.primaryLight, size: 20),
           ),
           const SizedBox(width: 14),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Employee Concerns & Grievances',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                 ),
                 SizedBox(height: 2),
                 Text(
@@ -196,7 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         border: Border.all(color: AppColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: AppColors.shadow,
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -211,7 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 height: 64,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const LinearGradient(
+                  gradient: LinearGradient(
                     colors: [AppColors.primary, AppColors.primaryLight],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -230,7 +230,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: AppColors.onAccent,
                   ),
                 ),
               ),
@@ -241,7 +241,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     Text(
                       p.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: AppColors.textLight,
@@ -251,7 +251,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 2),
                     Text(
                       p.jobTitle ?? p.role,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         color: AppColors.primaryLight,
                         fontWeight: FontWeight.w600,
@@ -305,7 +305,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               child: Text(
                                 p.officeName!,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 10, color: AppColors.textMuted),
+                                style: TextStyle(fontSize: 10, color: AppColors.textMuted),
                               ),
                             ),
                           ),
@@ -319,7 +319,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           if (p.employeeNumber != null || p.workEmail != null) ...[
             const SizedBox(height: 16),
-            const Divider(color: AppColors.border, height: 1),
+            Divider(color: AppColors.border, height: 1),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -344,13 +344,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         Text(
           label,
-          style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.textMuted),
+          style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.textMuted),
           overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 2),
         Text(
           value,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textLight),
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textLight),
           overflow: TextOverflow.ellipsis,
         ),
       ],
@@ -374,10 +374,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: AppColors.slateDark,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.lock_outline_rounded, color: AppColors.textMuted, size: 20),
+              child: Icon(Icons.lock_outline_rounded, color: AppColors.textMuted, size: 20),
             ),
             const SizedBox(width: 14),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -408,13 +408,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: AppColors.amber, size: 24),
+            Icon(Icons.warning_amber_rounded, color: AppColors.amber, size: 24),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Salary Record Pending',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.amber),
                   ),
@@ -434,8 +434,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1E1B4B), Color(0xFF0F172A)],
+        gradient: LinearGradient(
+          colors: [AppColors.primary.withValues(alpha: 0.18), AppColors.card],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -463,10 +463,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       color: AppColors.primary.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.account_balance_wallet_rounded, color: AppColors.primaryLight, size: 16),
+                    child: Icon(Icons.account_balance_wallet_rounded, color: AppColors.primaryLight, size: 16),
                   ),
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     'OFFICIAL SALARY & RATES',
                     style: TextStyle(
                       fontSize: 11,
@@ -486,10 +486,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 child: Text(
                   salary.currency,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: AppColors.textPrimary,
                   ),
                 ),
               ),
@@ -498,19 +498,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 16),
           Text(
             _formatCurrency(salary.monthly, salary.currency),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: AppColors.textPrimary,
               letterSpacing: -0.5,
             ),
           ),
-          const Text(
+          Text(
             'Monthly Gross Salary',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
           const SizedBox(height: 16),
-          const Divider(color: Color(0xFF312E81), height: 1),
+          Divider(color: AppColors.border, height: 1),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -518,14 +518,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'DAILY RATE (1/260)',
                       style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       _formatCurrency(salary.daily, salary.currency),
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.teal),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.teal),
                     ),
                   ],
                 ),
@@ -534,14 +534,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'ANNUAL BASE',
                       style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.textMuted),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       _formatCurrency(salary.annual, salary.currency),
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                   ],
                 ),
@@ -552,7 +552,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 10),
             Text(
               'Effective from: ${salary.effectiveFrom}',
-              style: const TextStyle(fontSize: 10, color: AppColors.textMuted, fontStyle: FontStyle.italic),
+              style: TextStyle(fontSize: 10, color: AppColors.textMuted, fontStyle: FontStyle.italic),
             ),
           ],
         ],
@@ -604,8 +604,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       icon: Icons.person_outline_rounded,
       action: TextButton.icon(
         onPressed: () => _showEditPersonalDetailsModal(p),
-        icon: const Icon(Icons.edit_rounded, size: 14, color: AppColors.primaryLight),
-        label: const Text(
+        icon: Icon(Icons.edit_rounded, size: 14, color: AppColors.primaryLight),
+        label: Text(
           'Edit',
           style: TextStyle(fontSize: 12, color: AppColors.primaryLight, fontWeight: FontWeight.bold),
         ),
@@ -631,8 +631,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       icon: Icons.contact_phone_outlined,
       action: TextButton.icon(
         onPressed: () => _showAddOrEditEmergencyContactModal(),
-        icon: const Icon(Icons.add_rounded, size: 14, color: AppColors.teal),
-        label: const Text(
+        icon: Icon(Icons.add_rounded, size: 14, color: AppColors.teal),
+        label: Text(
           '+ Add',
           style: TextStyle(fontSize: 12, color: AppColors.teal, fontWeight: FontWeight.bold),
         ),
@@ -644,7 +644,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       children: contacts.isEmpty
           ? [
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   'No emergency contacts on file. Tap "+ Add" above to register next of kin.',
@@ -684,7 +684,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             children: [
                               Text(
                                 c.name,
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
                               ),
                               if (c.isPrimary) ...[
                                 const SizedBox(width: 6),
@@ -694,7 +694,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     color: AppColors.teal.withOpacity(0.2),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: const Text(
+                                  child: Text(
                                     'PRIMARY',
                                     style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.teal),
                                   ),
@@ -705,21 +705,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           const SizedBox(height: 2),
                           Text(
                             '${c.relationship} · ${c.phone}${c.email != null && c.email!.isNotEmpty ? ' · ${c.email}' : ''}',
-                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                           ),
                         ],
                       ),
                     ),
                     if (c.id != null) ...[
                       IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.textMuted),
+                        icon: Icon(Icons.edit_outlined, size: 16, color: AppColors.textMuted),
                         tooltip: 'Edit Contact',
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                         onPressed: () => _showAddOrEditEmergencyContactModal(contact: c),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.danger),
+                        icon: Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.danger),
                         tooltip: 'Delete Contact',
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -739,7 +739,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       icon: Icons.account_balance_outlined,
       children: [
         if (!bank.hasDetails)
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Text(
               'No bank account details recorded yet.',
@@ -775,10 +775,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 Text(
                   '${p.kycVerifiedCount} of ${p.kycTotalCount} Documents Verified',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
                 ),
                 const SizedBox(height: 2),
-                const Text(
+                Text(
                   'CNIC, Degree, Utility Bills & Contracts',
                   style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                 ),
@@ -825,7 +825,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Flexible(
                       child: Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: AppColors.textLight,
@@ -843,7 +843,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          const Divider(color: AppColors.border, height: 1),
+          Divider(color: AppColors.border, height: 1),
           const SizedBox(height: 12),
           ...children,
         ],
@@ -896,7 +896,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'Edit Personal Details',
                           style: TextStyle(
                             fontSize: 18,
@@ -905,7 +905,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
+                          icon: Icon(Icons.close_rounded, color: AppColors.textMuted),
                           onPressed: () => Navigator.pop(ctx),
                         ),
                       ],
@@ -964,11 +964,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ? const SizedBox(
                                 height: 20,
                                 width: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                child: CircularProgressIndicator(color: AppColors.onAccent, strokeWidth: 2),
                               )
                             : const Text(
                                 'Save Personal Details',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.onAccent),
                               ),
                       ),
                     ),
@@ -1029,14 +1029,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         Text(
                           isEditing ? 'Edit Emergency Contact' : 'Add Emergency Contact',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                             color: AppColors.textLight,
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
+                          icon: Icon(Icons.close_rounded, color: AppColors.textMuted),
                           onPressed: () => Navigator.pop(ctx),
                         ),
                       ],
@@ -1053,7 +1053,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     SwitchListTile.adaptive(
                       contentPadding: EdgeInsets.zero,
                       activeThumbColor: AppColors.teal,
-                      title: const Text(
+                      title: Text(
                         'Set as Primary Emergency Contact',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textLight),
                       ),
@@ -1074,7 +1074,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             : () async {
                                 if (nameCtrl.text.trim().isEmpty || relCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Name, relationship, and phone are required.'), backgroundColor: AppColors.danger),
+                                    SnackBar(content: Text('Name, relationship, and phone are required.'), backgroundColor: AppColors.danger),
                                   );
                                   return;
                                 }
@@ -1118,11 +1118,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ? const SizedBox(
                                 height: 20,
                                 width: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                child: CircularProgressIndicator(color: AppColors.onAccent, strokeWidth: 2),
                               )
                             : Text(
                                 isEditing ? 'Save Changes' : 'Add Contact',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.onAccent),
                               ),
                       ),
                     ),
@@ -1141,14 +1141,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
+        backgroundColor: AppColors.sheet,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Contact', style: TextStyle(color: AppColors.textLight, fontSize: 16, fontWeight: FontWeight.bold)),
-        content: Text('Are you sure you want to remove ${c.name} from emergency contacts?', style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+        title: Text('Delete Contact', style: TextStyle(color: AppColors.textLight, fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to remove ${c.name} from emergency contacts?', style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
@@ -1170,7 +1170,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 }
               }
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+            child: const Text('Delete', style: TextStyle(color: AppColors.onAccent)),
           ),
         ],
       ),
@@ -1181,21 +1181,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted)),
         const SizedBox(height: 6),
         TextField(
           controller: ctrl,
-          style: const TextStyle(color: AppColors.textLight, fontSize: 13),
+          style: TextStyle(color: AppColors.textLight, fontSize: 13),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(color: AppColors.border, fontSize: 12),
+            hintStyle: TextStyle(color: AppColors.border, fontSize: 12),
             prefixIcon: Icon(icon, color: AppColors.textMuted, size: 18),
             filled: true,
             fillColor: AppColors.surfaceDark,
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.primaryLight)),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppColors.primaryLight)),
           ),
         ),
       ],
@@ -1211,14 +1211,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
           const SizedBox(width: 16),
           Flexible(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textLight),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textLight),
             ),
           ),
         ],

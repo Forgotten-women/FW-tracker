@@ -9,6 +9,8 @@ import '../services/token_store.dart';
 import '../services/ota_service.dart';
 import '../widgets/update_dialog.dart';
 import '../theme.dart';
+import '../widgets/appearance_section.dart';
+import '../widgets/glass/glass.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onSignedOut;
@@ -122,7 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             child: const Text('Unpair'),
           ),
         ],
@@ -138,17 +140,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return GlassScaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const _Header('Appearance'),
+          const AppearanceSection(),
+          const SizedBox(height: 20),
           const _Header('Server'),
           Card(
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.shade200),
+              side: BorderSide(color: AppColors.glassBorder),
             ),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -187,19 +192,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 fontSize: 12,
                                 color: _reachable!.startsWith('Server')
                                     ? AppColors.teal
-                                    : Colors.red.shade700,
+                                    : AppColors.danger,
                               )),
                         ],
                       ],
                     )
                   : Row(
                       children: [
-                        const Icon(Icons.dns_outlined, size: 18, color: AppColors.textMuted),
+                        Icon(Icons.dns_outlined, size: 18, color: AppColors.textMuted),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _serverController.text,
-                            style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                            style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -233,11 +238,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: _checkingUpdate ? null : _checkUpdatesManual,
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.teal,
-                side: const BorderSide(color: AppColors.teal, width: 1.2),
+                side: BorderSide(color: AppColors.teal, width: 1.2),
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
               icon: _checkingUpdate
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.teal),
@@ -251,7 +256,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text(
               _updateStatus!,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+              style: TextStyle(fontSize: 11, color: AppColors.textMuted),
             ),
           ],
           const SizedBox(height: 20),
@@ -263,7 +268,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border),
             ),
-            child: const Text(
+            child: Text(
               'Detailed presence readings are deleted after 90 days. Your daily '
               'hours are retained as part of the payroll record. To request a '
               'copy of your data, or its deletion, contact your administrator.',
@@ -298,7 +303,7 @@ class _Header extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.bold,
             color: AppColors.textLight,
@@ -332,14 +337,14 @@ class _InfoTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                 ),
               ),
               Flexible(
                 child: Text(
                   value,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textLight,
@@ -352,7 +357,7 @@ class _InfoTile extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               hint!,
-              style: const TextStyle(fontSize: 11, color: AppColors.amber, height: 1.3),
+              style: TextStyle(fontSize: 11, color: AppColors.amber, height: 1.3),
             ),
           ],
         ],

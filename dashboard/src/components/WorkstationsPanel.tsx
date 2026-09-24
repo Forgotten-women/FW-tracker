@@ -953,7 +953,7 @@ export function WorkstationsPanel({
             <button
               onClick={() => handleQueryBacklog()}
               disabled={backlogLoading || !backlogEmployeeId}
-              className="px-4 py-2 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2 rounded-lg bg-teal-500 hover:bg-teal-400 text-on-bright font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer"
             >
               {backlogLoading ? 'Loading…' : 'Query Backlog'}
             </button>
@@ -1068,7 +1068,7 @@ export function WorkstationsPanel({
                   type="button"
                   onClick={() => handleSaveStorageRetention(false)}
                   disabled={storageSaving}
-                  className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition cursor-pointer disabled:opacity-50"
+                  className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-on-bright font-bold text-xs transition cursor-pointer disabled:opacity-50"
                 >
                   {storageSaving ? 'Saving…' : 'Save Policy'}
                 </button>
@@ -1106,7 +1106,7 @@ export function WorkstationsPanel({
                     onClick={() => setShotsModalTab('gallery')}
                     className={`px-3 py-1 rounded-md font-semibold transition cursor-pointer ${
                       shotsModalTab === 'gallery'
-                        ? 'bg-sky-500 text-slate-950 shadow'
+                        ? 'bg-sky-500 text-on-bright shadow'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -1116,7 +1116,7 @@ export function WorkstationsPanel({
                     onClick={() => setShotsModalTab('settings')}
                     className={`px-3 py-1 rounded-md font-semibold transition cursor-pointer ${
                       shotsModalTab === 'settings'
-                        ? 'bg-sky-500 text-slate-950 shadow'
+                        ? 'bg-sky-500 text-on-bright shadow'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -1388,7 +1388,7 @@ export function WorkstationsPanel({
                       type="button"
                       onClick={handleSaveScreenshotSettings}
                       disabled={settingsSaving}
-                      className="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition cursor-pointer disabled:opacity-50"
+                      className="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-on-bright font-bold text-xs transition cursor-pointer disabled:opacity-50"
                     >
                       {settingsSaving ? 'Saving…' : 'Save Configuration'}
                     </button>
@@ -1405,7 +1405,7 @@ export function WorkstationsPanel({
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
           <div className="relative max-w-7xl max-h-[95vh] w-full flex flex-col items-center justify-center">
             {/* Header Overlay */}
-            <div className="w-full flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent text-white z-10 absolute top-0 inset-x-0">
+            <div className="w-full flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent text-on-accent z-10 absolute top-0 inset-x-0">
               <div className="flex items-center gap-3">
                 <span className="font-mono text-xs font-bold bg-sky-500/20 px-2.5 py-1 rounded border border-sky-500/40 text-sky-300">
                   {lightboxShot.displayTime}

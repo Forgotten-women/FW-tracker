@@ -57,6 +57,10 @@ dependencies:
   path_provider: ^2.1.5
   flutter_dotenv: ^6.0.1
 
+  # Plus Jakarta Sans (UI) + JetBrains Mono (timers/durations). Fetched once
+  # and cached on the device; falls back to the platform font while offline.
+  google_fonts: ^6.2.1
+
   # Verifying the downloaded APK's SHA-256 against the release record before
   # handing it to the system installer -- the backend's download_url can
   # point anywhere (GitHub Release asset, Supabase storage, ...), so this is

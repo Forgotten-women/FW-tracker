@@ -156,7 +156,7 @@ export function ManualTimeModal({
             <button
               type="submit"
               disabled={loading}
-              className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-xs font-bold transition shadow-lg shadow-indigo-950/40 disabled:opacity-50"
+              className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-on-accent px-4 py-2 text-xs font-bold transition shadow-lg shadow-indigo-950/40 disabled:opacity-50"
             >
               {loading ? 'Applying...' : '➕ Credit Manual Time'}
             </button>

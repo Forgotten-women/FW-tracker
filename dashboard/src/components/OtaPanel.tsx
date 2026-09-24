@@ -411,7 +411,7 @@ export function OtaPanel() {
       {/* Register Release Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-[#0F172A] p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-sheet p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-bold text-white">Register App Release</h3>
               <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">

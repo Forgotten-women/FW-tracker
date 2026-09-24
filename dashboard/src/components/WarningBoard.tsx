@@ -371,7 +371,7 @@ export function WarningBoard() {
         <div className="mb-6 rounded-xl border border-warn/40 bg-warn-dim/20 p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-warn text-[10px] font-bold text-black">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-warn text-[10px] font-bold text-on-bright">
                 !
               </span>
               <h3 className="text-xs font-bold text-text uppercase tracking-wide">
