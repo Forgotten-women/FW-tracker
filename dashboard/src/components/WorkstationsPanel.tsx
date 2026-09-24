@@ -719,9 +719,13 @@ export function WorkstationsPanel({
                           </button>
                         </td>
                         <td className="py-3.5 px-4">
-                          {ws.inOffice ? (
+                          {(ws.inOffice === 1 || ws.inOffice === true) ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-400 bg-teal-950/40 px-2 py-1 rounded-md border border-teal-800/40">
                               <BuildingIcon className="h-3.5 w-3.5 shrink-0" /> In Office
+                            </span>
+                          ) : (ws.inOffice === 2 || ws.workMode === 'REMOTE') ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 px-2 py-1 rounded-md border border-emerald-800/40">
+                              <LaptopIcon className="h-3.5 w-3.5 shrink-0" /> Remote (WFH)
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-800/40 px-2 py-1 rounded-md border border-slate-700/40">

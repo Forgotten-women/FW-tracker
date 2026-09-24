@@ -503,6 +503,7 @@ CREATE TABLE IF NOT EXISTS leave_approvals (
   decision TEXT,
   decided_at BIGINT,
   notes TEXT,
+  is_paid BIGINT DEFAULT NULL,
   created_at BIGINT NOT NULL,
   PRIMARY KEY (id)
 );
@@ -556,6 +557,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   reason TEXT,
   evidence_document_id TEXT,
   status TEXT NOT NULL DEFAULT 'PENDING_MANAGER',
+  is_paid BIGINT DEFAULT NULL,
   submitted_at BIGINT NOT NULL,
   decided_at BIGINT,
   cancelled_at BIGINT,

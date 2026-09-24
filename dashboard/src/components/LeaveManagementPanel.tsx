@@ -56,6 +56,7 @@ export function LeaveManagementPanel() {
   const [decisionAction, setDecisionAction] = useState<'APPROVED' | 'REJECTED' | null>(null);
   const [decisionNotes, setDecisionNotes] = useState('');
   const [overdraftReason, setOverdraftReason] = useState('');
+  const [decisionIsPaid, setDecisionIsPaid] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState(false);
 
   // Modals & Action states (Absences / Sickness)
@@ -184,12 +185,18 @@ export function LeaveManagementPanel() {
       return;
     }
 
+    const available = selectedRequest.balance?.availableDays ?? 0;
+    const reqDays = selectedRequest.days || 0;
+    const calculatedShortfall = Math.max(0, Math.round((reqDays - available) * 100) / 100);
+    const hasShortfall = decisionIsPaid && (calculatedShortfall > 0);
+
     if (
       decisionAction === 'APPROVED' &&
-      (selectedRequest.exceedsBalance || (selectedRequest.shortfallDays && selectedRequest.shortfallDays > 0)) &&
+      decisionIsPaid &&
+      hasShortfall &&
       !overdraftReason.trim()
     ) {
-      alert('An overdraft justification is required when approving leave beyond the accrued balance.');
+      alert(`An overdraft justification is required when approving paid leave beyond the accrued balance (Shortfall: ${calculatedShortfall} day(s)).`);
       return;
     }
 
@@ -200,6 +207,7 @@ export function LeaveManagementPanel() {
         decisionAction,
         decisionNotes.trim(),
         overdraftReason.trim() || undefined,
+        decisionAction === 'APPROVED' ? decisionIsPaid : undefined,
       );
       setSelectedRequest(null);
       setDecisionAction(null);
@@ -679,7 +687,18 @@ export function LeaveManagementPanel() {
                           )}
                         </td>
                         <td className="px-3 py-3 align-top">
-                          <Badge tone={r.reducesEntitlement ? 'brand' : 'muted'}>{r.type}</Badge>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge tone={r.reducesEntitlement ? 'brand' : 'muted'}>{r.type}</Badge>
+                            {r.defaultIsPaid ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/40 text-emerald-400 border border-emerald-800/40">
+                                Paid
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/40 text-amber-400 border border-amber-800/40">
+                                Unpaid
+                              </span>
+                            )}
+                          </div>
                           {r.requiresEvidence && (
                             <div className="text-[10px] text-warn mt-0.5">Evidence Required</div>
                           )}
@@ -722,9 +741,11 @@ export function LeaveManagementPanel() {
                               onClick={() => {
                                 setSelectedRequest(r);
                                 setDecisionAction('APPROVED');
-                                setDecisionNotes('Approved by HR.');
+                                const initialPaid = r.isPaid ?? r.defaultIsPaid ?? (r.leaveTypeId !== 'unpaid');
+                                setDecisionIsPaid(initialPaid);
+                                setDecisionNotes(initialPaid ? 'Approved as paid leave by HR.' : 'Approved as unpaid leave by HR.');
                                 setOverdraftReason(
-                                  hasShortfall
+                                  hasShortfall && initialPaid
                                     ? `Approved in advance of monthly accrual (Shortfall: ${r.shortfallDays}d).`
                                     : '',
                                 );
@@ -1395,7 +1416,20 @@ export function LeaveManagementPanel() {
                           <div className="text-[11px] text-muted">{r.employeeRole ?? ''}</div>
                         </td>
                         <td className="px-3 py-3 align-middle">
-                          <Badge tone={r.reducesEntitlement ? 'brand' : 'muted'}>{r.type}</Badge>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge tone={r.reducesEntitlement ? 'brand' : 'muted'}>{r.type}</Badge>
+                            {r.status === 'APPROVED' && (
+                              r.isPaid ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/40 text-emerald-400 border border-emerald-800/40">
+                                  Paid
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/40 text-amber-400 border border-amber-800/40">
+                                  Unpaid
+                                </span>
+                              )
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-3 align-middle font-mono text-[11px]">
                           {r.from} &rarr; {r.to}
@@ -1729,16 +1763,99 @@ export function LeaveManagementPanel() {
               {selectedRequest.type} · {selectedRequest.from} &rarr; {selectedRequest.to} ({selectedRequest.days} working days)
             </p>
 
+            {/* Leave Payment Type Configuration (HR Decision) */}
+            {decisionAction === 'APPROVED' && (
+              <div className="my-3.5 rounded-xl border border-line bg-raised/40 p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-text">
+                    Leave Payment Type
+                  </label>
+                  <span className="text-[10px] text-muted font-mono">
+                    Type Default: {selectedRequest.defaultIsPaid ? 'Paid' : 'Unpaid'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDecisionIsPaid(true);
+                      if (decisionNotes === 'Approved as unpaid leave by HR.') {
+                        setDecisionNotes('Approved as paid leave by HR.');
+                      }
+                    }}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
+                      decisionIsPaid
+                        ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300 ring-1 ring-emerald-500/40'
+                        : 'border-line bg-surface text-muted hover:border-line-hover'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                      decisionIsPaid ? 'border-emerald-400 bg-emerald-400' : 'border-dim'
+                    }`}>
+                      {decisionIsPaid && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-text">Paid Leave</div>
+                      <div className="text-[10px] text-muted">Compensated time off</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDecisionIsPaid(false);
+                      if (decisionNotes === 'Approved as paid leave by HR.') {
+                        setDecisionNotes('Approved as unpaid leave by HR.');
+                      }
+                    }}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
+                      !decisionIsPaid
+                        ? 'border-amber-500/60 bg-amber-950/40 text-amber-300 ring-1 ring-amber-500/40'
+                        : 'border-line bg-surface text-muted hover:border-line-hover'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                      !decisionIsPaid ? 'border-amber-400 bg-amber-400' : 'border-dim'
+                    }`}>
+                      {!decisionIsPaid && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-text">Unpaid Leave</div>
+                      <div className="text-[10px] text-muted">Deducted in payroll</div>
+                    </div>
+                  </button>
+                </div>
+
+                <div className="mt-2.5 text-[11px] leading-relaxed">
+                  {decisionIsPaid ? (
+                    <span className="text-emerald-400">
+                      ✓ <strong>Paid Leave</strong>: Deducted from accrued annual leave ({selectedRequest.days} day(s)). Full salary is maintained without deduction.
+                    </span>
+                  ) : (
+                    <span className="text-amber-400">
+                      ⚠ <strong>Unpaid Leave</strong>: Deducted from pay/salary ({selectedRequest.days} day(s) salary deduction in monthly payroll). Does <em>not</em> deduct from accrued leave balance.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Overdraft Alert & Justification (Spec 15.2) */}
             {decisionAction === 'APPROVED' &&
-              (selectedRequest.exceedsBalance ||
-                (selectedRequest.shortfallDays && selectedRequest.shortfallDays > 0)) && (
+              decisionIsPaid &&
+              (selectedRequest.balance?.availableDays !== undefined
+                ? (selectedRequest.days > selectedRequest.balance.availableDays)
+                : selectedRequest.exceedsBalance) && (
                 <div className="my-4 rounded-lg bg-warn-dim/30 border border-warn/40 p-3 text-xs">
                   <div className="font-semibold text-warn">
-                    <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> Shortfall Warning: Exceeds Accrued Entitlement by {selectedRequest.shortfallDays ?? 'unknown'} days
+                    <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> Shortfall Warning: Exceeds Accrued Entitlement by {
+                      selectedRequest.balance?.availableDays !== undefined
+                        ? Math.max(0, Math.round((selectedRequest.days - selectedRequest.balance.availableDays) * 100) / 100)
+                        : (selectedRequest.shortfallDays ?? 'unknown')
+                    } day(s)
                   </div>
                   <div className="text-muted mt-0.5">
-                    This request exceeds what the employee has accrued so far this holiday year. Approving requires an explicit HR overdraft reason.
+                    This request exceeds what the employee has accrued so far this holiday year. Approving as Paid Leave requires an explicit HR overdraft reason.
                   </div>
                   <div className="mt-3">
                     <label className="block text-xs font-semibold text-text mb-1">

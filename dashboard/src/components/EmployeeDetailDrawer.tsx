@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api';
-import type { EmployeeDay, WorkstationItem, AppUsageItem, ScreenshotItem, EmployeeScreenshotsResponse } from '../lib/types';
+import type { EmployeeDay, WorkstationItem, AppUsageItem, ScreenshotItem, EmployeeScreenshotsResponse, ShiftPattern } from '../lib/types';
 import { Badge, Button } from './primitives';
 import { ManualTimeModal } from './ManualTimeModal';
 import { LiveScreenViewer } from './LiveScreenViewer';
@@ -45,7 +45,7 @@ interface EmployeeDetailDrawerProps {
   onRefresh?: () => void;
 }
 
-type DrawerTab = 'sessions' | 'workstation' | 'apps' | 'policy' | 'screenshots';
+type DrawerTab = 'sessions' | 'workstation' | 'apps' | 'policy' | 'screenshots' | 'schedule';
 
 function formatBytes(bytes: number) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -328,12 +328,66 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     }
   };
 
+  // Shift & Remote Work Configuration State (HR Only)
+  const [availableShifts, setAvailableShifts] = useState<ShiftPattern[]>([]);
+  const [employeeProfile, setEmployeeProfile] = useState<any>(null);
+  const [selectedShiftId, setSelectedShiftId] = useState<string>('wp_default');
+  const [selectedWorkMode, setSelectedWorkMode] = useState<'IN_OFFICE' | 'REMOTE' | 'HYBRID'>('IN_OFFICE');
+  const [shiftsLoading, setShiftsLoading] = useState(false);
+  const [savingShift, setSavingShift] = useState(false);
+  const [shiftSuccessMsg, setShiftSuccessMsg] = useState<string | null>(null);
+  const [shiftErrorMsg, setShiftErrorMsg] = useState<string | null>(null);
+
+  const loadShiftData = useCallback(async (empId: string) => {
+    setShiftsLoading(true);
+    try {
+      const [shiftsRes, profileRes] = await Promise.all([
+        api.fetchShifts().catch(() => null),
+        api.getEmployeeProfile(empId).catch(() => null),
+      ]);
+      if (shiftsRes?.shifts) {
+        setAvailableShifts(shiftsRes.shifts);
+      }
+      if (profileRes?.profile) {
+        setEmployeeProfile(profileRes.profile);
+        setSelectedWorkMode(profileRes.profile.workMode || 'IN_OFFICE');
+        const patId = profileRes.profile.schedule?.patternId;
+        setSelectedShiftId(patId || 'wp_default');
+      }
+    } finally {
+      setShiftsLoading(false);
+    }
+  }, []);
+
+  const handleSaveShiftAndMode = async () => {
+    if (!employee?.employeeId) return;
+    setSavingShift(true);
+    setShiftSuccessMsg(null);
+    setShiftErrorMsg(null);
+    try {
+      await api.assignEmployeeShift(employee.employeeId, {
+        workingPatternId: selectedShiftId,
+        workMode: selectedWorkMode,
+        remoteAllowed: selectedWorkMode === 'REMOTE' || selectedWorkMode === 'HYBRID',
+      });
+      setShiftSuccessMsg('Shift working hours and remote work mode updated successfully by HR!');
+      setTimeout(() => setShiftSuccessMsg(null), 5000);
+      await loadShiftData(employee.employeeId);
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      setShiftErrorMsg(err?.message || 'Failed to update schedule');
+    } finally {
+      setSavingShift(false);
+    }
+  };
+
   useEffect(() => {
     if (employee?.employeeId) {
       loadTelemetry(employee.employeeId);
       loadEmployeeScreenshots(employee.employeeId, selectedShotDate);
+      loadShiftData(employee.employeeId);
     }
-  }, [employee?.employeeId, selectedShotDate, loadTelemetry, loadEmployeeScreenshots]);
+  }, [employee?.employeeId, selectedShotDate, loadTelemetry, loadEmployeeScreenshots, loadShiftData]);
 
   // Live Screen Handlers
   const handleOpenLiveScreen = () => {
@@ -360,8 +414,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     .join('')
     .toUpperCase();
 
-  // Shift calculation (450 minutes = 7h 30m required shift; 480 minutes = 8h 00m standard target)
-  const REQUIRED_SHIFT_MINUTES = 450;
+  // Shift calculation (dynamically resolved from employee's assigned shift pattern)
+  const REQUIRED_SHIFT_MINUTES = employeeProfile?.schedule?.dayEquivalentMinutes || 450;
   const workedMinutes = employee.totalMinutes || 0;
   const shiftProgressPercent = Math.min(100, Math.round((workedMinutes / REQUIRED_SHIFT_MINUTES) * 100));
   const remainingMinutes = Math.max(0, REQUIRED_SHIFT_MINUTES - workedMinutes);
@@ -536,10 +590,34 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                       <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
                     )}
                   </button>
+
+                  {/* HR Shift & Remote Button */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('schedule')}
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95 shadow-sm ${
+                      activeTab === 'schedule'
+                        ? 'bg-amber-500 text-slate-950 font-black shadow-amber-500/30'
+                        : 'bg-amber-500/20 hover:bg-amber-500/40 text-amber-200 border border-amber-500/30'
+                    }`}
+                    title="Configure shift timings & remote work mode (HR Only)"
+                  >
+                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span>Shift & Remote</span>
+                    {selectedWorkMode === 'REMOTE' && (
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    )}
+                  </button>
                 </div>
 
-                {/* Contextual Badges (Late / Break) */}
+                {/* Contextual Badges (Late / Break / Remote) */}
                 <div className="flex items-center gap-2 flex-wrap">
+                  {selectedWorkMode === 'REMOTE' && (
+                    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)] whitespace-nowrap">
+                      <LaptopIcon className="h-3.5 w-3.5 shrink-0" /> Remote (WFH)
+                    </span>
+                  )}
+
                   {isLate && (
                     <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)] whitespace-nowrap">
                       <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" /> Late (+{employee.lateMinutes}m)
@@ -574,7 +652,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
               <div className="mt-4 pt-4 border-t border-white/8">
                 <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <TimerIcon className="h-3.5 w-3.5 shrink-0" /> Daily Shift Target (7h 30m / day)
+                    <TimerIcon className="h-3.5 w-3.5 shrink-0" /> Daily Shift Target ({Math.floor(REQUIRED_SHIFT_MINUTES / 60)}h {REQUIRED_SHIFT_MINUTES % 60}m / day)
                   </span>
                   <span className="font-mono font-bold text-emerald-400">
                     {employee.timeWorkedFormatted}{' '}
@@ -592,7 +670,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   />
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1.5">
-                  <span>Target: 7h 30m required</span>
+                  <span>Target: {Math.floor(REQUIRED_SHIFT_MINUTES / 60)}h {REQUIRED_SHIFT_MINUTES % 60}m required</span>
                   <span>
                     {remainingMinutes > 0 ? (
                       <span className="text-amber-400 font-medium"><HourglassIcon className="inline-block h-3.5 w-3.5" /> {remainingFormatted} remaining</span>
@@ -714,6 +792,27 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   </span>
                 ) : (
                   <span className="text-slate-500 text-[10px]">Off</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('schedule')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTab === 'schedule'
+                    ? 'border-amber-400 text-white'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <CalendarIcon className="h-3.5 w-3.5 shrink-0" /> Shift & Remote
+                {selectedWorkMode === 'REMOTE' ? (
+                  <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300 border border-emerald-500/30">
+                    Remote
+                  </span>
+                ) : (
+                  <span className="text-slate-500 text-[10px]">
+                    {employeeProfile?.schedule?.startTime || '11:00'}–{employeeProfile?.schedule?.endTime || '19:00'}
+                  </span>
                 )}
               </button>
             </div>
@@ -1367,6 +1466,185 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Tab 6: Shift & Remote Work Configuration (HR Only) */}
+            {activeTab === 'schedule' && (
+              <div className="space-y-6">
+                {/* HR Control Notice */}
+                <div className="glass-panel rounded-2xl p-5 border border-amber-500/30 bg-amber-500/5 relative overflow-hidden">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                      <LockIcon className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        HR Administration Only
+                        <span className="rounded-full bg-amber-500/20 text-amber-300 px-2 py-0.5 text-[10px] font-mono border border-amber-500/40">
+                          Restricted
+                        </span>
+                      </h4>
+                      <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                        Employees cannot modify their own work schedule or work location mode. Changes saved here immediately update this employee&apos;s attendance verification engine, mobile background tracking, and daily shift targets.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {shiftSuccessMsg && (
+                  <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold animate-fade-in flex items-center gap-2">
+                    <CheckCircleIcon className="h-4 w-4 shrink-0 text-emerald-400" /> {shiftSuccessMsg}
+                  </div>
+                )}
+
+                {shiftErrorMsg && (
+                  <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold animate-fade-in flex items-center gap-2">
+                    <AlertTriangleIcon className="h-4 w-4 shrink-0 text-rose-400" /> {shiftErrorMsg}
+                  </div>
+                )}
+
+                {/* Configuration Form */}
+                <div className="glass-panel rounded-2xl p-5 border border-white/10 space-y-5">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2 border-b border-white/8 pb-3">
+                    <CalendarIcon className="h-4 w-4 text-amber-400" /> Working Pattern & Location Mode
+                  </h4>
+
+                  {/* 1. Work Mode Selector */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-2">
+                      Work Mode (Location Verification Policy)
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedWorkMode('IN_OFFICE')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          selectedWorkMode === 'IN_OFFICE'
+                            ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-lg shadow-indigo-950/40'
+                            : 'bg-slate-900/60 border-white/5 text-slate-400 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold text-white">In Office</span>
+                          {selectedWorkMode === 'IN_OFFICE' && <CheckCircleIcon className="h-3.5 w-3.5 text-indigo-400" />}
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-tight">
+                          Tracked via physical office ESP32 sensors & office Wi-Fi allowlist.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedWorkMode('REMOTE')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          selectedWorkMode === 'REMOTE'
+                            ? 'bg-emerald-600/20 border-emerald-500 text-white shadow-lg shadow-emerald-950/40'
+                            : 'bg-slate-900/60 border-white/5 text-slate-400 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold text-white flex items-center gap-1">
+                            Remote (WFH)
+                          </span>
+                          {selectedWorkMode === 'REMOTE' && <CheckCircleIcon className="h-3.5 w-3.5 text-emerald-400" />}
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-tight">
+                          Works from home. Tracked via Workstation Desktop Agent (keyboard/mouse + app telemetry).
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedWorkMode('HYBRID')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          selectedWorkMode === 'HYBRID'
+                            ? 'bg-purple-600/20 border-purple-500 text-white shadow-lg shadow-purple-950/40'
+                            : 'bg-slate-900/60 border-white/5 text-slate-400 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold text-white">Hybrid</span>
+                          {selectedWorkMode === 'HYBRID' && <CheckCircleIcon className="h-3.5 w-3.5 text-purple-400" />}
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-tight">
+                          Flexible work policy verified in-office or at home through either channel.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2. Shift Pattern Dropdown */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                      Assigned Shift Template
+                    </label>
+                    <select
+                      value={selectedShiftId}
+                      onChange={(e) => setSelectedShiftId(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer font-medium"
+                    >
+                      {availableShifts.map((shift) => (
+                        <option key={shift.id} value={shift.id}>
+                          {shift.name} ({shift.startTime} – {shift.endTime}) {shift.isDefault ? '[Org Default]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Defines the daily required working hours, arrival grace period, and absence thresholds.
+                    </p>
+                  </div>
+
+                  {/* 3. Shift Details Card */}
+                  {(() => {
+                    const currentShift = availableShifts.find((s) => s.id === selectedShiftId) || availableShifts[0];
+                    if (!currentShift) return null;
+                    return (
+                      <div className="p-4 rounded-xl bg-slate-900/70 border border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Start Time</span>
+                          <span className="font-mono font-bold text-white text-sm">{currentShift.startTime}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">End Time</span>
+                          <span className="font-mono font-bold text-white text-sm">{currentShift.endTime}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Grace Window</span>
+                          <span className="font-mono font-bold text-amber-400 text-sm">{currentShift.graceMinutes} mins</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Daily Target</span>
+                          <span className="font-mono font-bold text-emerald-400 text-sm">
+                            {Math.floor(currentShift.dayEquivalentMinutes / 60)}h {currentShift.dayEquivalentMinutes % 60}m
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 4. Save Button */}
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleSaveShiftAndMode}
+                      disabled={savingShift}
+                      className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black px-5 py-2.5 text-xs shadow-lg shadow-amber-500/25 transition cursor-pointer disabled:opacity-50 active:scale-95"
+                    >
+                      {savingShift ? (
+                        <>
+                          <RefreshIcon className="h-4 w-4 animate-spin shrink-0" />
+                          <span>Saving Changes...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircleIcon className="h-4 w-4 shrink-0" />
+                          <span>Save Shift & Work Mode</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

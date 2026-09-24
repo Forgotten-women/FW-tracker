@@ -302,9 +302,16 @@ const selectYearRequests = db.prepare(`
   SELECT r.id, r.start_date, r.end_date, r.total_days, r.status
   FROM leave_requests r
   JOIN leave_types t ON t.id = r.leave_type_id
-  WHERE r.employee_id = ? AND t.reduces_entitlement = 1
+  WHERE r.employee_id = ?
+    AND (
+      (r.status = 'APPROVED' AND (
+        (r.is_paid = 1)
+        OR (r.is_paid IS NULL AND t.is_paid = 1 AND t.reduces_entitlement = 1)
+      ))
+      OR
+      (r.status IN ('PENDING_MANAGER', 'PENDING_HR') AND t.reduces_entitlement = 1)
+    )
     AND r.cancelled_at IS NULL
-    AND r.status IN ('PENDING_MANAGER', 'PENDING_HR', 'APPROVED')
     AND r.start_date >= ? AND r.start_date < ?
     AND r.id != COALESCE(?, '')
 `);
@@ -474,6 +481,7 @@ async function previewRequest({
   // Set when re-previewing a request that has already been submitted, so it is
   // not counted against its own balance.
   excludeRequestId = null,
+  isPaid = null,
 }) {
   const type = await selectLeaveType.get(leaveTypeId);
   if (!type) return { ok: false, error: 'Unknown leave type.' };
@@ -493,9 +501,10 @@ async function previewRequest({
   const balance = await balanceFor(employeeId, startDate, excludeRequestId);
   if (balance.blocked) return { ok: false, error: balance.message, blocked: true };
 
-  // Only types that reduce entitlement touch the balance. Sick and maternity
-  // leave do not come out of someone's holiday.
-  const affectsBalance = !!type.reduces_entitlement;
+  // Only paid requests reduce accrued annual leave entitlement.
+  const affectsBalance = isPaid !== null && isPaid !== undefined
+    ? !!isPaid
+    : !!type.reduces_entitlement;
   const projected = affectsBalance
     ? balance.precise.availableDays - count.totalDays
     : balance.precise.availableDays;
@@ -584,7 +593,7 @@ async function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayP
   return { id, ...preview, status: 'PENDING_HR' };
 }
 
-async function decideRequest({ requestId, decision, notes, actor, overdraftReason = null, nowMs = T.now() }) {
+async function decideRequest({ requestId, decision, notes, actor, overdraftReason = null, isPaid = null, nowMs = T.now() }) {
   if (!['APPROVED', 'REJECTED', 'INFO_REQUESTED'].includes(decision)) {
     throw new Error('decision must be APPROVED, REJECTED or INFO_REQUESTED.');
   }
@@ -597,27 +606,37 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
   }
   if (req.cancelled_at) throw new Error('This request was cancelled.');
 
+  const type = await selectLeaveType.get(req.leave_type_id);
+  const effectiveIsPaid = (decision === 'APPROVED')
+    ? (isPaid !== null && isPaid !== undefined ? (isPaid ? 1 : 0) : Number(type?.is_paid ?? 1))
+    : null;
+
+  // Crucial policy rule: If approved as paid, it is deducted from accrued leave.
+  // If not paid (unpaid), it is not deducted from accrued leave (deducted from pay/salary in payroll).
+  const reducesEntitlement = (decision === 'APPROVED') && (effectiveIsPaid === 1);
+
   const preview = await previewRequest({
     employeeId: req.employee_id, leaveTypeId: req.leave_type_id,
     startDate: req.start_date, endDate: req.end_date, dayPortion: req.day_portion,
     excludeRequestId: requestId,
+    isPaid: effectiveIsPaid === 1,
   });
 
-  if (decision === 'APPROVED' && preview.ok && preview.requiresOverdraftApproval) {
+  if (reducesEntitlement && preview.ok && preview.requiresOverdraftApproval) {
     // Confirmed: going beyond entitlement is allowed, but only knowingly. A
     // silent approval would let someone accrue a debt nobody agreed to.
     if (!overdraftReason || !String(overdraftReason).trim()) {
       throw new Error(
         `This request exceeds the accrued balance by ${preview.shortfallDays} day(s). ` +
-        'Approving it requires an explicit reason for allowing the overdraft.',
+        'Approving it as paid leave requires an explicit reason for allowing the overdraft.',
       );
     }
   }
 
   await tx(async () => {
     await db.prepare(`
-      UPDATE leave_requests SET status = ?, decided_at = ? WHERE id = ?
-    `).run(decision === 'INFO_REQUESTED' ? 'PENDING_HR' : decision, nowMs, requestId);
+      UPDATE leave_requests SET status = ?, decided_at = ?, is_paid = ? WHERE id = ?
+    `).run(decision === 'INFO_REQUESTED' ? 'PENDING_HR' : decision, nowMs, effectiveIsPaid, requestId);
 
     // approver_user_id is a foreign key into users. The actor string may be a
     // system or CLI identity with no user row, so it is stored only when it
@@ -628,15 +647,15 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
       : null;
 
     await db.prepare(`
-      UPDATE leave_approvals SET decision = ?, decided_at = ?, notes = ?, approver_user_id = ?
+      UPDATE leave_approvals SET decision = ?, decided_at = ?, notes = ?, approver_user_id = ?, is_paid = ?
       WHERE request_id = ? AND step = 1
-    `).run(decision, nowMs, String(notes).trim(), resolvedUser ? resolvedUser.id : null, requestId);
+    `).run(decision, nowMs, String(notes).trim(), resolvedUser ? resolvedUser.id : null, effectiveIsPaid, requestId);
 
     if (decision === 'APPROVED') {
       const year = await holidayYearFor(req.employee_id, req.start_date);
-      const type = await selectLeaveType.get(req.leave_type_id);
 
-      if (!year.blocked && type.reduces_entitlement) {
+      // Only reduce annual entitlement if approved as PAID
+      if (!year.blocked && reducesEntitlement) {
         const balance = await balanceRaw(req.employee_id, year);
         await insertLedger.run({
           id: 'lal_' + crypto.randomBytes(8).toString('hex'),
@@ -647,19 +666,20 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
           balance_after: balance.availableDays - req.total_days,
           effective_date: req.start_date,
           leave_request_id: requestId,
-          description: `${type.name}: ${req.start_date} to ${req.end_date}`,
+          description: `${type?.name || 'Leave'} (Paid): ${req.start_date} to ${req.end_date}`,
           created_at: nowMs,
           created_by: actor,
         });
       }
 
-      if (preview.ok && preview.requiresOverdraftApproval) {
+      if (reducesEntitlement && preview.ok && preview.requiresOverdraftApproval) {
         await db.prepare(`
           INSERT INTO leave_overdraft_approvals
             (id, request_id, employee_id, shortfall_days, approved_by, approved_at, reason)
           VALUES (?,?,?,?,?,?,?)
         `).run('lov_' + crypto.randomBytes(8).toString('hex'), requestId, req.employee_id,
-               preview.shortfallDays, actor, nowMs, String(overdraftReason).trim());
+               preview.shortfallDays, resolvedUser ? resolvedUser.id : null, nowMs,
+               String(overdraftReason).trim());
       }
     }
 
@@ -667,20 +687,31 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
       actor, action: 'LEAVE_DECIDED',
       targetType: 'leave_request', targetId: requestId,
       before: { status: req.status },
-      after: { status: decision, overdraftApproved: !!overdraftReason },
+      after: {
+        status: decision,
+        isPaid: effectiveIsPaid !== null ? effectiveIsPaid === 1 : null,
+        overdraftApproved: !!overdraftReason,
+      },
       note: String(notes).trim(),
     });
   });
 
   try {
-    const type = await selectLeaveType.get(req.leave_type_id);
+    const PR = require('./payroll');
+    if (typeof PR.invalidatePayrollCache === 'function') {
+      PR.invalidatePayrollCache(req.employee_id);
+    }
+  } catch (_) {}
+
+  try {
     const typeName = type?.name || 'Leave';
     if (decision === 'APPROVED') {
+      const paidLabel = effectiveIsPaid === 1 ? 'Paid' : 'Unpaid';
       await N.notify({
         employeeId: req.employee_id,
         category: 'LEAVE',
         title: 'Leave Request Approved',
-        body: `Your ${req.total_days} day(s) ${typeName} request from ${req.start_date} to ${req.end_date} has been approved.`,
+        body: `Your ${req.total_days} day(s) ${typeName} request from ${req.start_date} to ${req.end_date} has been approved as ${paidLabel}.`,
         severity: 'info',
         link: '/leave',
         nowMs,
@@ -715,7 +746,8 @@ async function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() 
     if (req.status === 'APPROVED') {
       const year = await holidayYearFor(req.employee_id, req.start_date);
       const type = await selectLeaveType.get(req.leave_type_id);
-      if (!year.blocked && type.reduces_entitlement) {
+      const wasPaid = req.is_paid !== null ? req.is_paid === 1 : (type?.is_paid === 1 && type?.reduces_entitlement === 1);
+      if (!year.blocked && wasPaid) {
         const balance = await balanceRaw(req.employee_id, year);
         await insertLedger.run({
           id: 'lal_' + crypto.randomBytes(8).toString('hex'),
@@ -739,6 +771,13 @@ async function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() 
       before: { status: req.status }, note: reason,
     });
   });
+
+  try {
+    const PR = require('./payroll');
+    if (typeof PR.invalidatePayrollCache === 'function') {
+      PR.invalidatePayrollCache(req.employee_id);
+    }
+  } catch (_) {}
 
   try {
     const emp = await db.prepare('SELECT name FROM employees WHERE id = ?').get(req.employee_id);
@@ -1230,7 +1269,13 @@ async function monthlyReportFor(employeeId, { monthKey = null, asOfDate = T.date
   // 5. Query all requests in cycle
   const requests = await db.prepare(`
     SELECT r.id, r.leave_type_id, r.start_date, r.end_date, r.total_days, r.status,
-           t.name AS type_name, t.is_paid, t.reduces_entitlement
+           t.name AS type_name,
+           COALESCE(r.is_paid, t.is_paid) AS is_paid,
+           CASE 
+             WHEN r.is_paid = 1 THEN 1
+             WHEN r.is_paid = 0 THEN 0
+             ELSE (CASE WHEN t.is_paid = 1 AND t.reduces_entitlement = 1 THEN 1 ELSE 0 END)
+           END AS reduces_entitlement
     FROM leave_requests r
     JOIN leave_types t ON t.id = r.leave_type_id
     WHERE r.employee_id = ?

@@ -345,6 +345,11 @@ async function profile(employeeId, { permissions = new Set(), includeSensitive =
 
   const has = (p) => includeSensitive && permissions.has(p);
   const er = await currentEmployment(employeeId);
+  const wpId = (er && er.working_pattern_id) || null;
+  const wp = wpId
+    ? await db.prepare('SELECT * FROM working_patterns WHERE id = ?').get(wpId)
+    : (await db.prepare('SELECT * FROM working_patterns WHERE is_default = 1').get() ||
+       await db.prepare('SELECT * FROM working_patterns ORDER BY created_at ASC LIMIT 1').get());
 
   const out = {
     id: emp.id,
@@ -355,6 +360,8 @@ async function profile(employeeId, { permissions = new Set(), includeSensitive =
     workEmail: emp.work_email,
     employmentStatus: emp.employment_status,
     active: !!emp.active,
+    workMode: emp.work_mode || 'IN_OFFICE',
+    remoteAllowed: !!emp.remote_allowed,
 
     employment: er ? {
       jobTitle: er.job_title,
@@ -369,8 +376,19 @@ async function profile(employeeId, { permissions = new Set(), includeSensitive =
       contractStartDate: er.contract_start_date,
       contractEndDate: er.contract_end_date,
       noticePeriodDays: er.notice_period_days,
-      holidayEntitlementDays: er.holiday_entitlement_days,
+      workingPatternId: er.working_pattern_id || null,
     } : null,
+
+    schedule: {
+      patternId: wp?.id || null,
+      patternName: wp?.name || 'Standard Shift',
+      startTime: wp?.start_time || '11:00',
+      endTime: wp?.end_time || '19:00',
+      graceMinutes: wp?.grace_minutes ?? 10,
+      breakMinutes: wp?.permitted_break_minutes ?? 30,
+      dayEquivalentMinutes: wp?.day_equivalent_minutes ?? 450,
+      workDays: wp?.working_days || 'mon,tue,wed,thu,fri',
+    },
 
     emergencyContacts: has('employee.nextofkin.read')
       ? (await db.prepare('SELECT * FROM emergency_contacts WHERE employee_id = ?').all(employeeId))

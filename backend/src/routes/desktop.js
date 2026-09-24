@@ -147,11 +147,12 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
   const outsideWorkingHours = !isWithinWorkingHours;
 
-  const empRow = await db.prepare('SELECT app_tracking_enabled, screenshot_enabled, screenshot_interval_minutes, screenshot_mode FROM employees WHERE id = ?').get(employeeId);
+  const empRow = await db.prepare('SELECT app_tracking_enabled, screenshot_enabled, screenshot_interval_minutes, screenshot_mode, work_mode, remote_allowed FROM employees WHERE id = ?').get(employeeId);
   const appTrackingEnabled = empRow ? (empRow.app_tracking_enabled !== 0) : true;
   const screenshotEnabled = empRow ? (empRow.screenshot_enabled === 1) : false;
   const screenshotIntervalMinutes = empRow ? (parseInt(empRow.screenshot_interval_minutes, 10) || 5) : 5;
   const screenshotMode = empRow ? (empRow.screenshot_mode || 'ACTIVE_ONLY') : 'ACTIVE_ONLY';
+  const isRemoteWorker = empRow && (empRow.work_mode === 'REMOTE' || empRow.work_mode === 'HYBRID' || empRow.remote_allowed === 1);
 
   // 3. In-Office Verification (Multi-Signal: Direct BSSID, Air Proximity Beacon, Office Subnet, Office SSID)
   const locationVerdict = presence.classifyLocation({
@@ -163,6 +164,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     source: 'APP',
   });
   const inOffice = locationVerdict === 'OFFICE';
+  const isVerifiedWork = inOffice || isRemoteWorker;
 
   // 4. Settings
   const idleThresholdMins = parseInt(await getOrgSetting('idle_threshold_minutes', '5'), 10) || 5;
@@ -201,8 +203,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
   let reconciledActiveSeconds = 0;
 
-  if (inOffice && !outsideWorkingHours) {
-    if (existing && (existing.in_office === 0 || (Number(existing.unverified_seconds || 0) > 0))) {
+  if (isVerifiedWork && !outsideWorkingHours) {
+    if (inOffice && existing && (existing.in_office === 0 || (Number(existing.unverified_seconds || 0) > 0))) {
       const sessionAgeMs = nowMs - Number(existing.created_at);
       const twoHoursMs = 2 * 60 * 60 * 1000;
       if (sessionAgeMs > 60000 && sessionAgeMs <= twoHoursMs) {
@@ -210,7 +212,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
           await presence.recordEvent({
             employeeId,
             deviceId,
-            source: 'APP',
+            source: 'DESKTOP_AGENT',
             srcIp,
             localIp,
             bssid: connectedBssid,
@@ -218,6 +220,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
             visibleOfficeBssids,
             mac: currentWifiMac,
             observedAt: Number(existing.created_at),
+            location: 'OFFICE',
             note: 'Desktop Agent (Arrival Reconciled)',
           });
         } catch (_) {}
@@ -230,7 +233,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         await presence.recordEvent({
           employeeId,
           deviceId,
-          source: 'APP',
+          source: 'DESKTOP_AGENT',
           srcIp,
           localIp,
           bssid: connectedBssid,
@@ -238,7 +241,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
           visibleOfficeBssids,
           mac: currentWifiMac,
           observedAt: nowMs,
-          note: `Desktop Agent (${status})`,
+          location: inOffice ? 'OFFICE' : 'REMOTE_VERIFIED',
+          note: `Desktop Agent (${status}${inOffice ? '' : ' - Remote'})`,
         });
         await presence.recomputeDay(employeeId, dateKey, nowMs);
       } catch (_) {}
@@ -267,7 +271,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     effectiveIdle = batchTotal;
   } else {
     // ACTIVE
-    if (inOffice) {
+    if (isVerifiedWork) {
       effectiveActive = numActive + reconciledActiveSeconds;
       addUnverified = 0;
     } else {
@@ -277,6 +281,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     }
     effectiveIdle = numIdle;
   }
+
+  const inOfficeFlag = inOffice ? 1 : (isRemoteWorker ? 2 : 0);
 
   try {
     if (existing) {
@@ -298,11 +304,11 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         effectiveActive,
         effectiveIdle,
         effectiveBreak,
-        inOffice ? 1 : 0,
+        isVerifiedWork ? 1 : 0,
         addUnverified,
         lockState,
         connectedBssid,
-        inOffice ? 1 : 0,
+        inOfficeFlag,
         nowMs,
         nowMs,
         existing.id
@@ -326,7 +332,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         addUnverified,
         lockState,
         connectedBssid,
-        inOffice ? 1 : 0,
+        inOfficeFlag,
         nowMs,
         nowMs,
         nowMs

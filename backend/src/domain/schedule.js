@@ -131,6 +131,7 @@ async function resolve(employeeId, dateKey = T.dateKey()) {
     permittedBreakMinutes,
     dayEquivalentMinutes,
     graceMinutes,
+    workingDays: pattern?.working_days || 'mon,tue,wed,thu,fri',
     officeId: officeId || null,
 
     // Absolute instants, so callers never re-derive them and risk disagreeing.

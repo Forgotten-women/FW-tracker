@@ -31,6 +31,7 @@ const ATTRIBUTED_VIA_BINDING = 'ESP_SENSOR';
 
 const SOURCE_CONFIDENCE = {
   APP: 1.0,
+  DESKTOP_AGENT: 1.0,
   ROUTER: 0.6,
   ESP_SNIFFER: 0.5,
   ARP: 0.3,
@@ -202,11 +203,12 @@ function explainLocation({ bssid, ssid, visibleOfficeBssids, srcIp, localIp, sou
 async function recordEvent({
   employeeId = null, deviceId = null, source, mac = null, srcIp = null, localIp = null,
   ssid = null, bssid = null, visibleOfficeBssids = [], rssi = null, observedAt = null, note = null,
+  location: explicitLocation = null,
 }) {
   const receivedAt = T.now();
   const observed = Number(observedAt) || receivedAt;
   const macHash = mac ? T.hashMac(mac, MAC_SALT) : null;
-  const location = classifyLocation({ bssid, ssid, visibleOfficeBssids, srcIp, localIp, source });
+  const location = explicitLocation || classifyLocation({ bssid, ssid, visibleOfficeBssids, srcIp, localIp, source });
 
   // A network sighting carries no identity of its own. But if this MAC was
   // bound to an employee by an authenticated app heartbeat, presence keeps
@@ -279,9 +281,9 @@ async function recordEvent({
 // ---------------------------------------------------------------------------
 
 const selectDayEvents = db.prepare(`
-  SELECT observed_at, source, confidence
+  SELECT observed_at, source, confidence, location
   FROM presence_events
-  WHERE employee_id = ? AND location = 'OFFICE'
+  WHERE employee_id = ? AND (location = 'OFFICE' OR location = 'REMOTE_VERIFIED')
     AND observed_at >= ? AND observed_at < ?
   ORDER BY observed_at ASC
 `);
@@ -292,12 +294,13 @@ const selectDayEvents = db.prepare(`
 // the employee closing the app.
 function describeSource(source) {
   switch (source) {
-    case 'APP':         return { key: 'APP', label: 'App' };
-    case 'ESP_SNIFFER': return { key: 'SENSOR', label: 'Office sensor' };
-    case 'ARP':         return { key: 'NETWORK', label: 'Office network' };
-    case 'ROUTER':      return { key: 'NETWORK', label: 'Access point' };
-    case 'ADMIN':       return { key: 'MANUAL', label: 'Entered by HR' };
-    default:            return { key: 'UNKNOWN', label: source || 'Unknown' };
+    case 'APP':           return { key: 'APP', label: 'App' };
+    case 'DESKTOP_AGENT': return { key: 'DESKTOP_AGENT', label: 'Workstation Agent' };
+    case 'ESP_SNIFFER':   return { key: 'SENSOR', label: 'Office sensor' };
+    case 'ARP':           return { key: 'NETWORK', label: 'Office network' };
+    case 'ROUTER':        return { key: 'NETWORK', label: 'Access point' };
+    case 'ADMIN':         return { key: 'MANUAL', label: 'Entered by HR' };
+    default:              return { key: 'UNKNOWN', label: source || 'Unknown' };
   }
 }
 
@@ -388,20 +391,22 @@ async function deriveDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
   const isToday = nowMs >= dayStart && nowMs < dayEnd;
   const inactivityMs = Math.max(0, nowMs - lastActiveAt);
 
+  const isRemoteSighting = lastEvent && lastEvent.location === 'REMOTE_VERIFIED';
+
   let status, statusLabel, graceMinutesLeft = 0;
   if (!isToday) {
     status = 'CLOSED';
     statusLabel = 'Day closed';
   } else if (inactivityMs > GRACE_MS) {
     status = 'AWAY';
-    statusLabel = 'Away / On Break';
+    statusLabel = isRemoteSighting ? 'Away (Remote)' : 'Away / On Break';
   } else if (inactivityMs >= ACTIVE_MS) {
     status = 'GRACE_PERIOD';
     graceMinutesLeft = Math.max(1, Math.round((GRACE_MS - inactivityMs) / 60000));
     statusLabel = `Grace Period (${graceMinutesLeft}m remaining)`;
   } else {
     status = 'IN_OFFICE';
-    statusLabel = 'Active in Office';
+    statusLabel = isRemoteSighting ? 'Active (Remote WFH)' : 'Active in Office';
   }
 
   return {
@@ -417,6 +422,7 @@ async function deriveDay(employeeId, dayKey = T.dateKey(), nowMs = T.now()) {
     lastSource: describeSource(lastEvent.source),
     // True when presence no longer depends on the app being open.
     sensorCarried: lastEvent.source !== 'APP',
+    isRemote: isRemoteSighting,
   };
 }
 
@@ -561,6 +567,8 @@ async function presentDay(d, employee) {
     presenceSource: d.lastSource ? d.lastSource.label : null,
     presenceSourceKey: d.lastSource ? d.lastSource.key : null,
     sensorCarried: !!d.sensorCarried,
+    workMode: employee ? (employee.work_mode || 'IN_OFFICE') : 'IN_OFFICE',
+    remoteAllowed: employee ? Boolean(employee.remote_allowed) : false,
     sessions: d.sessions.map(s => ({
       from: T.displayTime(s.start),
       to: s.open ? 'now' : T.displayTime(s.end),
@@ -573,7 +581,7 @@ async function presentDay(d, employee) {
 // See the note on selectToken in middleware/auth.js: the previous shape let an
 // arbitrary employment record supply the job title.
 const selectActiveEmployees = db.prepare(`
-  SELECT e.id, e.name, e.employee_number, COALESCE(er.job_title, e.role) AS role, e.role AS department
+  SELECT e.id, e.name, e.employee_number, e.work_mode, e.remote_allowed, COALESCE(er.job_title, e.role) AS role, e.role AS department
   FROM employees e
   LEFT JOIN LATERAL (
     SELECT job_title

@@ -394,12 +394,13 @@ export const api = {
     decision: 'APPROVED' | 'REJECTED',
     notes: string,
     overdraftReason?: string,
+    isPaid?: boolean,
   ) =>
     request<{ status: string; decision: string }>(
       `/api/leave/request/${encodeURIComponent(id)}/decide`,
       {
         method: 'POST',
-        body: JSON.stringify({ decision, notes, overdraftReason }),
+        body: JSON.stringify({ decision, notes, overdraftReason, isPaid }),
       },
     ),
 
@@ -874,6 +875,54 @@ export const api = {
         body: JSON.stringify(data),
       }
     ),
+
+  fetchShifts: () =>
+    request<{
+      status: string;
+      shifts: import('./types').ShiftPattern[];
+    }>('/api/shifts'),
+
+  createShift: (data: {
+    name: string;
+    startTime: string;
+    endTime: string;
+    workingDays?: string;
+    permittedBreakMinutes?: number;
+    dayEquivalentMinutes?: number;
+    graceMinutes?: number;
+  }) =>
+    request<{ status: string; message: string; shift: import('./types').ShiftPattern }>('/api/shifts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateShift: (id: string, data: Partial<import('./types').ShiftPattern>) =>
+    request<{ status: string; message: string }>(`/api/shifts/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  assignEmployeeShift: (
+    employeeId: string,
+    data: {
+      workingPatternId?: string | null;
+      workMode?: 'IN_OFFICE' | 'REMOTE' | 'HYBRID';
+      remoteAllowed?: boolean;
+    }
+  ) =>
+    request<{
+      status: string;
+      message: string;
+      employee: {
+        id: string;
+        workMode: 'IN_OFFICE' | 'REMOTE' | 'HYBRID';
+        remoteAllowed: boolean;
+        schedule: any;
+      };
+    }>(`/api/shifts/assign/${encodeURIComponent(employeeId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 };
 
 

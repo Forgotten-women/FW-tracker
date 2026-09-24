@@ -78,7 +78,7 @@ router.get('/mine', requireDevice, async (req, res) => {
   const balance = await L.balanceFor(employeeId);
 
   const requests = await db.prepare(`
-    SELECT r.*, t.name AS type_name FROM leave_requests r
+    SELECT r.*, t.name AS type_name, t.is_paid AS type_is_paid FROM leave_requests r
     JOIN leave_types t ON t.id = r.leave_type_id
     WHERE r.employee_id = ? ORDER BY r.start_date DESC LIMIT 50
   `).all(employeeId);
@@ -89,6 +89,7 @@ router.get('/mine', requireDevice, async (req, res) => {
     requests: requests.map(r => ({
       id: r.id, type: r.type_name, from: r.start_date, to: r.end_date,
       days: r.total_days, status: r.status,
+      isPaid: r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1),
       submittedAt: T.displayTime(r.submitted_at),
       decidedAt: r.decided_at ? T.displayTime(r.decided_at) : null,
     })),
@@ -125,9 +126,10 @@ router.get('/types', requireDevice, async (req, res) => {
 // Spec 15 asks for the figures to be shown BEFORE submission, so nobody
 // discovers a shortfall after the fact.
 router.post('/preview', requireDevice, async (req, res) => {
-  const { leaveTypeId, startDate, endDate, dayPortion } = req.body || {};
+  const { leaveTypeId, startDate, endDate, dayPortion, isPaid } = req.body || {};
   const p = await L.previewRequest({
     employeeId: req.auth.employeeId, leaveTypeId, startDate, endDate, dayPortion,
+    isPaid: isPaid !== undefined && isPaid !== null ? (isPaid === true || isPaid === 1 || isPaid === 'true') : null,
   });
   if (!p.ok) return res.status(400).json({ status: 'ERROR', ...p });
 
@@ -189,7 +191,8 @@ router.post('/request/:id/cancel', requireDevice, async (req, res) => {
 router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => {
   const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
   const rows = (await db.prepare(`
-    SELECT r.*, e.name AS employee_name, e.role AS employee_role, e.employee_number, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
+    SELECT r.*, e.name AS employee_name, e.role AS employee_role, e.employee_number,
+           t.name AS type_name, t.reduces_entitlement, t.requires_evidence, t.is_paid AS type_is_paid
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
@@ -200,10 +203,12 @@ router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => 
   res.json({
     status: 'SUCCESS',
     requests: await Promise.all(rows.map(async r => {
+      const effectiveIsPaid = r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1);
       const preview = await L.previewRequest({
         employeeId: r.employee_id, leaveTypeId: r.leave_type_id,
         startDate: r.start_date, endDate: r.end_date, dayPortion: r.day_portion,
         excludeRequestId: r.id,
+        isPaid: effectiveIsPaid,
       });
       return {
         id: r.id,
@@ -215,6 +220,8 @@ router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => 
         leaveTypeId: r.leave_type_id,
         from: r.start_date, to: r.end_date, days: r.total_days,
         reason: r.reason,
+        isPaid: r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1),
+        defaultIsPaid: r.type_is_paid === 1,
         submittedAt: T.displayTime(r.submitted_at),
         submittedAtMs: r.submitted_at,
         balance: preview.ok ? presentBalance(preview.balance) : null,
@@ -233,7 +240,8 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
   const statusFilter = req.query.status;
 
   let query = `
-    SELECT r.*, e.name AS employee_name, e.role AS employee_role, e.employee_number, t.name AS type_name, t.reduces_entitlement, t.requires_evidence
+    SELECT r.*, e.name AS employee_name, e.role AS employee_role, e.employee_number,
+           t.name AS type_name, t.reduces_entitlement, t.requires_evidence, t.is_paid AS type_is_paid
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
@@ -263,6 +271,8 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
       status: r.status,
       reason: r.reason,
       notes: r.decision_notes,
+      isPaid: r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1),
+      defaultIsPaid: r.type_is_paid === 1,
       shortfallDays: r.shortfall_days || 0,
       reducesEntitlement: !!r.reduces_entitlement,
       requiresEvidence: !!r.requires_evidence,
@@ -347,6 +357,7 @@ router.post('/request/:id/decide',
         decision: req.body?.decision,
         notes: req.body?.notes,
         overdraftReason: req.body?.overdraftReason || null,
+        isPaid: req.body?.isPaid !== undefined ? (req.body.isPaid === true || req.body.isPaid === 1 || req.body.isPaid === 'true') : null,
         actor,
       });
       res.json({ status: 'SUCCESS', ...out, balance: presentBalance(await L.balanceFor(r.employee_id)) });

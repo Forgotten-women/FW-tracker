@@ -52,16 +52,47 @@ Future<PingResult?> sendHeartbeat({
 }
 
 /// Checks whether the given or current time falls within official office hours:
-/// Monday to Friday (weekdays only), 11:00 AM to 7:00 PM (11:00 to 19:00).
-bool isWithinOfficeHours([DateTime? dateTime]) {
+/// Dynamically uses employee's assigned schedule from TokenStore/SharedPreferences.
+bool isWithinOfficeHours([
+  DateTime? dateTime,
+  String? startTimeStr,
+  String? endTimeStr,
+  String? workingDaysStr,
+]) {
   final now = dateTime ?? DateTime.now();
-  if (now.weekday < DateTime.monday || now.weekday > DateTime.friday) {
+
+  // Check day of week against employee's working days
+  final days = (workingDaysStr ?? 'mon,tue,wed,thu,fri')
+      .toLowerCase()
+      .split(',')
+      .map((s) => s.trim())
+      .toList();
+  const dayNames = ['', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  final currentDayName =
+      now.weekday >= 1 && now.weekday <= 7 ? dayNames[now.weekday] : '';
+  if (!days.contains(currentDayName)) {
     return false;
   }
+
+  int startMinute = 11 * 60; // default 11:00 AM
+  int endMinute = 19 * 60;   // default 7:00 PM
+  if (startTimeStr != null && startTimeStr.contains(':')) {
+    final parts =
+        startTimeStr.split(':').map((s) => int.tryParse(s) ?? 0).toList();
+    if (parts.length >= 2) startMinute = parts[0] * 60 + parts[1];
+  }
+  if (endTimeStr != null && endTimeStr.contains(':')) {
+    final parts =
+        endTimeStr.split(':').map((s) => int.tryParse(s) ?? 0).toList();
+    if (parts.length >= 2) endMinute = parts[0] * 60 + parts[1];
+  }
+
+  // Allow a 30-minute buffer before scheduled start and 60-minute buffer after scheduled end
+  final effectiveStart = (startMinute - 30).clamp(0, 1439);
+  final effectiveEnd = (endMinute + 60).clamp(0, 1439);
+
   final minuteOfDay = now.hour * 60 + now.minute;
-  const startMinute = 11 * 60; // 11:00 AM
-  const endMinute = 19 * 60;   // 7:00 PM (19:00)
-  return minuteOfDay >= startMinute && minuteOfDay < endMinute;
+  return minuteOfDay >= effectiveStart && minuteOfDay < effectiveEnd;
 }
 
 @pragma('vm:entry-point')
@@ -86,10 +117,18 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
       // wrong device timezone/clock can't silently suppress heartbeats
       // during real office hours.
       final now = await ServerTime.now();
-      final withinHours = isWithinOfficeHours(now);
+
+      final prefs = await SharedPreferences.getInstance();
+      final schedStart = prefs.getString('shift_start_time') ?? '11:00';
+      final schedEnd = prefs.getString('shift_end_time') ?? '19:00';
+      final schedDays =
+          prefs.getString('shift_working_days') ?? 'mon,tue,wed,thu,fri';
+
+      final withinHours =
+          isWithinOfficeHours(now, schedStart, schedEnd, schedDays);
 
       if (!withinHours) {
-        // Outside office hours (Mon-Fri 11:00 AM - 7:00 PM):
+        // Outside office hours for this employee's schedule:
         // 1. Demote to background and completely hide/cancel presence notification 8800.
         // 2. Zero updates sent to backend.
         if (service is AndroidServiceInstance) {

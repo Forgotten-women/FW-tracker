@@ -25,6 +25,8 @@ export interface EmployeeDay {
   date: string;
   status: PresenceStatus;
   statusLabel: string;
+  workMode?: 'IN_OFFICE' | 'REMOTE' | 'HYBRID';
+  remoteAllowed?: boolean;
   onBreak?: boolean;
   activeBreakMinutes?: number;
   breakMinutes?: number;
@@ -331,6 +333,8 @@ export interface LeaveRequestItem {
   exceedsBalance?: boolean;
   reducesEntitlement?: boolean;
   requiresEvidence?: boolean;
+  isPaid?: boolean;
+  defaultIsPaid?: boolean;
   submittedAt: string;
   submittedAtMs?: number;
   decidedAt?: string | null;
@@ -667,7 +671,8 @@ export interface WorkstationItem {
   idleMinutes: number;
   breakMinutes: number;
   presenceMinutes?: number;
-  inOffice: boolean;
+  inOffice: boolean | number;
+  workMode?: 'IN_OFFICE' | 'REMOTE' | 'HYBRID';
   lockState: string;
   connectedBssid: string | null;
   lastHeartbeat: string;
@@ -984,5 +989,19 @@ export interface EmployeeScreenshotsResponse {
     totalBytes: number;
   }[];
   screenshots: ScreenshotItem[];
+}
+
+export interface ShiftPattern {
+  id: string;
+  name: string;
+  workingDays: string;
+  startTime: string;
+  endTime: string;
+  permittedBreakMinutes: number;
+  dayEquivalentMinutes: number;
+  graceMinutes: number;
+  isDefault: boolean;
+  active: boolean;
+  createdAt: number;
 }
 

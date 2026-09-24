@@ -275,7 +275,7 @@ const selectUnclaimedUnpaidLeave = db.prepare(`
   JOIN leave_types lt ON lt.id = lr.leave_type_id
   WHERE lr.employee_id = ?
     AND lr.status = 'APPROVED'
-    AND lt.is_paid = 0
+    AND COALESCE(lr.is_paid, lt.is_paid) = 0
     AND lr.start_date <= ?
     AND NOT EXISTS (
       SELECT 1 FROM payroll_adjustments pa
