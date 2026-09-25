@@ -29,9 +29,9 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::Notify;
 use tokio_tungstenite::tungstenite::Message;
 
-const FALLBACK_POLL: Duration = Duration::from_secs(20);
-const IDLE_WAKE: Duration = Duration::from_secs(300);
-const MIN_CHECK_GAP: Duration = Duration::from_secs(3);
+const FALLBACK_POLL: Duration = Duration::from_secs(5);
+const IDLE_WAKE: Duration = Duration::from_secs(6);
+const MIN_CHECK_GAP: Duration = Duration::from_secs(2);
 const FRAME_INTERVAL: Duration = Duration::from_millis(1000);
 const KEEPALIVE_EVERY: Duration = Duration::from_secs(3);
 // The backend keeps a frame for 8s; resend an unchanged screen well inside
@@ -201,7 +201,8 @@ async fn listen(rt: &RealtimeConfig, cfg: &AppConfig, last_hello: &mut Option<In
                             Err(_) => continue,
                         };
                         let ev = v["event"].as_str().unwrap_or("");
-                        let on_topic = v["topic"].as_str() == Some(topic.as_str());
+                        let v_topic = v["topic"].as_str().unwrap_or("");
+                        let on_topic = v_topic == topic || v_topic == rt.topic || v_topic.ends_with(&rt.topic);
                         if ev == "phx_reply" && on_topic && v["ref"].as_str() == Some("1") {
                             if v["payload"]["status"].as_str() != Some("ok") {
                                 return Err(format!("join refused: {}", v["payload"]));
@@ -295,28 +296,22 @@ pub async fn run_stream_worker(app: AppHandle) {
 
     loop {
         let wait = if hub().doorbell_up.load(Ordering::SeqCst) { IDLE_WAKE } else { FALLBACK_POLL };
-        let rang = tokio::time::timeout(wait, hub().ring.notified()).await.is_ok();
+        let _ = tokio::time::timeout(wait, hub().ring.notified()).await;
 
         let cfg = current_config(&app);
         if cfg.token.is_empty() {
             continue;
         }
-        if !rang {
-            // A timer wake-up, not a ring. With the doorbell up there is
-            // nothing to ask; without it, only ask when a stream could be
-            // allowed -- the server refuses outside hours and on breaks.
-            let h = hub();
-            if h.doorbell_up.load(Ordering::SeqCst)
-                || h.outside_hours.load(Ordering::SeqCst)
-                || h.server_break.load(Ordering::SeqCst)
-                || crate::IS_MANUAL_BREAK.load(Ordering::SeqCst)
-            {
-                continue;
-            }
+        
+        let h = hub();
+        if h.outside_hours.load(Ordering::SeqCst)
+            || h.server_break.load(Ordering::SeqCst)
+            || crate::IS_MANUAL_BREAK.load(Ordering::SeqCst)
+        {
+            continue;
         }
 
-        // A burst of rings (or someone ringing a leaked topic) costs at most
-        // one status check every few seconds.
+        // A burst of rings (or status checks) costs at most one status check every few seconds.
         let since = last_check.elapsed();
         if since < MIN_CHECK_GAP {
             tokio::time::sleep(MIN_CHECK_GAP - since).await;

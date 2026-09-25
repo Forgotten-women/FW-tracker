@@ -157,12 +157,12 @@ async function getState(deviceId) {
 
   if (!f && !getClient()) {
     try {
-      const row = await db.prepare('SELECT frame_base64, last_frame_at, updated_at FROM workstation_live_streams WHERE device_id = ?').get(deviceId);
+      const row = await db.prepare('SELECT frame_base64, requested_at, last_frame_at, updated_at FROM workstation_live_streams WHERE device_id = ?').get(deviceId);
       if (row && row.frame_base64) {
         f = { at: Number(row.last_frame_at) || Number(row.updated_at) || null, img: row.frame_base64 };
         aliveAt = Math.max(aliveAt || 0, Number(row.last_frame_at) || 0, Number(row.updated_at) || 0) || null;
       }
-      if (row && row.updated_at && !ackAt) {
+      if (row && row.updated_at && Number(row.updated_at) > Number(row.requested_at || 0) && !ackAt) {
         ackAt = Number(row.updated_at) || null;
       }
     } catch (e) {

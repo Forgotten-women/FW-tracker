@@ -69,6 +69,7 @@ function clientConfigFor(deviceId) {
 async function ring(deviceId, event = EVENT) {
   if (!isConfigured()) return false;
   try {
+    const baseTopic = topicFor(deviceId);
     const res = await fetch(`${projectUrl()}/realtime/v1/api/broadcast`, {
       method: 'POST',
       headers: {
@@ -77,7 +78,10 @@ async function ring(deviceId, event = EVENT) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        messages: [{ topic: topicFor(deviceId), event, payload: { at: Date.now() } }],
+        messages: [
+          { topic: baseTopic, event, payload: { at: Date.now() } },
+          { topic: `realtime:${baseTopic}`, event, payload: { at: Date.now() } }
+        ],
       }),
       signal: AbortSignal.timeout(3000),
     });

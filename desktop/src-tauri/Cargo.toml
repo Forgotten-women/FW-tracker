@@ -1,6 +1,6 @@
 [package]
 name = "office-tracker-desktop"
-version = "1.0.44"
+version = "1.0.45"
 description = "WorkSync Desktop Agent"
 authors = ["WorkSync Team"]
 edition = "2021"

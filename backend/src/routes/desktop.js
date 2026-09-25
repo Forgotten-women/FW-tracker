@@ -462,11 +462,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   // Check if an authorized HR stream request is active (requested within last 25s)
   let liveStreamRequested = false;
   try {
-    await ensureLiveStreamTable();
-    const streamReq = await db.prepare(
-      "SELECT requested_at FROM workstation_live_streams WHERE device_id = ? AND status = 'ACTIVE' AND requested_at > ?"
-    ).get(deviceId, nowMs - 25000);
-    if (streamReq && status === 'ACTIVE' && inOffice && !outsideWorkingHours && !hasOpenBreak && !isManualBreak) {
+    const isLeaseActive = await liveView.leaseActive(deviceId, nowMs, { fresh: true });
+    if (isLeaseActive && !outsideWorkingHours && !hasOpenBreak && !isManualBreak) {
       liveStreamRequested = true;
     }
   } catch (_) {}
