@@ -264,7 +264,7 @@ pub fn trigger_update_check(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         println!("[updater] manual check triggered");
         let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-            .title("Office Tracker")
+            .title("WorkSync")
             .body("Checking for updates...")
             .show();
 
