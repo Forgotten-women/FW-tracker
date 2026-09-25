@@ -6,11 +6,32 @@ on:
       - 'v*' # Triggers when pushing tags like v1.0.6, v1.0.7, etc.
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: 🔢 Read pubspec version
+        id: version
+        run: |
+          LINE=$(grep -E '^version:' forgottenwomen/pubspec.yaml | head -1 | awk '{print $2}')
+          NAME="${LINE%%+*}"
+          CODE="${LINE##*+}"
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "code=$CODE" >> $GITHUB_OUTPUT
+
+      - name: 📝 Determine Tag
+        id: vars
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "refs/heads/main" ]; then
+            TAG_NAME="v${{ steps.version.outputs.name }}-ios-manual"
+          fi
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
 
       - uses: subosito/flutter-action@v2
         with:
@@ -32,30 +53,104 @@ jobs:
           cd forgottenwomen
           flutter pub get
 
-      - name: Build iOS
+      - name: Build iOS (no codesign)
         run: |
           cd forgottenwomen
           flutter build ios --config-only --dart-define-from-file=.env || true
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build || flutter build ios --release --no-codesign --dart-define-from-file=.env || true
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build || flutter build ios --release --no-codesign --dart-define-from-file=.env || true
         continue-on-error: true
 
       - name: Package into IPA
+        id: ipa
         run: |
-          cd forgottenwomen/build/ios/iphoneos
-          if [ -d "Runner.app" ]; then
+          IPA_DIR="forgottenwomen/build/ios/iphoneos"
+          IPA_PATH="${IPA_DIR}/OfficeTracker.ipa"
+          if [ -d "${IPA_DIR}/Runner.app" ]; then
+            cd "$IPA_DIR"
             mkdir -p Payload
             cp -r Runner.app Payload/
             zip -r -9 OfficeTracker.ipa Payload
+            echo "found=true" >> $GITHUB_OUTPUT
           else
+            echo "found=false" >> $GITHUB_OUTPUT
             echo "Runner.app not found, skipping IPA packaging"
           fi
         continue-on-error: true
 
-      - name: Upload IPA Artifact
+      - name: Upload IPA as Workflow Artifact
         uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true
         with:
-          name: OfficeTracker-iOS-IPA
+          name: OfficeTracker-iOS-${{ steps.vars.outputs.tag }}
           path: forgottenwomen/build/ios/iphoneos/OfficeTracker.ipa
-          retention-days: 7
+          retention-days: 30
+
+      # Attach the IPA to the same GitHub Release created by the Android workflow.
+      # This gives a permanent, public download URL for the IPA that can be
+      # pasted into the dashboard's iOS TestFlight/IPA URL field.
+      - name: 🚀 Attach IPA to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') && steps.ipa.outputs.found == 'true'
+        continue-on-error: true
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: Office Tracker ${{ steps.vars.outputs.tag }}
+          make_latest: 'false'
+          files: forgottenwomen/build/ios/iphoneos/OfficeTracker.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Print iOS Download URL in Summary
+        if: startsWith(github.ref, 'refs/tags/') && steps.ipa.outputs.found == 'true'
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          IPA_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/OfficeTracker.ipa"
+          {
+            echo "### 📱 iOS IPA Download URL"
+            echo "Paste this into the dashboard → OTA Settings → iOS TestFlight / App Link:"
+            echo ""
+            echo "\`${IPA_URL}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Auto-register the iOS release with the backend OTA service.
+      # Requires OTA_BACKEND_URL and OTA_ADMIN_KEY repository secrets.
+      - name: 📲 Register iOS release for in-app updates
+        if: startsWith(github.ref, 'refs/tags/') && steps.ipa.outputs.found == 'true'
+        env:
+          OTA_BACKEND_URL: ${{ secrets.OTA_BACKEND_URL }}
+          OTA_ADMIN_KEY: ${{ secrets.OTA_ADMIN_KEY }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          if [ -z "$OTA_BACKEND_URL" ] || [ -z "$OTA_ADMIN_KEY" ]; then
+            echo "::notice::OTA_BACKEND_URL / OTA_ADMIN_KEY not set — paste the IPA URL into the dashboard manually."
+            exit 0
+          fi
+          IPA_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/OfficeTracker.ipa"
+          BODY=$(jq -n \
+            --arg n "$VERSION_NAME" \
+            --argjson c "$VERSION_CODE" \
+            --arg u "$IPA_URL" \
+            --arg notes "Release $TAG (iOS)" \
+            '{versionName:$n, versionCode:$c, platform:"ios", downloadUrl:$u, releaseNotes:$notes, mandatory:false}')
+          STATUS=$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST "${OTA_BACKEND_URL%/}/api/admin/releases" \
+            -H "Content-Type: application/json" \
+            -H "X-Admin-Key: $OTA_ADMIN_KEY" \
+            -d "$BODY")
+          cat response.json; echo
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
+            echo "::warning::Registering iOS release returned HTTP $STATUS — register manually in the dashboard."
+          else
+            echo "### 📲 iOS offered to devices: $VERSION_NAME (build $VERSION_CODE)" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -8,17 +8,32 @@ function getTauri() {
 
 function getTauriInvoke() {
   const t = getTauri();
-  return (t && t.tauri && typeof t.tauri.invoke === 'function') ? t.tauri.invoke : null;
+  if (!t) return null;
+  if (typeof t.invoke === 'function') return t.invoke;
+  if (t.tauri && typeof t.tauri.invoke === 'function') return t.tauri.invoke;
+  return null;
 }
 
 function getTauriWindow() {
   const t = getTauri();
-  return (t && t.window && t.window.appWindow) ? t.window.appWindow : null;
+  if (!t) return null;
+  if (t.window && t.window.appWindow) return t.window.appWindow;
+  if (t.getCurrent && typeof t.getCurrent === 'function') return t.getCurrent();
+  return null;
 }
 
 // Universal backend invoker (Tauri IPC or Local Agent HTTP Server)
 async function callBackend(command, args = {}) {
-  const invoke = getTauriInvoke();
+  let invoke = getTauriInvoke();
+  if (!invoke && typeof window !== 'undefined') {
+    // Wait up to 1.5s in case Tauri globals inject slightly after script parsing
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      invoke = getTauriInvoke();
+      if (invoke) break;
+    }
+  }
+
   if (invoke) {
     return invoke(command, args);
   }
@@ -451,13 +466,16 @@ async function refreshStatus() {
     }
   } catch (err) {
     console.error('refreshStatus error:', err);
-    // If backend IPC is temporarily delayed, do NOT flash enrollment screen if already enrolled
+    if (loadingSection) loadingSection.classList.add('hidden');
     try {
       if (localStorage.getItem('ot_enrolled') === 'true') {
-        if (loadingSection) loadingSection.classList.add('hidden');
         if (statusSection) statusSection.classList.remove('hidden');
+      } else {
+        if (enrollSection) enrollSection.classList.remove('hidden');
       }
-    } catch (_) {}
+    } catch (_) {
+      if (enrollSection) enrollSection.classList.remove('hidden');
+    }
   }
 }
 
@@ -513,7 +531,7 @@ if (enrollBtn) {
     const url = serverUrlInput.value.trim();
     const code = enrollCodeInput.value.trim();
     if (!url || !code) {
-      enrollError.textContent = 'Please enter both Server URL and Enrollment Code.';
+      enrollError.textContent = 'Please enter your Enrollment Code.';
       enrollError.style.color = '#f87171';
       return;
     }
@@ -671,3 +689,19 @@ if (activeTimer && currentActiveSecs > 0) {
 
 refreshStatus();
 setInterval(refreshStatus, 10000);
+
+// Safety watchdog: ensure the loading spinner NEVER stays visible indefinitely
+setTimeout(() => {
+  if (loadingSection && !loadingSection.classList.contains('hidden')) {
+    loadingSection.classList.add('hidden');
+    try {
+      if (localStorage.getItem('ot_enrolled') === 'true' && statusSection) {
+        statusSection.classList.remove('hidden');
+      } else if (enrollSection) {
+        enrollSection.classList.remove('hidden');
+      }
+    } catch (_) {
+      if (enrollSection) enrollSection.classList.remove('hidden');
+    }
+  }
+}, 2000);

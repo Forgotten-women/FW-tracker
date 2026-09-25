@@ -41,10 +41,8 @@
         <input type="text" id="enroll-code-input" placeholder="e.g. 7842-8921" autofocus style="text-align: center; font-size: 16px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;" />
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        <label style="font-size: 11px; color: #64748b; font-weight: 500;">SERVER URL</label>
-        <input type="text" id="server-url-input" placeholder="Server URL" value="https://backend-ten-lyart-57.vercel.app" style="font-size: 11px; color: #94a3b8;" />
-      </div>
+      <!-- Server URL is hardcoded; not editable by users -->
+      <input type="hidden" id="server-url-input" value="https://backend-ten-lyart-57.vercel.app" />
 
       <button id="enroll-btn" class="primary-btn" style="margin-top: 4px;">Pair This Laptop</button>
       <div id="enroll-error" class="error-msg" style="text-align: center; min-height: 20px;"></div>
