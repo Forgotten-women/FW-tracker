@@ -247,10 +247,18 @@ async fn check_and_install_silent(app: &tauri::AppHandle) {
     match tauri::updater::builder(app.clone()).check().await {
         Ok(update) if update.is_update_available() => {
             println!(
-                "[updater] {} available (current {}); installing silently",
+                "[updater] {} available (current {}); installing",
                 update.latest_version(),
                 update.current_version()
             );
+            let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                .title("WorkSync Update")
+                .body(&format!(
+                    "Updating to version {} (current {})...",
+                    update.latest_version(),
+                    update.current_version()
+                ))
+                .show();
             if let Err(e) = update.download_and_install().await {
                 eprintln!("[updater] install failed: {}", e);
             }
