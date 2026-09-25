@@ -711,3 +711,72 @@ export function PartyPopperIcon({ className }: IconProps) {
     </Icon>
   );
 }
+
+/* ---------- Attendance history ---------- */
+
+export function MinusIcon({ className }: IconProps) {
+  return (
+    <Icon className={className}>
+      <path d="M5 12h14" />
+    </Icon>
+  );
+}
+
+export function CircleSlashIcon({ className }: IconProps) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m5.7 5.7 12.6 12.6" />
+    </Icon>
+  );
+}
+
+export function FlagIcon({ className }: IconProps) {
+  return (
+    <Icon className={className}>
+      <path d="M4 22V4" />
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1" />
+    </Icon>
+  );
+}
+
+export function TrendingDownIcon({ className }: IconProps) {
+  return (
+    <Icon className={className}>
+      <path d="m22 17-8.5-8.5-5 5L2 7" />
+      <path d="M16 17h6v-6" />
+    </Icon>
+  );
+}
+
+export function LayoutGridIcon({ className }: IconProps) {
+  return (
+    <Icon className={className}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </Icon>
+  );
+}
+
+export function ListIcon({ className }: IconProps) {
+  return (
+    <Icon className={className}>
+      <path d="M8 6h13" />
+      <path d="M8 12h13" />
+      <path d="M8 18h13" />
+      <path d="M3 6h.01" />
+      <path d="M3 12h.01" />
+      <path d="M3 18h.01" />
+    </Icon>
+  );
+}
+
+export function ActivityIcon({ className }: IconProps) {
+  return (
+    <Icon className={className}>
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </Icon>
+  );
+}
