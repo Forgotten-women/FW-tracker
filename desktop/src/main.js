@@ -101,22 +101,19 @@ async function callBackend(command, args = {}) {
   return {};
 }
 
-const loadingSection = document.getElementById('loading-section');
 const enrollSection = document.getElementById('enroll-section');
 const statusSection = document.getElementById('status-section');
 const employeeBadge = document.getElementById('employee-badge');
 
 // enroll-section is visible by default in the HTML (no JS needed for fresh installs).
-// For previously-enrolled devices: swap to status view + brief loading spinner.
+// For previously-enrolled devices: swap to status view immediately.
 try {
   if (localStorage.getItem('ot_enrolled') === 'true') {
     if (enrollSection) enrollSection.classList.add('hidden');
     if (statusSection) statusSection.classList.remove('hidden');
-    if (loadingSection) loadingSection.classList.remove('hidden');
     const cachedEmp = localStorage.getItem('ot_emp_info');
     if (cachedEmp && employeeBadge) employeeBadge.textContent = cachedEmp;
   }
-  // Unenrolled: enroll-section is already visible from HTML — nothing to do.
 } catch (_) {}
 const checkinText = document.getElementById('checkin-text');
 const enrollBtn = document.getElementById('enroll-btn');
@@ -290,7 +287,6 @@ function updateBreakCountdown() {
 async function refreshStatus() {
   try {
     const data = await callBackend('get_app_status');
-    if (loadingSection) loadingSection.classList.add('hidden');
 
     // Show version number wherever visible
     const versionBadge = document.getElementById('version-badge');
@@ -488,7 +484,6 @@ async function refreshStatus() {
       }
       activeTimer.textContent = formatHMS(currentActiveSecs);
     } else {
-      if (loadingSection) loadingSection.classList.add('hidden');
       enrollSection.classList.remove('hidden');
       statusSection.classList.add('hidden');
       employeeBadge.textContent = 'Not Enrolled';
@@ -496,8 +491,6 @@ async function refreshStatus() {
     }
   } catch (err) {
     console.error('refreshStatus error:', err);
-    // Always dismiss the loading spinner on error — never leave it stuck.
-    if (loadingSection) loadingSection.classList.add('hidden');
     try {
       if (localStorage.getItem('ot_enrolled') === 'true') {
         if (statusSection) statusSection.classList.remove('hidden');
@@ -722,23 +715,3 @@ if (activeTimer && currentActiveSecs > 0) {
 
 refreshStatus();
 setInterval(refreshStatus, 10000);
-
-// Safety watchdog: ensure the loading spinner NEVER stays visible indefinitely.
-// This fires at 3 s — after the Tauri IPC poll (≤1 s) but leaving margin for
-// a slow first backend round-trip.
-setTimeout(() => {
-  if (loadingSection && !loadingSection.classList.contains('hidden')) {
-    loadingSection.classList.add('hidden');
-    try {
-      if (localStorage.getItem('ot_enrolled') === 'true' && statusSection) {
-        statusSection.classList.remove('hidden');
-        if (enrollSection) enrollSection.classList.add('hidden');
-      } else if (enrollSection) {
-        enrollSection.classList.remove('hidden');
-        if (statusSection) statusSection.classList.add('hidden');
-      }
-    } catch (_) {
-      if (enrollSection) enrollSection.classList.remove('hidden');
-    }
-  }
-}, 3000);
