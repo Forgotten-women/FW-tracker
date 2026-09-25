@@ -519,6 +519,8 @@ test('employee statements show only published payslips, keep the legacy fields, 
   await tick('2025-09-10');
   september = await periodStarting('2025-09-01');
   assert.equal(september.status, 'OPEN');
+  // The legacy manual close would end an automatic month with no payslips.
+  await assert.rejects(PR.closePeriod({ periodId: september.id, actor: 'user:hr' }), /managed automatically/);
   await unpaidAbsence(E.routine, '2025-09-03');
 
   // History from before payslips: a closed manual period, computed as always.

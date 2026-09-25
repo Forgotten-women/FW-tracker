@@ -10,6 +10,8 @@ import type {
   AttendanceCorrection,
   DashboardSummary,
   DocumentTypeOption,
+  EmployeeHistoryDayResponse,
+  EmployeeHistoryDaysResponse,
   EmployeeDocumentItem,
   EmployeeDeviceItem,
   EmployeeLeaveOverview,
@@ -276,6 +278,18 @@ export const api = {
         }>;
       }>;
     }>(`/api/dashboard/history?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+
+  /** One employee, one entry per day in [from, to]: at most 62 days a call; the future is clamped to today. */
+  employeeHistoryDays: (employeeId: string, from: string, to: string) =>
+    request<EmployeeHistoryDaysResponse>(
+      `/api/dashboard/employees/${encodeURIComponent(employeeId)}/days?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+
+  /** Everything about one day, including the HR-only movements log and top applications. */
+  employeeHistoryDay: (employeeId: string, dateKey: string) =>
+    request<EmployeeHistoryDayResponse>(
+      `/api/dashboard/employees/${encodeURIComponent(employeeId)}/day/${encodeURIComponent(dateKey)}`,
+    ),
 
   attendanceCorrections: (status = 'PENDING') =>
     request<{ status: string; corrections: AttendanceCorrection[] }>(

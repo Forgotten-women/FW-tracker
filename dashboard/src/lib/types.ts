@@ -1319,3 +1319,148 @@ export interface ShiftPattern {
   createdAt: number;
 }
 
+
+// ---------------------------------------------------------------------------
+// Attendance history (backend/src/domain/history.js). One entry per calendar
+// day, built from the persisted day rows, so any past date back to the
+// employee's start can be read.
+// ---------------------------------------------------------------------------
+
+export type HistoryDayStatus =
+  | 'NOT_EMPLOYED'
+  | 'ON_LEAVE'
+  | 'HOLIDAY'
+  | 'REST_DAY'
+  | 'REST_DAY_WORKED'
+  | 'IN_PROGRESS'
+  | 'NOT_STARTED'
+  | 'ABSENT'
+  | 'LATE'
+  | 'SHORT'
+  | 'ON_TIME';
+
+export interface HistoryDeficit {
+  lateMinutes: number;
+  excessBreakMinutes: number;
+  earlyDepartureMinutes: number;
+  unauthorisedMissingMinutes: number;
+  /** Always positive: minutes HR credited back against the deficit. */
+  approvedAdjustmentMinutes: number;
+  totalMinutes: number;
+}
+
+export interface HistoryLeave {
+  requestId: string;
+  type: string;
+  status: 'APPROVED' | 'PENDING';
+  /** 'FULL' or a half-day portion. */
+  dayPortion: string;
+  isPaid: boolean | null;
+}
+
+export interface HistoryAbsence {
+  /** PENDING_REVIEW | CONFIRMED | DISMISSED */
+  status: string;
+  /** SUSPECTED_NO_SHOW | UNAUTHORISED | AUTHORISED | SICK */
+  type: string | null;
+  treatAsUnpaid: boolean;
+}
+
+export interface HistoryDaySummary {
+  dateKey: string;
+  /** 'Mon' .. 'Sun' */
+  weekday: string;
+  isToday: boolean;
+  status: HistoryDayStatus;
+  statusLabel: string;
+  attendanceStatus: string | null;
+  isWorkingDay: boolean;
+  dayType: string;
+  nonWorkingReason: string | null;
+  /** 'HH:MM' in the office timezone. */
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+  firstInAt: number | null;
+  firstIn: string | null;
+  lastOutAt: number | null;
+  lastOut: string | null;
+  workedMinutes: number;
+  workedFormatted: string;
+  breakMinutes: number;
+  deficit: HistoryDeficit;
+  adjustment: { minutes: number; note: string | null } | null;
+  leave: HistoryLeave | null;
+  absence: HistoryAbsence | null;
+  corrections: { pending: number; total: number };
+  laptop: { activeMinutes: number; idleMinutes: number } | null;
+}
+
+export interface HistorySession {
+  startAt: number | null;
+  /** null while the session is still open. */
+  endAt: number | null;
+  start: string | null;
+  /** 'now' while the session is still open. */
+  end: string | null;
+  minutes: number;
+  duration: string;
+}
+
+export interface HistoryBreak {
+  startedAt: number;
+  endedAt: number | null;
+  start: string | null;
+  end: string | null;
+  permittedMinutes: number | null;
+  actualMinutes: number | null;
+  excessMinutes: number;
+}
+
+export interface HistoryCorrectionRequest {
+  id: string;
+  requestedAt: number;
+  /** Sent as the stored JSON text, e.g. '{"adjustmentMinutes":30}'. */
+  requestedChange: string | null;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'AMENDED' | 'INFO_REQUESTED' | string;
+  reviewedAt: number | null;
+  reviewNotes: string | null;
+}
+
+export interface HistoryLaptopSession {
+  deviceId: string;
+  device: string;
+  activeMinutes: number;
+  idleMinutes: number;
+  breakMinutes: number;
+  unverifiedMinutes: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+export interface HistoryDayDetail extends HistoryDaySummary {
+  employee: { id: string; name: string; role: string };
+  employmentStart: string | null;
+  sessions: HistorySession[];
+  breaks: HistoryBreak[];
+  correctionRequests: HistoryCorrectionRequest[];
+  laptopSessions: HistoryLaptopSession[];
+  /** HR only (the dashboard route always sends them). */
+  topApps?: { app: string; minutes: number }[];
+  movements?: { at: number; time: string | null; type: string; details: string }[];
+}
+
+export interface EmployeeHistoryDaysResponse {
+  status: string;
+  employee: { id: string; name: string; role: string };
+  from: string;
+  /** Clamped to today when the request reached into the future. */
+  to: string;
+  employmentStart: string | null;
+  days: HistoryDaySummary[];
+}
+
+export interface EmployeeHistoryDayResponse {
+  status: string;
+  day: HistoryDayDetail;
+}

@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/attendance.dart';
+import '../models/history.dart';
 import '../models/hr.dart';
 import '../models/payroll.dart';
 import 'pinned_http_client.dart';
@@ -231,6 +232,31 @@ class ApiClient {
             .map((d) => Attendance.fromJson(d as Map<String, dynamic>))
             .toList();
       });
+  /// This employee's attendance for every day in [from]..[to] (YYYY-MM-DD,
+  /// at most 62 days; the server clamps a `to` after today to today). One
+  /// month at a time is what the history calendar asks for.
+  Future<HistoryRange> fetchMyDays(String from, String to) => _guard(() async {
+        final res = await _http
+            .get(
+              await _uri('/api/attendance/mine/days', {'from': from, 'to': to}),
+              headers: await _authHeaders(),
+            )
+            .timeout(timeout);
+        return HistoryRange.fromJson(_decode(res));
+      });
+
+  /// One day in full: sessions, breaks, corrections and laptop activity.
+  Future<DayDetail> fetchMyDay(String dateKey) => _guard(() async {
+        final res = await _http
+            .get(
+              await _uri('/api/attendance/mine/day/${Uri.encodeComponent(dateKey)}'),
+              headers: await _authHeaders(),
+            )
+            .timeout(timeout);
+        final body = _decode(res);
+        return DayDetail.fromJson(body['day'] as Map<String, dynamic>? ?? const {});
+      });
+
   /// Submits an attendance correction / dispute request to HR (Spec 11).
   Future<String> submitCorrection({
     required String dateKey,

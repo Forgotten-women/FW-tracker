@@ -20,6 +20,25 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The app compares versionCode (the number after "+" in pubspec.yaml)
+      # to decide whether an update exists, so a tag built from an unbumped
+      # pubspec ships an "update" no phone will ever install. Refuse it here.
+      - name: 🔢 Check tag matches pubspec version
+        id: version
+        run: |
+          LINE=$(grep -E '^version:' forgottenwomen/pubspec.yaml | head -1 | awk '{print $2}')
+          NAME="${LINE%%+*}"
+          CODE="${LINE##*+}"
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "code=$CODE" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            if [ "$TAG" != "v$NAME" ]; then
+              echo "::error::Tag $TAG does not match pubspec version $NAME (+$CODE). Bump forgottenwomen/pubspec.yaml (name AND the +build number) and tag v$NAME."
+              exit 1
+            fi
+          fi
+
       - name: ☕ Set up Java 21
         uses: actions/setup-java@v4
         with:
@@ -100,13 +119,49 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+          # Never mark a phone release as the repo's "latest": the desktop
+          # agent's updater reads releases/latest/download/latest.json, and a
+          # phone release there (it has no latest.json) would stop every
+          # laptop from finding updates.
+          make_latest: 'false'
           body: |
+            **Version:** ${{ steps.version.outputs.name }} (build ${{ steps.version.outputs.code }})
             **SHA-256:** `${{ steps.checksum.outputs.sha256 }}`
 
-            Paste this checksum into the dashboard's "Register Release" form along
-            with this release's `app-release.apk` download URL.
+            Registered with the backend automatically when the OTA secrets are set;
+            otherwise paste the checksum and this release's `app-release.apk` URL into
+            the dashboard's "Register Release" form.
           files: |
             forgottenwomen/build/app/outputs/flutter-apk/app-release.apk
             forgottenwomen/build/app/outputs/flutter-apk/app-release.apk.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Offers the release to phones: the app asks the backend for the newest
+      # registered versionCode (routes/ota.js). Skipped, with a note, until the
+      # two secrets exist -- then no dashboard step is needed at all.
+      #   OTA_BACKEND_URL  e.g. https://backend-ten-lyart-57.vercel.app
+      #   OTA_ADMIN_KEY    the backend's ADMIN_API_KEY
+      - name: 📲 Register release for in-app updates
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          OTA_BACKEND_URL: ${{ secrets.OTA_BACKEND_URL }}
+          OTA_ADMIN_KEY: ${{ secrets.OTA_ADMIN_KEY }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          SHA256: ${{ steps.checksum.outputs.sha256 }}
+        run: |
+          if [ -z "$OTA_BACKEND_URL" ] || [ -z "$OTA_ADMIN_KEY" ]; then
+            echo "::notice::OTA_BACKEND_URL / OTA_ADMIN_KEY not set - register this release in the dashboard by hand."
+            exit 0
+          fi
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/app-release.apk"
+          BODY=$(jq -n --arg n "$VERSION_NAME" --argjson c "$VERSION_CODE" --arg u "$URL" --arg h "$SHA256" --arg notes "Release $TAG"             '{versionName:$n, versionCode:$c, platform:"android", downloadUrl:$u, sha256:$h, releaseNotes:$notes, mandatory:false}')
+          STATUS=$(curl -sS -o response.json -w '%{http_code}' -X POST "${OTA_BACKEND_URL%/}/api/admin/releases"             -H "Content-Type: application/json" -H "X-Admin-Key: $OTA_ADMIN_KEY" -d "$BODY")
+          cat response.json; echo
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
+            echo "::error::Registering the release failed with HTTP $STATUS."
+            exit 1
+          fi
+          echo "### 📲 Offered to phones: $VERSION_NAME (build $VERSION_CODE)" >> "$GITHUB_STEP_SUMMARY"

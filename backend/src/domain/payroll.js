@@ -1052,6 +1052,12 @@ async function closePeriod({ periodId, actor }) {
     if (period.status === 'PUBLISHED' || period.status === 'PAID') {
       throw new Error('This payroll run has been published with payslips; mark it paid rather than closing it.');
     }
+    // Closing is the legacy manual path and creates no payslips. On a run the
+    // system manages (auto-opened, or already generated for review) it would
+    // end the month without anyone ever being shown a payslip for it.
+    if (Number(period.auto_created) === 1 || period.status === 'IN_REVIEW') {
+      throw new Error('This payroll run is managed automatically. Approve and publish it (which creates payslips) instead of closing it.');
+    }
 
     const pending = (await db.prepare(
       "SELECT COUNT(*) c FROM payroll_adjustments WHERE period_id = ? AND status = 'PROPOSED'"

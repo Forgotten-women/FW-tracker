@@ -35,6 +35,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The installed agents update only to a HIGHER version, and the version
+      # they see is tauri.conf.json's, not the tag. desktop-v1.0.32/33 were
+      # built with 1.0.31 inside and so reached nobody. Refuse a mismatch.
+      - name: 🔢 Check tag matches tauri.conf.json version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./desktop/src-tauri/tauri.conf.json').package.version")
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            if [ "$TAG" != "desktop-v$VERSION" ]; then
+              echo "::error::Tag $TAG does not match tauri.conf.json version $VERSION. Bump desktop/src-tauri/tauri.conf.json (and desktop/package.json) and tag desktop-v$VERSION."
+              exit 1
+            fi
+          fi
+
       # ── 2. Install Node.js ───────────────────────────────────────────────────
       - name: 🟢 Set up Node.js 20
         uses: actions/setup-node@v4
