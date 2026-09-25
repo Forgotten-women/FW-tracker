@@ -448,7 +448,10 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   try {
     dayDerived = await attendance.deriveDay(employeeId, dateKey, nowMs);
     const workstationMins = sessionRow ? Math.floor((sessionRow.active_seconds || 0) / 60) : 0;
-    const effectiveWorkedMinutes = Math.max(dayDerived ? (dayDerived.workedMinutes || 0) : 0, workstationMins);
+    const presenceMins = dayDerived
+      ? Math.max(dayDerived.workedMinutes || 0, dayDerived.rawPresenceMinutes || 0)
+      : 0;
+    const effectiveWorkedMinutes = Math.max(presenceMins, workstationMins);
     officePresenceMinutes = effectiveWorkedMinutes;
     officePresenceFormatted = T.formatMinutes(effectiveWorkedMinutes);
     shiftProgressPercent = Math.min(100, Math.round((effectiveWorkedMinutes / shiftTargetMinutes) * 100));
@@ -498,9 +501,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     },
     today: {
       dateKey,
-      checkInTime: (sessionRow && sessionRow.created_at)
-        ? T.displayTime(sessionRow.created_at)
-        : (dayDerived && dayDerived.firstInAt ? T.displayTime(dayDerived.firstInAt) : null),
+      checkInTime: (dayDerived && dayDerived.firstInAt)
+        ? T.displayTime(dayDerived.firstInAt)
+        : ((sessionRow && sessionRow.created_at) ? T.displayTime(sessionRow.created_at) : null),
       activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
       unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
       idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,

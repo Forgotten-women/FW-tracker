@@ -342,6 +342,10 @@ async function refreshStatus() {
       if (data.latest && data.latest.today) {
         const serverDateKey = data.latest.today.dateKey || '';
         const serverActive = data.latest.today.activeSeconds || 0;
+        const presenceMins = (data.latest.today.officePresenceMinutes !== null && data.latest.today.officePresenceMinutes !== undefined)
+          ? data.latest.today.officePresenceMinutes
+          : 0;
+        const presenceSecs = presenceMins * 60;
 
         // Date rollover: if the day changed overnight or across midnight, reset to today's active seconds
         // What the server has credited, plus what the agent has counted since
@@ -350,8 +354,11 @@ async function refreshStatus() {
         const creditState = data.latest.creditState || null;
         creditCounting = !creditState || creditState === 'COUNTED';
         const pending = creditCounting ? (Number(data.pendingActiveSeconds) || 0) : 0;
-        currentActiveSecs = serverActive + pending;
-        lastSyncedServerSecs = serverActive;
+        
+        // Take the highest verified worked/presence time (e.g. 6h 22m) so the widget matches the HR dashboard
+        const totalCreditedSecs = Math.max(serverActive, presenceSecs);
+        currentActiveSecs = totalCreditedSecs + pending;
+        lastSyncedServerSecs = totalCreditedSecs;
         lastSyncedDateKey = serverDateKey || todayDateStr;
         saveLocalProgress(currentActiveSecs, lastSyncedDateKey);
 
