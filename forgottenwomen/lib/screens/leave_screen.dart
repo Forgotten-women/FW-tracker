@@ -1596,9 +1596,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                '·  ${h.weekday}',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+              Expanded(
+                child: Text(
+                  '·  ${h.weekday}',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
@@ -1619,10 +1622,14 @@ class _LeaveScreenState extends State<LeaveScreen> {
             child: Row(
               children: [
                 Icon(Icons.star_outline, size: 12, color: AppColors.primaryLight),
-                SizedBox(width: 5),
-                Text(
-                  '0 Annual Leave Deducted · 7.5h Monthly Target Credit',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 10.5),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    '0 Annual Leave Deducted · 7.5h Monthly Target Credit',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 10.5),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),

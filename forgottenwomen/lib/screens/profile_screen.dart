@@ -738,9 +738,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           Row(
                             children: [
-                              Text(
-                                c.name,
-                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
+                              Flexible(
+                                child: Text(
+                                  c.name,
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                               if (c.isPrimary) ...[
                                 const SizedBox(width: 6),
@@ -826,20 +829,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${p.kycVerifiedCount} of ${p.kycTotalCount} Documents Verified',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'CNIC, Degree, Utility Bills & Contracts',
-                  style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-                ),
-              ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${p.kycVerifiedCount} of ${p.kycTotalCount} Documents Verified',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textLight),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'CNIC, Degree, Utility Bills & Contracts',
+                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(width: 8),
             Icon(
               p.kycVerifiedCount > 0 && p.kycVerifiedCount >= p.kycTotalCount
                   ? Icons.check_circle_rounded
