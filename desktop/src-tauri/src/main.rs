@@ -128,6 +128,7 @@ async fn get_app_status(state: State<'_, AppState>) -> Result<serde_json::Value,
 
     Ok(serde_json::json!({
         "enrolled": !cfg.token.is_empty(),
+        "version": env!("CARGO_PKG_VERSION"),
         "employeeName": cfg.employee_name,
         "employeeRole": cfg.employee_role,
         "serverUrl": cfg.server_url,
@@ -219,8 +220,8 @@ fn request_exit(app: tauri::AppHandle) {
     let window = app.get_window("main");
     tauri::api::dialog::ask(
         window.as_ref(),
-        "Exit Office Tracker?",
-        "Office Tracker records your working time on this laptop. If you exit, HR will see that \
+        "Exit WorkSync?",
+        "WorkSync records your working time on this laptop. If you exit, HR will see that \
          the agent was stopped at this time, and nothing is recorded until it runs again \
          (it starts automatically the next time you sign in).\n\nExit anyway?",
         move |confirmed| {
@@ -275,22 +276,22 @@ pub fn trigger_update_check(app: tauri::AppHandle) {
                     update.current_version()
                 );
                 let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("Office Tracker")
+                    .title("WorkSync")
                     .body(&msg)
                     .show();
                 println!("[updater] {}", msg);
                 if let Err(e) = update.download_and_install().await {
                     eprintln!("[updater] install failed: {}", e);
                     let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                        .title("Office Tracker")
+                        .title("WorkSync")
                         .body(&format!("Update installation failed: {}", e))
                         .show();
                 }
             }
             Ok(_) => {
-                let msg = format!("Office Tracker is up to date (v{}).", env!("CARGO_PKG_VERSION"));
+                let msg = format!("WorkSync is up to date (v{}).", env!("CARGO_PKG_VERSION"));
                 let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("Office Tracker")
+                    .title("WorkSync")
                     .body(&msg)
                     .show();
                 println!("[updater] up to date");
@@ -298,7 +299,7 @@ pub fn trigger_update_check(app: tauri::AppHandle) {
             Err(e) => {
                 eprintln!("[updater] check failed: {}", e);
                 let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("Office Tracker")
+                    .title("WorkSync")
                     .body(&format!("Could not check for updates: {}", e))
                     .show();
             }
@@ -409,7 +410,7 @@ fn main() {
             // started for this session, not just once at enrollment time.
             if !initial_config.token.is_empty() {
                 let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("Office Tracker")
+                    .title("WorkSync")
                     .body("Monitoring has started for this session. Right-click the tray icon for status and options.")
                     .show();
             }

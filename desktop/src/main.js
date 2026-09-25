@@ -1,4 +1,4 @@
-// Office Tracker - Desktop Mini-App UI Logic (Cross-Platform Windows & macOS)
+// WorkSync - Desktop Mini-App UI Logic (Cross-Platform Windows & macOS)
 // Works seamlessly both inside Tauri GUI and in standalone App Mode!
 
 function getTauri() {
@@ -291,6 +291,13 @@ async function refreshStatus() {
   try {
     const data = await callBackend('get_app_status');
     if (loadingSection) loadingSection.classList.add('hidden');
+
+    // Show version number wherever visible
+    const versionBadge = document.getElementById('version-badge');
+    if (versionBadge && data.version) {
+      versionBadge.textContent = `v${data.version}`;
+    }
+
     if (data.enrolled) {
       try {
         localStorage.setItem('ot_enrolled', 'true');

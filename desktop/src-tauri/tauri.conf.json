@@ -7,7 +7,7 @@
     "withGlobalTauri": true
   },
   "package": {
-    "productName": "Office Tracker",
+    "productName": "WorkSync",
     "version": "1.0.39"
   },
   "tauri": {
@@ -35,7 +35,7 @@
         "minimumSystemVersion": ""
       },
       "resources": ["../capture-screen.ps1"],
-      "shortDescription": "Office Tracker Desktop Agent",
+      "shortDescription": "WorkSync Desktop Agent",
       "targets": "all",
       "windows": {
         "certificateThumbprint": null,
@@ -67,7 +67,7 @@
         "center": true,
         "height": 460,
         "resizable": false,
-        "title": "Office Tracker",
+        "title": "WorkSync",
         "width": 360,
         "decorations": false,
         "transparent": true,
