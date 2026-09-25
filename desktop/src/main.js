@@ -106,14 +106,17 @@ const enrollSection = document.getElementById('enroll-section');
 const statusSection = document.getElementById('status-section');
 const employeeBadge = document.getElementById('employee-badge');
 
-// If previously known to be enrolled, display status section immediately while verifying
+// enroll-section is visible by default in the HTML (no JS needed for fresh installs).
+// For previously-enrolled devices: swap to status view + brief loading spinner.
 try {
   if (localStorage.getItem('ot_enrolled') === 'true') {
-    if (loadingSection) loadingSection.classList.add('hidden');
+    if (enrollSection) enrollSection.classList.add('hidden');
     if (statusSection) statusSection.classList.remove('hidden');
+    if (loadingSection) loadingSection.classList.remove('hidden');
     const cachedEmp = localStorage.getItem('ot_emp_info');
     if (cachedEmp && employeeBadge) employeeBadge.textContent = cachedEmp;
   }
+  // Unenrolled: enroll-section is already visible from HTML — nothing to do.
 } catch (_) {}
 const checkinText = document.getElementById('checkin-text');
 const enrollBtn = document.getElementById('enroll-btn');
