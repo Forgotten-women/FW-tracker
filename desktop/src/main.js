@@ -22,15 +22,26 @@ function getTauriWindow() {
   return null;
 }
 
+// Module-level Tauri globals — resolves at parse time; refreshed inside callBackend
+// for the small window where __TAURI__ injects after the script runs.
+const isTauri = Boolean(getTauri());
+let tauriInvoke = getTauriInvoke();
+let tauriWindow = getTauriWindow();
+
 // Universal backend invoker (Tauri IPC or Local Agent HTTP Server)
 async function callBackend(command, args = {}) {
   let invoke = getTauriInvoke();
   if (!invoke && typeof window !== 'undefined') {
-    // Wait up to 1.5s in case Tauri globals inject slightly after script parsing
-    for (let i = 0; i < 15; i++) {
+    // Wait up to 1s in case Tauri globals inject slightly after script parsing
+    for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 100));
       invoke = getTauriInvoke();
       if (invoke) break;
+    }
+    // Keep module-level vars in sync for event handlers that use them directly
+    if (invoke) {
+      tauriInvoke = invoke;
+      tauriWindow = getTauriWindow();
     }
   }
 
@@ -466,12 +477,15 @@ async function refreshStatus() {
     }
   } catch (err) {
     console.error('refreshStatus error:', err);
+    // Always dismiss the loading spinner on error — never leave it stuck.
     if (loadingSection) loadingSection.classList.add('hidden');
     try {
       if (localStorage.getItem('ot_enrolled') === 'true') {
         if (statusSection) statusSection.classList.remove('hidden');
+        if (enrollSection) enrollSection.classList.add('hidden');
       } else {
         if (enrollSection) enrollSection.classList.remove('hidden');
+        if (statusSection) statusSection.classList.add('hidden');
       }
     } catch (_) {
       if (enrollSection) enrollSection.classList.remove('hidden');
@@ -690,18 +704,22 @@ if (activeTimer && currentActiveSecs > 0) {
 refreshStatus();
 setInterval(refreshStatus, 10000);
 
-// Safety watchdog: ensure the loading spinner NEVER stays visible indefinitely
+// Safety watchdog: ensure the loading spinner NEVER stays visible indefinitely.
+// This fires at 3 s — after the Tauri IPC poll (≤1 s) but leaving margin for
+// a slow first backend round-trip.
 setTimeout(() => {
   if (loadingSection && !loadingSection.classList.contains('hidden')) {
     loadingSection.classList.add('hidden');
     try {
       if (localStorage.getItem('ot_enrolled') === 'true' && statusSection) {
         statusSection.classList.remove('hidden');
+        if (enrollSection) enrollSection.classList.add('hidden');
       } else if (enrollSection) {
         enrollSection.classList.remove('hidden');
+        if (statusSection) statusSection.classList.add('hidden');
       }
     } catch (_) {
       if (enrollSection) enrollSection.classList.remove('hidden');
     }
   }
-}, 2000);
+}, 3000);
