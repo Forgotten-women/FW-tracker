@@ -444,12 +444,15 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   let shiftProgressPercent = 0;
   let shiftRemainingMinutes = 450;
   let shiftRemainingFormatted = '7h 30m';
+  let dayDerived = null;
   try {
-    const day = await attendance.deriveDay(employeeId, dateKey, nowMs);
-    officePresenceMinutes = day.workedMinutes;
-    officePresenceFormatted = T.formatMinutes(day.workedMinutes);
-    shiftProgressPercent = Math.min(100, Math.round((day.workedMinutes / shiftTargetMinutes) * 100));
-    shiftRemainingMinutes = Math.max(0, shiftTargetMinutes - day.workedMinutes);
+    dayDerived = await attendance.deriveDay(employeeId, dateKey, nowMs);
+    const workstationMins = sessionRow ? Math.floor((sessionRow.active_seconds || 0) / 60) : 0;
+    const effectiveWorkedMinutes = Math.max(dayDerived ? (dayDerived.workedMinutes || 0) : 0, workstationMins);
+    officePresenceMinutes = effectiveWorkedMinutes;
+    officePresenceFormatted = T.formatMinutes(effectiveWorkedMinutes);
+    shiftProgressPercent = Math.min(100, Math.round((effectiveWorkedMinutes / shiftTargetMinutes) * 100));
+    shiftRemainingMinutes = Math.max(0, shiftTargetMinutes - effectiveWorkedMinutes);
     shiftRemainingFormatted = `${Math.floor(shiftRemainingMinutes / 60)}h ${shiftRemainingMinutes % 60}m`;
   } catch (_) {}
 
@@ -495,7 +498,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     },
     today: {
       dateKey,
-      checkInTime: sessionRow && sessionRow.created_at ? T.displayTime(sessionRow.created_at) : null,
+      checkInTime: (sessionRow && sessionRow.created_at)
+        ? T.displayTime(sessionRow.created_at)
+        : (dayDerived && dayDerived.firstInAt ? T.displayTime(dayDerived.firstInAt) : null),
       activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
       unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
       idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
@@ -662,10 +667,12 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
   let shiftRemainingFormatted = '7h 30m';
   try {
     const day = await attendance.deriveDay(employeeId, dateKey, nowMs);
-    officePresenceMinutes = day.workedMinutes;
-    officePresenceFormatted = T.formatMinutes(day.workedMinutes);
-    shiftProgressPercent = Math.min(100, Math.round((day.workedMinutes / shiftTargetMinutes) * 100));
-    shiftRemainingMinutes = Math.max(0, shiftTargetMinutes - day.workedMinutes);
+    const workstationMins = sessionRow ? Math.floor((sessionRow.active_seconds || 0) / 60) : 0;
+    const effectiveWorkedMinutes = Math.max(day ? (day.workedMinutes || 0) : 0, workstationMins);
+    officePresenceMinutes = effectiveWorkedMinutes;
+    officePresenceFormatted = T.formatMinutes(effectiveWorkedMinutes);
+    shiftProgressPercent = Math.min(100, Math.round((effectiveWorkedMinutes / shiftTargetMinutes) * 100));
+    shiftRemainingMinutes = Math.max(0, shiftTargetMinutes - effectiveWorkedMinutes);
     shiftRemainingFormatted = `${Math.floor(shiftRemainingMinutes / 60)}h ${shiftRemainingMinutes % 60}m`;
   } catch (_) {}
 

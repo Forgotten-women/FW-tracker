@@ -236,6 +236,40 @@ function formatMS(seconds) {
   return isNegative ? `+${m}:${s}` : `${m}:${s}`;
 }
 
+let currentShiftTargetMins = 450;
+let currentOfficePresenceMins = 0;
+
+function updateShiftTargetDisplay(activeSecs, shiftTargetMins = currentShiftTargetMins, officePresenceMins = currentOfficePresenceMins) {
+  if (!shiftTargetCard) return;
+  currentShiftTargetMins = shiftTargetMins || 450;
+  currentOfficePresenceMins = officePresenceMins || 0;
+  const activeMins = Math.floor((activeSecs || 0) / 60);
+  const workedMins = Math.max(activeMins, currentOfficePresenceMins);
+  const workedFormatted = `${Math.floor(workedMins / 60)}h ${workedMins % 60}m`;
+  const pct = Math.min(100, Math.round((workedMins / currentShiftTargetMins) * 100));
+  const remMins = Math.max(0, currentShiftTargetMins - workedMins);
+  const remFormatted = `${Math.floor(remMins / 60)}h ${remMins % 60}m`;
+
+  if (shiftWorkedValue) {
+    shiftWorkedValue.innerHTML = `${workedFormatted} <span class="shift-pct">(${pct}%)</span>`;
+  }
+  if (shiftProgressFill) {
+    shiftProgressFill.style.width = `${Math.max(4, Math.min(100, pct))}%`;
+    if (pct >= 100) {
+      shiftProgressFill.className = 'shift-progress-fill completed';
+    } else {
+      shiftProgressFill.className = 'shift-progress-fill';
+    }
+  }
+  if (shiftRemText) {
+    if (remMins <= 0 || pct >= 100) {
+      shiftRemText.innerHTML = '<span class="rem-emerald font-bold">✅ Target Achieved</span>';
+    } else {
+      shiftRemText.innerHTML = `<span class="rem-amber">⏳ ${remFormatted} remaining</span>`;
+    }
+  }
+}
+
 function updateBreakCountdown() {
   if (isTogglingBreak) return;
   if (!isOnBreakState || !breakStartedAtMs || !breakCountdownTimer) return;
@@ -347,36 +381,10 @@ async function refreshStatus() {
         // Official Daily Shift Target (HR Dashboard Synced)
         if (shiftTargetCard) {
           const REQUIRED_SHIFT_MINS = data.latest.today.shiftTargetMinutes || 450;
-          const hrWorkedMins = (data.latest.today.officePresenceMinutes !== null && data.latest.today.officePresenceMinutes !== undefined)
+          const presenceMins = (data.latest.today.officePresenceMinutes !== null && data.latest.today.officePresenceMinutes !== undefined)
             ? data.latest.today.officePresenceMinutes
-            : Math.floor(currentActiveSecs / 60);
-          const hrFormatted = data.latest.today.officePresenceFormatted || `${Math.floor(hrWorkedMins / 60)}h ${hrWorkedMins % 60}m`;
-          const pct = (data.latest.today.shiftProgressPercent !== null && data.latest.today.shiftProgressPercent !== undefined)
-            ? data.latest.today.shiftProgressPercent
-            : Math.min(100, Math.round((hrWorkedMins / REQUIRED_SHIFT_MINS) * 100));
-          const remMins = (data.latest.today.shiftRemainingMinutes !== null && data.latest.today.shiftRemainingMinutes !== undefined)
-            ? data.latest.today.shiftRemainingMinutes
-            : Math.max(0, REQUIRED_SHIFT_MINS - hrWorkedMins);
-          const remFormatted = data.latest.today.shiftRemainingFormatted || `${Math.floor(remMins / 60)}h ${remMins % 60}m`;
-
-          if (shiftWorkedValue) {
-            shiftWorkedValue.innerHTML = `${hrFormatted} <span class="shift-pct">(${pct}%)</span>`;
-          }
-          if (shiftProgressFill) {
-            shiftProgressFill.style.width = `${Math.max(4, Math.min(100, pct))}%`;
-            if (pct >= 100) {
-              shiftProgressFill.className = 'shift-progress-fill completed';
-            } else {
-              shiftProgressFill.className = 'shift-progress-fill';
-            }
-          }
-          if (shiftRemText) {
-            if (remMins <= 0 || pct >= 100) {
-              shiftRemText.innerHTML = '<span class="rem-emerald font-bold">✅ Target Achieved</span>';
-            } else {
-              shiftRemText.innerHTML = `<span class="rem-amber">⏳ ${remFormatted} remaining</span>`;
-            }
-          }
+            : 0;
+          updateShiftTargetDisplay(currentActiveSecs, REQUIRED_SHIFT_MINS, presenceMins);
         }
 
         const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
@@ -528,6 +536,7 @@ timerInterval = setInterval(() => {
     }
     if (currentActiveSecs % 5 === 0) {
       saveLocalProgress(currentActiveSecs);
+      updateShiftTargetDisplay(currentActiveSecs);
     }
   }
 }, 1000);
@@ -712,6 +721,7 @@ try {
 if (activeTimer && currentActiveSecs > 0) {
   activeTimer.textContent = formatHMS(currentActiveSecs);
 }
+updateShiftTargetDisplay(currentActiveSecs);
 
 refreshStatus();
 setInterval(refreshStatus, 10000);
