@@ -5,6 +5,7 @@ pub fn create_tray() -> SystemTray {
     let status_item = CustomMenuItem::new("status".to_string(), "🟢 Status: Active (In Office)").disabled();
     let toggle_break = CustomMenuItem::new("toggle_break".to_string(), "☕ Take Break");
     let show_widget = CustomMenuItem::new("show_widget".to_string(), "📊 Open Status Widget");
+    let check_updates = CustomMenuItem::new("check_updates".to_string(), "🔄 Check for Updates");
     let quit = CustomMenuItem::new("quit".to_string(), "❌ Exit");
 
     let tray_menu = SystemTrayMenu::new()
@@ -12,6 +13,7 @@ pub fn create_tray() -> SystemTray {
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(show_widget)
         .add_item(toggle_break)
+        .add_item(check_updates)
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(quit);
 
@@ -37,6 +39,9 @@ pub fn handle_tray_event(app: &AppHandle, event: SystemTrayEvent) {
             }
             "toggle_break" => {
                 let _ = app.emit_all("toggle-break", ());
+            }
+            "check_updates" => {
+                crate::trigger_update_check(app.clone());
             }
             "quit" => {
                 // Not std::process::exit: that killed the process mid-write

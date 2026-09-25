@@ -170,46 +170,81 @@ fn backup_config_path() -> PathBuf {
     config_path().with_file_name("config.backup.json")
 }
 
+fn secondary_backup_path() -> PathBuf {
+    let mut dir = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push("OfficeTracker");
+    let _ = fs::create_dir_all(&dir);
+    dir.push("config.backup.json");
+    dir
+}
+
 fn read_config(path: &PathBuf) -> Option<AppConfig> {
     let data = fs::read_to_string(path).ok()?;
     serde_json::from_str(&data).ok()
 }
 
+/// Safely writes content to target path on both Windows and Unix with retries and fallback
+fn safe_replace_file(path: &PathBuf, content: &str) -> bool {
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+    if fs::write(&tmp, content.as_bytes()).is_err() {
+        return false;
+    }
+
+    // Try rename first
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, if target exists, remove it or attempt replace
+        if path.exists() {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    if fs::rename(&tmp, path).is_ok() {
+        return true;
+    }
+
+    // If rename failed (e.g. cross-device or permission hiccup), try copy + remove
+    let copied = fs::copy(&tmp, path).is_ok();
+    let _ = fs::remove_file(&tmp);
+    copied
+}
+
 /// The device's pairing lives here. Losing it means the employee has to be
 /// given a new enrolment code, so a damaged main file falls back to the
-/// backup copy -- the pairing only goes when the app's data folder does.
+/// primary backup copy, then secondary LocalAppData backup.
 pub fn load_config() -> AppConfig {
     let main = read_config(&config_path());
     if let Some(cfg) = main.as_ref().filter(|c| !c.token.is_empty()) {
         return cfg.clone();
     }
+
+    // Fallback 1: Roaming backup
     if let Some(backup) = read_config(&backup_config_path()).filter(|c| !c.token.is_empty()) {
         eprintln!("[config] main config unreadable or unpaired; restored pairing from backup");
         save_config(&backup);
         return backup;
     }
+
+    // Fallback 2: LocalAppData backup (survives roaming profile resets / installer edge-cases)
+    if let Some(sec_backup) = read_config(&secondary_backup_path()).filter(|c| !c.token.is_empty()) {
+        eprintln!("[config] restored pairing from secondary LocalAppData backup");
+        save_config(&sec_backup);
+        return sec_backup;
+    }
+
     main.unwrap_or_default()
 }
 
-// Written after every heartbeat. A plain fs::write truncates the file first,
-// so an exit (or crash, or power cut) landing mid-write left an empty or
-// half-written config.json -- which read back as "not paired" and sent the
-// employee back to the enrolment screen. Write a temp file and rename it into
-// place instead (the rename replaces the file in one step), and keep a copy.
+// Written after every heartbeat and whenever pairing updates. Uses safe replacement
+// so an exit or restart mid-write never leaves an empty config file.
 pub fn save_config(cfg: &AppConfig) {
     let Ok(json) = serde_json::to_string_pretty(cfg) else { return };
     let path = config_path();
-    let tmp = path.with_extension("json.tmp");
-    if fs::write(&tmp, &json).is_ok() && fs::rename(&tmp, &path).is_ok() {
+    if safe_replace_file(&path, &json) {
         if !cfg.token.is_empty() {
-            let backup = backup_config_path();
-            let backup_tmp = backup.with_extension("json.tmp");
-            if fs::write(&backup_tmp, &json).is_ok() {
-                let _ = fs::rename(&backup_tmp, &backup);
-            }
+            let _ = safe_replace_file(&backup_config_path(), &json);
+            let _ = safe_replace_file(&secondary_backup_path(), &json);
         }
-    } else {
-        let _ = fs::remove_file(&tmp);
     }
 }
 

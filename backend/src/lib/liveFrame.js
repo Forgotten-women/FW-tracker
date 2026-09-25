@@ -29,6 +29,7 @@
 // is why storeKind() is surfaced to the viewer and /api/health.
 
 const { getClient } = require('./redis');
+const { db } = require('../db');
 
 const FRAME_TTL_SECONDS = 8; // a bit more than the ~1s capture interval, so one missed beat isn't visible as a gap
 const ACK_TTL_SECONDS = 30;
@@ -102,14 +103,43 @@ function normaliseFrame(raw) {
 
 async function setFrame(deviceId, frameBase64, atMs = Date.now()) {
   await put(k.frame(deviceId), { at: atMs, img: frameBase64 }, FRAME_TTL_SECONDS);
+  if (!getClient()) {
+    try {
+      await db.prepare(`
+        UPDATE workstation_live_streams
+        SET frame_base64 = ?, last_frame_at = ?, updated_at = ?
+        WHERE device_id = ? AND status = 'ACTIVE'
+      `).run(frameBase64, atMs, atMs, deviceId);
+    } catch (e) {
+      console.error('[liveFrame] DB fallback write error:', e.message);
+    }
+  }
 }
 
 async function markAlive(deviceId, atMs = Date.now()) {
   await put(k.alive(deviceId), atMs, FRAME_TTL_SECONDS);
+  if (!getClient()) {
+    try {
+      await db.prepare(`
+        UPDATE workstation_live_streams
+        SET updated_at = ?
+        WHERE device_id = ? AND status = 'ACTIVE'
+      `).run(atMs, deviceId);
+    } catch (_) {}
+  }
 }
 
 async function setAck(deviceId, atMs = Date.now()) {
   await put(k.ack(deviceId), atMs, ACK_TTL_SECONDS);
+  if (!getClient()) {
+    try {
+      await db.prepare(`
+        UPDATE workstation_live_streams
+        SET updated_at = ?
+        WHERE device_id = ?
+      `).run(atMs, deviceId);
+    } catch (_) {}
+  }
 }
 
 async function setAgentInfo(deviceId, info) {
@@ -121,11 +151,29 @@ async function getState(deviceId) {
   const [frame, alive, ack, agent] = await getMany([
     k.frame(deviceId), k.alive(deviceId), k.ack(deviceId), k.agent(deviceId),
   ]);
-  const f = normaliseFrame(frame);
+  let f = normaliseFrame(frame);
+  let aliveAt = Number(alive) || null;
+  let ackAt = Number(ack) || null;
+
+  if (!f && !getClient()) {
+    try {
+      const row = await db.prepare('SELECT frame_base64, last_frame_at, updated_at FROM workstation_live_streams WHERE device_id = ?').get(deviceId);
+      if (row && row.frame_base64) {
+        f = { at: Number(row.last_frame_at) || Number(row.updated_at) || null, img: row.frame_base64 };
+        aliveAt = Math.max(aliveAt || 0, Number(row.last_frame_at) || 0, Number(row.updated_at) || 0) || null;
+      }
+      if (row && row.updated_at && !ackAt) {
+        ackAt = Number(row.updated_at) || null;
+      }
+    } catch (e) {
+      console.error('[liveFrame] DB fallback read error:', e.message);
+    }
+  }
+
   return {
     frame: f,
-    aliveAt: Number(alive) || null,
-    ackAt: Number(ack) || null,
+    aliveAt,
+    ackAt,
     agent: agent && typeof agent === 'object' ? agent : null,
   };
 }
@@ -133,12 +181,24 @@ async function getState(deviceId) {
 async function getFrame(deviceId) {
   const [frame] = await getMany([k.frame(deviceId)]);
   const f = normaliseFrame(frame);
-  return f ? f.img : null;
+  if (f) return f.img;
+  if (!getClient()) {
+    try {
+      const row = await db.prepare('SELECT frame_base64 FROM workstation_live_streams WHERE device_id = ?').get(deviceId);
+      return row ? row.frame_base64 : null;
+    } catch (_) {}
+  }
+  return null;
 }
 
 /** Ends a session: the frame, keepalive and ack go; what the agent said about itself stays. */
 async function clearFrame(deviceId) {
   await remove([k.frame(deviceId), k.alive(deviceId), k.ack(deviceId)]);
+  if (!getClient()) {
+    try {
+      await db.prepare('UPDATE workstation_live_streams SET frame_base64 = NULL, last_frame_at = NULL WHERE device_id = ?').run(deviceId);
+    } catch (_) {}
+  }
 }
 
 module.exports = {

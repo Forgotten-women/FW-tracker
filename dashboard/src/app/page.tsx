@@ -18,7 +18,7 @@ import { NotificationDrawer } from '@/components/NotificationDrawer';
 import { PayrollPanel } from '@/components/PayrollPanel';
 import { OtaPanel } from '@/components/OtaPanel';
 import { ComplaintsManagementPanel } from '@/components/ComplaintsManagementPanel';
-import { EmployeeDetailDrawer } from '@/components/EmployeeDetailDrawer';
+import { EmployeeDetailDrawer, type DrawerOpenOptions } from '@/components/EmployeeDetailDrawer';
 import { UnifiedWorkforcePanel } from '@/components/UnifiedWorkforcePanel';
 import { WorkstationsPanel } from '@/components/WorkstationsPanel';
 
@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [gateError, setGateError] = useState<string>('');
   const [pairing, setPairing] = useState<(EnrollmentCode & { name: string }) | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDay | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState<DrawerOpenOptions | null>(null);
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
@@ -381,7 +382,10 @@ export default function DashboardPage() {
                     onDecideCorrection={decideCorrection}
                     onRefreshCorrections={loadCorrections}
                     onExportCsv={exportCsv}
-                    onSelectEmployee={setSelectedEmployee}
+                    onSelectEmployee={(emp, open) => {
+                      setDrawerOpen(open ?? null);
+                      setSelectedEmployee(emp);
+                    }}
                   />
                 </div>
 
@@ -498,7 +502,13 @@ export default function DashboardPage() {
       {/* Slide-out Employee Detail Drawer */}
       <EmployeeDetailDrawer
         employee={selectedEmployee}
-        onClose={() => setSelectedEmployee(null)}
+        initialTab={drawerOpen?.tab}
+        initialDate={drawerOpen?.date}
+        todayKey={summary?.currentDateKey}
+        onClose={() => {
+          setSelectedEmployee(null);
+          setDrawerOpen(null);
+        }}
         onOpenPairing={async (emp) => {
           await pairDevice({ id: emp.id, name: emp.name } as any);
         }}

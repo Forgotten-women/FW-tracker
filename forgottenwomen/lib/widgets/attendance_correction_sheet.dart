@@ -55,12 +55,14 @@ Future<bool> showAttendanceCorrectionSheet(
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'File Attendance Dispute',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
+                      Expanded(
+                        child: Text(
+                          'File Attendance Dispute',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
                       ),
                       IconButton(
@@ -102,7 +104,7 @@ Future<bool> showAttendanceCorrectionSheet(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(selectedDateKey, style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+                          Expanded(child: Text(selectedDateKey, style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
                           Icon(Icons.calendar_today, size: 16, color: AppColors.primaryLight),
                         ],
                       ),
@@ -114,17 +116,18 @@ Future<bool> showAttendanceCorrectionSheet(
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
                     initialValue: reasonCategory,
+                    isExpanded: true,
                     dropdownColor: AppColors.sheet,
                     decoration: const InputDecoration(
                       contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     ),
                     items: [
-                      DropdownMenuItem(value: 'Sensor Glitch / Failed Check-in', child: Text('Sensor Glitch / Failed Check-in', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
-                      DropdownMenuItem(value: 'Wi-Fi / Network Disconnection', child: Text('Wi-Fi / Network Disconnection', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
-                      DropdownMenuItem(value: 'Off-site Business Meeting', child: Text('Off-site Business Meeting', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
-                      DropdownMenuItem(value: 'Forgotten Phone / Device', child: Text('Forgotten Phone / Device', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
-                      DropdownMenuItem(value: 'Approved Overtime / Late Shift', child: Text('Approved Overtime / Late Shift', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
-                      DropdownMenuItem(value: 'Other Reason', child: Text('Other Reason', style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                      DropdownMenuItem(value: 'Sensor Glitch / Failed Check-in', child: Text('Sensor Glitch / Failed Check-in', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                      DropdownMenuItem(value: 'Wi-Fi / Network Disconnection', child: Text('Wi-Fi / Network Disconnection', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                      DropdownMenuItem(value: 'Off-site Business Meeting', child: Text('Off-site Business Meeting', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                      DropdownMenuItem(value: 'Forgotten Phone / Device', child: Text('Forgotten Phone / Device', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                      DropdownMenuItem(value: 'Approved Overtime / Late Shift', child: Text('Approved Overtime / Late Shift', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
+                      DropdownMenuItem(value: 'Other Reason', child: Text('Other Reason', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: AppColors.textPrimary))),
                     ],
                     onChanged: (val) {
                       if (val != null) {

@@ -162,7 +162,7 @@ class _HistoryDayScreenState extends State<HistoryDayScreen> {
       _hero(s),
       if (notEmployed) ...[
         const SizedBox(height: 16),
-        _note('This day is before your employment started, so there is nothing to record.'),
+        _note('${s.statusLabel}. There is no attendance to record for this day.'),
       ] else ...[
         if (showsDeficit) ...[
           const SizedBox(height: 22),
@@ -857,7 +857,7 @@ class _HistoryDayScreenState extends State<HistoryDayScreen> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Flexible(
+                  Expanded(
                     flex: 2,
                     child: Text(
                       rows[i].$2,

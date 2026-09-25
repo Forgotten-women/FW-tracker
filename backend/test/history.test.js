@@ -139,3 +139,51 @@ test('HR reads any employee; the employee routes need the device token', async (
   assert.equal((await json('GET', '/api/attendance/mine/days?from=2026-09-01&to=2026-09-04')).status, 401);
   assert.equal((await json('GET', `/api/dashboard/employees/${emp.id}/days?from=2026-09-01&to=2026-09-04`)).status, 401);
 });
+
+test('an approved leave wins over a pending one on the same day, and correction details arrive parsed', async () => {
+  await db.prepare(`
+    INSERT INTO leave_requests (id, employee_id, leave_type_id, start_date, end_date, day_portion, total_days, reason, status, submitted_at, created_at)
+    VALUES ('lr_pending_overlap', ?, 'unpaid', '2026-09-04', '2026-09-04', 'FULL', 1, 'Duplicate', 'PENDING', ?, ?)
+  `).run(emp.id, clock, clock);
+  await db.prepare(`
+    INSERT INTO attendance_corrections (id, employee_id, date_key, requested_by, requested_at, requested_change, reason, status)
+    VALUES ('ac_hist', ?, '2026-09-02', ?, ?, ?, 'Traffic', 'PENDING')
+  `).run(emp.id, `employee:${emp.id}`, clock, JSON.stringify({ arrivalTime: '11:05' }));
+
+  const leaveDay = await json('GET', '/api/attendance/mine/day/2026-09-04', { headers: emp.phone });
+  assert.equal(leaveDay.body.day.status, 'ON_LEAVE');
+  assert.equal(leaveDay.body.day.leave.status, 'APPROVED');
+
+  const late = await json('GET', '/api/attendance/mine/day/2026-09-02', { headers: emp.phone });
+  assert.deepEqual(late.body.day.correctionRequests[0].requestedChange, { arrivalTime: '11:05' });
+  assert.equal(late.body.day.corrections.pending, 1);
+});
+
+test('days after the contract ends are not reported as absences', async () => {
+  await db.prepare('UPDATE employment_records SET contract_end_date = ? WHERE employee_id = ? AND effective_to IS NULL')
+    .run('2026-09-02', emp.id);
+  const r = await json('GET', '/api/attendance/mine/days?from=2026-09-01&to=2026-09-03', { headers: emp.phone });
+  assert.deepEqual(r.body.days.map(d => d.status), ['ON_TIME', 'LATE', 'NOT_EMPLOYED']);
+  assert.equal(r.body.days[2].statusLabel, 'After employment ended');
+  await db.prepare('UPDATE employment_records SET contract_end_date = NULL WHERE employee_id = ?').run(emp.id);
+});
+
+test('with no employment record, the date the employee was added stands in for the start', async () => {
+  const created = await json('POST', '/api/admin/employees', { headers: ADMIN, body: { name: 'No Record', role: 'Temp' } });
+  await db.prepare('DELETE FROM employment_records WHERE employee_id = ?').run(created.body.employee.id);
+  const r = await json('GET', `/api/dashboard/employees/${created.body.employee.id}/days?from=2026-09-01&to=2026-09-07`, { headers: ADMIN });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.employmentStart, '2026-09-07');
+  assert.equal(r.body.days[0].status, 'NOT_EMPLOYED');
+});
+
+test('leave spanning a weekend only counts working days as leave', async () => {
+  await db.prepare(`
+    INSERT INTO leave_requests (id, employee_id, leave_type_id, start_date, end_date, day_portion, total_days, reason, status, submitted_at, decided_at, created_at)
+    VALUES ('lr_weekend', ?, 'annual', '2026-08-28', '2026-08-31', 'FULL', 2, 'Trip', 'APPROVED', ?, ?, ?)
+  `).run(emp.id, clock, clock, clock);
+  await db.prepare('UPDATE employment_records SET start_date = ? WHERE employee_id = ?').run('2026-08-01', emp.id);
+  const r = await json('GET', '/api/attendance/mine/days?from=2026-08-28&to=2026-08-31', { headers: emp.phone });
+  assert.deepEqual(r.body.days.map(d => d.status), ['ON_LEAVE', 'REST_DAY', 'REST_DAY', 'ON_LEAVE']);
+  assert.ok('employmentEnd' in r.body);
+});

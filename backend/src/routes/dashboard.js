@@ -103,15 +103,19 @@ router.get('/summary', async (req, res) => {
   });
 });
 
-// GET /api/dashboard/history?from=YYYY-MM-DD&to=YYYY-MM-DD
 // GET /api/dashboard/employees/:employeeId/days?from=YYYY-MM-DD&to=YYYY-MM-DD
 // One employee's attendance for any past range (up to 62 days per call).
 router.get('/employees/:employeeId/days', async (req, res) => {
   try {
     const out = await History.daysInRange(req.params.employeeId, String(req.query.from || ''), String(req.query.to || ''));
-    res.json({ status: 'SUCCESS', employee: out.employee, from: out.from, to: out.to, employmentStart: out.employmentStart || null, days: out.days });
+    res.json({
+      status: 'SUCCESS', employee: out.employee, from: out.from, to: out.to,
+      employmentStart: out.employmentStart || null, employmentEnd: out.employmentEnd || null, days: out.days,
+    });
   } catch (err) {
-    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+    // Validation errors are the caller's to fix; anything else stays in the logs.
+    if (!err.httpStatus) console.error('[history]', err);
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.httpStatus ? err.message : 'Could not load attendance history.' });
   }
 });
 
@@ -122,10 +126,13 @@ router.get('/employees/:employeeId/day/:dateKey', async (req, res) => {
     const day = await History.dayDetail(req.params.employeeId, req.params.dateKey, { forHr: true });
     res.json({ status: 'SUCCESS', day });
   } catch (err) {
-    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+    // Validation errors are the caller's to fix; anything else stays in the logs.
+    if (!err.httpStatus) console.error('[history]', err);
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.httpStatus ? err.message : 'Could not load attendance history.' });
   }
 });
 
+// GET /api/dashboard/history?from=YYYY-MM-DD&to=YYYY-MM-DD
 router.get('/history', async (req, res) => {
   const from = String(req.query.from || T.dateKey());
   const to = String(req.query.to || T.dateKey());

@@ -1,14 +1,26 @@
 // Office Tracker - Desktop Mini-App UI Logic (Cross-Platform Windows & macOS)
 // Works seamlessly both inside Tauri GUI and in standalone App Mode!
 
-const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
-const tauriInvoke = isTauri && window.__TAURI__.tauri ? window.__TAURI__.tauri.invoke : null;
-const tauriWindow = isTauri && window.__TAURI__.window ? window.__TAURI__.window.appWindow : null;
+function getTauri() {
+  if (typeof window !== 'undefined' && window.__TAURI__) return window.__TAURI__;
+  return null;
+}
+
+function getTauriInvoke() {
+  const t = getTauri();
+  return (t && t.tauri && typeof t.tauri.invoke === 'function') ? t.tauri.invoke : null;
+}
+
+function getTauriWindow() {
+  const t = getTauri();
+  return (t && t.window && t.window.appWindow) ? t.window.appWindow : null;
+}
 
 // Universal backend invoker (Tauri IPC or Local Agent HTTP Server)
 async function callBackend(command, args = {}) {
-  if (isTauri && tauriInvoke) {
-    return tauriInvoke(command, args);
+  const invoke = getTauriInvoke();
+  if (invoke) {
+    return invoke(command, args);
   }
 
   // Fallback to local agent server
@@ -32,8 +44,9 @@ async function callBackend(command, args = {}) {
   }
 
   if (command === 'set_manual_break' || command === 'toggle_manual_break') {
-    if (isTauri && tauriInvoke) {
-      return tauriInvoke('set_manual_break', { onBreak: Boolean(args.onBreak) });
+    const invokeBreak = getTauriInvoke();
+    if (invokeBreak) {
+      return invokeBreak('set_manual_break', { onBreak: Boolean(args.onBreak) });
     }
     const res = await fetch('/api/break', {
       method: 'POST',
@@ -53,9 +66,20 @@ async function callBackend(command, args = {}) {
   return {};
 }
 
+const loadingSection = document.getElementById('loading-section');
 const enrollSection = document.getElementById('enroll-section');
 const statusSection = document.getElementById('status-section');
 const employeeBadge = document.getElementById('employee-badge');
+
+// If previously known to be enrolled, display status section immediately while verifying
+try {
+  if (localStorage.getItem('ot_enrolled') === 'true') {
+    if (loadingSection) loadingSection.classList.add('hidden');
+    if (statusSection) statusSection.classList.remove('hidden');
+    const cachedEmp = localStorage.getItem('ot_emp_info');
+    if (cachedEmp && employeeBadge) employeeBadge.textContent = cachedEmp;
+  }
+} catch (_) {}
 const checkinText = document.getElementById('checkin-text');
 const enrollBtn = document.getElementById('enroll-btn');
 const enrollError = document.getElementById('enroll-error');
@@ -228,10 +252,17 @@ function updateBreakCountdown() {
 async function refreshStatus() {
   try {
     const data = await callBackend('get_app_status');
+    if (loadingSection) loadingSection.classList.add('hidden');
     if (data.enrolled) {
+      try {
+        localStorage.setItem('ot_enrolled', 'true');
+        const empTitle = `${data.employeeName || 'Staff'} (${data.employeeRole || 'Member'})`;
+        localStorage.setItem('ot_emp_info', empTitle);
+        employeeBadge.textContent = empTitle;
+      } catch (_) {}
+
       enrollSection.classList.add('hidden');
       statusSection.classList.remove('hidden');
-      employeeBadge.textContent = `${data.employeeName || 'Staff'} (${data.employeeRole || 'Member'})`;
 
       if (data.latest && data.latest.today) {
         const serverDateKey = data.latest.today.dateKey || '';
@@ -412,12 +443,21 @@ async function refreshStatus() {
       }
       activeTimer.textContent = formatHMS(currentActiveSecs);
     } else {
+      if (loadingSection) loadingSection.classList.add('hidden');
       enrollSection.classList.remove('hidden');
       statusSection.classList.add('hidden');
       employeeBadge.textContent = 'Not Enrolled';
+      try { localStorage.setItem('ot_enrolled', 'false'); } catch (_) {}
     }
   } catch (err) {
     console.error('refreshStatus error:', err);
+    // If backend IPC is temporarily delayed, do NOT flash enrollment screen if already enrolled
+    try {
+      if (localStorage.getItem('ot_enrolled') === 'true') {
+        if (loadingSection) loadingSection.classList.add('hidden');
+        if (statusSection) statusSection.classList.remove('hidden');
+      }
+    } catch (_) {}
   }
 }
 
@@ -501,8 +541,9 @@ if (enrollBtn) {
 
 if (minimizeBtn) {
   minimizeBtn.addEventListener('click', () => {
-    if (isTauri && tauriWindow && typeof tauriWindow.minimize === 'function') {
-      tauriWindow.minimize();
+    const win = getTauriWindow();
+    if (win && typeof win.minimize === 'function') {
+      win.minimize();
     } else {
       window.blur();
     }
@@ -511,8 +552,9 @@ if (minimizeBtn) {
 
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {
-    if (isTauri && tauriWindow) {
-      tauriWindow.hide();
+    const win = getTauriWindow();
+    if (win && typeof win.hide === 'function') {
+      win.hide();
     } else {
       window.close();
     }
@@ -614,11 +656,14 @@ if (undoCheckoutBtn) {
 }
 
 // Listen for Tauri events if running under Tauri
-if (isTauri && window.__TAURI__.event) {
-  window.__TAURI__.event.listen('heartbeat-updated', () => {
-    refreshStatus();
-  });
-}
+try {
+  const t = getTauri();
+  if (t && t.event) {
+    t.event.listen('heartbeat-updated', () => {
+      refreshStatus();
+    });
+  }
+} catch (_) {}
 
 if (activeTimer && currentActiveSecs > 0) {
   activeTimer.textContent = formatHMS(currentActiveSecs);

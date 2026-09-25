@@ -15,6 +15,7 @@ import { Badge, Button, Empty, STATUS_META } from '@/components/primitives';
 import { AttendanceCorrectionsPanel } from '@/components/panels';
 import { OverviewHero, type HeroFilter } from '@/components/OverviewHero';
 import { XIcon } from '@/components/icons';
+import type { DrawerOpenOptions } from '@/components/EmployeeDetailDrawer';
 
 const LaptopIcon = ({ className = 'h-3 w-3' }: { className?: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -48,7 +49,8 @@ interface UnifiedWorkforcePanelProps {
   ) => Promise<void>;
   onRefreshCorrections: () => Promise<void>;
   onExportCsv: (from: string, to: string) => Promise<void>;
-  onSelectEmployee: (employee: EmployeeDay) => void;
+  /** `open` asks the drawer for a tab/date, e.g. the History tab on a past date. */
+  onSelectEmployee: (employee: EmployeeDay, open?: DrawerOpenOptions) => void;
 }
 
 export function UnifiedWorkforcePanel({
@@ -451,7 +453,7 @@ export function UnifiedWorkforcePanel({
                             timeWorkedFormatted: h.timeWorked || '0h 00m',
                             dailyDeficitMinutes: h.dailyDeficitMinutes || 0,
                             onBreak: false,
-                          } as unknown as EmployeeDay);
+                          } as unknown as EmployeeDay, { tab: 'history', date: selectedDate });
                         }}
                         className="hover:bg-indigo-500/[0.05] transition-colors cursor-pointer group"
                       >

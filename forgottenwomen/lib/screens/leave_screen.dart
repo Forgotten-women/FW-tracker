@@ -161,38 +161,6 @@ class _LeaveScreenState extends State<LeaveScreen> {
     if (reported == true) _load();
   }
 
-  Future<void> _cancel(LeaveRequest r) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.sheet,
-        title: Text('Cancel Request?', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
-        content: Text(
-          'Are you sure you want to cancel this leave application (${r.type}: ${r.from} to ${r.to})?',
-          style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Keep', style: TextStyle(color: AppColors.textMuted)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: const Text('Cancel Request'),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true) return;
-    try {
-      await _api.cancelLeave(r.id);
-      _load();
-    } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: AppColors.danger));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -711,6 +679,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
           Text(
             subtext,
             style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -943,10 +913,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
               child: Row(
                 children: [
                   Icon(Icons.tune_outlined, size: 16, color: AppColors.textMuted),
-                  SizedBox(width: 8),
-                  Text(
-                    'No adjustments were recorded in this month.',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'No adjustments were recorded in this month.',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                    ),
                   ),
                 ],
               ),
@@ -1181,7 +1153,6 @@ class _LeaveScreenState extends State<LeaveScreen> {
             child: Column(
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _metric('Entitlement', '${d(b.annualEntitlement)}d'),
                     Container(width: 1, height: 26, color: AppColors.border),
@@ -1196,7 +1167,6 @@ class _LeaveScreenState extends State<LeaveScreen> {
                 Divider(color: AppColors.border, height: 1),
                 const SizedBox(height: 10),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _metric('Carried In', '+${d(b.approvedCarryForward)}d'),
                     Container(width: 1, height: 26, color: AppColors.border),
@@ -1215,12 +1185,24 @@ class _LeaveScreenState extends State<LeaveScreen> {
     );
   }
 
-  Widget _metric(String label, String value) => Column(
-        children: [
-          Text(value, style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
-          const SizedBox(height: 2),
-          Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
-        ],
+  Widget _metric(String label, String value) => Expanded(
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 12.5),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(color: AppColors.textMuted, fontSize: 9.5),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       );
 
   Widget _requestRow(LeaveRequest r) {

@@ -26,6 +26,14 @@ const SEED_SQL = path.join(PG_DIR, 'seed.sql');
  * Call at the TOP of a test file, before requiring anything from src/, because
  * the modules build prepared statements at load time.
  */
+const LIVE_SERVICE_ENV = [
+  'DATABASE_URL',
+  'SUPABASE_URL', 'SUPABASE_KEY', 'SUPABASE_ANON_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
+  'SUPABASE_S3_ENDPOINT', 'SUPABASE_S3_ACCESS_KEY_ID', 'SUPABASE_S3_SECRET_ACCESS_KEY',
+  'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY',
+  'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN',
+];
+
 function useTestDatabase(suiteName) {
   const schema = 'test_' + String(suiteName).replace(/[^a-z0-9]+/gi, '_').toLowerCase();
 
@@ -36,6 +44,13 @@ function useTestDatabase(suiteName) {
     || path.join(__dirname, '..', 'fixtures', 'office.test.json');
   process.env.ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'test-admin-key-0123456789';
   process.env.MAC_SALT = process.env.MAC_SALT || 'test-salt-not-a-real-one';
+
+  // Nor any other live service. backend/.env holds the real Supabase and
+  // Upstash credentials, and src/config.js loads it -- so without this a test
+  // that requests a live stream rang the real Supabase Realtime, and storage
+  // code could write to the real bucket. Blank, not deleted: dotenv does not
+  // override a variable that is already set, even to an empty string.
+  for (const name of LIVE_SERVICE_ENV) process.env[name] = '';
 
   // A suite must never be able to reach production, however it was invoked.
   const url = process.env.TEST_DATABASE_URL;

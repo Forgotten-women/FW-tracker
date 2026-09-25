@@ -5,7 +5,7 @@
 // in UTC so no viewer timezone can move a day.
 
 import type { ReactNode } from 'react';
-import type { HistoryDayStatus, HistoryDaySummary, HistoryDeficit } from '@/lib/types';
+import type { HistoryCorrectionRequest, HistoryDayStatus, HistoryDaySummary, HistoryDeficit } from '@/lib/types';
 import {
   BriefcaseIcon,
   CheckIcon,
@@ -336,13 +336,16 @@ export function dayAriaLabel(day: HistoryDaySummary): string {
 }
 
 /** A correction's requested change, stored as JSON text, as a person reads it. */
-export function describeRequestedChange(raw: string | null | undefined): string[] {
+export function describeRequestedChange(raw: HistoryCorrectionRequest['requestedChange'] | undefined): string[] {
   if (!raw) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [raw];
+  // The backend sends the parsed object; older responses sent the JSON text.
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [raw];
+    }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [String(parsed)];
   const out: string[] = [];

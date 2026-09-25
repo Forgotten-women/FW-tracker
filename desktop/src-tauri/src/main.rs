@@ -242,6 +242,70 @@ fn request_exit(app: tauri::AppHandle) {
     );
 }
 
+async fn check_and_install_silent(app: &tauri::AppHandle) {
+    match tauri::updater::builder(app.clone()).check().await {
+        Ok(update) if update.is_update_available() => {
+            println!(
+                "[updater] {} available (current {}); installing silently",
+                update.latest_version(),
+                update.current_version()
+            );
+            if let Err(e) = update.download_and_install().await {
+                eprintln!("[updater] install failed: {}", e);
+            }
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("[updater] check failed: {}", e),
+    }
+}
+
+pub fn trigger_update_check(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        println!("[updater] manual check triggered");
+        let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+            .title("Office Tracker")
+            .body("Checking for updates...")
+            .show();
+
+        match tauri::updater::builder(app.clone()).check().await {
+            Ok(update) if update.is_update_available() => {
+                let msg = format!(
+                    "Updating to version {} (current {})...",
+                    update.latest_version(),
+                    update.current_version()
+                );
+                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                    .title("Office Tracker")
+                    .body(&msg)
+                    .show();
+                println!("[updater] {}", msg);
+                if let Err(e) = update.download_and_install().await {
+                    eprintln!("[updater] install failed: {}", e);
+                    let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                        .title("Office Tracker")
+                        .body(&format!("Update installation failed: {}", e))
+                        .show();
+                }
+            }
+            Ok(_) => {
+                let msg = format!("Office Tracker is up to date (v{}).", env!("CARGO_PKG_VERSION"));
+                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                    .title("Office Tracker")
+                    .body(&msg)
+                    .show();
+                println!("[updater] up to date");
+            }
+            Err(e) => {
+                eprintln!("[updater] check failed: {}", e);
+                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                    .title("Office Tracker")
+                    .body(&format!("Could not check for updates: {}", e))
+                    .show();
+            }
+        }
+    });
+}
+
 fn main() {
     let instance_role = single_instance::check_single_instance();
     let single_instance_listener = match instance_role {
@@ -361,27 +425,16 @@ fn main() {
             // secret, never in this repo) will be accepted.
             let app_handle_updater = app_handle.clone();
             tauri::async_runtime::spawn(async move {
+                // Boot checks: 15s (after network is stably initialized), 45s, 90s, then every 30 minutes
+                let initial_delays = [15, 30, 45];
+                for d in initial_delays {
+                    sleep(Duration::from_secs(d)).await;
+                    check_and_install_silent(&app_handle_updater).await;
+                }
+
                 loop {
-                    match tauri::updater::builder(app_handle_updater.clone()).check().await {
-                        Ok(update) if update.is_update_available() => {
-                            println!(
-                                "[updater] {} available (current {}); installing silently",
-                                update.latest_version(),
-                                update.current_version()
-                            );
-                            if let Err(e) = update.download_and_install().await {
-                                eprintln!("[updater] install failed: {}", e);
-                            }
-                            // A successful install restarts the app itself, so
-                            // there is nothing further to do on this path.
-                        }
-                        Ok(_) => {}
-                        Err(e) => eprintln!("[updater] check failed: {}", e),
-                    }
-                    // Frequent enough that a new release reaches every
-                    // workstation within the working day; infrequent enough
-                    // not to hammer GitHub's release API from every machine.
-                    sleep(Duration::from_secs(6 * 60 * 60)).await;
+                    sleep(Duration::from_secs(30 * 60)).await;
+                    check_and_install_silent(&app_handle_updater).await;
                 }
             });
 

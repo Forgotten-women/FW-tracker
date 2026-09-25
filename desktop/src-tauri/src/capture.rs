@@ -86,15 +86,113 @@ fn downscale(raw: RgbaImage, max_dim: u32) -> image::RgbImage {
     DynamicImage::ImageRgba8(rgba).into_rgb8()
 }
 
+#[cfg(target_os = "windows")]
+pub fn capture_gdi_rgba() -> Result<RgbaImage, String> {
+    use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    unsafe {
+        let width = GetSystemMetrics(SM_CXSCREEN);
+        let height = GetSystemMetrics(SM_CYSCREEN);
+        if width <= 0 || height <= 0 {
+            return Err("Invalid screen dimensions".to_string());
+        }
+
+        let raw_screen = GetDC(0);
+        if raw_screen == 0 {
+            return Err(format!("Failed to get screen DC: error {}", windows_sys::Win32::Foundation::GetLastError()));
+        }
+
+        let raw_mem = CreateCompatibleDC(raw_screen);
+        if raw_mem == 0 {
+            ReleaseDC(0, raw_screen);
+            return Err(format!("Failed to create compatible DC: error {}", windows_sys::Win32::Foundation::GetLastError()));
+        }
+
+        let mut bmi: BITMAPINFO = std::mem::zeroed();
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = width;
+        bmi.bmiHeader.biHeight = -height; // top-down
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+
+        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hbitmap = CreateDIBSection(
+            raw_mem,
+            &bmi,
+            DIB_RGB_COLORS,
+            &mut bits,
+            0,
+            0,
+        );
+
+        if hbitmap == 0 || bits.is_null() {
+            DeleteDC(raw_mem);
+            ReleaseDC(0, raw_screen);
+            return Err(format!("CreateDIBSection failed: error {}", windows_sys::Win32::Foundation::GetLastError()));
+        }
+
+        let old_obj = SelectObject(raw_mem, hbitmap);
+        let blt_res = BitBlt(raw_mem, 0, 0, width, height, raw_screen, 0, 0, SRCCOPY);
+        let blt_err = windows_sys::Win32::Foundation::GetLastError();
+
+        SelectObject(raw_mem, old_obj);
+        DeleteDC(raw_mem);
+        ReleaseDC(0, raw_screen);
+
+        if blt_res == 0 {
+            DeleteObject(hbitmap);
+            return Err(format!("BitBlt failed: error {}", blt_err));
+        }
+
+        // Copy and convert BGRA -> RGBA
+        let total_bytes = (width * height * 4) as usize;
+        let slice = std::slice::from_raw_parts(bits as *const u8, total_bytes);
+        let mut raw_pixels = vec![0u8; total_bytes];
+        for i in (0..total_bytes).step_by(4) {
+            let b = slice[i];
+            let g = slice[i + 1];
+            let r = slice[i + 2];
+            raw_pixels[i] = r;
+            raw_pixels[i + 1] = g;
+            raw_pixels[i + 2] = b;
+            raw_pixels[i + 3] = 255;
+        }
+
+        DeleteObject(hbitmap);
+
+        RgbaImage::from_raw(width as u32, height as u32, raw_pixels)
+            .ok_or_else(|| "Failed to construct RgbaImage from raw pixels".to_string())
+    }
+}
+
 /// Captures the primary monitor as a base64 JPEG. Blocking: call it from
 /// `spawn_blocking`, never directly on the async runtime.
 pub fn capture_live_frame() -> Result<Frame, String> {
-    let raw = primary_monitor()?
-        .capture_image()
-        .map_err(|e| format!("capture: {e}"))?;
-    if raw.width() == 0 || raw.height() == 0 {
-        return Err("empty capture".to_string());
-    }
+    let raw = match primary_monitor().and_then(|m| m.capture_image().map_err(|e| e.to_string())) {
+        Ok(img) if img.width() > 0 && img.height() > 0 => img,
+        Err(_err) => {
+            #[cfg(target_os = "windows")]
+            {
+                capture_gdi_rgba()?
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err(_err);
+            }
+        }
+        Ok(_) => {
+            #[cfg(target_os = "windows")]
+            {
+                capture_gdi_rgba()?
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err("empty capture".to_string());
+            }
+        }
+    };
 
     let mut rgb = downscale(raw, LIVE_MAX_DIM);
     let fp = fingerprint(&rgb);
@@ -145,6 +243,7 @@ mod tests {
         assert!(frame.jpeg_base64.len() < 900 * 1024, "under the backend's frame cap");
         println!("captured {} KB of base64 in {:?}", frame.jpeg_base64.len() / 1024, took);
     }
+
 
     #[test]
     fn encodes_a_valid_jpeg() {

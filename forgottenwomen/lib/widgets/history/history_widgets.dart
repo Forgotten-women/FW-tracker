@@ -38,7 +38,7 @@ HistoryTone historyTone(HistoryDayStatus s) {
     case HistoryDayStatus.restDayWorked:
       return HistoryTone(AppColors.tealDark, Icons.work_outline_rounded, 'Worked a rest day');
     case HistoryDayStatus.notEmployed:
-      return HistoryTone(AppColors.textTertiary, Icons.remove_rounded, 'Not employed yet');
+      return HistoryTone(AppColors.textTertiary, Icons.remove_rounded, 'Not employed');
     case HistoryDayStatus.inProgress:
       return HistoryTone(AppColors.primaryLight, Icons.play_arrow_rounded, 'Today, in progress');
     case HistoryDayStatus.notStarted:
@@ -273,6 +273,8 @@ class HistoryDayCell extends StatelessWidget {
     }
 
     return Semantics(
+      // Its own node, so an inert (future) cell isn't merged into its row.
+      container: true,
       button: onTap != null,
       label: semanticLabel(date, s, isToday: isToday, isFuture: isFuture),
       excludeSemantics: true,
@@ -448,6 +450,7 @@ class HistoryTotalsCard extends StatelessWidget {
 
   Widget _tile(String label, String value, Color? tone, IconData icon) {
     return Semantics(
+      container: true,
       label: '$label: $value',
       excludeSemantics: true,
       child: Container(

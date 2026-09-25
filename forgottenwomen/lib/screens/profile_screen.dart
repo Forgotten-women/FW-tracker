@@ -5,6 +5,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../widgets/glass/glass.dart';
 import 'complaints_screen.dart';
+import 'history_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final ApiClient? apiClient;
@@ -124,11 +125,66 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 16),
                       _buildKycStatusCard(_profile!),
                       const SizedBox(height: 16),
+                      _buildHistoryCard(),
+                      const SizedBox(height: 16),
                       _buildComplaintsCard(),
                       const SizedBox(height: 32),
                     ],
                   ),
                 ),
+    );
+  }
+
+  Widget _buildHistoryCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.calendar_month_rounded, color: AppColors.primaryLight, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Attendance history',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Look up any day since you started, month by month.',
+                  style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                ),
+              ],
+            ),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => HistoryScreen(api: _api)),
+              );
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              visualDensity: VisualDensity.compact,
+            ),
+            child: const Text('Open', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 

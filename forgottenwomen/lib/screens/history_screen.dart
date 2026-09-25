@@ -322,7 +322,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
         const SizedBox(height: 12),
       ],
       if (beforeEmployment)
-        _beforeEmploymentCard(start)
+        _beforeEmploymentCard(
+          start,
+          // The server also reports days after a contract ended as NOT_EMPLOYED.
+          ended: range != null &&
+              (start == null || !lastDayOfMonth(_month).isBefore(start)) &&
+              range.days.any((d) => d.statusLabel.toLowerCase().contains('ended')),
+        )
       else if (range == null && _error != null)
         _errorCard()
       else ...[
@@ -492,7 +498,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Widget _beforeEmploymentCard(DateTime? start) {
+  Widget _beforeEmploymentCard(DateTime? start, {bool ended = false}) {
     return GlassCard(
       radius: 22,
       padding: const EdgeInsets.all(22),
@@ -501,19 +507,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
           HistoryGlyph(tone: historyTone(HistoryDayStatus.notEmployed), size: 44),
           const SizedBox(height: 12),
           Text(
-            'Before your employment started',
+            ended ? 'After your employment ended' : 'Before your employment started',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
           ),
           const SizedBox(height: 6),
           Text(
-            start == null
+            ended || start == null
                 ? 'There is no attendance to show for this month.'
                 : 'Your records start on ${formatShortDate(start)}.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.textSecondary),
           ),
-          if (start != null && monthOf(start) != _month) ...[
+          if (!ended && start != null && monthOf(start) != _month) ...[
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: () => _goTo(start),

@@ -338,15 +338,17 @@ async fn capture_frame(native_failures: &mut u32) -> Option<(String, Option<u64>
                 *native_failures = 0;
                 return Some((f.jpeg_base64, Some(f.fingerprint)));
             }
-            Ok(Err(e)) => eprintln!("[live] native capture failed: {e}"),
-            Err(e) => eprintln!("[live] capture task failed: {e}"),
+            Ok(Err(e)) => {
+                eprintln!("[live] native capture failed: {e}");
+                *native_failures += 1;
+            }
+            Err(e) => {
+                eprintln!("[live] capture task failed: {e}");
+                *native_failures += 1;
+            }
         }
-        *native_failures += 1;
-        // A transient failure (locked screen, display change) is not worth
-        // a slow PowerShell capture; skip this tick instead.
-        return None;
     }
-    // Native capture keeps failing on this machine: use the old path.
+    // Fall back immediately to screen capture so no frames or ticks are dropped.
     tokio::task::spawn_blocking(crate::capture_screen_frame)
         .await
         .ok()

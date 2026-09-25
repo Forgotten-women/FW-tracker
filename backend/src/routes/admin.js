@@ -580,12 +580,14 @@ router.post('/workstations/:deviceId/request-stream', async (req, res) => {
 
     const rang = await liveDoorbell.ring(deviceId);
     const frameStore = liveFrame.storeKind();
+    const realtime = liveDoorbell.clientConfigFor(deviceId);
 
     res.json({
       status: 'SUCCESS',
       message: 'Live screen stream requested successfully.',
       doorbell: rang ? 'SENT' : (liveDoorbell.isConfigured() ? 'FAILED' : 'UNAVAILABLE'),
       frameStore,
+      realtime,
       warning: liveStoreWarning(frameStore),
     });
   } catch (err) {

@@ -6,6 +6,10 @@ import type { EmployeeDay, WorkstationItem, AppUsageItem, ScreenshotItem, Employ
 import { Badge, Button } from './primitives';
 import { ManualTimeModal } from './ManualTimeModal';
 import { LiveScreenViewer } from './LiveScreenViewer';
+import { EmployeeHistory } from './history/EmployeeHistory';
+import { useHistoryStore } from './history/historyStore';
+import { isDateKey, monthOf, type HistoryView } from './history/historyMeta';
+import { localDateKey } from './payroll/format';
 import {
   AlertTriangleIcon,
   BotIcon,
@@ -25,6 +29,7 @@ import {
   FilmIcon,
   GitBranchIcon,
   GlobeIcon,
+  HistoryIcon,
   HourglassIcon,
   LaptopIcon,
   LockIcon,
@@ -43,9 +48,21 @@ interface EmployeeDetailDrawerProps {
   onClose: () => void;
   onOpenPairing?: (employee: { id: string; name: string }) => Promise<void> | void;
   onRefresh?: () => void;
+  /** Tab to show when the drawer opens (e.g. 'history' from a past-date list). */
+  initialTab?: DrawerTab;
+  /** YYYY-MM-DD to open on the History tab. */
+  initialDate?: string;
+  /** Today's YYYY-MM-DD in the office timezone (the summary's currentDateKey). */
+  todayKey?: string;
 }
 
-type DrawerTab = 'sessions' | 'workstation' | 'apps' | 'policy' | 'screenshots' | 'schedule';
+export type DrawerTab = 'sessions' | 'history' | 'workstation' | 'apps' | 'policy' | 'screenshots' | 'schedule';
+
+/** How a caller asks for the drawer to open somewhere other than its default tab. */
+export interface DrawerOpenOptions {
+  tab?: DrawerTab;
+  date?: string;
+}
 
 function formatBytes(bytes: number) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -145,8 +162,29 @@ function getAppCategory(appName: string, explicitCategory?: 'WEBSITE' | 'APPLICA
   return { label: 'Application', icon: <LaptopIcon className="h-5 w-5" />, badgeClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20' };
 }
 
-export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefresh }: EmployeeDetailDrawerProps) {
+export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefresh, initialTab, initialDate, todayKey }: EmployeeDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<DrawerTab>('sessions');
+
+  // Attendance history: fetched months/days live in this store for as long as
+  // the drawer is open; the view (month, open day, layout) survives tab switches.
+  const historyStore = useHistoryStore();
+  const clearHistory = historyStore.clear;
+  const [historyView, setHistoryView] = useState<HistoryView | null>(null);
+  const [fallbackToday] = useState(() => localDateKey());
+  const historyToday = todayKey || fallbackToday;
+
+  // Apply an open request (tab + date) once per opening, adjusting state
+  // during render rather than in an effect.
+  const openIntent = employee ? `${employee.employeeId}|${initialTab ?? ''}|${initialDate ?? ''}` : '';
+  const [appliedIntent, setAppliedIntent] = useState('');
+  if (openIntent !== appliedIntent) {
+    setAppliedIntent(openIntent);
+    if (employee) {
+      if (initialTab) setActiveTab(initialTab);
+      const date = isDateKey(initialDate) ? (initialDate > historyToday ? historyToday : initialDate) : null;
+      setHistoryView(date ? { month: monthOf(date), day: date, mode: 'calendar' } : null);
+    }
+  }
   const [workstation, setWorkstation] = useState<WorkstationItem | null>(null);
   const [apps, setApps] = useState<AppUsageItem[]>([]);
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
@@ -171,8 +209,9 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
       api.stopLiveStream(workstation.deviceId).catch(() => {});
     }
     setIsLiveScreenOpen(false);
+    clearHistory();
     onClose();
-  }, [isLiveScreenOpen, workstation?.deviceId, onClose]);
+  }, [isLiveScreenOpen, workstation?.deviceId, onClose, clearHistory]);
 
   // Close on Escape key press
   useEffect(() => {
@@ -741,6 +780,18 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
 
               <button
                 type="button"
+                onClick={() => setActiveTab('history')}
+                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTab === 'history'
+                    ? 'border-indigo-500 text-white'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <HistoryIcon className="h-3.5 w-3.5 shrink-0" /> History
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveTab('workstation')}
                 className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   activeTab === 'workstation'
@@ -1123,6 +1174,22 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Attendance History: any past day back to the employment start */}
+            {activeTab === 'history' && (
+              <EmployeeHistory
+                employeeId={employee.employeeId}
+                employeeName={employee.employeeName}
+                today={historyToday}
+                store={historyStore}
+                view={historyView}
+                onViewChange={setHistoryView}
+                onViewScreenshots={(dateKey) => {
+                  setSelectedShotDate(dateKey);
+                  setActiveTab('screenshots');
+                }}
+              />
             )}
 
             {/* Tab 4: Policy & Deficit Breakdown */}

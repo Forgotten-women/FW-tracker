@@ -186,9 +186,14 @@ router.get('/me', requireDevice, async (req, res) => {
 router.get('/mine/days', requireDevice, async (req, res) => {
   try {
     const out = await History.daysInRange(req.auth.employeeId, String(req.query.from || ''), String(req.query.to || ''));
-    res.json({ status: 'SUCCESS', from: out.from, to: out.to, employmentStart: out.employmentStart || null, days: out.days });
+    res.json({
+      status: 'SUCCESS', from: out.from, to: out.to,
+      employmentStart: out.employmentStart || null, employmentEnd: out.employmentEnd || null, days: out.days,
+    });
   } catch (err) {
-    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+    // Validation errors are the caller's to fix; anything else stays in the logs.
+    if (!err.httpStatus) console.error('[history]', err);
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.httpStatus ? err.message : 'Could not load attendance history.' });
   }
 });
 
@@ -198,7 +203,9 @@ router.get('/mine/day/:dateKey', requireDevice, async (req, res) => {
     const day = await History.dayDetail(req.auth.employeeId, req.params.dateKey, { forHr: false });
     res.json({ status: 'SUCCESS', day });
   } catch (err) {
-    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.message });
+    // Validation errors are the caller's to fix; anything else stays in the logs.
+    if (!err.httpStatus) console.error('[history]', err);
+    res.status(err.httpStatus || 500).json({ status: 'ERROR', message: err.httpStatus ? err.message : 'Could not load attendance history.' });
   }
 });
 

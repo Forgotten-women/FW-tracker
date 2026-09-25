@@ -10,12 +10,16 @@ class AttendanceTimelineCard extends StatelessWidget {
   final ValueChanged<Attendance> onDayTapped;
   final VoidCallback onDisputeDay;
 
+  /// Opens the full attendance history; the button is hidden when null.
+  final VoidCallback? onSeeFullHistory;
+
   const AttendanceTimelineCard({
     super.key,
     required this.history,
     required this.disputesByDate,
     required this.onDayTapped,
     required this.onDisputeDay,
+    this.onSeeFullHistory,
   });
 
   @override
@@ -54,6 +58,18 @@ class AttendanceTimelineCard extends StatelessWidget {
                   ],
                 ),
         ),
+        if (onSeeFullHistory != null) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onSeeFullHistory,
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+              icon: const Icon(Icons.calendar_month_rounded, size: 18),
+              label: const Text('See full history', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
+        ],
       ],
     );
   }

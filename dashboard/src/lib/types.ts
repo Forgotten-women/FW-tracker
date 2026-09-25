@@ -1058,11 +1058,19 @@ export interface LiveFrameResponse {
   message?: string;
 }
 
+export interface LiveRealtimeConfig {
+  url: string;
+  apiKey: string;
+  topic: string;
+  event: string;
+}
+
 export interface LiveStreamRequestResponse {
   status: string;
   message: string;
   doorbell?: 'SENT' | 'FAILED' | 'UNAVAILABLE';
   frameStore?: 'redis' | 'memory';
+  realtime?: LiveRealtimeConfig | null;
   warning?: 'LIVE_STORE_NOT_SHARED' | null;
 }
 
@@ -1419,8 +1427,8 @@ export interface HistoryBreak {
 export interface HistoryCorrectionRequest {
   id: string;
   requestedAt: number;
-  /** Sent as the stored JSON text, e.g. '{"adjustmentMinutes":30}'. */
-  requestedChange: string | null;
+  /** The requested change, e.g. { adjustmentMinutes: 30 } (older backends sent it as JSON text). */
+  requestedChange: Record<string, unknown> | string | null;
   reason: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'AMENDED' | 'INFO_REQUESTED' | string;
   reviewedAt: number | null;

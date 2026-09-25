@@ -46,7 +46,7 @@ router.get('/home-summary', requireDevice, async (req, res) => {
       // One indexed query, so the phone can spot a newly published payslip
       // on every poll without fetching its statements.
       PR.latestPayslipFor(employeeId).catch(() => null),
-      db.prepare('SELECT COUNT(*) AS count FROM formal_warnings WHERE employee_id = ?').get(employeeId).catch(() => ({ count: 0 })),
+      db.prepare("SELECT COUNT(*) AS count FROM formal_warnings WHERE employee_id = ? AND status = 'ACTIVE'").get(employeeId).catch(() => ({ count: 0 })),
     ]);
 
     // 3. Fast history: Today reuses day.presence directly. Past 6 days loaded from attendance_days cache.

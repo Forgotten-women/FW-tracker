@@ -35,10 +35,10 @@ type ViewPhase =
 
 const POLL_MS = 1000;
 const BREAK_POLL_MS = 5000; // a break ends on its own; no need to ask every second
-const WAIT_LIMIT_INSTANT_MS = 15_000; // agent with the instant doorbell (v1.0.32+)
-const WAIT_LIMIT_LEGACY_MS = 40_000; // older agents check for requests every 20s
-const START_LIMIT_MS = 20_000; // acknowledged, but no first frame yet
-const STALL_LIMIT_MS = 20_000; // was live, frames stopped arriving
+const WAIT_LIMIT_INSTANT_MS = 30_000; // agent with the instant doorbell (v1.0.32+)
+const WAIT_LIMIT_LEGACY_MS = 45_000; // older agents check for requests every 20s
+const START_LIMIT_MS = 30_000; // acknowledged, but no first frame yet
+const STALL_LIMIT_MS = 25_000; // was live, frames stopped arriving
 const MAX_POLL_ERRORS = 3;
 
 function toSrc(frame: string) {
@@ -80,7 +80,6 @@ export function LiveScreenViewer({ deviceId, employeeName, model, onClose }: Pro
   const [startedAt, setStartedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [fullscreen, setFullscreen] = useState(false);
-  const [tabHidden, setTabHidden] = useState(false);
 
   // Clock for the "12s ago" labels.
   useEffect(() => {
@@ -99,25 +98,15 @@ export function LiveScreenViewer({ deviceId, employeeName, model, onClose }: Pro
     setSession((s) => s + 1);
   };
 
-  // Nobody is looking at a hidden tab: end the stream so the laptop stops
-  // capturing, and start a fresh one when the tab is shown again.
+  // Clean up: stop the stream on unmount
   useEffect(() => {
-    const onVisibility = () => {
-      if (document.hidden) {
-        setTabHidden(true);
-        api.stopLiveStream(deviceId).catch(() => {});
-      } else {
-        setTabHidden(false);
-        resetSession();
-      }
+    return () => {
+      api.stopLiveStream(deviceId).catch(() => {});
     };
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [deviceId]);
 
   // One session: request the stream, then poll until a final state.
   useEffect(() => {
-    if (tabHidden) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const sessionStart = Date.now();
@@ -227,7 +216,7 @@ export function LiveScreenViewer({ deviceId, employeeName, model, onClose }: Pro
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [deviceId, session, tabHidden]);
+  }, [deviceId, session]);
 
   const close = () => {
     api.stopLiveStream(deviceId).catch(() => {});

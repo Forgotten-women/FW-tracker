@@ -54,10 +54,16 @@ function normaliseRange(from, to, nowMs = T.now()) {
   return { from, to: end, dates };
 }
 
-const selectEmployee = db.prepare('SELECT id, name, role FROM employees WHERE id = ?');
-const selectEmploymentStart = db.prepare(
-  'SELECT MIN(effective_from) AS start_date FROM employment_records WHERE employee_id = ?'
-);
+const selectEmployee = db.prepare('SELECT id, name, role, created_at FROM employees WHERE id = ?');
+// Start: the earliest employment record's start (or effective date). End: the
+// contract end on the current record, if any. With no employment record at
+// all, the employee's creation date stands in for the start, so days before
+// they existed in the system aren't reported as absences.
+const selectEmploymentBounds = db.prepare(`
+  SELECT MIN(COALESCE(start_date, effective_from)) AS start_date,
+         MAX(CASE WHEN effective_to IS NULL THEN contract_end_date END) AS end_date
+  FROM employment_records WHERE employee_id = ?
+`);
 const selectSummaries = db.prepare(`
   SELECT date_key, first_clock_in, last_clock_out, worked_minutes, break_minutes, late_minutes,
          excess_break_minutes, early_departure_minutes, unauthorised_missing_minutes,
@@ -96,6 +102,11 @@ const selectLaptop = db.prepare(`
   GROUP BY session_date
 `);
 
+function parseJson(value) {
+  if (typeof value !== 'string') return value ?? null;
+  try { return JSON.parse(value); } catch (_) { return value; }
+}
+
 const byDate = (rows, key = 'date_key') => new Map(rows.map(r => [r[key], r]));
 const clock = (ms) => (ms ? T.displayTime(Number(ms)) : null);
 
@@ -103,9 +114,12 @@ const clock = (ms) => (ms ? T.displayTime(Number(ms)) : null);
  * Plain-language outcome for a day, from most to least specific. The raw
  * attendance status is returned alongside for anyone who needs it.
  */
-function dayStatus({ isToday, beforeEmployment, sched, summary, leave, workedMinutes }) {
+function dayStatus({ isToday, beforeEmployment, afterEmployment, sched, summary, leave, workedMinutes }) {
   if (beforeEmployment) return { status: 'NOT_EMPLOYED', label: 'Before employment started' };
-  if (leave && leave.status === 'APPROVED') {
+  if (afterEmployment && workedMinutes === 0) return { status: 'NOT_EMPLOYED', label: 'After employment ended' };
+  // A leave request spanning a weekend or holiday doesn't turn those days into
+  // leave days: only scheduled working days are taken as leave.
+  if (leave && leave.status === 'APPROVED' && sched.isWorkingDay) {
     return { status: 'ON_LEAVE', label: leave.dayPortion && leave.dayPortion !== 'FULL' ? `${leave.type} (half day)` : leave.type };
   }
   if (!sched.isWorkingDay) {
@@ -134,13 +148,15 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
   const range = normaliseRange(from, to, nowMs);
   const employee = await selectEmployee.get(employeeId);
   if (!employee) throw new HistoryError('No such employee.', 404);
-  if (range.dates.length === 0) return { employee, from: range.from, to: range.to, days: [] };
+  if (range.dates.length === 0) {
+    return { employee: { id: employee.id, name: employee.name, role: employee.role }, from: range.from, to: range.to, days: [] };
+  }
 
   const f = range.from;
   const t = range.to;
   const today = T.dateKey(nowMs);
-  const [start, summaries, days, leave, absences, corrections, laptop] = await Promise.all([
-    selectEmploymentStart.get(employeeId),
+  const [bounds, summaries, days, leave, absences, corrections, laptop] = await Promise.all([
+    selectEmploymentBounds.get(employeeId),
     selectSummaries.all(employeeId, f, t),
     selectDays.all(employeeId, f, t),
     selectLeave.all(employeeId, t, f),
@@ -148,7 +164,9 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
     selectCorrectionCounts.all(employeeId, f, t),
     selectLaptop.all(employeeId, f, t),
   ]);
-  const employmentStart = start?.start_date || null;
+  const employmentStart = bounds?.start_date
+    || (employee.created_at ? T.dateKey(Number(employee.created_at)) : null);
+  const employmentEnd = bounds?.end_date || null;
   const summaryBy = byDate(summaries);
   const dayBy = byDate(days);
   const absenceBy = byDate(absences);
@@ -157,7 +175,8 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
   for (const c of corrections) {
     const e = correctionsBy.get(c.date_key) || { pending: 0, total: 0 };
     e.total += Number(c.c) || 0;
-    if (c.status === 'PENDING') e.pending += Number(c.c) || 0;
+    // Anything not yet decided: PENDING, PENDING_HR, PENDING_MANAGER, ...
+    if (String(c.status).startsWith('PENDING')) e.pending += Number(c.c) || 0;
     correctionsBy.set(c.date_key, e);
   }
 
@@ -167,7 +186,9 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
     const sched = schedules[i];
     const s = summaryBy.get(dateKey) || null;
     const d = dayBy.get(dateKey) || null;
-    const lr = leave.find(l => l.start_date <= dateKey && l.end_date >= dateKey) || null;
+    // An approved request wins over a pending one covering the same day.
+    const covering = leave.filter(l => l.start_date <= dateKey && l.end_date >= dateKey);
+    const lr = covering.find(l => l.status === 'APPROVED') || covering[0] || null;
     const leaveInfo = lr ? {
       requestId: lr.id,
       type: lr.type_name || 'Leave',
@@ -183,6 +204,7 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
     const outcome = dayStatus({
       isToday: dateKey === today,
       beforeEmployment: Boolean(employmentStart && dateKey < employmentStart),
+      afterEmployment: Boolean(employmentEnd && dateKey > employmentEnd),
       sched, summary: s, leave: leaveInfo, workedMinutes,
     });
 
@@ -224,7 +246,10 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
     };
   });
 
-  return { employee, from: range.from, to: range.to, employmentStart, days: out };
+  return {
+    employee: { id: employee.id, name: employee.name, role: employee.role },
+    from: range.from, to: range.to, employmentStart, employmentEnd, days: out,
+  };
 }
 
 const selectBreaks = db.prepare(`
@@ -301,7 +326,8 @@ async function dayDetail(employeeId, dateKey, { nowMs = T.now(), forHr = false }
     correctionRequests: corrections.map(c => ({
       id: c.id,
       requestedAt: Number(c.requested_at),
-      requestedChange: c.requested_change,
+      // Stored as JSON text; sent as the object, as /api/attendance/corrections does.
+      requestedChange: parseJson(c.requested_change),
       reason: c.reason,
       status: c.status,
       reviewedAt: c.reviewed_at ? Number(c.reviewed_at) : null,

@@ -12,6 +12,7 @@ import '../models/attendance.dart';
 import '../services/api_client.dart';
 import '../services/token_store.dart';
 import '../theme.dart';
+import '../widgets/attendance_correction_sheet.dart';
 import '../widgets/home/attendance_timeline_card.dart';
 import '../widgets/home/break_control_card.dart';
 import '../widgets/home/home_skeleton_loader.dart';
@@ -23,6 +24,8 @@ import '../widgets/glass/glass.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
 import 'complaints_screen.dart';
+import 'history_day_screen.dart';
+import 'history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final VoidCallback onSignedOut;
@@ -231,6 +234,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (sent && mounted) {
       context.read<HomeBloc>().add(const HomeRefreshRequested());
     }
+  }
+
+  void _refreshHome() {
+    if (mounted) context.read<HomeBloc>().add(const HomeRefreshRequested());
+  }
+
+  void _openHistory() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HistoryScreen(api: _api, onCorrectionSubmitted: _refreshHome),
+      ),
+    );
+  }
+
+  void _openHistoryDay(String dateKey) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HistoryDayScreen(dateKey: dateKey, api: _api, onCorrectionSubmitted: _refreshHome),
+      ),
+    );
   }
 
   void _showMyDisputesSheet(List<CorrectionRequest> corrections) {
@@ -701,8 +724,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           AttendanceTimelineCard(
                             history: history,
                             disputesByDate: disputesByDate,
-                            onDayTapped: (day) => _onDayTapped(day, corrections),
+                            onDayTapped: (day) => _openHistoryDay(day.date),
                             onDisputeDay: () => _openCorrectionForm(),
+                            onSeeFullHistory: _openHistory,
                           ),
                         ],
                       ),
