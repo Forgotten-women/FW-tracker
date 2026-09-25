@@ -46,7 +46,16 @@ async function callBackend(command, args = {}) {
   }
 
   if (invoke) {
-    return invoke(command, args);
+    // Hard 2-second timeout around every IPC call. A Tauri WebView message-channel
+    // stall can leave invoke() pending forever, blocking the JS event loop and
+    // preventing even setTimeout watchdogs from firing.
+    const timeoutMs = 2000;
+    return Promise.race([
+      invoke(command, args),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`IPC timeout: ${command} did not respond in ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
   }
 
   // Fallback to local agent server
