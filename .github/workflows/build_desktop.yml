@@ -108,9 +108,9 @@ jobs:
           # Providing tagName tells tauri-action to create/update the GitHub Release
           # and upload all bundles automatically.
           tagName: ${{ github.event.inputs.release_tag || github.ref_name }}
-          releaseName: 🖥️ Office Tracker Desktop ${{ github.event.inputs.release_tag || github.ref_name }}
+          releaseName: 🖥️ WorkSync Desktop ${{ github.event.inputs.release_tag || github.ref_name }}
           releaseBody: |
-            ## Office Tracker Desktop Agent
+            ## WorkSync Desktop Agent
 
             ### 📥 Downloads
             | Platform | Installer | Notes |
@@ -120,12 +120,12 @@ jobs:
 
             ### 🍎 macOS First-Time Launch (Intel & Apple Silicon)
             Because this application is distributed directly within your organization:
-            1. Drag **Office Tracker.app** to your **/Applications** folder.
+            1. Drag **WorkSync.app** to your **/Applications** folder.
             2. If macOS reports *"developer cannot be verified"* or blocks opening on first run:
-               - **Option A**: Right-click (or Control-click) `Office Tracker.app` in Applications and choose **Open**, then click **Open**.
+               - **Option A**: Right-click (or Control-click) `WorkSync.app` in Applications and choose **Open**, then click **Open**.
                - **Option B**: Open Terminal and run:
                  ```bash
-                 xattr -cr "/Applications/Office Tracker.app"
+                 xattr -cr "/Applications/WorkSync.app"
                  ```
 
             ### 🔐 First-time setup
