@@ -362,6 +362,11 @@ fn main() {
                 // heartbeat replaces it.
                 office_presence_minutes: None,
                 office_presence_formatted: None,
+                shift_target_minutes: Some(450),
+                shift_progress_percent: None,
+                shift_remaining_minutes: None,
+                shift_remaining_formatted: None,
+                ..Default::default()
             },
             policy: client::PolicySettings::default(),
         })
