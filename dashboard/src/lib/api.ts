@@ -663,9 +663,9 @@ export const api = {
       },
     ),
 
-  payrollPrepare: (periodId: string) =>
+  payrollPrepare: (periodId: string, basis?: string) =>
     request<{ status: string } & PayrollPrepareSheet>(
-      `/api/payroll/periods/${encodeURIComponent(periodId)}/prepare`,
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/prepare${basis ? `?basis=${encodeURIComponent(basis)}` : ''}`,
     ),
 
   closePayrollPeriod: (periodId: string) =>
@@ -674,13 +674,37 @@ export const api = {
       { method: 'POST' },
     ),
 
+  getDailyRateBasis: () =>
+    request<{ status: string; basis: string }>('/api/payroll/settings/daily-rate-basis'),
+
+  setDailyRateBasis: (basis: string) =>
+    request<{ status: string; basis: string }>(
+      '/api/payroll/settings/daily-rate-basis',
+      { method: 'POST', body: JSON.stringify({ basis }) },
+    ),
+
+  addPayrollException: (
+    periodId: string,
+    data: {
+      employeeId: string;
+      amount: number;
+      type: string;
+      explanation: string;
+      autoApprove?: boolean;
+    },
+  ) =>
+    request<{ status: string; exception: unknown }>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/exception`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+
   // ---- The monthly run: review, approve, pay ------------------------------
   // Refusals throw ApiError; its `body` is a PayrollRunErrorBody.
 
   /** Read-only: rows, ROUTINE/ATTENTION lines, employee flags, totals and the preflight. */
-  payrollReview: (periodId: string) =>
+  payrollReview: (periodId: string, basis?: string) =>
     request<{ status: string } & PayrollReviewSheet>(
-      `/api/payroll/periods/${encodeURIComponent(periodId)}/review`,
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/review${basis ? `?basis=${encodeURIComponent(basis)}` : ''}`,
     ),
 
   /** Read-only: what would make approving this run wrong right now. */

@@ -46,10 +46,11 @@ async function callBackend(command, args = {}) {
   }
 
   if (invoke) {
-    // Hard 2-second timeout around every IPC call. A Tauri WebView message-channel
-    // stall can leave invoke() pending forever, blocking the JS event loop and
-    // preventing even setTimeout watchdogs from firing.
-    const timeoutMs = 2000;
+    // Network-bound commands (enrollment, checkout, break toggles) require round-trips
+    // over HTTPS to the cloud backend (DNS, TLS handshake, DB transactions).
+    // They get a generous 25s timeout. Local in-memory IPC queries get 4s.
+    const isNetworkCommand = ['enroll_device', 'checkout_shift', 'set_manual_break', 'toggle_manual_break'].includes(command);
+    const timeoutMs = isNetworkCommand ? 25000 : 4000;
     return Promise.race([
       invoke(command, args),
       new Promise((_, reject) =>
@@ -590,6 +591,20 @@ if (enrollBtn) {
         refreshStatus();
       }, 1000);
     } catch (e) {
+      // Recovery check: In case the network request succeeded in Rust right around the timeout,
+      // verify if the device is already marked enrolled in local state/config.
+      try {
+        const checkStatus = await callBackend('get_app_status');
+        if (checkStatus && checkStatus.enrolled) {
+          enrollError.style.color = '#34d399';
+          enrollError.textContent = '✓ Successfully paired! Launching session…';
+          setTimeout(() => {
+            refreshStatus();
+          }, 1000);
+          return;
+        }
+      } catch (_) {}
+
       enrollError.style.color = '#f87171';
       enrollError.textContent = e.message || 'Enrollment failed. Invalid or expired code.';
     } finally {

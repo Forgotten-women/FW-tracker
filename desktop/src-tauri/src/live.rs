@@ -29,8 +29,8 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::Notify;
 use tokio_tungstenite::tungstenite::Message;
 
-const FALLBACK_POLL: Duration = Duration::from_secs(5);
-const IDLE_WAKE: Duration = Duration::from_secs(6);
+const FALLBACK_POLL: Duration = Duration::from_secs(20);
+const IDLE_WAKE: Duration = Duration::from_secs(300);
 const MIN_CHECK_GAP: Duration = Duration::from_secs(2);
 const FRAME_INTERVAL: Duration = Duration::from_millis(1000);
 const KEEPALIVE_EVERY: Duration = Duration::from_secs(3);
@@ -296,7 +296,14 @@ pub async fn run_stream_worker(app: AppHandle) {
 
     loop {
         let wait = if hub().doorbell_up.load(Ordering::SeqCst) { IDLE_WAKE } else { FALLBACK_POLL };
-        let _ = tokio::time::timeout(wait, hub().ring.notified()).await;
+        let notified = tokio::time::timeout(wait, hub().ring.notified()).await.is_ok();
+
+        let doorbell_is_up = hub().doorbell_up.load(Ordering::SeqCst);
+        // If doorbell is connected and this wake-up was an idle timeout (not a real doorbell ring),
+        // do NOT spam the server with stream-status polls!
+        if doorbell_is_up && !notified {
+            continue;
+        }
 
         let cfg = current_config(&app);
         if cfg.token.is_empty() {

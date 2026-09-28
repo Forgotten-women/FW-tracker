@@ -52,6 +52,7 @@ export function PayrollRunView({
   adjustments,
   currency,
   rate,
+  rateBasis,
   refreshKey,
   onChanged,
   onRecordSalary,
@@ -61,6 +62,7 @@ export function PayrollRunView({
   adjustments: PayrollAdjustment[];
   currency: Currency;
   rate: number;
+  rateBasis?: 'WORKING_DAYS_260' | 'CALENDAR_DAYS_30';
   refreshKey: number;
   /** Something changed on the server: the parent reloads the period list and adjustments. */
   onChanged: () => void;
@@ -92,7 +94,7 @@ export function PayrollRunView({
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.payrollReview(period.id);
+        const res = await api.payrollReview(period.id, rateBasis);
         if (cancelled) return;
         setSheet(res);
         setLoadError('');
@@ -104,7 +106,7 @@ export function PayrollRunView({
     return () => {
       cancelled = true;
     };
-  }, [period.id, refreshKey, reloadTick]);
+  }, [period.id, rateBasis, refreshKey, reloadTick]);
 
   // The review sheet is a heavy read, so it follows payroll events only, not
   // every presence update on the stream: this run being published, and HR's

@@ -107,9 +107,9 @@ async function setFrame(deviceId, frameBase64, atMs = Date.now()) {
     try {
       await db.prepare(`
         UPDATE workstation_live_streams
-        SET frame_base64 = ?, last_frame_at = ?, updated_at = ?
+        SET last_frame_at = ?, updated_at = ?
         WHERE device_id = ? AND status = 'ACTIVE'
-      `).run(frameBase64, atMs, atMs, deviceId);
+      `).run(atMs, atMs, deviceId);
     } catch (e) {
       console.error('[liveFrame] DB fallback write error:', e.message);
     }
@@ -157,14 +157,11 @@ async function getState(deviceId) {
 
   if (!f && !getClient()) {
     try {
-      const row = await db.prepare('SELECT frame_base64, requested_at, last_frame_at, updated_at FROM workstation_live_streams WHERE device_id = ?').get(deviceId);
-      if (row && row.frame_base64) {
-        f = { at: Number(row.last_frame_at) || Number(row.updated_at) || null, img: row.frame_base64 };
-        aliveAt = Math.max(aliveAt || 0, Number(row.last_frame_at) || 0, Number(row.updated_at) || 0) || null;
-      }
+      const row = await db.prepare('SELECT requested_at, last_frame_at, updated_at FROM workstation_live_streams WHERE device_id = ?').get(deviceId);
       if (row && row.updated_at && Number(row.updated_at) > Number(row.requested_at || 0) && !ackAt) {
         ackAt = Number(row.updated_at) || null;
       }
+      aliveAt = Math.max(aliveAt || 0, Number(row.last_frame_at) || 0, Number(row.updated_at) || 0) || null;
     } catch (e) {
       console.error('[liveFrame] DB fallback read error:', e.message);
     }
@@ -181,14 +178,7 @@ async function getState(deviceId) {
 async function getFrame(deviceId) {
   const [frame] = await getMany([k.frame(deviceId)]);
   const f = normaliseFrame(frame);
-  if (f) return f.img;
-  if (!getClient()) {
-    try {
-      const row = await db.prepare('SELECT frame_base64 FROM workstation_live_streams WHERE device_id = ?').get(deviceId);
-      return row ? row.frame_base64 : null;
-    } catch (_) {}
-  }
-  return null;
+  return f ? f.img : null;
 }
 
 /** Ends a session: the frame, keepalive and ack go; what the agent said about itself stays. */
@@ -196,7 +186,7 @@ async function clearFrame(deviceId) {
   await remove([k.frame(deviceId), k.alive(deviceId), k.ack(deviceId)]);
   if (!getClient()) {
     try {
-      await db.prepare('UPDATE workstation_live_streams SET frame_base64 = NULL, last_frame_at = NULL WHERE device_id = ?').run(deviceId);
+      await db.prepare('UPDATE workstation_live_streams SET last_frame_at = NULL WHERE device_id = ?').run(deviceId);
     } catch (_) {}
   }
 }

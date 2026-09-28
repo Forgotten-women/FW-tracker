@@ -19,13 +19,22 @@ const liveFrame = require('../lib/liveFrame');
 const liveDoorbell = require('../lib/liveDoorbell');
 const liveView = require('../domain/liveView');
 
+let orgSettingsCache = new Map();
+let orgSettingsCacheExpires = 0;
+
 async function getOrgSetting(key, defaultValue) {
-  try {
-    const row = await db.prepare('SELECT value FROM org_settings WHERE key = ?').get(key);
-    return row ? row.value : defaultValue;
-  } catch (_) {
-    return defaultValue;
+  const now = Date.now();
+  if (now > orgSettingsCacheExpires) {
+    try {
+      const rows = await db.prepare('SELECT key, value FROM org_settings').all();
+      orgSettingsCache.clear();
+      for (const r of rows) {
+        orgSettingsCache.set(r.key, r.value);
+      }
+      orgSettingsCacheExpires = now + 60 * 1000;
+    } catch (_) {}
   }
+  return orgSettingsCache.has(key) ? orgSettingsCache.get(key) : defaultValue;
 }
 
 let liveStreamTableEnsured = false;

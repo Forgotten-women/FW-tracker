@@ -134,16 +134,222 @@ function ExchangeRateModal({
 // Prepare-sheet employee row shape (from backend)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Add Exception / Bonus / Allowance Modal (HR Exception Policy)
+// ---------------------------------------------------------------------------
+
+function AddExceptionModal({
+  periodId,
+  employee,
+  currency,
+  periodRate,
+  onClose,
+  onSuccess,
+}: {
+  periodId: string;
+  employee: PrepareEmployee;
+  currency: Currency;
+  periodRate: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [type, setType] = useState('BONUS');
+  const [amount, setAmount] = useState('');
+  const [explanation, setExplanation] = useState('');
+  const [autoApprove, setAutoApprove] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const empCurrency = employee.salary?.currency || 'PKR';
+  const currSymbol = empCurrency === 'GBP' ? '£' : '₨';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const num = parseFloat(amount);
+    if (isNaN(num) || num === 0) {
+      setError('Please enter a valid non-zero amount.');
+      return;
+    }
+    if (!explanation.trim()) {
+      setError('Please provide a reason or explanation for this exception.');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.addPayrollException(periodId, {
+        employeeId: employee.employeeId,
+        amount: num,
+        type,
+        explanation: explanation.trim(),
+        autoApprove,
+      });
+      onSuccess();
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to add exception.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-md`}>
+        <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <span>+ Add Exception / Adjustment</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              For <strong className="text-indigo-300">{employee.employeeName}</strong>{' '}
+              {employee.employeeNumber ? `(${employee.employeeNumber})` : ''}
+            </p>
+          </div>
+          <span className="rounded bg-indigo-500/20 px-2 py-0.5 text-xs font-mono font-bold text-indigo-300 border border-indigo-500/30">
+            Base: {formatMoney(employee.salary.monthly, currency, empCurrency, periodRate)}
+          </span>
+        </div>
+
+        {error && (
+          <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Exception / Adjustment Type</label>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="BONUS">Bonus (Performance / Discretionary Incentive)</option>
+              <option value="ALLOWANCE">Monthly / Transport / Shift Allowance</option>
+              <option value="SPECIAL_ADDITION">Special / Festive Addition</option>
+              <option value="MANUAL_ADJUSTMENT">Custom Manual Adjustment</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">
+              Amount ({empCurrency})
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-2 text-xs text-slate-500 font-mono">{currSymbol}</span>
+              <input
+                type="number"
+                step="any"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="e.g. 5000"
+                required
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 pl-8 pr-3 py-2 text-xs font-mono text-white focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Positive values (e.g. 5000) increase pay; negative values deduct.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Reason / Explanation</label>
+            <textarea
+              rows={2}
+              value={explanation}
+              onChange={(e) => setExplanation(e.target.value)}
+              placeholder="e.g. Approved discretionary bonus for outstanding milestone achievement"
+              required
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id="autoApprove"
+              checked={autoApprove}
+              onChange={(e) => setAutoApprove(e.target.checked)}
+              className="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+            />
+            <label htmlFor="autoApprove" className="text-xs text-slate-300 select-none">
+              Directly approve this line (reflects immediately on net payable)
+            </label>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition"
+            >
+              {submitting ? 'Applying...' : 'Apply Exception'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-4 py-2 text-xs font-medium text-slate-300 transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Prepare-sheet employee row shape (from backend)
+// ---------------------------------------------------------------------------
+
 interface PrepareEmployee {
   employeeId: string;
   employeeName: string;
   employeeNumber?: string | null;
-  salary: { monthly: number; daily: number; annual: number; currency?: string };
+  salary: {
+    monthly: number;
+    daily: number;
+    annual: number;
+    currency?: string;
+    dailyWorkingDays?: number;
+    dailyCalendar30?: number;
+    basis?: string;
+  };
   workingDaysCount?: number;
   fullPeriodDays?: number;
+  grossBaseline?: number;
   calculatedPeriodGross?: number;
+  projectedNetPayable?: number;
+  netPayable?: { amount: number; basis: string };
   isStarter: boolean;
   starter: { startDate: string; eligibleWorkingDays: number; calculatedGross: number } | null;
+  unpaidDays?: {
+    deficitDays: number;
+    deficitAmount: number;
+    deficitAdjustmentId?: string | null;
+    deficitStatus?: string | null;
+    absenceDays: number;
+    absenceAmount: number;
+    leaveDays: number;
+    leaveAmount: number;
+    totalDays: number;
+    totalAmount: number;
+  };
+  additions?: {
+    total: number;
+    approvedTotal: number;
+    items: Array<{
+      id: string;
+      type: string;
+      status: string;
+      calculatedAmount: number;
+      approvedAmount: number | null;
+      explanation: string;
+    }>;
+  };
   attendanceDeficit: {
     wholeDayEquivalents: number;
     carryForwardMinutes: number;
@@ -170,7 +376,15 @@ interface PrepareBlocked {
 }
 
 interface PrepareSheet {
-  period: { id: string; name: string; from: string; to: string; status: string; exchangeRate?: number };
+  period: {
+    id: string;
+    name: string;
+    from: string;
+    to: string;
+    status: string;
+    exchangeRate?: number;
+    dailyRateBasis?: string;
+  };
   employees: PrepareEmployee[];
   blocked: PrepareBlocked[];
   note: string;
@@ -1002,11 +1216,21 @@ function PeriodDetailView({
   const [closingConfirm, setClosingConfirm] = useState(false);
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState('');
+  const [rateBasis, setRateBasis] = useState<'WORKING_DAYS_260' | 'CALENDAR_DAYS_30'>('WORKING_DAYS_260');
+  const [exceptionEmployee, setExceptionEmployee] = useState<PrepareEmployee | null>(null);
 
   const changed = useCallback(() => {
     setDataKey((k) => k + 1);
     onRefresh();
   }, [onRefresh]);
+
+  const handleBasisChange = async (newBasis: 'WORKING_DAYS_260' | 'CALENDAR_DAYS_30') => {
+    setRateBasis(newBasis);
+    try {
+      await api.setDailyRateBasis(newBasis);
+    } catch (_) {}
+    changed();
+  };
 
   const openTab = (t: DetailTab) => {
     setTab(t);
@@ -1037,11 +1261,14 @@ function PeriodDetailView({
     let cancelled = false;
     (async () => {
       try {
-        const prepRes = await api.payrollPrepare(period.id);
+        const prepRes = await api.payrollPrepare(period.id, rateBasis);
         if (cancelled) return;
         const prepSheet = prepRes as unknown as PrepareSheet;
         setSheet(prepSheet);
         if (prepSheet.period?.exchangeRate) setPeriodRate(prepSheet.period.exchangeRate);
+        if (prepSheet.period?.dailyRateBasis && (prepSheet.period.dailyRateBasis === 'WORKING_DAYS_260' || prepSheet.period.dailyRateBasis === 'CALENDAR_DAYS_30')) {
+          setRateBasis(prepSheet.period.dailyRateBasis);
+        }
         setError('');
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load period data.');
@@ -1052,7 +1279,7 @@ function PeriodDetailView({
     return () => {
       cancelled = true;
     };
-  }, [period.id, prepVisited, dataKey, liveKey]);
+  }, [period.id, prepVisited, dataKey, liveKey, rateBasis]);
 
   // As before, the preparation sheet follows the live stream while it is on
   // screen (attendance deficits move with every clock event).
@@ -1119,7 +1346,7 @@ function PeriodDetailView({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Currency switcher & Period Rate pill */}
+            {/* Currency switcher */}
             <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
               {(['GBP', 'PKR'] as Currency[]).map((c) => (
                 <button
@@ -1136,6 +1363,36 @@ function PeriodDetailView({
                 </button>
               ))}
             </div>
+
+            {/* Daily Rate Formula Switcher */}
+            <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 p-0.5">
+              <span className="pl-2 pr-1 text-[10px] uppercase font-bold text-slate-400 select-none">Basis:</span>
+              <button
+                type="button"
+                onClick={() => handleBasisChange('WORKING_DAYS_260')}
+                title="Daily Rate = (Monthly × 12) / 260"
+                className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+                  rateBasis === 'WORKING_DAYS_260'
+                    ? 'bg-indigo-600 text-on-accent shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                260 Working Days
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBasisChange('CALENDAR_DAYS_30')}
+                title="Daily Rate = Monthly / 30"
+                className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+                  rateBasis === 'CALENDAR_DAYS_30'
+                    ? 'bg-indigo-600 text-on-accent shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                30 Calendar Days
+              </button>
+            </div>
+
             {!isFinal ? (
               <button
                 type="button"
@@ -1202,6 +1459,7 @@ function PeriodDetailView({
             adjustments={adjustments}
             currency={currency}
             rate={periodRate}
+            rateBasis={rateBasis}
             refreshKey={dataKey}
             onChanged={changed}
             onRecordSalary={(employeeId) => {
@@ -1228,20 +1486,27 @@ function PeriodDetailView({
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
                     <th className="pb-2 text-left font-semibold">Employee</th>
-                    <th className="pb-2 text-right font-semibold">Calculated Period Pay</th>
-                    <th className="pb-2 text-right font-semibold">Daily Rate</th>
                     <th className="pb-2 text-right font-semibold">Contract Monthly</th>
-                    <th className="pb-2 text-right font-semibold">Leave Available</th>
-                    <th className="pb-2 text-right font-semibold">Deficit Equiv.</th>
-                    <th className="pb-2 text-right font-semibold">Adjustments</th>
-                    <th className="pb-2 text-left font-semibold pl-3">Notes</th>
+                    <th className="pb-2 text-right font-semibold">Daily Rate</th>
+                    <th className="pb-2 text-right font-semibold">Unpaid Leaves Cut</th>
+                    <th className="pb-2 text-right font-semibold">Deficit / Absences</th>
+                    <th className="pb-2 text-right font-semibold">Additions / Exceptions</th>
+                    <th className="pb-2 text-right font-semibold">Net Payable</th>
+                    <th className="pb-2 text-center font-semibold">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {sheet.employees.map((emp) => {
-                    const approvedAdjs = emp.adjustments.filter((a) => a.status === 'APPROVED');
-                    const adjTotal = approvedAdjs.reduce((s, a) => s + (a.approvedAmount ?? a.calculatedAmount), 0);
-                    const gross = emp.calculatedPeriodGross ?? (emp.isStarter && emp.starter ? emp.starter.calculatedGross : emp.salary.monthly);
+                    const gross = emp.grossBaseline ?? (emp.calculatedPeriodGross ?? (emp.isStarter && emp.starter ? emp.starter.calculatedGross : emp.salary.monthly));
+                    const unpaidLeaveDays = emp.unpaidDays?.leaveDays ?? 0;
+                    const unpaidLeaveAmount = emp.unpaidDays?.leaveAmount ?? 0;
+                    const deficitDays = (emp.unpaidDays?.deficitDays || emp.attendanceDeficit?.wholeDayEquivalents || 0);
+                    const absenceDays = emp.unpaidDays?.absenceDays || 0;
+                    const deficitAbsenceDays = deficitDays + absenceDays;
+                    const deficitAbsenceAmount = (emp.unpaidDays?.deficitAmount || emp.attendanceDeficit?.valueIfDeducted || 0) + (emp.unpaidDays?.absenceAmount || 0);
+                    const additionsTotal = emp.additions?.total || 0;
+                    const net = emp.projectedNetPayable ?? (emp.netPayable?.amount ?? emp.calculatedPeriodGross ?? gross);
+
                     return (
                       <tr key={emp.employeeId} className="hover:bg-slate-800/30 transition-colors">
                         <td className="py-2.5 font-medium text-white">
@@ -1258,40 +1523,29 @@ function PeriodDetailView({
                               </span>
                             )}
                           </div>
-                        </td>
-                        <td className="py-2.5 text-right font-mono text-slate-200">
-                          <div>
-                            <div className="text-emerald-400 font-bold">
-                              {formatMoney(gross, currency, emp.salary.currency, periodRate)}
+                          {emp.isStarter && (
+                            <div className="text-[10px] text-sky-400 font-sans mt-0.5">
+                              Starter ({emp.starter?.eligibleWorkingDays}/{emp.fullPeriodDays} worked days)
                             </div>
-                            <div className="text-[10px] text-slate-400 font-sans">
-                              {emp.workingDaysCount !== undefined ? `${emp.workingDaysCount} working days` : `${formatMoney(emp.salary.daily, currency, emp.salary.currency, periodRate)}/d`}
-                            </div>
-                          </div>
+                          )}
                         </td>
                         <td className="py-2.5 text-right font-mono text-slate-300">
-                          {formatMoney(emp.salary.daily, currency, emp.salary.currency, periodRate)}
-                        </td>
-                        <td className="py-2.5 text-right font-mono text-slate-400">
                           {formatMoney(emp.salary.monthly, currency, emp.salary.currency, periodRate)}
                         </td>
-                        <td className="py-2.5 text-right font-mono">
-                          {emp.leave.blocked ? (
-                            <span className="text-amber-400 text-xs"><AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> {emp.leave.reason || 'Blocked'}</span>
-                          ) : (
-                            <span className={emp.leave.isNegative ? 'text-rose-400 font-bold' : 'text-slate-300'}>
-                              {emp.leave.available ?? '—'}d
-                            </span>
-                          )}
+                        <td className="py-2.5 text-right font-mono text-slate-300">
+                          <div>{formatMoney(emp.salary.daily, currency, emp.salary.currency, periodRate)}/d</div>
+                          <div className="text-[10px] text-slate-500 font-sans">
+                            {rateBasis === 'WORKING_DAYS_260' ? '260d basis' : '30d basis'}
+                          </div>
                         </td>
                         <td className="py-2.5 text-right font-mono">
-                          {emp.attendanceDeficit.needsHrDecision ? (
+                          {unpaidLeaveDays > 0 ? (
                             <div>
                               <span className="text-rose-400 font-bold">
-                                {emp.attendanceDeficit.wholeDayEquivalents}d
+                                -{unpaidLeaveDays}d
                               </span>
-                              <div className="text-[10px] text-slate-400 font-sans">
-                                Val: {formatMoney(emp.attendanceDeficit.valueIfDeducted, currency, emp.salary.currency, periodRate)}
+                              <div className="text-[10px] text-rose-400/80 font-sans">
+                                -{formatMoney(unpaidLeaveAmount, currency, emp.salary.currency, periodRate)}
                               </div>
                             </div>
                           ) : (
@@ -1299,40 +1553,53 @@ function PeriodDetailView({
                           )}
                         </td>
                         <td className="py-2.5 text-right font-mono">
-                          {emp.adjustments.length === 0 ? (
-                            <span className="text-slate-500">—</span>
-                          ) : (
+                          {deficitAbsenceDays > 0 ? (
                             <div>
-                              <span className={adjTotal < 0 ? 'text-rose-400 font-bold' : adjTotal > 0 ? 'text-emerald-400 font-bold' : 'text-slate-300'}>
-                                {adjTotal !== 0 ? formatMoney(adjTotal, currency, emp.salary.currency, periodRate) : '—'}
+                              <span className="text-rose-400 font-bold">
+                                -{deficitAbsenceDays}d
                               </span>
-                              <div className="text-[10px] text-slate-400 font-sans">
-                                {approvedAdjs.length}/{emp.adjustments.length} approved
+                              <div className="text-[10px] text-rose-400/80 font-sans">
+                                -{formatMoney(deficitAbsenceAmount, currency, emp.salary.currency, periodRate)}
                               </div>
                             </div>
+                          ) : (
+                            <span className="text-slate-500">—</span>
                           )}
                         </td>
-                        <td className="py-2.5 pl-3 text-slate-400">
-                          <div className="flex flex-col gap-0.5">
-                            {emp.isStarter && (
-                              <span className="text-sky-400 font-medium text-[11px]">
-                                <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 align-middle" /> Starter ({emp.starter?.eligibleWorkingDays}/{emp.fullPeriodDays} days)
+                        <td className="py-2.5 text-right font-mono">
+                          {additionsTotal > 0 ? (
+                            <div>
+                              <span className="text-emerald-400 font-bold">
+                                +{formatMoney(additionsTotal, currency, emp.salary.currency, periodRate)}
                               </span>
-                            )}
-                            {emp.attendanceDeficit.needsHrDecision && (
-                              <span className="text-amber-400 text-[11px]">
-                                <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> Deficit ({emp.attendanceDeficit.wholeDayEquivalents}d) — pending decision
-                              </span>
-                            )}
-                            {emp.leave.isNegative && (
-                              <span className="text-rose-400 text-[11px]">
-                                <span className="inline-block h-2 w-2 rounded-full bg-rose-400 align-middle" /> Negative leave balance
-                              </span>
-                            )}
-                            {!emp.isStarter && !emp.attendanceDeficit.needsHrDecision && !emp.leave.isNegative && (
-                              <span className="text-slate-500">—</span>
-                            )}
+                              <div className="text-[10px] text-emerald-400/80 font-sans">
+                                {emp.additions?.items?.length || 1} exception(s)
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right font-mono">
+                          <div className="text-emerald-400 font-bold text-sm">
+                            {formatMoney(net, currency, emp.salary.currency, periodRate)}
                           </div>
+                          <div className="text-[10px] text-slate-400 font-sans">
+                            Net payable
+                          </div>
+                        </td>
+                        <td className="py-2.5 text-center">
+                          {!isFinal && (
+                            <button
+                              type="button"
+                              onClick={() => setExceptionEmployee(emp)}
+                              title="Add custom bonus, allowance, or exception amount for this employee"
+                              className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/60 px-2.5 py-1 text-xs font-semibold text-indigo-300 transition"
+                            >
+                              <PlusIcon className="h-3 w-3 shrink-0" />
+                              <span>Exception</span>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1537,6 +1804,18 @@ function PeriodDetailView({
           formatAmount={(amount) => formatMoney(amount, currency, currencyOf(decideAdj.employeeId), periodRate)}
           onClose={() => setDecideAdj(null)}
           onDecided={changed}
+        />
+      )}
+
+      {/* HR Exception Policy: Add Exception Modal */}
+      {exceptionEmployee && (
+        <AddExceptionModal
+          periodId={period.id}
+          employee={exceptionEmployee}
+          currency={currency}
+          periodRate={periodRate}
+          onClose={() => setExceptionEmployee(null)}
+          onSuccess={changed}
         />
       )}
     </div>

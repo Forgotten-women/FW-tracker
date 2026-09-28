@@ -205,10 +205,30 @@ router.post('/periods/:id/exchange-rate', requirePermission('payroll.approve'), 
   }
 });
 
+// Daily Rate Basis settings
+router.get('/settings/daily-rate-basis', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    const basis = await PR.getDailyRateBasis();
+    res.json({ status: 'SUCCESS', basis });
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/settings/daily-rate-basis', requirePermission('payroll.approve'), async (req, res) => {
+  try {
+    const r = await PR.setDailyRateBasis(req.body?.basis, getActor(req));
+    res.json({ status: 'SUCCESS', ...r });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 // The preparation sheet. Read-only: computing it writes nothing.
 router.get('/periods/:id/prepare', requirePermission('payroll.read'), async (req, res) => {
   try {
-    const sheet = await PR.preparePeriod(req.params.id);
+    const basis = req.query.basis || null;
+    const sheet = await PR.preparePeriod(req.params.id, { basis });
     const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
     res.json({
       status: 'SUCCESS',
@@ -218,6 +238,24 @@ router.get('/periods/:id/prepare', requirePermission('payroll.read'), async (req
     });
   } catch (err) {
     res.status(404).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// HR Exception Policy: Add custom amount (bonus/allowance/addition/deduction) for an employee
+router.post('/periods/:id/exception', requirePermission('payroll.approve'), async (req, res) => {
+  try {
+    const r = await PR.addException({
+      periodId: req.params.id,
+      employeeId: req.body?.employeeId,
+      amount: req.body?.amount,
+      type: req.body?.type,
+      explanation: req.body?.explanation,
+      actor: getActor(req),
+      autoApprove: req.body?.autoApprove !== false,
+    });
+    res.status(201).json({ status: 'SUCCESS', exception: r });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
   }
 });
 
@@ -268,8 +306,9 @@ router.get('/periods/:id/preflight', requirePermission('payroll.read'), async (r
 // The sheet a run is approved from. Read-only.
 router.get('/periods/:id/review', requirePermission('payroll.read'), async (req, res) => {
   try {
+    const basis = req.query.basis || null;
     const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
-    const sheet = await PR.reviewPeriod(req.params.id, { visibleEmployeeIds: visible });
+    const sheet = await PR.reviewPeriod(req.params.id, { visibleEmployeeIds: visible, basis });
     res.json({
       status: 'SUCCESS',
       ...sheet,

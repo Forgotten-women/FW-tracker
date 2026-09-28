@@ -43,26 +43,66 @@ function money(n) {
   return Math.round(n * 100) / 100;
 }
 
+let cachedDailyRateBasis = null;
+let cachedDailyRateBasisExpiry = 0;
+
+async function getDailyRateBasis() {
+  const now = Date.now();
+  if (cachedDailyRateBasis && now < cachedDailyRateBasisExpiry) {
+    return cachedDailyRateBasis;
+  }
+  try {
+    const row = await db.prepare("SELECT value FROM org_settings WHERE key = 'payroll_daily_rate_basis'").get();
+    cachedDailyRateBasis = row?.value || 'WORKING_DAYS_260';
+  } catch (_) {
+    cachedDailyRateBasis = 'WORKING_DAYS_260';
+  }
+  cachedDailyRateBasisExpiry = now + 60 * 1000;
+  return cachedDailyRateBasis;
+}
+
 /**
- * The rate chain from spec section 17, kept as separate steps so each one can
- * be shown to whoever is checking the figure.
+ * The rate chain from spec section 17, supporting both:
+ * 1. WORKING_DAYS_260: Monthly x 12 / 52 / 5 (Monthly x 12 / 260)
+ * 2. CALENDAR_DAYS_30: Monthly / 30 (calendar-month basis)
  */
-function rates(monthlyAmount) {
+function rates(monthlyAmount, basis = null) {
   const monthly = Number(monthlyAmount) || 0;
+  const effectiveBasis = basis || cachedDailyRateBasis || 'WORKING_DAYS_260';
   const annual = monthly * P.monthsPerYear;
   const weekly = annual / P.weeksPerYear;
-  const daily = weekly / P.workingDaysPerWeek;
+
+  const dailyWorkingDays = weekly / P.workingDaysPerWeek;
+  const dailyCalendar30 = monthly / 30;
+
+  let daily;
+  let formula;
+  let workingDaysPerYear;
+
+  if (effectiveBasis === 'CALENDAR_DAYS_30') {
+    daily = dailyCalendar30;
+    formula = `monthly / 30 (calendar-day basis)`;
+    workingDaysPerYear = 360;
+  } else {
+    // WORKING_DAYS_260 (default)
+    daily = dailyWorkingDays;
+    formula = `monthly x ${P.monthsPerYear} / ${P.weeksPerYear} / ${P.workingDaysPerWeek} (monthly x 12 / 260)`;
+    workingDaysPerYear = P.weeksPerYear * P.workingDaysPerWeek;
+  }
 
   return {
     monthly: money(monthly),
     annual: money(annual),
     weekly: money(weekly),
     daily: money(daily),
-    // Unrounded, because multiplying a rounded daily rate by a day count is
-    // what produces the penny difference against the spec's worked example.
     dailyPrecise: daily,
-    formula: `monthly x ${P.monthsPerYear} / ${P.weeksPerYear} / ${P.workingDaysPerWeek}`,
-    workingDaysPerYear: P.weeksPerYear * P.workingDaysPerWeek,
+    dailyWorkingDays: money(dailyWorkingDays),
+    dailyCalendar30: money(dailyCalendar30),
+    basis: effectiveBasis,
+    altDaily: money(effectiveBasis === 'CALENDAR_DAYS_30' ? dailyWorkingDays : dailyCalendar30),
+    altBasis: effectiveBasis === 'CALENDAR_DAYS_30' ? 'WORKING_DAYS_260' : 'CALENDAR_DAYS_30',
+    formula,
+    workingDaysPerYear,
   };
 }
 
@@ -80,7 +120,7 @@ const selectSalaryAt = db.prepare(`
  * paid in June" stays answerable after a pay rise. Spec section 17 requires
  * exactly this.
  */
-async function salaryAt(employeeId, dateKey = T.dateKey()) {
+async function salaryAt(employeeId, dateKey = T.dateKey(), basis = null) {
   const row = await selectSalaryAt.get(employeeId, dateKey, dateKey);
   if (!row) {
     return {
@@ -89,6 +129,7 @@ async function salaryAt(employeeId, dateKey = T.dateKey()) {
       message: 'No salary is recorded for this employee on that date, so pay cannot be calculated.',
     };
   }
+  const effectiveBasis = basis || await getDailyRateBasis();
   return {
     blocked: false,
     salaryId: row.id,
@@ -96,7 +137,7 @@ async function salaryAt(employeeId, dateKey = T.dateKey()) {
     effectiveTo: row.effective_to,
     currency: row.currency,
     payFrequency: row.pay_frequency,
-    ...rates(row.amount),
+    ...rates(row.amount, effectiveBasis),
   };
 }
 
@@ -167,9 +208,17 @@ async function salaryHistoryFor(employeeId) {
 // Working days
 // ---------------------------------------------------------------------------
 
+const workingDaysCache = new Map();
+
 /** Scheduled working days for an employee in a range, honouring the calendar. */
 async function eligibleWorkingDays(employeeId, fromDate, toDate) {
-  return await schedule.workingDaysBetween(employeeId, fromDate, toDate);
+  const cacheKey = `${employeeId || 'default'}:${fromDate}:${toDate}`;
+  if (workingDaysCache.has(cacheKey)) {
+    return workingDaysCache.get(cacheKey);
+  }
+  const days = await schedule.workingDaysBetween(employeeId, fromDate, toDate);
+  workingDaysCache.set(cacheKey, days);
+  return days;
 }
 
 const selectEmploymentDates = db.prepare(`
@@ -615,8 +664,8 @@ async function payrollEmployees(period) {
  * review sheet, the classifier, the payslip snapshot and the phone's estimate
  * all start here, so they can never disagree about what someone's baseline is.
  */
-async function periodBasis(period, employeeId, { throughDate = null } = {}) {
-  const salary = await salaryAt(employeeId, period.end_date);
+async function periodBasis(period, employeeId, { throughDate = null, rateBasis = null } = {}) {
+  const salary = await salaryAt(employeeId, period.end_date, rateBasis);
   if (salary.blocked) return { blocked: true, salary };
 
   const employment = await selectEmploymentDates.get(employeeId);
@@ -628,20 +677,24 @@ async function periodBasis(period, employeeId, { throughDate = null } = {}) {
     : period.end_date;
   const inPeriod = effectiveStart <= period.end_date && effectiveEnd >= period.start_date;
 
+  const isPartialPeriod = effectiveStart > period.start_date || effectiveEnd < period.end_date;
+
   let workingDaysCount = 0;
-  if (inPeriod) {
-    const workedDays = await eligibleWorkingDays(employeeId, effectiveStart, effectiveEnd);
+  let fullPeriodDays = 0;
+
+  if (isPartialPeriod) {
+    const [workedDays, fullDays] = await Promise.all([
+      inPeriod ? eligibleWorkingDays(employeeId, effectiveStart, effectiveEnd) : Promise.resolve([]),
+      eligibleWorkingDays(employeeId, period.start_date, period.end_date),
+    ]);
     workingDaysCount = workedDays.length;
+    fullPeriodDays = fullDays.length;
+  } else if (inPeriod) {
+    const fullDays = await eligibleWorkingDays(employeeId, period.start_date, period.end_date);
+    workingDaysCount = fullDays.length;
+    fullPeriodDays = fullDays.length;
   }
 
-  const fullPeriodDays = (await eligibleWorkingDays(employeeId, period.start_date, period.end_date)).length;
-
-  // A partial period (starter, leaver, or both) keeps the day-rate basis --
-  // you can't apply "full month minus unpaid days" to someone who only had
-  // a handful of scheduled days in the period to begin with. A full period
-  // starts from the whole monthly salary instead of re-deriving it from a
-  // day count, per the new formula.
-  const isPartialPeriod = effectiveStart > period.start_date || effectiveEnd < period.end_date;
   const grossBaseline = isPartialPeriod ? money(salary.dailyPrecise * workingDaysCount) : salary.monthly;
 
   const startDate = employment?.start_date || null;
@@ -708,8 +761,8 @@ function presentAdjustment(a) {
  * sheet and the estimate build on. `detail` adds the lifetime deficit and
  * leave views and the starter breakdown, which only the sheets show.
  */
-async function employeePosition(period, e, { throughDate = null, detail = true } = {}) {
-  const basis = await periodBasis(period, e.id, { throughDate });
+async function employeePosition(period, e, { throughDate = null, detail = true, rateBasis = null } = {}) {
+  const basis = await periodBasis(period, e.id, { throughDate, rateBasis });
   if (basis.blocked) {
     return {
       employee: e,
@@ -722,26 +775,23 @@ async function employeePosition(period, e, { throughDate = null, detail = true }
 
   const { salary, windowEnd, isPartialPeriod, workingDaysCount, fullPeriodDays, grossBaseline } = basis;
 
-  const unpaid = await unpaidDaysSummary({
-    employeeId: e.id, periodId: period.id, windowEnd, dailyPrecise: salary.dailyPrecise,
-  });
-  const existing = await selectPeriodAdjustmentsFor.all(period.id, e.id);
+  const [unpaid, existing, starter, deficit, balance] = await Promise.all([
+    unpaidDaysSummary({
+      employeeId: e.id, periodId: period.id, windowEnd, dailyPrecise: salary.dailyPrecise,
+    }),
+    selectPeriodAdjustmentsFor.all(period.id, e.id),
+    detail ? starterCalculation({
+      employeeId: e.id, periodStart: period.start_date, periodEnd: period.end_date, periodId: period.id, windowEnd,
+    }) : Promise.resolve(null),
+    detail ? attendance.balanceFor(e.id).catch(() => ({ wholeDayEquivalents: 0, carryForwardMinutes: 0 })) : Promise.resolve({ wholeDayEquivalents: 0, carryForwardMinutes: 0 }),
+    detail ? leave.balanceFor(e.id, period.end_date).catch(() => ({ blocked: false, availableDays: 0, isNegative: false })) : Promise.resolve({ blocked: false, availableDays: 0, isNegative: false }),
+  ]);
 
   if (!detail) return { employee: e, basis, unpaid, existing };
-
-  const starter = await starterCalculation({
-    employeeId: e.id, periodStart: period.start_date, periodEnd: period.end_date, periodId: period.id, windowEnd,
-  });
 
   const calculatedPeriodGross = isPartialPeriod
     ? money(salary.dailyPrecise * Math.max(0, workingDaysCount - unpaid.totalDays))
     : money(salary.monthly - salary.dailyPrecise * unpaid.totalDays);
-
-  // Lifetime informational view, kept for continuity -- unpaid.deficitDays
-  // above (NEW whole-days not yet claimed by a prior adjustment) is what
-  // actually drives the deduction now.
-  const deficit = await attendance.balanceFor(e.id);
-  const balance = await leave.balanceFor(e.id, period.end_date);
 
   const approvedTotal = existing
     .filter(a => a.status === 'APPROVED')
@@ -753,11 +803,35 @@ async function employeePosition(period, e, { throughDate = null, detail = true }
   // that exists has been approved or rejected.
   const netBasis = existing.length === 0 ? 'PROVISIONAL' : (hasPending ? 'PARTIALLY_DECIDED' : 'DECIDED');
 
+  const additionsTotal = existing
+    .filter(a => standingAmount(a) > 0)
+    .reduce((s, a) => s + standingAmount(a), 0);
+  const deductionsTotal = existing
+    .filter(a => standingAmount(a) < 0)
+    .reduce((s, a) => s + -standingAmount(a), 0);
+  const approvedAdditionsTotal = existing
+    .filter(a => a.status === 'APPROVED' && Number(a.approved_amount || 0) > 0)
+    .reduce((s, a) => s + Number(a.approved_amount || 0), 0);
+  const approvedDeductionsTotal = existing
+    .filter(a => a.status === 'APPROVED' && Number(a.approved_amount || 0) < 0)
+    .reduce((s, a) => s + -Number(a.approved_amount || 0), 0);
+
+  const projectedDeductions = Math.max(unpaid.totalAmount, deductionsTotal);
+  const projectedNetPayable = money(grossBaseline - projectedDeductions + additionsTotal);
+
   const row = {
     employeeId: e.id,
     employeeName: e.name,
     employeeNumber: e.employee_number || null,
-    salary: { monthly: salary.monthly, daily: salary.daily, annual: salary.annual, currency: salary.currency || 'GBP' },
+    salary: {
+      monthly: salary.monthly,
+      daily: salary.daily,
+      annual: salary.annual,
+      currency: salary.currency || 'GBP',
+      dailyWorkingDays: salary.dailyWorkingDays,
+      dailyCalendar30: salary.dailyCalendar30,
+      basis: salary.basis,
+    },
     isPartialPeriod,
     workingDaysCount,
     fullPeriodDays,
@@ -766,8 +840,8 @@ async function employeePosition(period, e, { throughDate = null, detail = true }
     // The last date whose data this row's deductions count: the cut-off, or
     // the period end for a manual period, or a leaver's last day if earlier.
     deductionsThrough: windowEnd,
-    isStarter: starter.applicable && !starter.blocked,
-    starter: starter.applicable && !starter.blocked ? {
+    isStarter: starter?.applicable && !starter?.blocked,
+    starter: starter?.applicable && !starter?.blocked ? {
       startDate: starter.startDate,
       eligibleWorkingDays: starter.eligibleWorkingDays,
       calculatedGross: starter.calculatedGross,
@@ -780,13 +854,17 @@ async function employeePosition(period, e, { throughDate = null, detail = true }
       totalDays: unpaid.totalDays, totalAmount: unpaid.totalAmount,
     },
     netPayable: { amount: money(grossBaseline + approvedTotal), basis: netBasis },
+    projectedNetPayable,
+    additions: {
+      total: additionsTotal,
+      approvedTotal: approvedAdditionsTotal,
+      items: existing.filter(a => standingAmount(a) > 0).map(presentAdjustment),
+    },
     attendanceDeficit: {
-      wholeDayEquivalents: deficit.wholeDayEquivalents,
-      carryForwardMinutes: deficit.carryForwardMinutes,
-      // Shown as a VALUE, never as a deduction, on this lifetime view.
-      // unpaidDays.deficitAmount above is the actual per-period deduction.
-      valueIfDeducted: money(salary.dailyPrecise * deficit.wholeDayEquivalents),
-      needsHrDecision: deficit.wholeDayEquivalents > 0,
+      wholeDayEquivalents: deficit.wholeDayEquivalents || 0,
+      carryForwardMinutes: deficit.carryForwardMinutes || 0,
+      valueIfDeducted: money(salary.dailyPrecise * (deficit.wholeDayEquivalents || 0)),
+      needsHrDecision: (deficit.wholeDayEquivalents || 0) > 0,
     },
     leave: balance.blocked
       ? { blocked: true, reason: balance.reason }
@@ -878,32 +956,56 @@ function presentSheetPeriod(period) {
  * Read-only by design: it computes what each employee's position looks like and
  * writes nothing. Adjustments are created only when a person chooses to.
  */
-async function preparePeriod(periodId) {
+async function preparePeriod(periodId, { basis = null } = {}) {
   const period = await selectPeriod.get(periodId);
   if (!period) throw new Error('No such payroll period.');
+
+  const rateBasis = basis || await getDailyRateBasis();
+
+  // Try Redis cache if available
+  const redis = require('../lib/redis').getClient();
+  const cacheKey = `payroll:prep:${periodId}:${rateBasis}`;
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached && typeof cached === 'object') return cached;
+    } catch (_) {}
+  }
+
+  const employees = await payrollEmployees(period);
+
+  // Compute all employee positions concurrently in parallel
+  const positions = await Promise.all(
+    employees.map(e => employeePosition(period, e, { rateBasis }))
+  );
 
   const rows = [];
   const blocked = [];
 
-  for (const e of await payrollEmployees(period)) {
-    const pos = await employeePosition(period, e);
+  for (const pos of positions) {
     if (pos.blocked) {
       blocked.push(pos.blocked);
-      continue;
+    } else if (pos.row) {
+      rows.push(pos.row);
     }
-    rows.push(pos.row);
   }
 
-  return {
-    period: presentSheetPeriod(period),
+  const result = {
+    period: { ...presentSheetPeriod(period), dailyRateBasis: rateBasis },
     employees: rows,
-    // Named rather than skipped, so a missing salary is visible instead of the
-    // employee simply not appearing on the sheet.
     blocked,
     note: 'Nothing here affects pay until an adjustment is created and approved. '
         + 'calculatedPeriodGross and unpaidDays are a preview of what generate-deductions would '
         + 'propose; netPayable reflects only what has actually been approved.',
   };
+
+  if (redis) {
+    try {
+      await redis.set(cacheKey, result, { ex: 60 });
+    } catch (_) {}
+  }
+
+  return result;
 }
 
 const insertAdjustment = db.prepare(`
@@ -1672,14 +1774,30 @@ async function employeeFlags(period, employeeId, basis, expectedNet, previous) {
  * may see; the preflight is always the whole run's, because it is the whole
  * run that approval would publish.
  */
-async function reviewPeriod(periodId, { visibleEmployeeIds = null } = {}) {
+async function reviewPeriod(periodId, { visibleEmployeeIds = null, basis = null } = {}) {
   const period = await selectPeriod.get(periodId);
   if (!period) throw new PayrollRunError('No such payroll period.', { code: 'NOT_FOUND', httpStatus: 404 });
 
+  const rateBasis = basis || await getDailyRateBasis();
+  const redis = require('../lib/redis').getClient();
+  const cacheKey = `payroll:review:${periodId}:${rateBasis}:${visibleEmployeeIds ? Array.from(visibleEmployeeIds).sort().join(',') : 'all'}`;
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached && typeof cached === 'object') return cached;
+    } catch (_) {}
+  }
+
+  const emps = await payrollEmployees(period);
+  const allPositions = await Promise.all(
+    emps.map(e => employeePosition(period, e, { rateBasis }))
+  );
+
   const positions = [];
   const excluded = [];
-  for (const e of await payrollEmployees(period)) {
-    const pos = await employeePosition(period, e);
+  for (let i = 0; i < emps.length; i++) {
+    const e = emps[i];
+    const pos = allPositions[i];
     if (pos.blocked) {
       excluded.push(pos.blocked);
     } else if (!pos.basis.inPeriod) {
@@ -1703,9 +1821,18 @@ async function reviewPeriod(periodId, { visibleEmployeeIds = null } = {}) {
     employees: 0, gross: 0, deductions: 0, net: 0,
     routineCount: 0, attentionCount: 0, pendingCount: 0, decidedCount: 0,
   };
-  const employees = [];
 
-  for (const pos of visible) {
+  const flagsList = await Promise.all(
+    visible.map(pos => {
+      const standing = pos.existing.reduce((s, a) => s + standingAmount(a), 0);
+      const expectedNet = money(pos.basis.grossBaseline + standing);
+      return employeeFlags(period, pos.employee.id, pos.basis, expectedNet, previous.get(pos.employee.id));
+    })
+  );
+
+  const employees = [];
+  for (let i = 0; i < visible.length; i++) {
+    const pos = visible[i];
     const standing = pos.existing.reduce((s, a) => s + standingAmount(a), 0);
     const expectedNet = money(pos.basis.grossBaseline + standing);
 
@@ -1725,11 +1852,8 @@ async function reviewPeriod(periodId, { visibleEmployeeIds = null } = {}) {
 
     employees.push({
       ...pos.row,
-      // gross + every approved line + every still-undecided line at its
-      // calculated figure: what this employee is paid if the run is approved
-      // as it stands.
       expectedNetPayable: expectedNet,
-      employeeFlags: await employeeFlags(period, pos.employee.id, pos.basis, expectedNet, previous.get(pos.employee.id)),
+      employeeFlags: flagsList[i],
     });
   }
 
@@ -1737,8 +1861,8 @@ async function reviewPeriod(periodId, { visibleEmployeeIds = null } = {}) {
   totals.deductions = money(totals.deductions);
   totals.net = money(totals.net);
 
-  return {
-    period: presentPeriod(period),
+  const result = {
+    period: { ...presentPeriod(period), dailyRateBasis: rateBasis },
     totals,
     preflight,
     employees,
@@ -1746,6 +1870,14 @@ async function reviewPeriod(periodId, { visibleEmployeeIds = null } = {}) {
     note: 'Approving the run approves every ROUTINE line still proposed. ATTENTION lines must each be '
         + 'decided explicitly. Nothing is paid until the run is approved.',
   };
+
+  if (redis) {
+    try {
+      await redis.set(cacheKey, result, { ex: 60 });
+    } catch (_) {}
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -2189,12 +2321,101 @@ async function listPayslips(periodId) {
 const statementsCache = new Map();
 const STATEMENTS_CACHE_TTL_MS = 60 * 1000;
 
-function invalidatePayrollCache(employeeId = null) {
+async function invalidatePayrollCache(employeeId = null, periodId = null) {
   if (employeeId) {
     statementsCache.delete(employeeId);
   } else {
     statementsCache.clear();
   }
+  workingDaysCache.clear();
+  cachedDailyRateBasis = null;
+  cachedDailyRateBasisExpiry = 0;
+  try {
+    const redis = require('../lib/redis').getClient();
+    if (redis) {
+      if (periodId) {
+        const keys = await redis.keys(`payroll:*:${periodId}:*`);
+        if (keys && keys.length > 0) await redis.del(...keys);
+      } else {
+        const keys = await redis.keys('payroll:*');
+        if (keys && keys.length > 0) await redis.del(...keys);
+      }
+    }
+  } catch (_) {}
+}
+
+async function setDailyRateBasis(basis, actor = 'hr') {
+  if (!['WORKING_DAYS_260', 'CALENDAR_DAYS_30'].includes(basis)) {
+    throw new Error("basis must be 'WORKING_DAYS_260' or 'CALENDAR_DAYS_30'");
+  }
+  await db.prepare(`
+    INSERT INTO org_settings (key, value) VALUES ('payroll_daily_rate_basis', ?)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+  `).run(basis);
+  cachedDailyRateBasis = basis;
+  cachedDailyRateBasisExpiry = Date.now() + 60 * 1000;
+  await invalidatePayrollCache();
+  await audit({
+    actor, action: 'PAYROLL_DAILY_RATE_BASIS_UPDATED', targetType: 'org_settings', targetId: 'payroll_daily_rate_basis',
+    after: { basis },
+  });
+  return { basis };
+}
+
+async function addException({ periodId, employeeId, amount, type = 'BONUS', explanation, actor = 'hr', autoApprove = true }) {
+  if (!employeeId) throw new Error('employeeId is required.');
+  if (!explanation || !String(explanation).trim()) {
+    throw new Error('An explanation or reason is required for an exception addition.');
+  }
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount === 0) {
+    throw new Error('A non-zero numeric amount is required.');
+  }
+
+  const period = await selectPeriod.get(periodId);
+  if (!period) throw new Error('No such payroll period.');
+  if (isFinal(period.status)) throw new Error(finalMessage(period));
+
+  const validTypes = ['BONUS', 'ALLOWANCE', 'SPECIAL_ADDITION', 'HR_EXCEPTION', 'MANUAL_ADJUSTMENT'];
+  const adjType = validTypes.includes(type) ? type : 'BONUS';
+
+  const id = 'pa_' + crypto.randomBytes(8).toString('hex');
+  const now = T.now();
+
+  if (autoApprove) {
+    await db.prepare(`
+      INSERT INTO payroll_adjustments
+        (id, period_id, employee_id, adjustment_type, calculated_days, calculated_amount,
+         approved_days, approved_amount, status, explanation, created_at, approved_at, approved_by,
+         review_level, review_reasons)
+      VALUES (?, ?, ?, ?, 0, ?, 0, ?, 'APPROVED', ?, ?, ?, ?, 'ROUTINE', ?)
+    `).run(
+      id, periodId, employeeId, adjType, numericAmount, numericAmount,
+      String(explanation).trim(), now, now, actor, JSON.stringify(['HR Exception Addition (Approved)'])
+    );
+
+    await audit({
+      actor, action: 'PAYROLL_EXCEPTION_APPROVED',
+      targetType: 'employee', targetId: employeeId,
+      after: { adjustmentId: id, adjustmentType: adjType, amount: numericAmount },
+      note: String(explanation).trim(),
+    });
+  } else {
+    await insertAdjustment.run(
+      id, periodId, employeeId, adjType, 0, numericAmount, null,
+      String(explanation).trim(), now, 'ATTENTION', JSON.stringify([MANUAL_REASON])
+    );
+
+    await audit({
+      actor, action: 'PAYROLL_EXCEPTION_PROPOSED',
+      targetType: 'employee', targetId: employeeId,
+      after: { adjustmentId: id, adjustmentType: adjType, calculatedAmount: numericAmount },
+      note: String(explanation).trim(),
+    });
+  }
+
+  await invalidatePayrollCache(employeeId, periodId);
+  return { id, employeeId, periodId, type: adjType, amount: numericAmount, status: autoApprove ? 'APPROVED' : 'PROPOSED' };
 }
 
 const selectPublishedPayslips = db.prepare(`
@@ -2567,6 +2788,7 @@ async function latestPayslipFor(employeeId) {
 
 module.exports = {
   rates, money, salaryAt, setSalary, salaryHistoryFor,
+  getDailyRateBasis, setDailyRateBasis, addException,
   eligibleWorkingDays, starterCalculation, leaverCalculation,
   createPeriod, updatePeriodExchangeRate, preparePeriod, proposeAdjustment, decideAdjustment, closePeriod,
   generatePeriodDeductions, unpaidDaysSummary,
