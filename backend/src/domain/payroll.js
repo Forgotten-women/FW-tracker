@@ -783,8 +783,8 @@ async function employeePosition(period, e, { throughDate = null, detail = true, 
     detail ? starterCalculation({
       employeeId: e.id, periodStart: period.start_date, periodEnd: period.end_date, periodId: period.id, windowEnd,
     }) : Promise.resolve(null),
-    detail ? attendance.balanceFor(e.id).catch(() => ({ wholeDayEquivalents: 0, carryForwardMinutes: 0 })) : Promise.resolve({ wholeDayEquivalents: 0, carryForwardMinutes: 0 }),
-    detail ? leave.balanceFor(e.id, period.end_date).catch(() => ({ blocked: false, availableDays: 0, isNegative: false })) : Promise.resolve({ blocked: false, availableDays: 0, isNegative: false }),
+    detail ? attendance.balanceAsOf(e.id, period.end_date).catch(() => ({ wholeDayEquivalents: 0, carryForwardMinutes: 0 })) : Promise.resolve({ wholeDayEquivalents: 0, carryForwardMinutes: 0 }),
+    detail ? leave.balanceFor(e.id, period.end_date, null, { skipAccrue: true, summaryOnly: true }).catch(() => ({ blocked: false, availableDays: 0, isNegative: false })) : Promise.resolve({ blocked: false, availableDays: 0, isNegative: false }),
   ]);
 
   if (!detail) return { employee: e, basis, unpaid, existing };
@@ -881,7 +881,7 @@ async function employeePosition(period, e, { throughDate = null, detail = true, 
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-async function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, cutoffDate = null, payDate = null, actor }) {
+async function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, processingFee = 0, processingFeeType = 'DEDUCTION', cutoffDate = null, payDate = null, actor }) {
   if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
     throw new Error('startDate and endDate must be YYYY-MM-DD.');
   }
@@ -902,20 +902,46 @@ async function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, cu
   }
 
   const rate = Number(exchangeRate) > 0 ? Number(exchangeRate) : 350.0;
+  const fee = Number(processingFee) >= 0 ? Number(processingFee) : 0;
+  const feeType = (String(processingFeeType).toUpperCase() === 'ADDITION') ? 'ADDITION' : 'DEDUCTION';
   const id = 'pp_' + crypto.randomBytes(6).toString('hex');
+  const nowMs = T.now();
+
   try {
     await db.prepare(`
-      INSERT INTO payroll_periods (id, name, start_date, end_date, exchange_rate, status, created_at, cutoff_date, pay_date)
-      VALUES (?,?,?,?,?, 'OPEN', ?, ?, ?)
-    `).run(id, name || `${startDate} to ${endDate}`, startDate, endDate, rate, T.now(), cutoffDate, payDate);
+      INSERT INTO payroll_periods (id, name, start_date, end_date, exchange_rate, processing_fee, processing_fee_type, status, created_at, cutoff_date, pay_date)
+      VALUES (?,?,?,?,?,?,?, 'OPEN', ?, ?, ?)
+    `).run(id, name || `${startDate} to ${endDate}`, startDate, endDate, rate, fee, feeType, nowMs, cutoffDate, payDate);
   } catch (err) {
     if (err.code === '23505') throw new Error('A payroll period for exactly these dates already exists.');
     throw err;
   }
 
+  // If processing fee is set > 0, automatically seed routine adjustments for all active employees
+  if (fee > 0) {
+    const periodObj = { id, start_date: startDate, end_date: endDate, status: 'OPEN' };
+    const emps = await payrollEmployees(periodObj);
+    const calculatedAmount = feeType === 'DEDUCTION' ? -fee : fee;
+    const explanation = `Processing fee (${feeType === 'DEDUCTION' ? 'Deduction' : 'Addition'})`;
+    for (const emp of emps) {
+      const adjId = 'pa_' + crypto.randomBytes(8).toString('hex');
+      await db.prepare(`
+        INSERT INTO payroll_adjustments
+          (id, period_id, employee_id, adjustment_type, calculated_days, calculated_amount,
+           source_reference, explanation, status, created_at, review_level, review_reasons)
+        VALUES (?,?,?,?,?,?,?,?, 'PROPOSED', ?, 'ROUTINE', ?)
+      `).run(
+        adjId, id, emp.id, 'PROCESSING_FEE', 0, calculatedAmount,
+        null, explanation, nowMs, JSON.stringify([`Period processing fee (${feeType})`])
+      );
+    }
+  }
+
+  invalidatePayrollCache(null, id);
+
   await audit({ actor, action: 'PAYROLL_PERIOD_CREATED', targetType: 'payroll_period', targetId: id,
-          after: { startDate, endDate, exchangeRate: rate, cutoffDate, payDate } });
-  return { id, name: name || `${startDate} to ${endDate}`, startDate, endDate, exchangeRate: rate, status: 'OPEN', cutoffDate, payDate };
+          after: { startDate, endDate, exchangeRate: rate, processingFee: fee, processingFeeType: feeType, cutoffDate, payDate } });
+  return { id, name: name || `${startDate} to ${endDate}`, startDate, endDate, exchangeRate: rate, processingFee: fee, processingFeeType: feeType, status: 'OPEN', cutoffDate, payDate };
 }
 
 async function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
@@ -931,6 +957,7 @@ async function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
   }
 
   await db.prepare('UPDATE payroll_periods SET exchange_rate = ? WHERE id = ?').run(rate, periodId);
+  invalidatePayrollCache(null, periodId);
   await audit({
     actor, action: 'PAYROLL_PERIOD_EXCHANGE_RATE_UPDATED', targetType: 'payroll_period', targetId: periodId,
     before: { exchangeRate: period.exchange_rate }, after: { exchangeRate: rate },
@@ -944,11 +971,17 @@ function presentSheetPeriod(period) {
     id: period.id, name: period.name,
     from: period.start_date, to: period.end_date,
     exchangeRate: period.exchange_rate || 350.0,
+    processingFee: Number(period.processing_fee) || 0,
+    processingFeeType: period.processing_fee_type || 'DEDUCTION',
     status: period.status,
     cutoffDate: period.cutoff_date || null,
     payDate: period.pay_date || null,
   };
 }
+
+// In-memory cache for preparePeriod
+const prepMemoryCache = new Map();
+const PREP_CACHE_TTL_MS = 60 * 1000;
 
 /**
  * Builds the preparation sheet for a period.
@@ -962,13 +995,23 @@ async function preparePeriod(periodId, { basis = null } = {}) {
 
   const rateBasis = basis || await getDailyRateBasis();
 
+  // Fast memory cache check
+  const memKey = `${periodId}:${rateBasis}`;
+  const memHit = prepMemoryCache.get(memKey);
+  if (memHit && Date.now() < memHit.expiresAt) {
+    return memHit.data;
+  }
+
   // Try Redis cache if available
   const redis = require('../lib/redis').getClient();
   const cacheKey = `payroll:prep:${periodId}:${rateBasis}`;
   if (redis) {
     try {
       const cached = await redis.get(cacheKey);
-      if (cached && typeof cached === 'object') return cached;
+      if (cached && typeof cached === 'object') {
+        prepMemoryCache.set(memKey, { data: cached, expiresAt: Date.now() + PREP_CACHE_TTL_MS });
+        return cached;
+      }
     } catch (_) {}
   }
 
@@ -998,6 +1041,8 @@ async function preparePeriod(periodId, { basis = null } = {}) {
         + 'calculatedPeriodGross and unpaidDays are a preview of what generate-deductions would '
         + 'propose; netPayable reflects only what has actually been approved.',
   };
+
+  prepMemoryCache.set(memKey, { data: result, expiresAt: Date.now() + PREP_CACHE_TTL_MS });
 
   if (redis) {
     try {
@@ -1289,6 +1334,7 @@ async function generatePeriodDeductions({ periodId, actor }) {
 const ROUTINE_REASON = {
   [UNPAID_LEAVE_DEDUCTION]: 'Unpaid leave already approved by a person',
   [UNAUTHORISED_ABSENCE_UNPAID]: 'Absence already confirmed as unpaid by HR',
+  'PROCESSING_FEE': 'Period processing fee configured for payroll',
 };
 const DEFICIT_REASON = 'Derived from accumulated lateness/early departures';
 
@@ -1919,6 +1965,7 @@ const LINE_LABELS = {
   [ATTENDANCE_DEFICIT_DAY]: 'Attendance deficit',
   [UNAUTHORISED_ABSENCE_UNPAID]: 'Unpaid absence',
   [UNPAID_LEAVE_DEDUCTION]: 'Unpaid leave',
+  'PROCESSING_FEE': 'Processing fee',
 };
 
 function lineLabel(type) {
@@ -2322,6 +2369,7 @@ const statementsCache = new Map();
 const STATEMENTS_CACHE_TTL_MS = 60 * 1000;
 
 async function invalidatePayrollCache(employeeId = null, periodId = null) {
+  prepMemoryCache.clear();
   if (employeeId) {
     statementsCache.delete(employeeId);
   } else {

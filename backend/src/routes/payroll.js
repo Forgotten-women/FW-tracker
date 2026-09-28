@@ -161,6 +161,8 @@ router.get('/periods', requirePermission('payroll.read'), async (req, res) => {
     periods: rows.map(p => ({
       id: p.id, name: p.name, from: p.start_date, to: p.end_date, status: p.status,
       exchangeRate: p.exchange_rate || 350.0,
+      processingFee: Number(p.processing_fee) || 0,
+      processingFeeType: p.processing_fee_type || 'DEDUCTION',
       approvedBy: p.approved_by,
       approvedAt: p.approved_at ? T.displayTime(p.approved_at) : null,
       // The monthly run. Timestamps are epoch ms; null until they happen.
@@ -182,6 +184,8 @@ router.post('/periods', requirePermission('payroll.approve'), async (req, res) =
       startDate: req.body?.startDate,
       endDate: req.body?.endDate,
       exchangeRate: req.body?.exchangeRate,
+      processingFee: req.body?.processingFee,
+      processingFeeType: req.body?.processingFeeType,
       cutoffDate: req.body?.cutoffDate ?? null,
       payDate: req.body?.payDate ?? null,
       actor: getActor(req),

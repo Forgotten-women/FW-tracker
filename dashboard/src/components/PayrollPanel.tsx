@@ -429,7 +429,12 @@ function CreatePeriodModal({
     from: string,
     to: string,
     exchangeRate: number,
-    dates: { cutoffDate: string | null; payDate: string | null },
+    dates: {
+      cutoffDate: string | null;
+      payDate: string | null;
+      processingFee?: number;
+      processingFeeType?: 'DEDUCTION' | 'ADDITION';
+    },
   ) => Promise<void>;
 }) {
   const [name, setName] = useState('');
@@ -438,6 +443,8 @@ function CreatePeriodModal({
   const [cutoff, setCutoff] = useState('');
   const [payDate, setPayDate] = useState('');
   const [exchangeRate, setExchangeRate] = useState('350.00');
+  const [processingFee, setProcessingFee] = useState('');
+  const [processingFeeType, setProcessingFeeType] = useState<'DEDUCTION' | 'ADDITION'>('DEDUCTION');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -447,10 +454,17 @@ function CreatePeriodModal({
     if (cutoff && (cutoff < from || cutoff > to)) { setError('The cut-off must fall inside the period.'); return; }
     const parsedRate = parseFloat(exchangeRate);
     if (isNaN(parsedRate) || parsedRate <= 0) { setError('Please enter a valid positive conversion rate.'); return; }
+    const parsedFee = parseFloat(processingFee);
+    const fee = !isNaN(parsedFee) && parsedFee > 0 ? parsedFee : 0;
     setLoading(true);
     setError('');
     try {
-      await onCreate(name.trim(), from, to, parsedRate, { cutoffDate: cutoff || null, payDate: payDate || null });
+      await onCreate(name.trim(), from, to, parsedRate, {
+        cutoffDate: cutoff || null,
+        payDate: payDate || null,
+        processingFee: fee,
+        processingFeeType,
+      });
       onClose();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create period.');
@@ -537,6 +551,42 @@ function CreatePeriodModal({
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-mono text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
             />
             <p className="mt-1 text-[11px] text-slate-500">Rate applied to this specific payroll run. Can be adjusted until the run is published.</p>
+          </div>
+
+          {/* Processing Fee Section */}
+          <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3.5">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300">Processing Fee (Applied to Each Employee)</label>
+              <span className="text-[10px] font-medium text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded">Per Employee</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-400">Fee Amount</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={processingFee}
+                  onChange={(e) => setProcessingFee(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-mono text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-400">Fee Type</label>
+                <select
+                  value={processingFeeType}
+                  onChange={(e) => setProcessingFeeType(e.target.value as 'DEDUCTION' | 'ADDITION')}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="DEDUCTION">Deduction (Deduct from pay)</option>
+                  <option value="ADDITION">Addition (Add to pay)</option>
+                </select>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              When amount &gt; 0, automatically creates a routine processing fee adjustment for every eligible employee in this payroll period.
+            </p>
           </div>
         </div>
         <div className="mt-6 flex gap-3">
@@ -1409,6 +1459,11 @@ function PeriodDetailView({
                 <span>£1 = ₨{periodRate.toFixed(2)}</span>
               </span>
             )}
+            {Number(period.processingFee || 0) > 0 && (
+              <span className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-950/40 px-2.5 py-1.5 text-xs font-mono text-purple-300" title="Processing fee applied to each employee">
+                <span>Fee: {period.processingFeeType === 'ADDITION' ? '+' : '-'}{currency === 'GBP' ? '£' : '₨'}{period.processingFee}</span>
+              </span>
+            )}
             {!isFinal && (
               <>
                 <Button size="sm" variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => { setSetSalaryEmployeeId(null); setShowSetSalary(true); }}>
@@ -1990,7 +2045,12 @@ export function PayrollPanel() {
     startDate: string,
     endDate: string,
     exchangeRate: number,
-    dates: { cutoffDate: string | null; payDate: string | null },
+    dates: {
+      cutoffDate: string | null;
+      payDate: string | null;
+      processingFee?: number;
+      processingFeeType?: 'DEDUCTION' | 'ADDITION';
+    },
   ) => {
     await api.createPayrollPeriod(name, startDate, endDate, exchangeRate, dates);
     loadPeriods();

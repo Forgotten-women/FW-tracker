@@ -376,22 +376,43 @@ async function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequest
 /**
  * The employee leave dashboard figures with full 8-metric report.
  */
-async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestId = null) {
+async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestIdOrOpts = null, options = {}) {
+  let excludeRequestId = excludeRequestIdOrOpts;
+  let opts = options;
+  if (excludeRequestIdOrOpts && typeof excludeRequestIdOrOpts === 'object') {
+    opts = excludeRequestIdOrOpts;
+    excludeRequestId = null;
+  }
+  const { skipAccrue = false } = opts || {};
+
   const year = await holidayYearFor(employeeId, onDate);
   if (year.blocked) return { blocked: true, ...year };
 
-  // Always ensure accruals and rollovers are current
-  try {
-    if (year.yearsOfService > 0) {
-      await rolloverHolidayYear(employeeId, onDate);
+  // Ensure accruals and rollovers are current (skip during bulk read-only queries like payroll preview)
+  if (!skipAccrue) {
+    try {
+      if (year.yearsOfService > 0) {
+        await rolloverHolidayYear(employeeId, onDate);
+      }
+      await accrue(employeeId, onDate);
+    } catch (err) {
+      console.error('Auto-accrual/rollover error in balanceFor:', err);
     }
-    await accrue(employeeId, onDate);
-  } catch (err) {
-    console.error('Auto-accrual/rollover error in balanceFor:', err);
   }
 
   const raw = await balanceRaw(employeeId, year, onDate, excludeRequestId);
   const round2 = (n) => Math.round(n * 100) / 100;
+
+  if (opts.summaryOnly) {
+    return {
+      blocked: false,
+      availableDays: round2(raw.availableDays),
+      isNegative: raw.availableDays < 0,
+      accruedDays: round2(raw.accruedDays),
+      takenDays: round2(raw.takenDays),
+      bookedDays: round2(raw.bookedDays),
+    };
+  }
 
   // Check carry-forward approval for this closing cycle
   const cf = await selectCarryForwardRecord.get(employeeId, year.leaveYear);

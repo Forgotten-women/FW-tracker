@@ -643,7 +643,12 @@ export const api = {
     startDate: string,
     endDate: string,
     exchangeRate?: number,
-    options: { cutoffDate?: string | null; payDate?: string | null } = {},
+    options: {
+      cutoffDate?: string | null;
+      payDate?: string | null;
+      processingFee?: number;
+      processingFeeType?: 'DEDUCTION' | 'ADDITION';
+    } = {},
   ) =>
     request<{ status: string; period: PayrollPeriod }>('/api/payroll/periods', {
       method: 'POST',
@@ -651,6 +656,8 @@ export const api = {
         name, startDate, endDate, exchangeRate,
         cutoffDate: options.cutoffDate ?? null,
         payDate: options.payDate ?? null,
+        processingFee: options.processingFee ?? 0,
+        processingFeeType: options.processingFeeType ?? 'DEDUCTION',
       }),
     }),
 
