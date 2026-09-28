@@ -497,6 +497,12 @@ async function refreshStatus() {
           networkText.textContent = '⚠️ Attendance Paused · Not on Office Wi-Fi';
           if (wifiConnectBtn) wifiConnectBtn.classList.remove('hidden');
         }
+      } else {
+        // Device is enrolled, but waiting for initial heartbeat response from server
+        if (statusBanner) statusBanner.className = 'status-banner syncing';
+        if (statusText) statusText.textContent = '🔄 Connecting to Server…';
+        if (networkText) networkText.textContent = '📶 Checking Office Wi-Fi…';
+        if (checkinText) checkinText.textContent = '📌 Check-in: Syncing…';
       }
       activeTimer.textContent = formatHMS(currentActiveSecs);
     } else {
@@ -507,6 +513,9 @@ async function refreshStatus() {
     }
   } catch (err) {
     console.error('refreshStatus error:', err);
+    if (statusBanner) statusBanner.className = 'status-banner syncing';
+    if (statusText) statusText.textContent = '🔄 Reconnecting…';
+    if (networkText) networkText.textContent = '📶 Verifying Network…';
     try {
       if (localStorage.getItem('ot_enrolled') === 'true') {
         if (statusSection) statusSection.classList.remove('hidden');

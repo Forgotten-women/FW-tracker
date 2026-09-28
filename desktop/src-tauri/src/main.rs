@@ -560,7 +560,6 @@ fn main() {
 
                     // On app launch, query initial status immediately without waiting 60s
                     if !cfg.token.is_empty() && first_run {
-                        first_run = false;
                         let bssid = tracker::network::get_connected_bssid();
                         let ssid = tracker::network::get_connected_ssid();
                         let visible = tracker::network::get_visible_office_bssids();
@@ -582,19 +581,25 @@ fn main() {
                             current_app: None,
                             app_breakdown: None,
                         };
-                        if let Ok(resp) = client::send_heartbeat(&cfg, payload).await {
-                            live::on_heartbeat(&resp);
-                            *state.latest_response.lock().unwrap() = Some(resp.clone());
-                            let mut cfg_to_save = cfg.clone();
-                            let effective_secs = std::cmp::max(
-                                resp.today.active_seconds,
-                                resp.today.office_presence_minutes.unwrap_or(0).max(0) as u64 * 60,
-                            );
-                            cfg_to_save.cached_active_seconds = effective_secs;
-                            cfg_to_save.cached_date_key = resp.today.date_key.clone();
-                            client::save_config(&cfg_to_save);
-                            *state.config.lock().unwrap() = cfg_to_save;
-                            let _ = app_handle.emit_all("heartbeat-updated", resp);
+                        match client::send_heartbeat(&cfg, payload).await {
+                            Ok(resp) => {
+                                first_run = false;
+                                live::on_heartbeat(&resp);
+                                *state.latest_response.lock().unwrap() = Some(resp.clone());
+                                let mut cfg_to_save = cfg.clone();
+                                let effective_secs = std::cmp::max(
+                                    resp.today.active_seconds,
+                                    resp.today.office_presence_minutes.unwrap_or(0).max(0) as u64 * 60,
+                                );
+                                cfg_to_save.cached_active_seconds = effective_secs;
+                                cfg_to_save.cached_date_key = resp.today.date_key.clone();
+                                client::save_config(&cfg_to_save);
+                                *state.config.lock().unwrap() = cfg_to_save;
+                                let _ = app_handle.emit_all("heartbeat-updated", resp);
+                            }
+                            Err(e) => {
+                                eprintln!("[main] initial heartbeat probe failed ({}), will retry on next 10s tick", e);
+                            }
                         }
                     }
 
