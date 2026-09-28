@@ -129,6 +129,14 @@ pub struct SessionStats {
     pub office_presence_minutes: Option<i64>,
     #[serde(default)]
     pub office_presence_formatted: Option<String>,
+    #[serde(default)]
+    pub shift_target_minutes: Option<u32>,
+    #[serde(default)]
+    pub shift_progress_percent: Option<u32>,
+    #[serde(default)]
+    pub shift_remaining_minutes: Option<u32>,
+    #[serde(default)]
+    pub shift_remaining_formatted: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

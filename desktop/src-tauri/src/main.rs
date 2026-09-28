@@ -581,7 +581,11 @@ fn main() {
                             live::on_heartbeat(&resp);
                             *state.latest_response.lock().unwrap() = Some(resp.clone());
                             let mut cfg_to_save = cfg.clone();
-                            cfg_to_save.cached_active_seconds = resp.today.active_seconds;
+                            let effective_secs = std::cmp::max(
+                                resp.today.active_seconds,
+                                resp.today.office_presence_minutes.unwrap_or(0).max(0) as u64 * 60,
+                            );
+                            cfg_to_save.cached_active_seconds = effective_secs;
                             cfg_to_save.cached_date_key = resp.today.date_key.clone();
                             client::save_config(&cfg_to_save);
                             *state.config.lock().unwrap() = cfg_to_save;
@@ -718,7 +722,11 @@ fn main() {
                                 live::on_heartbeat(&final_resp);
                                 *state.latest_response.lock().unwrap() = Some(final_resp.clone());
                                 let mut cfg_to_save = cfg.clone();
-                                cfg_to_save.cached_active_seconds = final_resp.today.active_seconds;
+                                let effective_secs = std::cmp::max(
+                                    final_resp.today.active_seconds,
+                                    final_resp.today.office_presence_minutes.unwrap_or(0).max(0) as u64 * 60,
+                                );
+                                cfg_to_save.cached_active_seconds = effective_secs;
                                 cfg_to_save.cached_date_key = final_resp.today.date_key.clone();
                                 client::save_config(&cfg_to_save);
                                 *state.config.lock().unwrap() = cfg_to_save;
