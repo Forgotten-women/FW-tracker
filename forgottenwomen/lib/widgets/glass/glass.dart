@@ -357,29 +357,36 @@ class GlassNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: GlassCard(
-        blur: true,
-        strong: true,
-        radius: 26,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            for (var i = 0; i < items.length; i++) _buildItem(i),
-          ],
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 400;
+        final horizontalMargin = isCompact ? 12.0 : 16.0;
+
+        return Padding(
+          padding: EdgeInsets.fromLTRB(horizontalMargin, 0, horizontalMargin, 12),
+          child: GlassCard(
+            blur: true,
+            strong: true,
+            radius: 26,
+            padding: EdgeInsets.symmetric(horizontal: isCompact ? 5 : 8, vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                for (var i = 0; i < items.length; i++) _buildItem(i, isCompact),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildItem(int i) {
+  Widget _buildItem(int i, bool isCompact) {
     final item = items[i];
     final active = i == currentIndex;
     final iconColor = active ? AppColors.onAccent : AppColors.textSecondary;
 
-    Widget icon = Icon(active ? item.activeIcon : item.icon, size: 22, color: iconColor);
+    Widget icon = Icon(active ? item.activeIcon : item.icon, size: isCompact ? 20 : 22, color: iconColor);
     if (item.badge > 0) {
       icon = Badge(
         label: Text('${item.badge}'),
@@ -400,7 +407,9 @@ class GlassNavBar extends StatelessWidget {
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
           height: 48,
-          padding: EdgeInsets.symmetric(horizontal: active ? 16 : 12),
+          padding: EdgeInsets.symmetric(
+            horizontal: active ? (isCompact ? 10 : 14) : (isCompact ? 8 : 10),
+          ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             gradient: active ? AppColors.accentGradient : null,
@@ -419,13 +428,22 @@ class GlassNavBar extends StatelessWidget {
             children: [
               icon,
               if (active) ...[
-                const SizedBox(width: 8),
-                Text(
-                  item.label,
-                  style: const TextStyle(
-                    color: AppColors.onAccent,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
+                SizedBox(width: isCompact ? 5 : 8),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: isCompact ? 85 : 110,
+                  ),
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: TextStyle(
+                      color: AppColors.onAccent,
+                      fontWeight: FontWeight.w700,
+                      fontSize: isCompact ? 12 : 13,
+                      letterSpacing: -0.2,
+                    ),
                   ),
                 ),
               ],
