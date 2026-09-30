@@ -129,3 +129,14 @@ test('exiting the agent is recorded rather than looking like missing data', asyn
   const session = await db.prepare('SELECT status FROM workstation_sessions WHERE device_id = ?').get(p.laptopId);
   assert.equal(session.status, 'AGENT_STOPPED');
 });
+
+test('the daily target is the full working day, break included, as attendance judges it', async () => {
+  const p = await enrolPair('Target Tester');
+  const hb = await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0 });
+  const t = hb.body.today;
+  assert.equal(t.shiftTargetMinutes, 480, '8h day (7h 30m + the 30m break), not a fixed 450');
+  assert.equal(t.shiftBreakIncludedMinutes, 30);
+  const credited = Math.max(0, t.officePresenceMinutes - t.shiftExcessBreakMinutes);
+  assert.equal(t.shiftRemainingMinutes, Math.max(0, 480 - credited));
+  assert.equal(t.shiftProgressPercent, Math.min(100, Math.round((credited / 480) * 100)));
+});

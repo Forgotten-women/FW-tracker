@@ -296,18 +296,22 @@ function formatMS(seconds) {
   return isNegative ? `+${m}:${s}` : `${m}:${s}`;
 }
 
-let currentShiftTargetMins = 450;
+// The full working day, break included (8h by default), as the server's
+// attendance engine judges it. A break longer than the allowance extends it.
+let currentShiftTargetMins = 480;
 let currentOfficePresenceMins = 0;
+let currentExcessBreakMins = 0;
 
 function updateShiftTargetDisplay(activeSecs, shiftTargetMins = currentShiftTargetMins, officePresenceMins = currentOfficePresenceMins) {
   if (!shiftTargetCard) return;
-  currentShiftTargetMins = shiftTargetMins || 450;
+  currentShiftTargetMins = shiftTargetMins || 480;
   currentOfficePresenceMins = officePresenceMins || 0;
   const activeMins = Math.floor((activeSecs || 0) / 60);
   const workedMins = Math.max(activeMins, currentOfficePresenceMins);
   const workedFormatted = `${Math.floor(workedMins / 60)}h ${workedMins % 60}m`;
-  const pct = Math.min(100, Math.round((workedMins / currentShiftTargetMins) * 100));
-  const remMins = Math.max(0, currentShiftTargetMins - workedMins);
+  const creditedMins = Math.max(0, workedMins - currentExcessBreakMins);
+  const pct = Math.min(100, Math.round((creditedMins / currentShiftTargetMins) * 100));
+  const remMins = Math.max(0, currentShiftTargetMins - creditedMins);
   const remFormatted = `${Math.floor(remMins / 60)}h ${remMins % 60}m`;
 
   if (shiftWorkedValue) {
@@ -338,7 +342,8 @@ function updateShiftTargetDisplay(activeSecs, shiftTargetMins = currentShiftTarg
     if (remMins <= 0 || pct >= 100) {
       shiftRemText.innerHTML = '<span class="rem-emerald">Target reached</span>';
     } else {
-      shiftRemText.innerHTML = `<span class="rem-amber">${remFormatted} remaining</span>`;
+      const over = currentExcessBreakMins > 0 ? ` · incl. ${currentExcessBreakMins}m over break` : '';
+      shiftRemText.innerHTML = `<span class="rem-amber">${remFormatted} remaining${over}</span>`;
     }
   }
 }
@@ -464,7 +469,11 @@ async function refreshStatus() {
 
         // Official Daily Shift Target (HR Dashboard Synced)
         if (shiftTargetCard) {
-          const REQUIRED_SHIFT_MINS = data.latest.today.shiftTargetMinutes || 450;
+          const REQUIRED_SHIFT_MINS = data.latest.today.shiftTargetMinutes || 480;
+          currentExcessBreakMins = Number(data.latest.today.shiftExcessBreakMinutes) || 0;
+          const breakIncluded = Number(data.latest.today.shiftBreakIncludedMinutes) || 30;
+          const ringEl = document.querySelector('.ring');
+          if (ringEl) ringEl.title = `Daily target: ${Math.floor(REQUIRED_SHIFT_MINS / 60)}h ${String(REQUIRED_SHIFT_MINS % 60).padStart(2, '0')}m, including your ${breakIncluded}m break`;
           const presenceMins = (data.latest.today.officePresenceMinutes !== null && data.latest.today.officePresenceMinutes !== undefined)
             ? data.latest.today.officePresenceMinutes
             : 0;

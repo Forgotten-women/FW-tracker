@@ -454,7 +454,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     .toUpperCase();
 
   // Shift calculation (dynamically resolved from employee's assigned shift pattern)
-  const REQUIRED_SHIFT_MINUTES = employeeProfile?.schedule?.dayEquivalentMinutes || 450;
+  // The full day, break included: totalMinutes is time present, break and all.
+  const REQUIRED_SHIFT_MINUTES = employeeProfile?.schedule?.dayEquivalentMinutes || 480;
   const workedMinutes = employee.totalMinutes || 0;
   const shiftProgressPercent = Math.min(100, Math.round((workedMinutes / REQUIRED_SHIFT_MINUTES) * 100));
   const remainingMinutes = Math.max(0, REQUIRED_SHIFT_MINUTES - workedMinutes);

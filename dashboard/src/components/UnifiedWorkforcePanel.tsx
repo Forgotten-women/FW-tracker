@@ -424,7 +424,7 @@ export function UnifiedWorkforcePanel({
                     <th className="px-4 py-3.5">Employee</th>
                     <th className="px-3 py-3.5">First In</th>
                     <th className="px-3 py-3.5">Last Seen</th>
-                    <th className="px-3 py-3.5">Worked (Target 7h 30m)</th>
+                    <th className="px-3 py-3.5">Worked (Target 8h incl. break)</th>
                     <th className="px-3 py-3.5">Break Taken</th>
                     <th className="px-3 py-3.5">Deficit</th>
                     <th className="px-3 py-3.5 text-center">Status</th>
@@ -519,7 +519,9 @@ export function UnifiedWorkforcePanel({
 
                 // Shift target calculations
                 const workedMinutes = e.totalMinutes || 0;
-                const targetPercent = Math.min(100, Math.round((workedMinutes / 450) * 100)); // 450m = 7h 30m
+                // Time present includes the break, so it is measured against the
+                // full 8h day (7h 30m + the 30m break), as attendance judges it.
+                const targetPercent = Math.min(100, Math.round((workedMinutes / 480) * 100));
 
                 const initials = e.employeeName
                   .split(' ')
@@ -577,7 +579,7 @@ export function UnifiedWorkforcePanel({
                       </div>
                     </div>
 
-                    {/* Shift Progress Bar (Target: 7h 30m) */}
+                    {/* Shift Progress Bar (Target: 8h, the 30m break included) */}
                     <div className="mt-4 pt-3 border-t border-white/6">
                       <div className="flex items-center justify-between text-[11px] mb-1.5">
                         <span className="text-slate-400 font-medium">Worked Today:</span>
@@ -585,7 +587,7 @@ export function UnifiedWorkforcePanel({
                           <span className="font-bold text-emerald-400">
                             {e.timeWorkedFormatted}
                           </span>
-                          <span className="text-slate-500 text-[10px]">/ 7h 30m</span>
+                          <span className="text-slate-500 text-[10px]">/ 8h 00m</span>
                         </div>
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
@@ -658,7 +660,7 @@ export function UnifiedWorkforcePanel({
                   <th className="px-3 py-3.5">Live Status</th>
                   <th className="px-3 py-3.5">First In</th>
                   <th className="px-3 py-3.5">Last Seen</th>
-                  <th className="px-3 py-3.5">Worked (Target 7h 30m)</th>
+                  <th className="px-3 py-3.5">Worked (Target 8h incl. break)</th>
                   <th className="px-3 py-3.5">Break / Deficit</th>
                   <th className="px-3 py-3.5">Workstation & App</th>
                   <th className="px-4 py-3.5 text-right">Action</th>
@@ -725,7 +727,7 @@ export function UnifiedWorkforcePanel({
                           {e.timeWorkedFormatted}
                         </div>
                         <div className="text-[10px] text-slate-500">
-                          of 7h 30m target
+                          of 8h target (incl. 30m break)
                         </div>
                       </td>
 
