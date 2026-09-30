@@ -43,6 +43,22 @@ types.setTypeParser(20, value => (value === null ? null : Number(value)));
 // The connection the current transaction is running on, if any.
 const txContext = new AsyncLocalStorage();
 
+// Read memo: inside withReadMemo(), an identical SELECT with identical
+// parameters is sent to the database once and shared. For read-only
+// computations that assemble one employee at a time from many small helpers
+// (the payroll review sheet): the same employment row, deficit balance and
+// working pattern are otherwise fetched two or three times per employee, and
+// every fetch is a network round trip. Any write inside the scope clears the
+// memo, and nothing is memoised inside a transaction.
+const memoContext = new AsyncLocalStorage();
+const READ_ONLY = /^\s*(SELECT|WITH)\b/i;
+const WRITES = /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CREATE|ALTER|DROP)\b/i;
+
+function withReadMemo(fn) {
+  if (memoContext.getStore()) return fn();
+  return memoContext.run(new Map(), fn);
+}
+
 // ---------------------------------------------------------------------------
 // Connection
 // ---------------------------------------------------------------------------
@@ -91,8 +107,11 @@ function getPool() {
   pool = new Pool({
     connectionString: url,
     // Serverless instances are numerous and short-lived, so each one keeps a
-    // small pool. Supabase's pooler is what multiplexes them.
-    max: Number(process.env.PG_POOL_MAX) || 5,
+    // small pool; Supabase's pooler multiplexes them (200 client connections
+    // on the free plan). 10 lets a sheet that assembles every employee - the
+    // payroll review - run its per-employee reads side by side rather than
+    // five at a time.
+    max: Number(process.env.PG_POOL_MAX) || 10,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,
     // Supabase requires TLS; a local test container does not offer it.
@@ -250,8 +269,30 @@ class Statement {
   }
 
   async execute(args) {
+    const memo = memoContext.getStore();
+    if (memo && !txContext.getStore()) {
+      const { text } = this.compiled;
+      if (READ_ONLY.test(text) && !WRITES.test(text)) {
+        const params = this.bind(args);
+        const key = `${text}\u0000${JSON.stringify(params)}`;
+        let pending = memo.get(key);
+        if (!pending) {
+          pending = this.query(params);
+          memo.set(key, pending);
+          pending.catch(() => memo.delete(key));
+        }
+        const res = await pending;
+        // Each caller gets its own row objects, so one can't alter another's.
+        return { ...res, rows: res.rows.map(r => ({ ...r })) };
+      }
+      memo.clear();
+    }
+    return this.query(this.bind(args));
+  }
+
+  async query(params) {
     try {
-      return await executor().query(this.compiled.text, this.bind(args));
+      return await executor().query(this.compiled.text, params);
     } catch (err) {
       // Without the statement, a Postgres error is nearly unactionable - it
       // names a column but not which of 390 statements used it.
@@ -354,4 +395,4 @@ async function close() {
   cache.clear();
 }
 
-module.exports = { prepare, exec, tx, close, getPool, translate, normaliseDialect };
+module.exports = { prepare, exec, tx, close, getPool, translate, normaliseDialect, withReadMemo };

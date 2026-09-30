@@ -20,7 +20,7 @@
 const crypto = require('crypto');
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
-const { db, audit } = require('../db');
+const { db, audit, withReadMemo } = require('../db');
 const schedule = require('./schedule');
 const T = require('../util/time');
 
@@ -137,7 +137,8 @@ async function attendanceSummary(employeeId, fromDate, toDate) {
       WHERE employee_id = ? AND date_key >= ? AND date_key <= ?
     `).get(dayEquivalent, employeeId, fromDate, toDate),
     db.prepare(`
-      SELECT r.start_date, r.end_date, r.day_portion, r.leave_type_id, t.is_paid
+      SELECT r.start_date, r.end_date, r.day_portion, r.leave_type_id,
+             COALESCE(r.is_paid, t.is_paid) AS is_paid -- a request can override its type
       FROM leave_requests r JOIN leave_types t ON t.id = r.leave_type_id
       WHERE r.employee_id = ? AND r.status = 'APPROVED' AND r.cancelled_at IS NULL
         AND r.start_date <= ? AND r.end_date >= ?
@@ -371,7 +372,11 @@ async function draftFigures(period, employeeId, throughDate) {
  *   throughDate - for a draft, count data only up to this day (the phone's
  *                 "so far this month"); defaults to today
  */
-async function buildStatement({ periodId, employeeId, maskBank = false, throughDate = null }) {
+function buildStatement(opts) {
+  return withReadMemo(() => buildStatementUncached(opts));
+}
+
+async function buildStatementUncached({ periodId, employeeId, maskBank = false, throughDate = null }) {
   const period = await selectPeriod.get(periodId);
   if (!period) throw new InvoiceError('No such payroll period.', { code: 'NOT_FOUND', httpStatus: 404 });
   const final = FINAL.has(period.status);

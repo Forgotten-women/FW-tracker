@@ -732,6 +732,17 @@ export const api = {
       },
     ),
 
+  // A % of each employee's gross pay; 0 removes it. Undecided fee lines are
+  // recalculated, decided ones are left as decided.
+  updatePeriodProcessingFee: (periodId: string, processingFee: number, processingFeeType: 'DEDUCTION' | 'ADDITION') =>
+    request<{
+      status: string; processingFee: number; processingFeeType: 'DEDUCTION' | 'ADDITION';
+      processingFeeBasis: 'PERCENT'; lines: number; removed: number; decidedUnchanged: number; message: string;
+    }>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/processing-fee`,
+      { method: 'POST', body: JSON.stringify({ processingFee, processingFeeType }) },
+    ),
+
   payrollPrepare: (periodId: string, basis?: string) =>
     request<{ status: string } & PayrollPrepareSheet>(
       `/api/payroll/periods/${encodeURIComponent(periodId)}/prepare${basis ? `?basis=${encodeURIComponent(basis)}` : ''}`,

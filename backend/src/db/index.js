@@ -148,5 +148,6 @@ async function isInitialised() {
 
 module.exports = {
   db, tx, audit, getMeta, setMeta, backup, close, isInitialised,
+  withReadMemo: pg.withReadMemo,
   MAC_SALT, MAC_SALT_IS_EPHEMERAL, DATA_DIR,
 };

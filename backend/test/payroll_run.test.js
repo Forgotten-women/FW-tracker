@@ -741,3 +741,96 @@ test('the run endpoints: review, preflight, approve-run, mark-paid and payslips'
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+// ---------------------------------------------------------------------------
+// Decisions made while a run is in review (February 2026)
+// ---------------------------------------------------------------------------
+
+test('an absence confirmed as unpaid while the run is in review joins that run at once', async () => {
+  const W = require('../src/domain/warnings');
+  const emp = await makeEmployee('emp_review_join', '2024-12-02');
+  await tick('2026-02-26');
+  const feb = await periodStarting('2026-02-01');
+  assert.equal(feb.status, 'IN_REVIEW');
+  assert.equal((await linesFor(feb.id, emp)).length, 0);
+
+  const absId = 'abs_' + rand();
+  await db.prepare(`
+    INSERT INTO absence_records (id, employee_id, date_key, absence_type, detected_at, status, treat_as_unpaid, deduct_annual_leave, create_warning_trigger)
+    VALUES (?,?, '2026-02-12', 'SUSPECTED_NO_SHOW', ?, 'PENDING_REVIEW', 0, 0, 0)
+  `).run(absId, emp, at('2026-02-12'));
+
+  const r = await W.reviewAbsence({
+    absenceId: absId, status: 'CONFIRMED', treatAsUnpaid: true, notes: 'No contact all day', actor: 'user:hr',
+    nowMs: at('2026-02-27'),
+  });
+  assert.equal(r.addedToRun.periodId, feb.id);
+  assert.equal(r.addedToRun.createdCount, 1);
+
+  const lines = await linesFor(feb.id, emp);
+  assert.deepEqual(lines.map(l => [l.adjustment_type, l.source_reference, l.status]),
+    [['UNAUTHORISED_ABSENCE_UNPAID', absId, 'PROPOSED']], 'proposed in this run; HR still approves it');
+
+  const preflight = await PR.payrollPreflight(feb.id);
+  const fresh = preflight.find(c => c.code === 'NEW_DEDUCTIONS_SINCE_GENERATION');
+  assert.ok(!fresh || !fresh.items.some(i => i.ref === absId), 'no "generate again" needed for it');
+});
+
+// ---------------------------------------------------------------------------
+// Processing fee as a percentage of gross (May 2026, manual period)
+// ---------------------------------------------------------------------------
+
+test('the processing fee is a percentage of each employee\'s gross, kept current until decided', async () => {
+  const full = await makeEmployee('emp_fee_full', '2024-12-02', { salary: 3000 });
+  const p = await PR.createPeriod({
+    name: 'May 2026 (fee)', startDate: '2026-05-01', endDate: '2026-05-31', cutoffDate: '2026-05-25',
+    processingFee: 1.06, processingFeeType: 'DEDUCTION', actor: 'user:hr',
+  });
+  assert.equal(p.processingFeeBasis, 'PERCENT');
+  await assert.rejects(PR.createPeriod({
+    name: 'Bad', startDate: '2026-06-01', endDate: '2026-06-30', processingFee: 150, actor: 'user:hr',
+  }), /percentage between 0 and 100/);
+
+  const feeLine = async emp => (await linesFor(p.id, emp)).find(l => l.adjustment_type === 'PROCESSING_FEE');
+  assert.equal(Number((await feeLine(full)).calculated_amount), -31.8, '1.06% of 3000');
+  assert.equal((await feeLine(full)).review_level, 'ROUTINE');
+
+  // Joined after the period was created, part-way through: fee on their pro-rated gross.
+  const starter = await makeEmployee('emp_fee_starter', '2026-05-18', { salary: 2600 });
+  assert.equal(await feeLine(starter), undefined);
+  // A salary change before the run is generated.
+  await PR.setSalary({ employeeId: full, amount: 4000, effectiveFrom: '2026-05-01', reason: 'Raise', actor: 'user:hr' });
+
+  await PR.generatePeriodDeductions({ periodId: p.id, actor: 'user:hr' });
+  assert.equal(Number((await feeLine(full)).calculated_amount), -42.4, 'refreshed to 1.06% of 4000');
+  const basis = await PR.preparePeriod(p.id);
+  const starterRow = basis.employees.find(e => e.employeeId === starter);
+  assert.equal(Number((await feeLine(starter)).calculated_amount), -Math.round(starterRow.grossBaseline * 1.06) / 100);
+  assert.match((await feeLine(starter)).explanation, /1\.06% of gross pay/);
+});
+
+test('an automatic month carries the processing fee forward from the previous month', async () => {
+  await tick('2026-06-03');
+  const june = await periodStarting('2026-06-01');
+  assert.equal(june.auto_created, 1);
+  assert.equal(Number(june.processing_fee), 1.06);
+  assert.equal(june.processing_fee_basis, 'PERCENT');
+  assert.equal(june.processing_fee_type, 'DEDUCTION');
+  const line = (await linesFor(june.id, 'emp_fee_full')).find(l => l.adjustment_type === 'PROCESSING_FEE');
+  assert.equal(Number(line.calculated_amount), -42.4, '1.06% of the 4000 salary');
+});
+
+test('HR can change or remove the processing fee until the run is final', async () => {
+  const june = await periodStarting('2026-06-01');
+  const feeOf = async () => (await linesFor(june.id, 'emp_fee_full')).find(l => l.adjustment_type === 'PROCESSING_FEE');
+
+  const r = await PR.updatePeriodProcessingFee({ periodId: june.id, processingFee: 2, processingFeeType: 'DEDUCTION', actor: 'user:hr' });
+  assert.equal(r.processingFeeBasis, 'PERCENT');
+  assert.equal(Number((await feeOf()).calculated_amount), -80, '2% of 4000');
+
+  await assert.rejects(PR.updatePeriodProcessingFee({ periodId: june.id, processingFee: 101, actor: 'user:hr' }), /between 0 and 100/);
+
+  const off = await PR.updatePeriodProcessingFee({ periodId: june.id, processingFee: 0, actor: 'user:hr' });
+  assert.ok(off.removed >= 1);
+  assert.equal(await feeOf(), undefined, 'undecided fee lines are withdrawn');
+});

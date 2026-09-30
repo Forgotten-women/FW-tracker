@@ -274,6 +274,9 @@ router.get('/periods', requirePermission('payroll.read'), async (req, res) => {
       exchangeRate: p.exchange_rate || 350.0,
       processingFee: Number(p.processing_fee) || 0,
       processingFeeType: p.processing_fee_type || 'DEDUCTION',
+      // PERCENT: processingFee is a % of each employee's gross; FIXED (periods
+      // from before migration 030): an amount.
+      processingFeeBasis: p.processing_fee_basis || 'FIXED',
       approvedBy: p.approved_by,
       approvedAt: p.approved_at ? T.displayTime(p.approved_at) : null,
       // The monthly run. Timestamps are epoch ms; null until they happen.
@@ -297,6 +300,7 @@ router.post('/periods', requirePermission('payroll.approve'), async (req, res) =
       exchangeRate: req.body?.exchangeRate,
       processingFee: req.body?.processingFee,
       processingFeeType: req.body?.processingFeeType,
+      processingFeeBasis: 'PERCENT',
       cutoffDate: req.body?.cutoffDate ?? null,
       payDate: req.body?.payDate ?? null,
       actor: getActor(req),
@@ -312,6 +316,22 @@ router.post('/periods/:id/exchange-rate', requirePermission('payroll.approve'), 
     const r = await PR.updatePeriodExchangeRate({
       periodId: req.params.id,
       exchangeRate: req.body?.exchangeRate,
+      actor: getActor(req),
+    });
+    res.json({ status: 'SUCCESS', ...r });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// The processing fee: a % of each employee's gross, changeable until the run
+// is final. Automatic months carry it forward from the month before.
+router.post('/periods/:id/processing-fee', requirePermission('payroll.approve'), async (req, res) => {
+  try {
+    const r = await PR.updatePeriodProcessingFee({
+      periodId: req.params.id,
+      processingFee: req.body?.processingFee,
+      processingFeeType: req.body?.processingFeeType,
       actor: getActor(req),
     });
     res.json({ status: 'SUCCESS', ...r });

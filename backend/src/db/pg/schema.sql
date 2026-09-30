@@ -1647,3 +1647,6 @@ CREATE INDEX IF NOT EXISTS idx_invoice_templates_active ON invoice_templates(act
 ALTER TABLE payslips ADD COLUMN IF NOT EXISTS statement_json TEXT;
 ALTER TABLE payslips ADD COLUMN IF NOT EXISTS template_id TEXT;
 ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS approval_note TEXT;
+
+-- Migration 030
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS processing_fee_basis TEXT NOT NULL DEFAULT 'FIXED';

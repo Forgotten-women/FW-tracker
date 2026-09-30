@@ -23,7 +23,7 @@
 // on every calculation rather than hidden.
 
 const crypto = require('crypto');
-const { db, tx, audit } = require('../db');
+const { db, tx, audit, withReadMemo } = require('../db');
 const { config } = require('../config');
 const schedule = require('./schedule');
 const leave = require('./leave');
@@ -885,7 +885,7 @@ async function employeePosition(period, e, { throughDate = null, detail = true, 
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-async function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, processingFee = 0, processingFeeType = 'DEDUCTION', cutoffDate = null, payDate = null, actor }) {
+async function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, processingFee = 0, processingFeeType = 'DEDUCTION', processingFeeBasis = 'PERCENT', cutoffDate = null, payDate = null, actor }) {
   if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
     throw new Error('startDate and endDate must be YYYY-MM-DD.');
   }
@@ -906,46 +906,108 @@ async function createPeriod({ name, startDate, endDate, exchangeRate = 350.0, pr
   }
 
   const rate = Number(exchangeRate) > 0 ? Number(exchangeRate) : 350.0;
+  const feeBasis = String(processingFeeBasis).toUpperCase() === 'FIXED' ? 'FIXED' : 'PERCENT';
   const fee = Number(processingFee) >= 0 ? Number(processingFee) : 0;
+  if (feeBasis === 'PERCENT' && fee > 100) throw new Error('The processing fee must be a percentage between 0 and 100.');
   const feeType = (String(processingFeeType).toUpperCase() === 'ADDITION') ? 'ADDITION' : 'DEDUCTION';
   const id = 'pp_' + crypto.randomBytes(6).toString('hex');
   const nowMs = T.now();
 
   try {
     await db.prepare(`
-      INSERT INTO payroll_periods (id, name, start_date, end_date, exchange_rate, processing_fee, processing_fee_type, status, created_at, cutoff_date, pay_date)
-      VALUES (?,?,?,?,?,?,?, 'OPEN', ?, ?, ?)
-    `).run(id, name || `${startDate} to ${endDate}`, startDate, endDate, rate, fee, feeType, nowMs, cutoffDate, payDate);
+      INSERT INTO payroll_periods (id, name, start_date, end_date, exchange_rate, processing_fee, processing_fee_type, processing_fee_basis, status, created_at, cutoff_date, pay_date)
+      VALUES (?,?,?,?,?,?,?,?, 'OPEN', ?, ?, ?)
+    `).run(id, name || `${startDate} to ${endDate}`, startDate, endDate, rate, fee, feeType, feeBasis, nowMs, cutoffDate, payDate);
   } catch (err) {
     if (err.code === '23505') throw new Error('A payroll period for exactly these dates already exists.');
     throw err;
   }
 
-  // If processing fee is set > 0, automatically seed routine adjustments for all active employees
-  if (fee > 0) {
-    const periodObj = { id, start_date: startDate, end_date: endDate, status: 'OPEN' };
-    const emps = await payrollEmployees(periodObj);
-    const calculatedAmount = feeType === 'DEDUCTION' ? -fee : fee;
-    const explanation = `Processing fee (${feeType === 'DEDUCTION' ? 'Deduction' : 'Addition'})`;
-    for (const emp of emps) {
-      const adjId = 'pa_' + crypto.randomBytes(8).toString('hex');
-      await db.prepare(`
-        INSERT INTO payroll_adjustments
-          (id, period_id, employee_id, adjustment_type, calculated_days, calculated_amount,
-           source_reference, explanation, status, created_at, review_level, review_reasons)
-        VALUES (?,?,?,?,?,?,?,?, 'PROPOSED', ?, 'ROUTINE', ?)
-      `).run(
-        adjId, id, emp.id, 'PROCESSING_FEE', 0, calculatedAmount,
-        null, explanation, nowMs, JSON.stringify([`Period processing fee (${feeType})`])
-      );
-    }
-  }
+  // A processing fee becomes one routine line per employee, straight away, so
+  // the month's draft invoices show it. Generating deductions refreshes them.
+  if (fee > 0) await syncProcessingFees(await selectPeriod.get(id));
 
   invalidatePayrollCache(null, id);
 
   await audit({ actor, action: 'PAYROLL_PERIOD_CREATED', targetType: 'payroll_period', targetId: id,
-          after: { startDate, endDate, exchangeRate: rate, processingFee: fee, processingFeeType: feeType, cutoffDate, payDate } });
-  return { id, name: name || `${startDate} to ${endDate}`, startDate, endDate, exchangeRate: rate, processingFee: fee, processingFeeType: feeType, status: 'OPEN', cutoffDate, payDate };
+          after: { startDate, endDate, exchangeRate: rate, processingFee: fee, processingFeeType: feeType, processingFeeBasis: feeBasis, cutoffDate, payDate } });
+  return { id, name: name || `${startDate} to ${endDate}`, startDate, endDate, exchangeRate: rate, processingFee: fee, processingFeeType: feeType, processingFeeBasis: feeBasis, status: 'OPEN', cutoffDate, payDate };
+}
+
+// ---------------------------------------------------------------------------
+// Processing fee
+//
+// A percentage of each employee's gross pay for the period (the contract
+// salary, pro-rated for a starter or leaver), as one routine PROCESSING_FEE
+// line per employee. Periods from before migration 030 hold a fixed amount
+// (processing_fee_basis = 'FIXED') and keep it.
+// ---------------------------------------------------------------------------
+
+function processingFeeFor(period, grossBaseline) {
+  const fee = Number(period.processing_fee) || 0;
+  if (fee <= 0) return 0;
+  const amount = (period.processing_fee_basis || 'FIXED') === 'PERCENT'
+    ? money(grossBaseline * fee / 100)
+    : money(fee);
+  return period.processing_fee_type === 'ADDITION' ? amount : -amount;
+}
+
+function processingFeeExplanation(period, grossBaseline, currency) {
+  const kind = period.processing_fee_type === 'ADDITION' ? 'addition' : 'deduction';
+  if ((period.processing_fee_basis || 'FIXED') === 'PERCENT') {
+    return `Processing fee (${kind}): ${Number(period.processing_fee)}% of gross pay `
+         + `${currency || ''} ${money(grossBaseline).toFixed(2)}`.replace(/\s+/g, ' ').trim() + '.';
+  }
+  return `Processing fee (${kind}).`;
+}
+
+const selectProcessingFeeLine = db.prepare(
+  "SELECT * FROM payroll_adjustments WHERE period_id = ? AND employee_id = ? AND adjustment_type = 'PROCESSING_FEE' ORDER BY created_at ASC LIMIT 1"
+);
+
+/**
+ * One employee's fee line, created if missing, or brought up to date while it
+ * is still PROPOSED (the salary or the pro-rating may have changed). A line
+ * HR has already decided is never touched. Returns the line's id or null.
+ */
+async function syncProcessingFeeFor(period, employeeId, basis) {
+  if (isFinal(period.status)) return null;
+  const amount = processingFeeFor(period, basis.grossBaseline);
+  const existing = await selectProcessingFeeLine.get(period.id, employeeId);
+  if (!amount) return existing ? existing.id : null;
+  const explanation = processingFeeExplanation(period, basis.grossBaseline, basis.salary.currency);
+  if (!existing) {
+    const adjId = 'pa_' + crypto.randomBytes(8).toString('hex');
+    await db.prepare(`
+      INSERT INTO payroll_adjustments
+        (id, period_id, employee_id, adjustment_type, calculated_days, calculated_amount,
+         source_reference, explanation, status, created_at, review_level, review_reasons)
+      VALUES (?,?,?, 'PROCESSING_FEE', 0, ?, NULL, ?, 'PROPOSED', ?, 'ROUTINE', ?)
+    `).run(adjId, period.id, employeeId, amount, explanation, T.now(),
+      JSON.stringify([ROUTINE_REASON.PROCESSING_FEE]));
+    return adjId;
+  }
+  if (existing.status === 'PROPOSED' && Math.abs(Number(existing.calculated_amount) - amount) > 0.004) {
+    await db.prepare(
+      "UPDATE payroll_adjustments SET calculated_amount = ?, explanation = ? WHERE id = ? AND status = 'PROPOSED'"
+    ).run(amount, explanation, existing.id);
+  }
+  return existing.id;
+}
+
+/** Every eligible employee's fee line for a period (see syncProcessingFeeFor). */
+async function syncProcessingFees(period, { employeeIds = null } = {}) {
+  if (!period || !(Number(period.processing_fee) > 0) || isFinal(period.status)) return 0;
+  const only = employeeIds ? new Set(employeeIds) : null;
+  let n = 0;
+  for (const e of await payrollEmployees(period)) {
+    if (only && !only.has(e.id)) continue;
+    const basis = await periodBasis(period, e.id);
+    if (basis.blocked || !basis.inPeriod) continue;
+    if (await syncProcessingFeeFor(period, e.id, basis)) n++;
+  }
+  invalidatePayrollCache(null, period.id);
+  return n;
 }
 
 async function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
@@ -970,6 +1032,61 @@ async function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
   return { periodId, exchangeRate: rate, message: 'Exchange rate updated for this period.' };
 }
 
+/**
+ * Set or change a period's processing fee (a % of each employee's gross)
+ * while the run is not final. Undecided fee lines are recalculated, and
+ * removed when the fee is set to 0; a line HR has already decided stays as
+ * decided.
+ */
+async function updatePeriodProcessingFee({ periodId, processingFee, processingFeeType = 'DEDUCTION', actor }) {
+  const period = await selectPeriod.get(periodId);
+  if (!period) throw new Error('No such payroll period.');
+  if (isFinal(period.status)) {
+    throw new Error(`Cannot change the processing fee of a ${period.status.toLowerCase()} payroll period.`);
+  }
+  const fee = Number(processingFee);
+  if (!Number.isFinite(fee) || fee < 0 || fee > 100) {
+    throw new Error('The processing fee must be a percentage between 0 and 100.');
+  }
+  const feeType = String(processingFeeType).toUpperCase() === 'ADDITION' ? 'ADDITION' : 'DEDUCTION';
+
+  await db.prepare(`
+    UPDATE payroll_periods SET processing_fee = ?, processing_fee_type = ?, processing_fee_basis = 'PERCENT'
+    WHERE id = ?
+  `).run(fee, feeType, periodId);
+
+  let removed = 0;
+  let lines = 0;
+  if (fee === 0) {
+    removed = (await db.prepare(
+      "DELETE FROM payroll_adjustments WHERE period_id = ? AND adjustment_type = 'PROCESSING_FEE' AND status = 'PROPOSED'"
+    ).run(periodId)).changes;
+  } else {
+    lines = await syncProcessingFees(await selectPeriod.get(periodId));
+  }
+  const decided = Number((await db.prepare(
+    "SELECT COUNT(*) AS c FROM payroll_adjustments WHERE period_id = ? AND adjustment_type = 'PROCESSING_FEE' AND status <> 'PROPOSED'"
+  ).get(periodId)).c) || 0;
+
+  invalidatePayrollCache(null, periodId);
+  await audit({
+    actor, action: 'PAYROLL_PERIOD_PROCESSING_FEE_UPDATED', targetType: 'payroll_period', targetId: periodId,
+    before: {
+      processingFee: Number(period.processing_fee) || 0, processingFeeType: period.processing_fee_type,
+      processingFeeBasis: period.processing_fee_basis || 'FIXED',
+    },
+    after: { processingFee: fee, processingFeeType: feeType, processingFeeBasis: 'PERCENT', lines, removed, decidedUnchanged: decided },
+  });
+
+  return {
+    periodId, processingFee: fee, processingFeeType: feeType, processingFeeBasis: 'PERCENT',
+    lines, removed, decidedUnchanged: decided,
+    message: fee === 0
+      ? 'Processing fee removed from this period.'
+      : `Processing fee set to ${fee}% of gross pay for this period.`,
+  };
+}
+
 function presentSheetPeriod(period) {
   return {
     id: period.id, name: period.name,
@@ -977,6 +1094,7 @@ function presentSheetPeriod(period) {
     exchangeRate: period.exchange_rate || 350.0,
     processingFee: Number(period.processing_fee) || 0,
     processingFeeType: period.processing_fee_type || 'DEDUCTION',
+    processingFeeBasis: period.processing_fee_basis || 'FIXED',
     status: period.status,
     cutoffDate: period.cutoff_date || null,
     payDate: period.pay_date || null,
@@ -996,7 +1114,13 @@ const PREP_CACHE_TTL_MS = 15 * 1000;
  * Read-only by design: it computes what each employee's position looks like and
  * writes nothing. Adjustments are created only when a person chooses to.
  */
-async function preparePeriod(periodId, { basis = null } = {}) {
+// Read-only sheets run inside a read memo (db/pg/client.js): the helpers they
+// compose fetch the same rows several times per employee.
+function preparePeriod(periodId, opts = {}) {
+  return withReadMemo(() => preparePeriodUncached(periodId, opts));
+}
+
+async function preparePeriodUncached(periodId, { basis = null } = {}) {
   const period = await selectPeriod.get(periodId);
   if (!period) throw new Error('No such payroll period.');
 
@@ -1223,7 +1347,8 @@ async function closePeriod({ periodId, actor }) {
  *
  * Every open line is (re)classified ROUTINE/ATTENTION before returning.
  */
-async function generatePeriodDeductions({ periodId, actor }) {
+async function generatePeriodDeductions({ periodId, actor, employeeIds = null }) {
+  const only = employeeIds ? new Set(employeeIds) : null;
   const result = await tx(async () => {
     await lockPayroll();
     const period = await selectPeriodForUpdate.get(periodId);
@@ -1234,11 +1359,16 @@ async function generatePeriodDeductions({ periodId, actor }) {
     const bases = new Map();
 
     for (const e of await payrollEmployees(period)) {
+      if (only && !only.has(e.id)) continue;
       const basis = await periodBasis(period, e.id);
       if (basis.blocked || !basis.inPeriod) continue;
       bases.set(e.id, basis);
 
       const { salary, windowEnd } = basis;
+
+      // The processing fee, from this employee's gross (added for anyone who
+      // joined after the period was created; refreshed while undecided).
+      await syncProcessingFeeFor(period, e.id, basis);
 
       // Attendance deficit: one row per employee per period.
       const deficit = await deficitComponent({ employeeId: e.id, periodId, windowEnd });
@@ -1289,7 +1419,7 @@ async function generatePeriodDeductions({ periodId, actor }) {
 
     await audit({
       actor, action: 'PAYROLL_DEDUCTIONS_GENERATED', targetType: 'payroll_period', targetId: periodId,
-      after: { createdCount: created.length, ...classification },
+      after: { createdCount: created.length, ...(only ? { employeeIds: [...only] } : {}), ...classification },
     });
 
     return { periodId, createdCount: created.length, created, employees: bases.size, classification };
@@ -1297,6 +1427,35 @@ async function generatePeriodDeductions({ periodId, actor }) {
 
   invalidatePayrollCache();
   return result;
+}
+
+/**
+ * A decision HR makes while a run is IN_REVIEW - confirming an absence as
+ * unpaid, approving unpaid leave - joins that run straight away, for that one
+ * employee, instead of waiting for someone to press "generate deductions"
+ * again (the preflight blocks approval until they do).
+ *
+ * Only a run still IN_REVIEW whose deduction window reaches the date: an OPEN
+ * month picks it up at its own cut-off, and once a run is approved the next
+ * month's run collects it (the unclaimed queries have no lower date bound).
+ * Never throws: the decision itself has already been recorded.
+ */
+const selectRunInReviewFor = db.prepare(`
+  SELECT id FROM payroll_periods
+  WHERE status = 'IN_REVIEW' AND COALESCE(cutoff_date, end_date) >= ?
+  ORDER BY start_date ASC LIMIT 1
+`);
+
+async function addDecisionToRunInReview({ employeeId, dateKey, actor }) {
+  try {
+    const period = await selectRunInReviewFor.get(dateKey);
+    if (!period) return null;
+    const r = await generatePeriodDeductions({ periodId: period.id, actor, employeeIds: [employeeId] });
+    return { periodId: period.id, createdCount: r.createdCount };
+  } catch (err) {
+    console.error(`[payroll] could not add ${employeeId}'s decision to the run in review:`, err.message);
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1455,18 +1614,24 @@ async function ensureCurrentPeriod({ nowMs = T.now() } = {}) {
   ).get(month.end, month.start);
   if (overlapping) return { created: false, periodId: overlapping.id };
 
+  // The exchange rate and the processing fee carry forward from the previous
+  // month, so an automatic month is set up the way HR last set one up.
   const previous = await db.prepare(
-    'SELECT exchange_rate FROM payroll_periods ORDER BY start_date DESC, created_at DESC LIMIT 1'
+    'SELECT exchange_rate, processing_fee, processing_fee_type, processing_fee_basis FROM payroll_periods ORDER BY start_date DESC, created_at DESC LIMIT 1'
   ).get();
   const rate = Number(previous?.exchange_rate) > 0 ? Number(previous.exchange_rate) : 350.0;
+  const fee = Number(previous?.processing_fee) > 0 ? Number(previous.processing_fee) : 0;
+  const feeType = previous?.processing_fee_type === 'ADDITION' ? 'ADDITION' : 'DEDUCTION';
+  const feeBasis = previous?.processing_fee_basis === 'FIXED' ? 'FIXED' : 'PERCENT';
 
   const id = 'pp_' + crypto.randomBytes(6).toString('hex');
   const res = await db.prepare(`
     INSERT INTO payroll_periods
-      (id, name, start_date, end_date, exchange_rate, status, created_at, cutoff_date, pay_date, auto_created)
-    VALUES (?,?,?,?,?, 'OPEN', ?, ?, ?, 1)
+      (id, name, start_date, end_date, exchange_rate, processing_fee, processing_fee_type, processing_fee_basis,
+       status, created_at, cutoff_date, pay_date, auto_created)
+    VALUES (?,?,?,?,?,?,?,?, 'OPEN', ?, ?, ?, 1)
     ON CONFLICT (start_date, end_date) DO NOTHING
-  `).run(id, month.name, month.start, month.end, rate, nowMs, month.cutoff, month.end);
+  `).run(id, month.name, month.start, month.end, rate, fee, feeType, feeBasis, nowMs, month.cutoff, month.end);
 
   if (!res.changes) {
     const row = await db.prepare('SELECT id FROM payroll_periods WHERE start_date = ? AND end_date = ?')
@@ -1478,10 +1643,12 @@ async function ensureCurrentPeriod({ nowMs = T.now() } = {}) {
     actor: 'system', action: 'PAYROLL_PERIOD_CREATED', targetType: 'payroll_period', targetId: id,
     after: {
       startDate: month.start, endDate: month.end, exchangeRate: rate,
+      processingFee: fee, processingFeeType: feeType, processingFeeBasis: feeBasis,
       cutoffDate: month.cutoff, payDate: month.end, autoCreated: true,
     },
     note: 'Opened automatically for the calendar month.',
   });
+  if (fee > 0) await syncProcessingFees(await selectPeriod.get(id));
 
   return { created: true, periodId: id, name: month.name, cutoffDate: month.cutoff, payDate: month.end, exchangeRate: rate };
 }
@@ -1709,7 +1876,11 @@ async function preflightChecks(period, run, excluded) {
   return checks;
 }
 
-async function payrollPreflight(periodId) {
+function payrollPreflight(periodId) {
+  return withReadMemo(() => payrollPreflightUncached(periodId));
+}
+
+async function payrollPreflightUncached(periodId) {
   const period = await selectPeriod.get(periodId);
   if (!period) throw new PayrollRunError('No such payroll period.', { code: 'NOT_FOUND', httpStatus: 404 });
   const { run, excluded } = await runMembers(period);
@@ -1807,7 +1978,11 @@ async function employeeFlags(period, employeeId, basis, expectedNet, previous) {
  * may see; the preflight is always the whole run's, because it is the whole
  * run that approval would publish.
  */
-async function reviewPeriod(periodId, { visibleEmployeeIds = null, basis = null } = {}) {
+function reviewPeriod(periodId, opts = {}) {
+  return withReadMemo(() => reviewPeriodUncached(periodId, opts));
+}
+
+async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis = null } = {}) {
   const period = await selectPeriod.get(periodId);
   if (!period) throw new PayrollRunError('No such payroll period.', { code: 'NOT_FOUND', httpStatus: 404 });
 
@@ -2822,8 +2997,8 @@ module.exports = {
   rates, money, salaryAt, setSalary, salaryHistoryFor,
   getDailyRateBasis, setDailyRateBasis, addException,
   eligibleWorkingDays, starterCalculation, leaverCalculation,
-  createPeriod, updatePeriodExchangeRate, preparePeriod, proposeAdjustment, decideAdjustment, closePeriod,
-  generatePeriodDeductions, unpaidDaysSummary,
+  createPeriod, updatePeriodExchangeRate, updatePeriodProcessingFee, preparePeriod, proposeAdjustment, decideAdjustment, closePeriod,
+  generatePeriodDeductions, unpaidDaysSummary, addDecisionToRunInReview,
   employeeStatements, invalidatePayrollCache,
   // The monthly run
   ensureCurrentPeriod, generateRun, runPayrollAutomation,

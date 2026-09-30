@@ -738,6 +738,15 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
     }
   } catch (_) {}
 
+  // Unpaid leave approved while this month's run is in review joins that run
+  // now (see payroll.addDecisionToRunInReview).
+  let addedToRun = null;
+  if (decision === 'APPROVED' && effectiveIsPaid === 0) {
+    addedToRun = await require('./payroll').addDecisionToRunInReview({
+      employeeId: req.employee_id, dateKey: req.start_date, actor,
+    });
+  }
+
   try {
     const typeName = type?.name || 'Leave';
     if (decision === 'APPROVED') {
@@ -764,7 +773,7 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
     }
   } catch (_) {}
 
-  return { decision, requestId };
+  return { decision, requestId, addedToRun };
 }
 
 async function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() }) {

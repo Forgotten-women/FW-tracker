@@ -55,6 +55,111 @@ const MODAL_BACKDROP = 'fixed inset-0 z-50 flex items-start justify-center overf
 const MODAL_SHELL = 'glass-panel-elevated w-full rounded-3xl p-6';
 
 // ---------------------------------------------------------------------------
+// Processing Fee Modal
+// ---------------------------------------------------------------------------
+
+function ProcessingFeeModal({
+  current,
+  currentType,
+  onClose,
+  onSave,
+}: {
+  current: number;
+  currentType: 'DEDUCTION' | 'ADDITION';
+  onClose: () => void;
+  onSave: (fee: number, type: 'DEDUCTION' | 'ADDITION') => Promise<string>;
+}) {
+  const [feeInput, setFeeInput] = useState(current > 0 ? String(current) : '');
+  const [feeType, setFeeType] = useState<'DEDUCTION' | 'ADDITION'>(currentType);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const parsed = feeInput.trim() === '' ? 0 : parseFloat(feeInput);
+    if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+      setError('Enter a percentage from 0 to 100 (0 removes the fee).');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(parsed, feeType);
+      onClose();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to update the processing fee.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-sm`}>
+        <h2 className="mb-2 text-base font-bold text-white">Processing fee</h2>
+        <p className="mb-4 text-xs text-slate-400">
+          A percentage of each employee&apos;s gross pay for this period (pro-rated for starters and leavers).
+          Lines not yet decided are recalculated; lines already approved stay as approved. Next month&apos;s
+          automatic period starts with the same fee.
+        </p>
+        {error && (
+          <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+            {error}
+          </div>
+        )}
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-400">Fee (%)</label>
+            <div className="relative">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                inputMode="decimal"
+                value={feeInput}
+                onChange={(e) => setFeeInput(e.target.value)}
+                placeholder="0.00"
+                aria-label="Processing fee percentage"
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-3 pr-8 text-sm font-mono text-white focus:border-indigo-500 focus:outline-none"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-mono text-slate-400">%</span>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-400">Fee type</label>
+            <select
+              value={feeType}
+              onChange={(e) => setFeeType(e.target.value as 'DEDUCTION' | 'ADDITION')}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="DEDUCTION">Deduction</option>
+              <option value="ADDITION">Addition</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-semibold text-on-accent shadow-lg shadow-indigo-600/30 transition disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : 'Apply fee'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Exchange Rate Modal
 // ---------------------------------------------------------------------------
 
@@ -466,6 +571,7 @@ function CreatePeriodModal({
     if (isNaN(parsedRate) || parsedRate <= 0) { setError('Please enter a valid positive conversion rate.'); return; }
     const parsedFee = parseFloat(processingFee);
     const fee = !isNaN(parsedFee) && parsedFee > 0 ? parsedFee : 0;
+    if (fee > 100) { setError('The processing fee is a percentage: enter a value from 0 to 100.'); return; }
     setLoading(true);
     setError('');
     try {
@@ -567,20 +673,26 @@ function CreatePeriodModal({
           <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3.5">
             <div className="mb-2 flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-300">Processing Fee (Applied to Each Employee)</label>
-              <span className="text-[10px] font-medium text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded">Per Employee</span>
+              <span className="text-[10px] font-medium text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded">% of gross pay</span>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-[11px] text-slate-400">Fee Amount</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={processingFee}
-                  onChange={(e) => setProcessingFee(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-mono text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-                />
+                <label className="mb-1 block text-[11px] text-slate-400">Fee (%)</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    inputMode="decimal"
+                    value={processingFee}
+                    onChange={(e) => setProcessingFee(e.target.value)}
+                    placeholder="0.00"
+                    aria-label="Processing fee percentage"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-3 pr-8 text-sm font-mono text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-mono text-slate-400">%</span>
+                </div>
               </div>
               <div>
                 <label className="mb-1 block text-[11px] text-slate-400">Fee Type</label>
@@ -595,7 +707,7 @@ function CreatePeriodModal({
               </div>
             </div>
             <p className="mt-2 text-[11px] text-slate-500">
-              When amount &gt; 0, automatically creates a routine processing fee adjustment for every eligible employee in this payroll period.
+              A percentage of each employee&apos;s gross pay for this period (pro-rated for starters and leavers). When above 0, every eligible employee gets a routine processing fee line, recalculated from their pay until the run is approved.
             </p>
           </div>
         </div>
@@ -1271,6 +1383,12 @@ function PeriodDetailView({
   const [showSetSalary, setShowSetSalary] = useState(false);
   const [showRateModal, setShowRateModal] = useState(false);
   const [periodRate, setPeriodRate] = useState<number>(period.exchangeRate || 350.0);
+  const [showFeeModal, setShowFeeModal] = useState(false);
+  const [fee, setFee] = useState({
+    amount: Number(period.processingFee || 0),
+    type: (period.processingFeeType || 'DEDUCTION') as 'DEDUCTION' | 'ADDITION',
+    basis: (period.processingFeeBasis || 'FIXED') as 'PERCENT' | 'FIXED',
+  });
   const [setSalaryEmployeeId, setSetSalaryEmployeeId] = useState<string | null>(null);
   const [decideAdj, setDecideAdj] = useState<PayrollAdjustment | null>(null);
   const [prefill, setPrefill] = useState<{ employeeId: string; amount: number; type: string; explanation: string } | null>(null);
@@ -1362,6 +1480,13 @@ function PeriodDetailView({
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to update period rate.');
     }
+  };
+
+  const handleSaveFee = async (amount: number, type: 'DEDUCTION' | 'ADDITION') => {
+    const r = await api.updatePeriodProcessingFee(period.id, amount, type);
+    setFee({ amount: r.processingFee, type: r.processingFeeType, basis: 'PERCENT' });
+    changed();
+    return r.message;
   };
 
   const handleClose = async () => {
@@ -1473,11 +1598,29 @@ function PeriodDetailView({
                 <span>£1 = ₨{periodRate.toFixed(2)}</span>
               </span>
             )}
-            {Number(period.processingFee || 0) > 0 && (
-              <span className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-950/40 px-2.5 py-1.5 text-xs font-mono text-purple-300" title="Processing fee applied to each employee">
-                <span>Fee: {period.processingFeeType === 'ADDITION' ? '+' : '-'}{currency === 'GBP' ? '£' : '₨'}{period.processingFee}</span>
-              </span>
-            )}
+            {(() => {
+              const label = fee.amount > 0
+                ? `Fee: ${fee.type === 'ADDITION' ? '+' : '-'}${fee.basis === 'PERCENT'
+                  ? `${fee.amount}% of gross`
+                  : `${currency === 'GBP' ? '£' : '₨'}${fee.amount}`}`
+                : 'No processing fee';
+              return !isFinal ? (
+                <button
+                  type="button"
+                  onClick={() => setShowFeeModal(true)}
+                  title="Click to set the processing fee for this month"
+                  className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-950/40 hover:bg-purple-900/50 px-2.5 py-1.5 text-xs font-mono text-purple-300 transition"
+                >
+                  <span>{label}</span>
+                  <PencilIcon className="h-3 w-3 shrink-0 text-purple-400" />
+                </button>
+              ) : fee.amount > 0 ? (
+                <span className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs font-mono text-slate-400" title="Processing fee applied to each employee">
+                  <LockIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span>{label}</span>
+                </span>
+              ) : null;
+            })()}
             {!isFinal && (
               <>
                 <Button size="sm" variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => { setSetSalaryEmployeeId(null); setShowSetSalary(true); }}>
@@ -1877,6 +2020,16 @@ function PeriodDetailView({
           currentRate={periodRate}
           onClose={() => setShowRateModal(false)}
           onSave={handleSavePeriodRate}
+        />
+      )}
+
+      {/* Processing Fee Modal */}
+      {showFeeModal && (
+        <ProcessingFeeModal
+          current={fee.basis === 'PERCENT' ? fee.amount : 0}
+          currentType={fee.type}
+          onClose={() => setShowFeeModal(false)}
+          onSave={handleSaveFee}
         />
       )}
 

@@ -526,8 +526,11 @@ export interface PayrollPeriod {
   from: string;
   to: string;
   exchangeRate?: number;
+  // PERCENT: processingFee is a % of each employee's gross pay for the
+  // period. FIXED: periods created before that, where it is an amount.
   processingFee?: number;
   processingFeeType?: 'DEDUCTION' | 'ADDITION';
+  processingFeeBasis?: 'PERCENT' | 'FIXED';
   status: PayrollPeriodStatus;
   approvedBy: string | null;
   // T.displayTime() on this route: a time of day only, not a date.

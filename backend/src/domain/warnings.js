@@ -487,10 +487,20 @@ async function reviewAbsence({
   // on an approved decision.
   // A confirmed unpaid absence changes the payroll sheet: drop its short cache.
   try { require('./payroll').invalidatePayrollCache(); } catch (_) {}
+
+  // Confirmed as unpaid while this month's run is in review: it joins that
+  // run now, as a proposed line HR still approves with the run.
+  let addedToRun = null;
+  if (status === 'CONFIRMED' && treatAsUnpaid) {
+    addedToRun = await require('./payroll').addDecisionToRunInReview({
+      employeeId: record.employee_id, dateKey: record.date_key, actor,
+    });
+  }
   return {
     status,
     proposedConsequences: { deductAnnualLeave, treatAsUnpaid, createWarningTrigger },
     applied: false,
+    addedToRun,
   };
 }
 
