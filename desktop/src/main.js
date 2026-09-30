@@ -106,6 +106,36 @@ const enrollSection = document.getElementById('enroll-section');
 const statusSection = document.getElementById('status-section');
 const employeeBadge = document.getElementById('employee-badge');
 
+// Text saved by older versions starts with an emoji; the widget now shows a
+// coloured dot and icons instead.
+function plainText(text) {
+  return String(text || '').replace(/^[^\p{L}\p{N}(]+/u, '').trim();
+}
+
+// "10:33:04 AM" -> "10:33 AM": the tile has room for minutes, not seconds.
+function shortTime(text) {
+  return String(text || '').replace(/^(\d{1,2}:\d{2}):\d{2}/, '$1');
+}
+
+// "Name (Role)" -> name and role on one line; the full text on hover.
+function renderEmployee(label) {
+  if (!employeeBadge) return;
+  const full = String(label || '');
+  const m = /^(.*?)\s*\((.*)\)\s*$/.exec(full);
+  employeeBadge.textContent = '';
+  employeeBadge.title = full;
+  const name = document.createElement('span');
+  name.className = 'emp-name';
+  name.textContent = m ? m[1] : full;
+  employeeBadge.appendChild(name);
+  if (m && m[2]) {
+    const role = document.createElement('span');
+    role.className = 'emp-role';
+    role.textContent = m[2];
+    employeeBadge.appendChild(role);
+  }
+}
+
 // enroll-section is visible by default in the HTML (no JS needed for fresh installs).
 // For previously-enrolled devices: swap to status view immediately.
 try {
@@ -113,7 +143,7 @@ try {
     if (enrollSection) enrollSection.classList.add('hidden');
     if (statusSection) statusSection.classList.remove('hidden');
     const cachedEmp = localStorage.getItem('ot_emp_info');
-    if (cachedEmp && employeeBadge) employeeBadge.textContent = cachedEmp;
+    if (cachedEmp) renderEmployee(cachedEmp);
 
     // Restore today's last known status & check-in time immediately to eliminate glitch
     const cachedDate = localStorage.getItem('officetracker_date_key');
@@ -123,14 +153,14 @@ try {
       const cachedCheckin = localStorage.getItem('ot_last_checkin');
       const checkinEl = document.getElementById('checkin-text');
       if (cachedCheckin && checkinEl) {
-        checkinEl.textContent = `Check-in: ${cachedCheckin}`;
+        checkinEl.textContent = shortTime(cachedCheckin);
       }
       const cachedStatusText = localStorage.getItem('ot_last_status_text');
       const cachedStatusClass = localStorage.getItem('ot_last_status_class');
       const statusTextEl = document.getElementById('status-text');
       const statusBannerEl = document.getElementById('status-banner');
       if (cachedStatusText && statusTextEl) {
-        statusTextEl.textContent = cachedStatusText;
+        statusTextEl.textContent = plainText(cachedStatusText);
       }
       if (cachedStatusClass && statusBannerEl) {
         statusBannerEl.className = cachedStatusClass;
@@ -138,7 +168,7 @@ try {
       const cachedNet = localStorage.getItem('ot_last_network_text');
       const networkEl = document.getElementById('network-text');
       if (cachedNet && networkEl) {
-        networkEl.textContent = cachedNet;
+        networkEl.textContent = plainText(cachedNet);
       }
     }
   }
@@ -214,7 +244,7 @@ if (wifiConnectBtn) {
     } catch (_) {}
     setTimeout(() => {
       wifiConnectBtn.disabled = false;
-      wifiConnectBtn.textContent = '📶 Connect to Trans K 2.4G';
+      wifiConnectBtn.textContent = 'Connect';
     }, 4000);
   });
 }
@@ -283,6 +313,19 @@ function updateShiftTargetDisplay(activeSecs, shiftTargetMins = currentShiftTarg
   if (shiftWorkedValue) {
     shiftWorkedValue.innerHTML = `${workedFormatted} <span class="shift-pct">(${pct}%)</span>`;
   }
+  const ring = document.getElementById('shift-ring');
+  if (ring) {
+    const circumference = 263.89; // 2 * pi * r (r = 42)
+    ring.style.strokeDashoffset = String(circumference * (1 - Math.max(0, Math.min(100, pct)) / 100));
+    ring.classList.toggle('completed', pct >= 100);
+  }
+  const ringPct = document.getElementById('shift-ring-pct');
+  if (ringPct) ringPct.textContent = `${pct}%`;
+  const targetLabel = document.getElementById('shift-target-label');
+  if (targetLabel) {
+    const t = currentShiftTargetMins;
+    targetLabel.textContent = `of ${Math.floor(t / 60)}h ${String(t % 60).padStart(2, '0')}m`;
+  }
   if (shiftProgressFill) {
     shiftProgressFill.style.width = `${Math.max(4, Math.min(100, pct))}%`;
     if (pct >= 100) {
@@ -293,9 +336,9 @@ function updateShiftTargetDisplay(activeSecs, shiftTargetMins = currentShiftTarg
   }
   if (shiftRemText) {
     if (remMins <= 0 || pct >= 100) {
-      shiftRemText.innerHTML = '<span class="rem-emerald font-bold">✅ Target Achieved</span>';
+      shiftRemText.innerHTML = '<span class="rem-emerald">Target reached</span>';
     } else {
-      shiftRemText.innerHTML = `<span class="rem-amber">⏳ ${remFormatted} remaining</span>`;
+      shiftRemText.innerHTML = `<span class="rem-amber">${remFormatted} remaining</span>`;
     }
   }
 }
@@ -315,34 +358,34 @@ function updateBreakCountdown() {
   if (remainingSecs > 0) {
     const formatted = formatMS(remainingSecs);
     breakCountdownTimer.textContent = formatted;
-    breakToggleBtn.textContent = `▶ Resume Work (${Math.ceil(remainingSecs / 60)}m left)`;
+    breakToggleBtn.textContent = `Resume work (${Math.ceil(remainingSecs / 60)}m left)`;
 
     if (remainingSecs <= 300) {
       if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap warning';
       if (breakProgressBar) breakProgressBar.style.background = '#f59e0b';
       if (breakCountdownFooter) {
-        breakCountdownFooter.textContent = '⚠️ Under 5 minutes remaining! Resume work soon.';
+        breakCountdownFooter.textContent = 'Under 5 minutes left. Resume work soon.';
         breakCountdownFooter.style.color = '#facc15';
       }
     } else {
       if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap';
       if (breakProgressBar) breakProgressBar.style.background = '#38bdf8';
       if (breakCountdownFooter) {
-        breakCountdownFooter.textContent = 'Permitted daily break · Resume work before 00:00';
+        breakCountdownFooter.textContent = 'Permitted daily break';
         breakCountdownFooter.style.color = '#94a3b8';
       }
     }
   } else {
     const overdueSecs = Math.abs(remainingSecs);
-    breakCountdownTimer.textContent = `+${formatMS(overdueSecs)} OVERDUE`;
-    breakToggleBtn.textContent = '▶ Resume Work (Break Overdue)';
+    breakCountdownTimer.textContent = `+${formatMS(overdueSecs)} over`;
+    breakToggleBtn.textContent = 'Resume work (overdue)';
     if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap overdue';
     if (breakProgressBar) {
       breakProgressBar.style.width = '100%';
       breakProgressBar.style.background = '#ef4444';
     }
     if (breakCountdownFooter) {
-      breakCountdownFooter.textContent = '⚠️ Break exceeded! Excess time counts toward daily deficit.';
+      breakCountdownFooter.textContent = 'Break exceeded: extra time counts toward your deficit.';
       breakCountdownFooter.style.color = '#f87171';
     }
   }
@@ -363,7 +406,7 @@ async function refreshStatus() {
         localStorage.setItem('ot_enrolled', 'true');
         const empTitle = `${data.employeeName || 'Staff'} (${data.employeeRole || 'Member'})`;
         localStorage.setItem('ot_emp_info', empTitle);
-        employeeBadge.textContent = empTitle;
+        renderEmployee(empTitle);
       } catch (_) {}
 
       enrollSection.classList.add('hidden');
@@ -413,7 +456,7 @@ async function refreshStatus() {
 
         if (data.latest && data.latest.today && checkinText) {
           const checkinVal = data.latest.today.checkInTime || 'Not Recorded';
-          checkinText.textContent = `Check-in: ${checkinVal}`;
+          checkinText.textContent = data.latest.today.checkInTime ? shortTime(checkinVal) : '--:--';
           if (data.latest.today.checkInTime) {
             try { localStorage.setItem('ot_last_checkin', data.latest.today.checkInTime); } catch (_) {}
           }
@@ -450,7 +493,7 @@ async function refreshStatus() {
           if (!isTogglingBreak) {
             updateBreakCountdown();
             if (statusBanner) statusBanner.className = 'status-banner away';
-            if (statusText) statusText.textContent = '☕ On Break';
+            if (statusText) statusText.textContent = 'On break';
             if (breakToggleBtn) {
               breakToggleBtn.disabled = false;
               breakToggleBtn.classList.remove('disabled');
@@ -466,59 +509,59 @@ async function refreshStatus() {
           if (isBreakUsed) {
             if (data.latest.workstationStatus === 'AWAY') {
               if (statusBanner) statusBanner.className = 'status-banner away';
-              if (statusText) statusText.textContent = '🔒 Screen Locked (Away)';
+              if (statusText) statusText.textContent = 'Screen locked · Away';
             } else if (data.latest.workstationStatus === 'IDLE') {
               if (statusBanner) statusBanner.className = 'status-banner away';
-              if (statusText) statusText.textContent = '⏳ Idle Inactivity';
+              if (statusText) statusText.textContent = 'Idle · No activity';
             } else if (data.latest.workstationStatus === 'CHECKED_OUT') {
               if (statusBanner) statusBanner.className = 'status-banner away';
-              if (statusText) statusText.textContent = '🏁 Shift Ended (Checked Out)';
+              if (statusText) statusText.textContent = 'Shift ended · Checked out';
             } else {
               if (statusBanner) statusBanner.className = 'status-banner';
-              if (statusText) statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
+              if (statusText) statusText.textContent = data.latest.inOffice ? 'Active · In office' : 'Active · Outside office';
             }
             if (!isTogglingBreak && breakToggleBtn) {
-              breakToggleBtn.textContent = `☕ Break Taken (${breakMins}m used)`;
+              breakToggleBtn.textContent = `Break taken (${breakMins}m)`;
               breakToggleBtn.disabled = true;
               breakToggleBtn.classList.add('disabled');
             }
           } else if (data.latest.workstationStatus === 'AWAY') {
             if (statusBanner) statusBanner.className = 'status-banner away';
-            if (statusText) statusText.textContent = '🔒 Screen Locked (Away)';
+            if (statusText) statusText.textContent = 'Screen locked · Away';
             if (!isTogglingBreak && breakToggleBtn) {
-              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.textContent = 'Take break';
               breakToggleBtn.disabled = false;
               breakToggleBtn.classList.remove('disabled');
             }
           } else if (data.latest.workstationStatus === 'IDLE') {
             if (statusBanner) statusBanner.className = 'status-banner away';
-            if (statusText) statusText.textContent = '⏳ Idle Inactivity';
+            if (statusText) statusText.textContent = 'Idle · No activity';
             if (!isTogglingBreak && breakToggleBtn) {
-              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.textContent = 'Take break';
               breakToggleBtn.disabled = false;
               breakToggleBtn.classList.remove('disabled');
             }
           } else if (data.latest.workstationStatus === 'CHECKED_OUT') {
             if (statusBanner) statusBanner.className = 'status-banner away';
-            if (statusText) statusText.textContent = '🏁 Shift Ended (Checked Out)';
+            if (statusText) statusText.textContent = 'Shift ended · Checked out';
             if (!isTogglingBreak && breakToggleBtn) {
-              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.textContent = 'Take break';
               breakToggleBtn.disabled = true;
               breakToggleBtn.classList.add('disabled');
             }
           } else if (data.latest.workstationStatus === 'OUTSIDE_HOURS') {
             if (statusBanner) statusBanner.className = 'status-banner away';
-            if (statusText) statusText.textContent = '🌙 Outside working hours';
+            if (statusText) statusText.textContent = 'Outside working hours';
             if (!isTogglingBreak && breakToggleBtn) {
-              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.textContent = 'Take break';
               breakToggleBtn.disabled = true;
               breakToggleBtn.classList.add('disabled');
             }
           } else {
             if (statusBanner) statusBanner.className = 'status-banner';
-            if (statusText) statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
+            if (statusText) statusText.textContent = data.latest.inOffice ? 'Active · In office' : 'Active · Outside office';
             if (!isTogglingBreak && breakToggleBtn) {
-              breakToggleBtn.textContent = '☕ Take Break';
+              breakToggleBtn.textContent = 'Take break';
               breakToggleBtn.disabled = false;
               breakToggleBtn.classList.remove('disabled');
             }
@@ -526,10 +569,10 @@ async function refreshStatus() {
         }
 
         if (data.latest.inOffice) {
-          if (networkText) networkText.textContent = '🟢 Verified in Office (Trans K)';
+          if (networkText) networkText.textContent = 'On office Wi-Fi · Verified';
           if (wifiConnectBtn) wifiConnectBtn.classList.add('hidden');
         } else {
-          if (networkText) networkText.textContent = '⚠️ Attendance Paused · Not on Office Wi-Fi';
+          if (networkText) networkText.textContent = 'Not on office Wi-Fi · Time paused';
           if (wifiConnectBtn) wifiConnectBtn.classList.remove('hidden');
         }
 
@@ -551,16 +594,16 @@ async function refreshStatus() {
         if (cachedDate === todayDateStr && cachedStatusText) {
           const cachedStatusClass = localStorage.getItem('ot_last_status_class');
           if (statusBanner && cachedStatusClass) statusBanner.className = cachedStatusClass;
-          if (statusText) statusText.textContent = cachedStatusText;
+          if (statusText) statusText.textContent = plainText(cachedStatusText);
           const cachedCheckin = localStorage.getItem('ot_last_checkin');
-          if (checkinText && cachedCheckin) checkinText.textContent = `Check-in: ${cachedCheckin}`;
+          if (checkinText && cachedCheckin) checkinText.textContent = shortTime(cachedCheckin);
           const cachedNet = localStorage.getItem('ot_last_network_text');
-          if (networkText && cachedNet) networkText.textContent = cachedNet;
+          if (networkText && cachedNet) networkText.textContent = plainText(cachedNet);
         } else {
           if (statusBanner) statusBanner.className = 'status-banner syncing';
-          if (statusText) statusText.textContent = '🔄 Connecting to Server…';
-          if (networkText) networkText.textContent = '📶 Checking Office Wi-Fi…';
-          if (checkinText) checkinText.textContent = '📌 Check-in: Syncing…';
+          if (statusText) statusText.textContent = 'Connecting to server…';
+          if (networkText) networkText.textContent = 'Checking office Wi-Fi…';
+          if (checkinText) checkinText.textContent = '--:--';
         }
       }
       if (activeTimer) activeTimer.textContent = formatHMS(currentActiveSecs);
@@ -577,8 +620,8 @@ async function refreshStatus() {
     // Only display Reconnecting if persistent consecutive errors occur (prevent momentary flicker)
     if (consecutiveErrors >= 2) {
       if (statusBanner) statusBanner.className = 'status-banner syncing';
-      if (statusText) statusText.textContent = '🔄 Reconnecting…';
-      if (networkText) networkText.textContent = '📶 Verifying Network…';
+      if (statusText) statusText.textContent = 'Reconnecting…';
+      if (networkText) networkText.textContent = 'Verifying network…';
     }
     try {
       if (localStorage.getItem('ot_enrolled') === 'true') {
@@ -653,13 +696,13 @@ if (enrollBtn) {
     }
     
     enrollBtn.disabled = true;
-    enrollBtn.textContent = 'Pairing Laptop…';
+    enrollBtn.textContent = 'Pairing…';
     enrollError.textContent = '';
 
     try {
       await callBackend('enroll_device', { serverUrl: url, code });
       enrollError.style.color = '#34d399';
-      enrollError.textContent = '✓ Successfully paired! Launching session…';
+      enrollError.textContent = 'Paired. Starting your session…';
       setTimeout(() => {
         refreshStatus();
       }, 1000);
@@ -670,7 +713,7 @@ if (enrollBtn) {
         const checkStatus = await callBackend('get_app_status');
         if (checkStatus && checkStatus.enrolled) {
           enrollError.style.color = '#34d399';
-          enrollError.textContent = '✓ Successfully paired! Launching session…';
+          enrollError.textContent = 'Paired. Starting your session…';
           setTimeout(() => {
             refreshStatus();
           }, 1000);
@@ -682,7 +725,7 @@ if (enrollBtn) {
       enrollError.textContent = e.message || 'Enrollment failed. Invalid or expired code.';
     } finally {
       enrollBtn.disabled = false;
-      enrollBtn.textContent = 'Pair This Laptop';
+      enrollBtn.textContent = 'Pair this laptop';
     }
   });
 }
@@ -724,16 +767,16 @@ if (breakToggleBtn) {
       breakStartedAtMs = Date.now();
       if (breakCountdownWrap) breakCountdownWrap.classList.remove('hidden');
       if (statusBanner) statusBanner.className = 'status-banner away';
-      if (statusText) statusText.textContent = '☕ On Break';
-      breakToggleBtn.textContent = '⏳ Starting break…';
+      if (statusText) statusText.textContent = 'On break';
+      breakToggleBtn.textContent = 'Starting break…';
       updateBreakCountdown();
     } else {
       isOnBreakState = false;
       breakStartedAtMs = null;
       if (breakCountdownWrap) breakCountdownWrap.classList.add('hidden');
       if (statusBanner) statusBanner.className = 'status-banner';
-      if (statusText) statusText.textContent = '🟢 Active · In Office';
-      breakToggleBtn.textContent = '☕ Break Taken';
+      if (statusText) statusText.textContent = 'Active · In office';
+      breakToggleBtn.textContent = 'Break taken';
     }
 
     try {
@@ -775,7 +818,7 @@ if (checkoutBtn) {
           } else {
             await fetch('/api/checkout', { method: 'POST' });
           }
-          showFeedback('✓ Shift checked out successfully.', false);
+          showFeedback('Shift checked out.', false);
           refreshStatus();
         } catch (err) {
           showFeedback('Checkout failed. Please try again.');
@@ -799,7 +842,7 @@ if (undoCheckoutBtn) {
       checkoutBtn.disabled = false;
       checkoutBtn.classList.remove('disabled');
     }
-    showFeedback('✓ Checkout cancelled. Session continues.', false);
+    showFeedback('Checkout cancelled. Your session continues.', false);
   });
 }
 

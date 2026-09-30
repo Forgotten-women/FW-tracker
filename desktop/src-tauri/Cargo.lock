@@ -3508,7 +3508,7 @@ dependencies = [
 
 [[package]]
 name = "office-tracker-desktop"
-version = "1.0.50"
+version = "1.0.51"
 dependencies = [
  "base64 0.22.1",
  "chrono",

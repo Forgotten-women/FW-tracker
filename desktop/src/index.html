@@ -9,129 +9,163 @@
 <body>
   <div class="widget-card" data-tauri-drag-region>
     <!-- Header -->
-    <div class="header" data-tauri-drag-region>
+    <header class="header" data-tauri-drag-region>
       <div class="brand" data-tauri-drag-region>
-        <div class="logo-icon" data-tauri-drag-region>🏢</div>
-        <div data-tauri-drag-region>
-          <div class="app-title" data-tauri-drag-region>WorkSync <span id="version-badge" style="font-size: 10px; font-weight: 600; color: #64748b; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 6px; margin-left: 4px; vertical-align: middle;">v1.0.50</span></div>
+        <div class="logo-icon" data-tauri-drag-region aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="13" r="8" />
+            <path d="M12 9v4l2.5 2.5" />
+            <path d="M9 2h6" />
+          </svg>
+        </div>
+        <div class="brand-text" data-tauri-drag-region>
+          <div class="app-title" data-tauri-drag-region>
+            WorkSync <span id="version-badge" class="version-badge">v1.0.51</span>
+          </div>
           <div id="employee-badge" class="sub-title" data-tauri-drag-region>Not Enrolled</div>
         </div>
       </div>
       <div class="window-controls">
-        <button id="minimize-btn" class="icon-btn" title="Minimize Window">─</button>
-        <button id="close-btn" class="icon-btn" title="Hide to Tray / Dock">✕</button>
+        <button id="minimize-btn" class="icon-btn" title="Minimize" aria-label="Minimize">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h12" /></svg>
+        </button>
+        <button id="close-btn" class="icon-btn" title="Hide to tray" aria-label="Hide to tray">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17" /></svg>
+        </button>
       </div>
-    </div>
-
+    </header>
 
     <!-- Enrollment View (shown by default on first paint — no JS required) -->
-    <div id="enroll-section" class="section">
-      <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 12px; padding: 12px; text-align: center;">
-        <div style="font-size: 13px; font-weight: 700; color: #a5b4fc; margin-bottom: 4px;">Device Registration</div>
-        <p class="desc" style="font-size: 11px; margin: 0;">Enter the 8-character pairing code provided by HR to link this laptop.</p>
+    <section id="enroll-section" class="section enroll-section">
+      <div class="enroll-hero">
+        <div class="enroll-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="12" rx="2" />
+            <path d="M2 20h20" />
+            <path d="M9 10l2 2 4-4" />
+          </svg>
+        </div>
+        <div class="enroll-title">Register this laptop</div>
+        <p class="desc">Enter the 8-character pairing code HR gave you to link this laptop to your account.</p>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">ENROLLMENT CODE</label>
-        <input type="text" id="enroll-code-input" placeholder="e.g. 7842-8921" autofocus style="text-align: center; font-size: 16px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;" />
-      </div>
+      <label class="field-label" for="enroll-code-input">Enrollment code</label>
+      <input type="text" id="enroll-code-input" class="code-input" placeholder="e.g. 7842-8921" autofocus autocomplete="off" spellcheck="false" />
 
       <!-- Server URL is hardcoded; not editable by users -->
       <input type="hidden" id="server-url-input" value="https://backend-ten-lyart-57.vercel.app" />
 
-      <button id="enroll-btn" class="primary-btn" style="margin-top: 4px;">Pair This Laptop</button>
-      <div id="enroll-error" class="error-msg" style="text-align: center; min-height: 20px;"></div>
-      
-      <p style="font-size: 10px; color: #64748b; text-align: center; margin-top: 4px;">
-        🔒 Privacy Safe: Only tracks active application names & idle time. Keystrokes and screen contents are never recorded.
+      <button id="enroll-btn" class="primary-btn">Pair this laptop</button>
+      <div id="enroll-error" class="error-msg"></div>
+
+      <p class="privacy-note">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+        Only application names and idle time are recorded. Keystrokes and screen contents never are.
       </p>
-    </div>
+    </section>
 
     <!-- Live Status View -->
-    <div id="status-section" class="section hidden">
-      <!-- Status Badge -->
-      <div class="status-banner syncing" id="status-banner">
-        <div class="pulse-dot" id="status-dot"></div>
-        <span id="status-text">Connecting to Server…</span>
+    <section id="status-section" class="section status-section hidden">
+      <!-- Status -->
+      <div class="status-banner syncing" id="status-banner" role="status">
+        <span class="pulse-dot" id="status-dot"></span>
+        <span id="status-text" class="status-text">Connecting to server…</span>
       </div>
 
-      <!-- Check-in Time Badge -->
-      <div id="checkin-badge" class="checkin-badge">
-        <span class="checkin-icon">📌</span>
-        <span id="checkin-text">Check-in: --:--</span>
-      </div>
+      <!-- Hero: shift target ring + today's active time -->
+      <div class="hero" id="shift-target-card">
+        <div class="hero-main">
+          <div class="ring" aria-hidden="true">
+            <svg viewBox="0 0 100 100" class="ring-svg">
+              <defs>
+                <linearGradient id="ring-gradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#6366f1" />
+                  <stop offset="55%" stop-color="#06b6d4" />
+                  <stop offset="100%" stop-color="#10b981" />
+                </linearGradient>
+              </defs>
+              <circle class="ring-track" cx="50" cy="50" r="42" />
+              <circle class="ring-fill" id="shift-ring" cx="50" cy="50" r="42" />
+            </svg>
+            <div class="ring-center">
+              <div class="ring-pct" id="shift-ring-pct">0%</div>
+              <div class="ring-sub" id="shift-target-label">of 7h 30m</div>
+            </div>
+          </div>
 
-      <!-- Official Daily Shift Target (HR Dashboard Synced) -->
-      <div class="shift-target-card" id="shift-target-card">
-        <div class="shift-header">
-          <span class="shift-title">⏱️ Daily Shift Target (7h 30m / day)</span>
-          <span class="shift-value" id="shift-worked-value">0h 0m <span class="shift-pct" id="shift-pct">(0%)</span></span>
+          <div class="hero-details">
+            <div class="timer-label" id="timer-label">Active today</div>
+            <div class="timer-display" id="active-timer">00:00:00</div>
+            <div class="shift-lines">
+              <div class="shift-line">Worked <span class="shift-value" id="shift-worked-value">0h 0m</span></div>
+              <div class="shift-line" id="shift-rem-text"><span class="rem-amber">7h 30m remaining</span></div>
+            </div>
+          </div>
         </div>
-        <div class="shift-progress-track">
-          <div class="shift-progress-fill" id="shift-progress-fill" style="width: 4%;"></div>
-        </div>
-        <div class="shift-footer">
-          <span class="shift-req">Target: 7h 30m required</span>
-          <span class="shift-rem" id="shift-rem-text"><span class="rem-amber">⏳ 7h 30m remaining</span></span>
-        </div>
-      </div>
 
-      <!-- Live Workstation Active Timer -->
-      <div class="timer-container" id="timer-container">
-        <div class="timer-label" id="timer-label">TODAY'S ACTIVE TIME</div>
-        <div class="timer-display" id="active-timer">00:00:00</div>
         <!-- Why time isn't being counted right now (outside hours, not verified, idle...) -->
         <div id="credit-note" class="credit-note hidden"></div>
 
-        <!-- Live Break Remaining Countdown (appears when on break) -->
+        <!-- Break countdown (replaces the stat tiles while on break) -->
         <div id="break-countdown-wrap" class="break-countdown-wrap hidden">
           <div class="break-countdown-header">
-            <span class="break-badge-title">☕ REMAINING BREAK TIME</span>
+            <span class="break-badge-title">Break remaining</span>
             <span class="break-badge-pill" id="break-permitted-pill">30m max</span>
           </div>
-          <div class="break-countdown-timer" id="break-countdown-timer">30:00</div>
-          <div class="break-progress-wrap">
-            <div class="break-progress-bar" id="break-progress-bar" style="width: 100%;"></div>
+          <div class="break-row">
+            <div class="break-countdown-timer" id="break-countdown-timer">30:00</div>
+            <div class="break-progress-wrap">
+              <div class="break-progress-bar" id="break-progress-bar" style="width: 100%;"></div>
+            </div>
           </div>
-          <div class="break-countdown-footer" id="break-countdown-footer">Permitted daily break · Resume work before 00:00</div>
+          <div class="break-countdown-footer" id="break-countdown-footer">Permitted daily break</div>
         </div>
       </div>
 
-      <!-- Stats Grid -->
+      <!-- Stat tiles -->
       <div class="stats-grid">
+        <div class="stat-card" id="checkin-badge">
+          <div class="stat-value" id="checkin-text">--:--</div>
+          <div class="stat-label">Checked in</div>
+        </div>
         <div class="stat-card">
           <div class="stat-value" id="stat-break">0m</div>
-          <div class="stat-label">Break / Away</div>
+          <div class="stat-label">Break / away</div>
         </div>
         <div class="stat-card">
           <div class="stat-value" id="stat-idle">0m</div>
-          <div class="stat-label">Idle Time</div>
+          <div class="stat-label">Idle</div>
         </div>
       </div>
 
-      <!-- Network Location Pill -->
+      <!-- Office network -->
       <div class="network-pill" id="network-pill">
-        <span class="net-icon">📶</span>
-        <span id="network-text">Checking Office Wi-Fi...</span>
-      </div>
-      <button id="wifi-connect-btn" class="action-btn hidden" style="background: #2563eb; color: #fff; margin-top: 6px; font-weight: 600;">📶 Connect to Trans K 2.4G</button>
-
-      <!-- Quick Action Buttons -->
-      <div class="action-row">
-        <button id="break-toggle-btn" class="action-btn">☕ Take Break</button>
-        <button id="checkout-btn" class="action-btn checkout-btn">🚪 End Shift</button>
+        <svg class="net-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12.5a10 10 0 0 1 14 0" /><path d="M8.5 16a5 5 0 0 1 7 0" /><path d="M2 9a15 15 0 0 1 20 0" /><circle cx="12" cy="19.5" r="1" />
+        </svg>
+        <span id="network-text" class="network-text">Checking office Wi-Fi…</span>
+        <button id="wifi-connect-btn" class="wifi-btn hidden">Connect</button>
       </div>
 
-      <!-- Undo Checkout Banner (Hidden by default) -->
-      <div id="undo-checkout-wrap" class="undo-checkout-wrap hidden">
-        <div class="undo-content">
-          <span>⚠️ Ending shift in <strong id="undo-timer-num">5</strong>s…</span>
-          <button id="undo-checkout-btn" class="undo-btn">↩️ Cancel & Undo</button>
+      <!-- Actions (pinned to the bottom) -->
+      <div class="footer-actions">
+        <div class="action-row">
+          <button id="break-toggle-btn" class="action-btn break-btn">Take break</button>
+          <button id="checkout-btn" class="action-btn checkout-btn">End shift</button>
+        </div>
+
+        <!-- Undo checkout (replaces the buttons while counting down) -->
+        <div id="undo-checkout-wrap" class="undo-checkout-wrap hidden">
+          <div class="undo-content">
+            <span>Ending shift in <strong id="undo-timer-num">5</strong>s…</span>
+            <button id="undo-checkout-btn" class="undo-btn">Undo</button>
+          </div>
         </div>
       </div>
 
-      <div id="status-feedback" class="desc hidden" style="font-size: 11px; text-align: center; margin-top: 6px; color: #f87171;"></div>
-    </div>
+      <!-- Messages float above the actions instead of pushing the layout -->
+      <div id="status-feedback" class="toast hidden" role="alert"></div>
+    </section>
   </div>
 
   <script src="main.js"></script>
