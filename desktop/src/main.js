@@ -32,8 +32,8 @@ let tauriWindow = getTauriWindow();
 async function callBackend(command, args = {}) {
   let invoke = getTauriInvoke();
   if (!invoke && typeof window !== 'undefined') {
-    // Wait up to 1s in case Tauri globals inject slightly after script parsing
-    for (let i = 0; i < 10; i++) {
+    // Wait up to 3s in case Tauri globals inject slightly after script parsing
+    for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 100));
       invoke = getTauriInvoke();
       if (invoke) break;
@@ -48,9 +48,9 @@ async function callBackend(command, args = {}) {
   if (invoke) {
     // Network-bound commands (enrollment, checkout, break toggles) require round-trips
     // over HTTPS to the cloud backend (DNS, TLS handshake, DB transactions).
-    // They get a generous 25s timeout. Local in-memory IPC queries get 4s.
+    // They get a generous 25s timeout. Local in-memory IPC queries get 10s.
     const isNetworkCommand = ['enroll_device', 'checkout_shift', 'set_manual_break', 'toggle_manual_break'].includes(command);
-    const timeoutMs = isNetworkCommand ? 25000 : 4000;
+    const timeoutMs = isNetworkCommand ? 25000 : 10000;
     return Promise.race([
       invoke(command, args),
       new Promise((_, reject) =>
@@ -114,6 +114,33 @@ try {
     if (statusSection) statusSection.classList.remove('hidden');
     const cachedEmp = localStorage.getItem('ot_emp_info');
     if (cachedEmp && employeeBadge) employeeBadge.textContent = cachedEmp;
+
+    // Restore today's last known status & check-in time immediately to eliminate glitch
+    const cachedDate = localStorage.getItem('officetracker_date_key');
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (cachedDate === today) {
+      const cachedCheckin = localStorage.getItem('ot_last_checkin');
+      const checkinEl = document.getElementById('checkin-text');
+      if (cachedCheckin && checkinEl) {
+        checkinEl.textContent = `Check-in: ${cachedCheckin}`;
+      }
+      const cachedStatusText = localStorage.getItem('ot_last_status_text');
+      const cachedStatusClass = localStorage.getItem('ot_last_status_class');
+      const statusTextEl = document.getElementById('status-text');
+      const statusBannerEl = document.getElementById('status-banner');
+      if (cachedStatusText && statusTextEl) {
+        statusTextEl.textContent = cachedStatusText;
+      }
+      if (cachedStatusClass && statusBannerEl) {
+        statusBannerEl.className = cachedStatusClass;
+      }
+      const cachedNet = localStorage.getItem('ot_last_network_text');
+      const networkEl = document.getElementById('network-text');
+      if (cachedNet && networkEl) {
+        networkEl.textContent = cachedNet;
+      }
+    }
   }
 } catch (_) {}
 const checkinText = document.getElementById('checkin-text');
@@ -127,6 +154,7 @@ const breakToggleBtn = document.getElementById('break-toggle-btn');
 const checkoutBtn = document.getElementById('checkout-btn');
 const undoCheckoutWrap = document.getElementById('undo-checkout-wrap');
 const undoTimerNum = document.getElementById('undo-timer-num');
+const undoCheckoutBtn = document.getElementById('undo-checkout-btn');
 const shiftTargetCard = document.getElementById('shift-target-card');
 const shiftWorkedValue = document.getElementById('shift-worked-value');
 const shiftProgressFill = document.getElementById('shift-progress-fill');
@@ -144,6 +172,7 @@ let feedbackTimeout = null;
 let isTogglingBreak = false;
 let checkoutCountdownTimer = null;
 let checkoutSecondsLeft = 5;
+let consecutiveErrors = 0;
 
 const breakCountdownWrap = document.getElementById('break-countdown-wrap');
 const breakCountdownTimer = document.getElementById('break-countdown-timer');
@@ -379,11 +408,15 @@ async function refreshStatus() {
         }
 
         const breakMins = Math.floor((data.latest.today.breakSeconds || 0) / 60);
-        statBreak.textContent = `${breakMins}m`;
-        statIdle.textContent = `${Math.floor((data.latest.today.idleSeconds || 0) / 60)}m`;
+        if (statBreak) statBreak.textContent = `${breakMins}m`;
+        if (statIdle) statIdle.textContent = `${Math.floor((data.latest.today.idleSeconds || 0) / 60)}m`;
 
         if (data.latest && data.latest.today && checkinText) {
-          checkinText.textContent = `Check-in: ${data.latest.today.checkInTime || 'Not Recorded'}`;
+          const checkinVal = data.latest.today.checkInTime || 'Not Recorded';
+          checkinText.textContent = `Check-in: ${checkinVal}`;
+          if (data.latest.today.checkInTime) {
+            try { localStorage.setItem('ot_last_checkin', data.latest.today.checkInTime); } catch (_) {}
+          }
         }
 
         // Official Daily Shift Target (HR Dashboard Synced)
@@ -416,10 +449,12 @@ async function refreshStatus() {
           }
           if (!isTogglingBreak) {
             updateBreakCountdown();
-            statusBanner.className = 'status-banner away';
-            statusText.textContent = '☕ On Break';
-            breakToggleBtn.disabled = false;
-            breakToggleBtn.classList.remove('disabled');
+            if (statusBanner) statusBanner.className = 'status-banner away';
+            if (statusText) statusText.textContent = '☕ On Break';
+            if (breakToggleBtn) {
+              breakToggleBtn.disabled = false;
+              breakToggleBtn.classList.remove('disabled');
+            }
           }
         } else {
           isOnBreakState = false;
@@ -430,59 +465,59 @@ async function refreshStatus() {
 
           if (isBreakUsed) {
             if (data.latest.workstationStatus === 'AWAY') {
-              statusBanner.className = 'status-banner away';
-              statusText.textContent = '🔒 Screen Locked (Away)';
+              if (statusBanner) statusBanner.className = 'status-banner away';
+              if (statusText) statusText.textContent = '🔒 Screen Locked (Away)';
             } else if (data.latest.workstationStatus === 'IDLE') {
-              statusBanner.className = 'status-banner away';
-              statusText.textContent = '⏳ Idle Inactivity';
+              if (statusBanner) statusBanner.className = 'status-banner away';
+              if (statusText) statusText.textContent = '⏳ Idle Inactivity';
             } else if (data.latest.workstationStatus === 'CHECKED_OUT') {
-              statusBanner.className = 'status-banner away';
-              statusText.textContent = '🏁 Shift Ended (Checked Out)';
+              if (statusBanner) statusBanner.className = 'status-banner away';
+              if (statusText) statusText.textContent = '🏁 Shift Ended (Checked Out)';
             } else {
-              statusBanner.className = 'status-banner';
-              statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
+              if (statusBanner) statusBanner.className = 'status-banner';
+              if (statusText) statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
             }
-            if (!isTogglingBreak) {
+            if (!isTogglingBreak && breakToggleBtn) {
               breakToggleBtn.textContent = `☕ Break Taken (${breakMins}m used)`;
               breakToggleBtn.disabled = true;
               breakToggleBtn.classList.add('disabled');
             }
           } else if (data.latest.workstationStatus === 'AWAY') {
-            statusBanner.className = 'status-banner away';
-            statusText.textContent = '🔒 Screen Locked (Away)';
-            if (!isTogglingBreak) {
+            if (statusBanner) statusBanner.className = 'status-banner away';
+            if (statusText) statusText.textContent = '🔒 Screen Locked (Away)';
+            if (!isTogglingBreak && breakToggleBtn) {
               breakToggleBtn.textContent = '☕ Take Break';
               breakToggleBtn.disabled = false;
               breakToggleBtn.classList.remove('disabled');
             }
           } else if (data.latest.workstationStatus === 'IDLE') {
-            statusBanner.className = 'status-banner away';
-            statusText.textContent = '⏳ Idle Inactivity';
-            if (!isTogglingBreak) {
+            if (statusBanner) statusBanner.className = 'status-banner away';
+            if (statusText) statusText.textContent = '⏳ Idle Inactivity';
+            if (!isTogglingBreak && breakToggleBtn) {
               breakToggleBtn.textContent = '☕ Take Break';
               breakToggleBtn.disabled = false;
               breakToggleBtn.classList.remove('disabled');
             }
           } else if (data.latest.workstationStatus === 'CHECKED_OUT') {
-            statusBanner.className = 'status-banner away';
-            statusText.textContent = '🏁 Shift Ended (Checked Out)';
-            if (!isTogglingBreak) {
+            if (statusBanner) statusBanner.className = 'status-banner away';
+            if (statusText) statusText.textContent = '🏁 Shift Ended (Checked Out)';
+            if (!isTogglingBreak && breakToggleBtn) {
               breakToggleBtn.textContent = '☕ Take Break';
               breakToggleBtn.disabled = true;
               breakToggleBtn.classList.add('disabled');
             }
           } else if (data.latest.workstationStatus === 'OUTSIDE_HOURS') {
-            statusBanner.className = 'status-banner away';
-            statusText.textContent = '🌙 Outside working hours';
-            if (!isTogglingBreak) {
+            if (statusBanner) statusBanner.className = 'status-banner away';
+            if (statusText) statusText.textContent = '🌙 Outside working hours';
+            if (!isTogglingBreak && breakToggleBtn) {
               breakToggleBtn.textContent = '☕ Take Break';
               breakToggleBtn.disabled = true;
               breakToggleBtn.classList.add('disabled');
             }
           } else {
-            statusBanner.className = 'status-banner';
-            statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
-            if (!isTogglingBreak) {
+            if (statusBanner) statusBanner.className = 'status-banner';
+            if (statusText) statusText.textContent = data.latest.inOffice ? '🟢 Active · In Office' : '🔵 Active · Outside Office';
+            if (!isTogglingBreak && breakToggleBtn) {
               breakToggleBtn.textContent = '☕ Take Break';
               breakToggleBtn.disabled = false;
               breakToggleBtn.classList.remove('disabled');
@@ -491,20 +526,45 @@ async function refreshStatus() {
         }
 
         if (data.latest.inOffice) {
-          networkText.textContent = '🟢 Verified in Office (Trans K)';
+          if (networkText) networkText.textContent = '🟢 Verified in Office (Trans K)';
           if (wifiConnectBtn) wifiConnectBtn.classList.add('hidden');
         } else {
-          networkText.textContent = '⚠️ Attendance Paused · Not on Office Wi-Fi';
+          if (networkText) networkText.textContent = '⚠️ Attendance Paused · Not on Office Wi-Fi';
           if (wifiConnectBtn) wifiConnectBtn.classList.remove('hidden');
+        }
+
+        // Cache last confirmed status and network text to avoid startup/reconnection glitches
+        if (statusText && statusText.textContent) {
+          try { localStorage.setItem('ot_last_status_text', statusText.textContent); } catch (_) {}
+        }
+        if (statusBanner && statusBanner.className) {
+          try { localStorage.setItem('ot_last_status_class', statusBanner.className); } catch (_) {}
+        }
+        if (networkText && networkText.textContent) {
+          try { localStorage.setItem('ot_last_network_text', networkText.textContent); } catch (_) {}
         }
       } else {
         // Device is enrolled, but waiting for initial heartbeat response from server
-        if (statusBanner) statusBanner.className = 'status-banner syncing';
-        if (statusText) statusText.textContent = '🔄 Connecting to Server…';
-        if (networkText) networkText.textContent = '📶 Checking Office Wi-Fi…';
-        if (checkinText) checkinText.textContent = '📌 Check-in: Syncing…';
+        // If we already have today's confirmed active status cached, keep showing it instead of glitching to "Connecting..."
+        const cachedDate = localStorage.getItem(CACHE_KEY_DATE);
+        const cachedStatusText = localStorage.getItem('ot_last_status_text');
+        if (cachedDate === todayDateStr && cachedStatusText) {
+          const cachedStatusClass = localStorage.getItem('ot_last_status_class');
+          if (statusBanner && cachedStatusClass) statusBanner.className = cachedStatusClass;
+          if (statusText) statusText.textContent = cachedStatusText;
+          const cachedCheckin = localStorage.getItem('ot_last_checkin');
+          if (checkinText && cachedCheckin) checkinText.textContent = `Check-in: ${cachedCheckin}`;
+          const cachedNet = localStorage.getItem('ot_last_network_text');
+          if (networkText && cachedNet) networkText.textContent = cachedNet;
+        } else {
+          if (statusBanner) statusBanner.className = 'status-banner syncing';
+          if (statusText) statusText.textContent = '🔄 Connecting to Server…';
+          if (networkText) networkText.textContent = '📶 Checking Office Wi-Fi…';
+          if (checkinText) checkinText.textContent = '📌 Check-in: Syncing…';
+        }
       }
-      activeTimer.textContent = formatHMS(currentActiveSecs);
+      if (activeTimer) activeTimer.textContent = formatHMS(currentActiveSecs);
+      consecutiveErrors = 0;
     } else {
       enrollSection.classList.remove('hidden');
       statusSection.classList.add('hidden');
@@ -513,9 +573,13 @@ async function refreshStatus() {
     }
   } catch (err) {
     console.error('refreshStatus error:', err);
-    if (statusBanner) statusBanner.className = 'status-banner syncing';
-    if (statusText) statusText.textContent = '🔄 Reconnecting…';
-    if (networkText) networkText.textContent = '📶 Verifying Network…';
+    consecutiveErrors++;
+    // Only display Reconnecting if persistent consecutive errors occur (prevent momentary flicker)
+    if (consecutiveErrors >= 2) {
+      if (statusBanner) statusBanner.className = 'status-banner syncing';
+      if (statusText) statusText.textContent = '🔄 Reconnecting…';
+      if (networkText) networkText.textContent = '📶 Verifying Network…';
+    }
     try {
       if (localStorage.getItem('ot_enrolled') === 'true') {
         if (statusSection) statusSection.classList.remove('hidden');
@@ -739,15 +803,24 @@ if (undoCheckoutBtn) {
   });
 }
 
-// Listen for Tauri events if running under Tauri
-try {
-  const t = getTauri();
-  if (t && t.event) {
-    t.event.listen('heartbeat-updated', () => {
-      refreshStatus();
-    });
+// Listen for Tauri events if running under Tauri (robust retry loop to ensure binding)
+async function initTauriEvents() {
+  for (let i = 0; i < 30; i++) {
+    const t = getTauri();
+    if (t && t.event && typeof t.event.listen === 'function') {
+      try {
+        await t.event.listen('heartbeat-updated', () => {
+          refreshStatus();
+        });
+        break;
+      } catch (err) {
+        console.warn('Failed to listen to heartbeat-updated:', err);
+      }
+    }
+    await new Promise(r => setTimeout(r, 100));
   }
-} catch (_) {}
+}
+initTauriEvents();
 
 if (activeTimer && currentActiveSecs > 0) {
   activeTimer.textContent = formatHMS(currentActiveSecs);

@@ -57,6 +57,10 @@ import type {
   ComplaintStatus,
   LiveFrameResponse,
   LiveStreamRequestResponse,
+  DownloadedFile,
+  InvoiceStatement,
+  InvoiceTemplateResponse,
+  InvoiceTemplateUploadResult,
 } from './types';
 
 
@@ -147,6 +151,64 @@ async function request<T>(
   if (!res.ok) {
     throw new ApiError(
       body?.message ?? `Request failed (HTTP ${res.status})`,
+      res.status,
+      body && typeof body === 'object' ? body : null,
+    );
+  }
+  return body as T;
+}
+
+/** The file name from a Content-Disposition header, if it carries one. */
+function fileNameFrom(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const star = /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(header);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''));
+    } catch {
+      // Malformed encoding: fall through to the plain form.
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
+  return plain ? plain[1].trim() : fallback;
+}
+
+/**
+ * A binary GET with the admin key. Refusals come back as JSON, so they throw
+ * the same errors request() does (ApiError keeps the machine-readable code).
+ */
+async function download(path: string, fallbackName: string, key = getKey()): Promise<DownloadedFile> {
+  const res = await fetch(path, { headers: { 'X-Admin-Key': key } });
+  if (res.status === 401) throw new UnauthorizedError('That admin key was not accepted.');
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    if (res.status === 503) {
+      throw new NotConfiguredError(body?.message ?? 'The server has no admin key configured.');
+    }
+    throw new ApiError(
+      body?.message ?? `Download failed (HTTP ${res.status})`,
+      res.status,
+      body && typeof body === 'object' ? body : null,
+    );
+  }
+  return {
+    blob: await res.blob(),
+    fileName: fileNameFrom(res.headers.get('Content-Disposition'), fallbackName),
+    headers: res.headers,
+  };
+}
+
+/** Multipart POST with the admin key; the browser sets the boundary itself. */
+async function upload<T>(path: string, form: FormData, key = getKey()): Promise<T> {
+  const res = await fetch(path, { method: 'POST', headers: { 'X-Admin-Key': key }, body: form });
+  if (res.status === 401) throw new UnauthorizedError('That admin key was not accepted.');
+  const body = await res.json().catch(() => null);
+  if (res.status === 413) {
+    throw new ApiError('The file is too large for the server to accept.', 413, body && typeof body === 'object' ? body : null);
+  }
+  if (!res.ok) {
+    throw new ApiError(
+      body?.message ?? `Upload failed (HTTP ${res.status})`,
       res.status,
       body && typeof body === 'object' ? body : null,
     );
@@ -813,6 +875,44 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       },
+    ),
+
+  // ---- Monthly invoices ----------------------------------------------------
+  // Built on request from the stored template; nothing but the template is
+  // stored. Refusals throw ApiError with an InvoiceErrorCode in `code`.
+
+  /** Final for a published / paid month, a live draft for an open one. */
+  payrollInvoice: (periodId: string, employeeId: string) =>
+    request<{ status: string; invoice: InvoiceStatement }>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/invoices/${encodeURIComponent(employeeId)}`,
+    ),
+
+  /** The invoice filled into its Word template. NO_TEMPLATE (409) until one is uploaded. */
+  payrollInvoiceDocx: (periodId: string, employeeId: string) =>
+    download(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/invoices/${encodeURIComponent(employeeId)}/docx`,
+      'invoice.docx',
+    ),
+
+  /** Every published invoice of an approved month; NOT_FINAL (409) otherwise. */
+  payrollInvoicesZip: (periodId: string) =>
+    download(`/api/payroll/periods/${encodeURIComponent(periodId)}/invoices.zip`, 'invoices.zip'),
+
+  invoiceTemplate: () =>
+    request<{ status: string } & InvoiceTemplateResponse>('/api/payroll/invoice-template'),
+
+  /** A .docx (max 4 MB). The new version becomes active; 400 names what is wrong with it. */
+  uploadInvoiceTemplate: (file: File, name?: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (name && name.trim()) form.append('name', name.trim());
+    return upload<{ status: string } & InvoiceTemplateUploadResult>('/api/payroll/invoice-template', form);
+  },
+
+  invoiceTemplateFile: (templateId: string) =>
+    download(
+      `/api/payroll/invoice-template/${encodeURIComponent(templateId)}/file`,
+      'invoice_template.docx',
     ),
 
   // -------------------------------------------------------------------------

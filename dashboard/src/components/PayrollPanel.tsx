@@ -26,6 +26,7 @@ import {
   ChevronRightIcon,
   CurrencyExchangeIcon,
   EyeIcon,
+  FileTextIcon,
   HandIcon,
   InfoIcon,
   LockIcon,
@@ -46,6 +47,8 @@ import {
   isFinalStatus,
 } from './payroll/format';
 import { PayrollRunView } from './payroll/PayrollRunView';
+import { InvoiceModal } from './payroll/InvoiceView';
+import { InvoiceSettingsPanel } from './payroll/InvoiceSettings';
 
 // Shared by every modal here: scrolls on a short screen instead of clipping.
 const MODAL_BACKDROP = 'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center';
@@ -228,8 +231,15 @@ function AddExceptionModal({
               <option value="BONUS">Bonus (Performance / Discretionary Incentive)</option>
               <option value="ALLOWANCE">Monthly / Transport / Shift Allowance</option>
               <option value="SPECIAL_ADDITION">Special / Festive Addition</option>
+              <option value="OVERTIME">Overtime (paid extra hours)</option>
               <option value="MANUAL_ADJUSTMENT">Custom Manual Adjustment</option>
             </select>
+            {type === 'OVERTIME' && (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Overtime is never calculated automatically. Enter the amount to pay for the extra hours; the invoice prints it
+                on its Overtime line.
+              </p>
+            )}
           </div>
 
           <div>
@@ -781,6 +791,7 @@ const ADJ_TYPES = [
   { value: 'STARTER', label: 'Starter (Pro-rata)' },
   { value: 'LEAVER', label: 'Leaver Settlement' },
   { value: 'BONUS', label: 'Bonus' },
+  { value: 'OVERTIME', label: 'Overtime (entered by HR)' },
   { value: 'OTHER', label: 'Other' },
 ];
 
@@ -1268,6 +1279,9 @@ function PeriodDetailView({
   const [closeError, setCloseError] = useState('');
   const [rateBasis, setRateBasis] = useState<'WORKING_DAYS_260' | 'CALENDAR_DAYS_30'>('WORKING_DAYS_260');
   const [exceptionEmployee, setExceptionEmployee] = useState<PrepareEmployee | null>(null);
+  const [draftInvoiceFor, setDraftInvoiceFor] = useState<{ employeeId: string; name: string } | null>(null);
+  // A draft invoice is the open month's live figures; a final one lives on the payslips.
+  const canPreviewDraft = period.status === 'OPEN' || period.status === 'IN_REVIEW';
 
   const changed = useCallback(() => {
     setDataKey((k) => k + 1);
@@ -1644,17 +1658,31 @@ function PeriodDetailView({
                           </div>
                         </td>
                         <td className="py-2.5 text-center">
-                          {!isFinal && (
-                            <button
-                              type="button"
-                              onClick={() => setExceptionEmployee(emp)}
-                              title="Add custom bonus, allowance, or exception amount for this employee"
-                              className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/60 px-2.5 py-1 text-xs font-semibold text-indigo-300 transition"
-                            >
-                              <PlusIcon className="h-3 w-3 shrink-0" />
-                              <span>Exception</span>
-                            </button>
-                          )}
+                          <div className="flex flex-wrap items-center justify-center gap-1.5">
+                            {!isFinal && (
+                              <button
+                                type="button"
+                                onClick={() => setExceptionEmployee(emp)}
+                                title="Add custom bonus, allowance, overtime or exception amount for this employee"
+                                className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/60 px-2.5 py-1 text-xs font-semibold text-indigo-300 transition"
+                              >
+                                <PlusIcon className="h-3 w-3 shrink-0" />
+                                <span>Exception</span>
+                              </button>
+                            )}
+                            {canPreviewDraft && (
+                              <button
+                                type="button"
+                                onClick={() => setDraftInvoiceFor({ employeeId: emp.employeeId, name: emp.employeeName })}
+                                title="Preview draft invoice: this month's live figures, provisional until the run is approved"
+                                aria-label={`Preview draft invoice for ${emp.employeeName}`}
+                                className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 px-2.5 py-1 text-xs font-semibold text-slate-300 transition"
+                              >
+                                <FileTextIcon className="h-3 w-3 shrink-0" />
+                                <span>Draft invoice</span>
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1862,6 +1890,16 @@ function PeriodDetailView({
         />
       )}
 
+      {/* Draft invoice preview (open / in-review months) */}
+      {draftInvoiceFor && (
+        <InvoiceModal
+          periodId={period.id}
+          employeeId={draftInvoiceFor.employeeId}
+          employeeName={draftInvoiceFor.name}
+          onClose={() => setDraftInvoiceFor(null)}
+        />
+      )}
+
       {/* HR Exception Policy: Add Exception Modal */}
       {exceptionEmployee && (
         <AddExceptionModal
@@ -1968,6 +2006,9 @@ export function PayrollPanel() {
   const [employees, setEmployees] = useState<AdminEmployee[]>([]);
   const [showSalaryToEmployees, setShowSalaryToEmployees] = useState(false);
   const [togglingVisibility, setTogglingVisibility] = useState(false);
+  const [showEstimateToEmployees, setShowEstimateToEmployees] = useState(false);
+  const [togglingEstimate, setTogglingEstimate] = useState(false);
+  const [invoiceSettingsOpen, setInvoiceSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -2005,6 +2046,8 @@ export function PayrollPanel() {
         setEmployees(eRes.employees ?? []);
         if (sRes?.settings) {
           setShowSalaryToEmployees(sRes.settings.show_salary_to_employees === '1' || sRes.settings.show_salary_to_employees === 'true');
+          // The backend reads this one as on only when it is exactly '1'.
+          setShowEstimateToEmployees(sRes.settings.show_payroll_estimate_to_employees === '1');
         }
         setError('');
       } catch (e: unknown) {
@@ -2038,6 +2081,31 @@ export function PayrollPanel() {
     } finally {
       setTogglingVisibility(false);
     }
+  };
+
+  const handleToggleEstimateVisibility = async () => {
+    const nextVal = !showEstimateToEmployees;
+    setTogglingEstimate(true);
+    try {
+      await api.updateSetting('show_payroll_estimate_to_employees', nextVal ? '1' : '0');
+      setShowEstimateToEmployees(nextVal);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update the draft invoice visibility setting.');
+    } finally {
+      setTogglingEstimate(false);
+    }
+  };
+
+  const scrollToId = (id: string) => {
+    // After the render that may have just opened the section.
+    window.requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const openInvoiceSettings = () => {
+    setInvoiceSettingsOpen(true);
+    scrollToId('invoice-settings');
   };
 
   const handleCreate = async (
@@ -2119,41 +2187,79 @@ export function PayrollPanel() {
           <Button variant="secondary" icon={<PlusIcon className="h-3.5 w-3.5" />} onClick={() => setShowCreate(true)}>
             New period
           </Button>
+          <Button variant="secondary" icon={<FileTextIcon className="h-3.5 w-3.5" />} onClick={openInvoiceSettings}>
+            Invoice settings
+          </Button>
         </div>
       </div>
 
       {/* Employee Mobile Salary Visibility Setting Banner */}
-      <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${showSalaryToEmployees ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-            {showSalaryToEmployees ? <EyeIcon className="h-5 w-5" /> : <LockIcon className="h-5 w-5" />}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-white">Employee Mobile Salary Visibility</span>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${showSalaryToEmployees ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
-                {showSalaryToEmployees ? 'Visible on Mobile' : 'Hidden on Mobile'}
-              </span>
+      <div id="payroll-visibility" className="glass-panel scroll-mt-28 flex flex-col divide-y divide-white/8 rounded-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${showSalaryToEmployees ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+              {showSalaryToEmployees ? <EyeIcon className="h-5 w-5" /> : <LockIcon className="h-5 w-5" />}
             </div>
-            <p className="text-[11px] text-slate-400">
-              {showSalaryToEmployees
-                ? 'Staff can view their pay and published payslips in the mobile app, and are told when a payslip is published.'
-                : 'Personal salaries and payslips are hidden from the mobile app and stripped from employee API responses.'}
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-white">Employee Mobile Salary Visibility</span>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${showSalaryToEmployees ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
+                  {showSalaryToEmployees ? 'Visible on Mobile' : 'Hidden on Mobile'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {showSalaryToEmployees
+                  ? 'Staff can view their pay, published payslips and approved monthly invoices in the mobile app, and are told when a payslip is published.'
+                  : 'Personal salaries, payslips and invoices are hidden from the mobile app and stripped from employee API responses.'}
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={handleToggleSalaryVisibility}
+            disabled={togglingVisibility}
+            className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 ${
+              showSalaryToEmployees
+                ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+            }`}
+          >
+            {togglingVisibility ? 'Updating…' : (showSalaryToEmployees ? <><LockIcon className="h-3.5 w-3.5 shrink-0" /> Hide From Staff</> : <><EyeIcon className="h-3.5 w-3.5 shrink-0" /> Enable Staff View</>)}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={handleToggleSalaryVisibility}
-          disabled={togglingVisibility}
-          className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 ${
-            showSalaryToEmployees
-              ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30'
-              : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-          }`}
-        >
-          {togglingVisibility ? 'Updating…' : (showSalaryToEmployees ? <><LockIcon className="h-3.5 w-3.5 shrink-0" /> Hide From Staff</> : <><EyeIcon className="h-3.5 w-3.5 shrink-0" /> Enable Staff View</>)}
-        </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${showEstimateToEmployees ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'}`}>
+              <FileTextIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-white">This Month&apos;s Draft Invoice</span>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${showEstimateToEmployees ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
+                  {showEstimateToEmployees ? 'Draft shown' : 'Draft hidden'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {showEstimateToEmployees
+                  ? 'Staff also see a provisional invoice for the month in progress, clearly marked as an estimate that changes until HR approves the run.'
+                  : 'Staff see an invoice only once HR has approved the month. Turn on to also show the month in progress as a marked estimate.'}
+                {!showSalaryToEmployees && ' Has no effect while salaries are hidden (above).'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleToggleEstimateVisibility}
+            disabled={togglingEstimate}
+            className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 ${
+              showEstimateToEmployees
+                ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+            }`}
+          >
+            {togglingEstimate ? 'Updating…' : (showEstimateToEmployees ? <><LockIcon className="h-3.5 w-3.5 shrink-0" /> Hide Draft</> : <><EyeIcon className="h-3.5 w-3.5 shrink-0" /> Show Draft</>)}
+          </button>
+        </div>
       </div>
 
       {currency === 'PKR' && (
@@ -2235,6 +2341,14 @@ export function PayrollPanel() {
           )}
         </>
       )}
+
+      <InvoiceSettingsPanel
+        open={invoiceSettingsOpen}
+        onToggle={() => setInvoiceSettingsOpen((v) => !v)}
+        salaryVisible={showSalaryToEmployees}
+        estimateVisible={showEstimateToEmployees}
+        onShowVisibility={() => scrollToId('payroll-visibility')}
+      />
 
       {showCreate && (
         <CreatePeriodModal

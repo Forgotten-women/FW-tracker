@@ -208,16 +208,20 @@ async function salaryHistoryFor(employeeId) {
 // Working days
 // ---------------------------------------------------------------------------
 
-const workingDaysCache = new Map();
+// Short-lived and bounded: a new bank holiday, office closure or shift pattern
+// must reach payroll within a minute, not whenever this instance recycles.
+const workingDaysCache = new Map(); // key -> { days, expiresAt }
+const WORKING_DAYS_TTL_MS = 60 * 1000;
+const WORKING_DAYS_MAX = 2000;
 
 /** Scheduled working days for an employee in a range, honouring the calendar. */
 async function eligibleWorkingDays(employeeId, fromDate, toDate) {
   const cacheKey = `${employeeId || 'default'}:${fromDate}:${toDate}`;
-  if (workingDaysCache.has(cacheKey)) {
-    return workingDaysCache.get(cacheKey);
-  }
+  const hit = workingDaysCache.get(cacheKey);
+  if (hit && hit.expiresAt > Date.now()) return hit.days;
   const days = await schedule.workingDaysBetween(employeeId, fromDate, toDate);
-  workingDaysCache.set(cacheKey, days);
+  if (workingDaysCache.size >= WORKING_DAYS_MAX) workingDaysCache.clear();
+  workingDaysCache.set(cacheKey, { days, expiresAt: Date.now() + WORKING_DAYS_TTL_MS });
   return days;
 }
 
@@ -981,7 +985,10 @@ function presentSheetPeriod(period) {
 
 // In-memory cache for preparePeriod
 const prepMemoryCache = new Map();
-const PREP_CACHE_TTL_MS = 60 * 1000;
+// Absorbs repeated renders of the same sheet, nothing more: attendance
+// changes clear it on this instance (invalidatePayrollCache), and other
+// instances catch up within the TTL.
+const PREP_CACHE_TTL_MS = 15 * 1000;
 
 /**
  * Builds the preparation sheet for a period.
@@ -1000,19 +1007,6 @@ async function preparePeriod(periodId, { basis = null } = {}) {
   const memHit = prepMemoryCache.get(memKey);
   if (memHit && Date.now() < memHit.expiresAt) {
     return memHit.data;
-  }
-
-  // Try Redis cache if available
-  const redis = require('../lib/redis').getClient();
-  const cacheKey = `payroll:prep:${periodId}:${rateBasis}`;
-  if (redis) {
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached && typeof cached === 'object') {
-        prepMemoryCache.set(memKey, { data: cached, expiresAt: Date.now() + PREP_CACHE_TTL_MS });
-        return cached;
-      }
-    } catch (_) {}
   }
 
   const employees = await payrollEmployees(period);
@@ -1043,13 +1037,6 @@ async function preparePeriod(periodId, { basis = null } = {}) {
   };
 
   prepMemoryCache.set(memKey, { data: result, expiresAt: Date.now() + PREP_CACHE_TTL_MS });
-
-  if (redis) {
-    try {
-      await redis.set(cacheKey, result, { ex: 60 });
-    } catch (_) {}
-  }
-
   return result;
 }
 
@@ -1824,15 +1811,9 @@ async function reviewPeriod(periodId, { visibleEmployeeIds = null, basis = null 
   const period = await selectPeriod.get(periodId);
   if (!period) throw new PayrollRunError('No such payroll period.', { code: 'NOT_FOUND', httpStatus: 404 });
 
+  // Not cached: this is the sheet HR approves pay from, so it must reflect
+  // every decision the moment it's made.
   const rateBasis = basis || await getDailyRateBasis();
-  const redis = require('../lib/redis').getClient();
-  const cacheKey = `payroll:review:${periodId}:${rateBasis}:${visibleEmployeeIds ? Array.from(visibleEmployeeIds).sort().join(',') : 'all'}`;
-  if (redis) {
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached && typeof cached === 'object') return cached;
-    } catch (_) {}
-  }
 
   const emps = await payrollEmployees(period);
   const allPositions = await Promise.all(
@@ -1917,12 +1898,6 @@ async function reviewPeriod(periodId, { visibleEmployeeIds = null, basis = null 
         + 'decided explicitly. Nothing is paid until the run is approved.',
   };
 
-  if (redis) {
-    try {
-      await redis.set(cacheKey, result, { ex: 60 });
-    } catch (_) {}
-  }
-
   return result;
 }
 
@@ -1990,12 +1965,14 @@ const insertPayslip = db.prepare(`
     (id, period_id, employee_id, version, status, currency, exchange_rate, monthly_salary,
      daily_rate, gross_baseline, deductions_total, adjustments_total, net_payable,
      working_days, full_period_days, is_partial, is_starter, salary_effective_from,
-     lines_json, cutoff_date, pay_date, published_at, published_by, paid_at, content_hash, created_at)
+     lines_json, cutoff_date, pay_date, published_at, published_by, paid_at, content_hash, created_at,
+     statement_json, template_id)
   VALUES
     (@id, @period_id, @employee_id, @version, @status, @currency, @exchange_rate, @monthly_salary,
      @daily_rate, @gross_baseline, @deductions_total, @adjustments_total, @net_payable,
      @working_days, @full_period_days, @is_partial, @is_starter, @salary_effective_from,
-     @lines_json, @cutoff_date, @pay_date, @published_at, @published_by, @paid_at, @content_hash, @created_at)
+     @lines_json, @cutoff_date, @pay_date, @published_at, @published_by, @paid_at, @content_hash, @created_at,
+     @statement_json, @template_id)
 `);
 
 /**
@@ -2007,7 +1984,7 @@ const insertPayslip = db.prepare(`
  * new version with this one marked SUPERSEDED; until then the unique
  * constraints are the backstop against a run somehow publishing twice.
  */
-async function writePayslip(period, member, { actor, nowMs }) {
+async function writePayslip(period, member, { actor, nowMs, approvalNote = null, templateId = null }) {
   const { employee, basis } = member;
   const approved = await selectApprovedLines.all(period.id, employee.id);
 
@@ -2053,6 +2030,18 @@ async function writePayslip(period, member, { actor, nowMs }) {
     created_at: nowMs,
   };
   row.content_hash = payslipHash(row);
+
+  // What the invoice needs beyond the money (employee and bank details, the
+  // attendance counts for the same window the deductions used, the approval
+  // note), frozen now and sealed to the content hash: the invoice is filled
+  // from these figures on every view, and a later correction cannot change it.
+  const invoice = require('./invoice');
+  const snapshot = await invoice.buildSnapshot({ ...period, approval_note: approvalNote }, employee.id, {
+    fromDate: basis.effectiveStart || period.start_date,
+    toDate: basis.windowEnd,
+  });
+  row.statement_json = invoice.sealSnapshot(snapshot, row.content_hash);
+  row.template_id = templateId;
 
   await insertPayslip.run(row);
   return row;
@@ -2208,14 +2197,19 @@ async function approveRun({ periodId, note, decisions = [], waiveBlockers = fals
       );
     }
 
+    // Each invoice renders in the template in force when it was published.
+    const templateId = await require('./invoice').activeTemplateId();
     const payslips = [];
-    for (const m of run) payslips.push(await writePayslip(period, m, { actor, nowMs }));
+    for (const m of run) {
+      payslips.push(await writePayslip(period, m, { actor, nowMs, approvalNote: runNote, templateId }));
+    }
 
     const moved = await db.prepare(`
       UPDATE payroll_periods
-      SET status = 'PUBLISHED', published_at = ?, published_by = ?, approved_by = ?, approved_at = ?
+      SET status = 'PUBLISHED', published_at = ?, published_by = ?, approved_by = ?, approved_at = ?,
+          approval_note = ?
       WHERE id = ? AND status = 'IN_REVIEW'
-    `).run(nowMs, actor, actor, nowMs, periodId);
+    `).run(nowMs, actor, actor, nowMs, runNote, periodId);
     if (!moved.changes) {
       throw new PayrollRunError('This payroll run has already been approved.', { code: 'ALREADY_FINAL' });
     }
@@ -2378,18 +2372,6 @@ async function invalidatePayrollCache(employeeId = null, periodId = null) {
   workingDaysCache.clear();
   cachedDailyRateBasis = null;
   cachedDailyRateBasisExpiry = 0;
-  try {
-    const redis = require('../lib/redis').getClient();
-    if (redis) {
-      if (periodId) {
-        const keys = await redis.keys(`payroll:*:${periodId}:*`);
-        if (keys && keys.length > 0) await redis.del(...keys);
-      } else {
-        const keys = await redis.keys('payroll:*');
-        if (keys && keys.length > 0) await redis.del(...keys);
-      }
-    }
-  } catch (_) {}
 }
 
 async function setDailyRateBasis(basis, actor = 'hr') {
@@ -2424,7 +2406,9 @@ async function addException({ periodId, employeeId, amount, type = 'BONUS', expl
   if (!period) throw new Error('No such payroll period.');
   if (isFinal(period.status)) throw new Error(finalMessage(period));
 
-  const validTypes = ['BONUS', 'ALLOWANCE', 'SPECIAL_ADDITION', 'HR_EXCEPTION', 'MANUAL_ADJUSTMENT'];
+  // OVERTIME is never calculated automatically: HR adds it here when it is
+  // paid, and the invoice prints it on its own line.
+  const validTypes = ['BONUS', 'ALLOWANCE', 'SPECIAL_ADDITION', 'OVERTIME', 'HR_EXCEPTION', 'MANUAL_ADJUSTMENT'];
   const adjType = validTypes.includes(type) ? type : 'BONUS';
 
   const id = 'pa_' + crypto.randomBytes(8).toString('hex');
@@ -2845,6 +2829,9 @@ module.exports = {
   ensureCurrentPeriod, generateRun, runPayrollAutomation,
   payrollPreflight, reviewPeriod, approveRun, markPaid,
   listPayslips, employeePayslip, latestPayslipFor,
+  // For invoices (domain/invoice.js)
+  employeePosition,
+  payslipIntegrityOk: r => payslipHash(r) === r.content_hash,
   PayrollRunError, FINAL_STATUSES,
   ATTENDANCE_DEFICIT_DAY, UNAUTHORISED_ABSENCE_UNPAID, UNPAID_LEAVE_DEDUCTION,
 };

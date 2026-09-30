@@ -47,7 +47,23 @@ class PayslipWatcher {
   static const String lastSeenPrefKey = 'payslip_last_seen_published_at';
 
   /// Routed by MainShell: it contains 'PAY', so a tap opens the Salary tab.
+  /// The announcement itself carries the period too ([payloadFor]), so the
+  /// tap lands on that month's invoice.
   static const String notificationPayload = 'PAYSLIP';
+
+  /// `PAYSLIP:<periodId>`.
+  static String payloadFor(String periodId) =>
+      periodId.isEmpty ? notificationPayload : '$notificationPayload:$periodId';
+
+  /// The period in a payload made by [payloadFor], or null (a bare
+  /// 'PAYSLIP', or any other notification).
+  static String? periodIdFromPayload(String? payload) {
+    if (payload == null) return null;
+    const prefix = '$notificationPayload:';
+    if (!payload.startsWith(prefix)) return null;
+    final id = payload.substring(prefix.length).trim();
+    return id.isEmpty ? null : id;
+  }
 
   /// Fixed, so a second announcement of the same payslip (two isolates
   /// racing) replaces the first in the tray instead of stacking.
@@ -141,7 +157,7 @@ class PayslipWatcher {
         id: notificationId,
         title: notificationTitle(payslip?.periodName),
         body: notificationBody(payslip?.payDate),
-        payload: notificationPayload,
+        payload: payloadFor(latest.periodId),
         category: 'PAYROLL',
       );
       return true;

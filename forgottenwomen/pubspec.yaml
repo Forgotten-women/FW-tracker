@@ -71,6 +71,12 @@ dependencies:
   # unverified package install.
   crypto: ^3.0.6
 
+  # The monthly invoice as a PDF, built on the device from the invoice's
+  # fields (lib/services/invoice_pdf.dart), then handed to the system
+  # share/save sheet. Both Apache-2.0.
+  pdf: ^3.13.1
+  printing: ^5.15.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

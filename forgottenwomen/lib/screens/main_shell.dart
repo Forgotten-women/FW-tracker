@@ -15,6 +15,7 @@ import '../widgets/update_dialog.dart';
 import '../theme.dart';
 import 'documents_screen.dart';
 import 'home_screen.dart';
+import 'invoice_screen.dart';
 import 'leave_screen.dart';
 import 'salary_screen.dart';
 import 'warnings_screen.dart';
@@ -68,6 +69,16 @@ class _MainShellState extends State<MainShell> {
 
   void _handleNotificationTap(String? payload) {
     if (!mounted || payload == null) return;
+    // "Your payslip is ready" names its month: the Salary tab, with that
+    // month's invoice opened over it. Checked first, as the period id is
+    // free text to the keyword matching below.
+    final invoicePeriod = PayslipWatcher.periodIdFromPayload(payload);
+    if (invoicePeriod != null) {
+      PayslipWatcher.refreshRequests.value++;
+      setState(() => _index = 2);
+      _openInvoice(invoicePeriod);
+      return;
+    }
     final clean = payload.toUpperCase();
     if (clean.contains('LEAVE')) {
       setState(() => _index = 1);
@@ -82,6 +93,21 @@ class _MainShellState extends State<MainShell> {
       setState(() => _index = 4);
     } else {
       setState(() => _index = 0);
+    }
+  }
+
+  bool _invoiceOpen = false;
+
+  Future<void> _openInvoice(String periodId) async {
+    // Two taps (or a tap and the launch check) open it once.
+    if (_invoiceOpen) return;
+    _invoiceOpen = true;
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => InvoiceScreen(periodId: periodId, api: _api)),
+      );
+    } finally {
+      _invoiceOpen = false;
     }
   }
 

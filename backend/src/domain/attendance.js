@@ -579,6 +579,8 @@ async function adjustBalance({ employeeId, dateKey, minutes, reason, actor }) {
     created_by: actor,
   };
   await insertLedger.run(entry);
+  // The payroll sheet is briefly cached; an HR balance change must show at once.
+  try { require('./payroll').invalidatePayrollCache(); } catch (_) {}
   return entry;
 }
 

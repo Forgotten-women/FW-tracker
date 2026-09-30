@@ -1625,3 +1625,25 @@ CREATE INDEX IF NOT EXISTS idx_payslips_employee
   ON payslips (employee_id, status, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payslips_period
   ON payslips (period_id, status);
+
+-- Migration 028
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS processing_fee DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS processing_fee_type TEXT NOT NULL DEFAULT 'DEDUCTION';
+
+-- Migration 029
+CREATE TABLE IF NOT EXISTS invoice_templates (
+  id TEXT PRIMARY KEY,
+  version BIGINT NOT NULL,
+  name TEXT NOT NULL,
+  file BYTEA NOT NULL,
+  sha256 TEXT NOT NULL,
+  placeholders TEXT NOT NULL,
+  active BIGINT NOT NULL DEFAULT 0,
+  uploaded_by TEXT,
+  uploaded_at BIGINT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_templates_version ON invoice_templates(version);
+CREATE INDEX IF NOT EXISTS idx_invoice_templates_active ON invoice_templates(active);
+ALTER TABLE payslips ADD COLUMN IF NOT EXISTS statement_json TEXT;
+ALTER TABLE payslips ADD COLUMN IF NOT EXISTS template_id TEXT;
+ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS approval_note TEXT;

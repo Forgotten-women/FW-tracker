@@ -259,8 +259,20 @@ async fn check_and_install_silent(app: &tauri::AppHandle) {
                     update.current_version()
                 ))
                 .show();
-            if let Err(e) = update.download_and_install().await {
-                eprintln!("[updater] install failed: {}", e);
+            match update.download_and_install().await {
+                Ok(()) => {
+                    println!("[updater] update installed successfully");
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                            .title("WorkSync Updated")
+                            .body("WorkSync has been updated to the latest version and will now restart.")
+                            .show();
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        app.restart();
+                    }
+                }
+                Err(e) => eprintln!("[updater] install failed: {}", e),
             }
         }
         Ok(_) => {}
@@ -288,12 +300,22 @@ pub fn trigger_update_check(app: tauri::AppHandle) {
                     .body(&msg)
                     .show();
                 println!("[updater] {}", msg);
-                if let Err(e) = update.download_and_install().await {
-                    eprintln!("[updater] install failed: {}", e);
-                    let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                        .title("WorkSync")
-                        .body(&format!("Update installation failed: {}", e))
-                        .show();
+                match update.download_and_install().await {
+                    Ok(()) => {
+                        println!("[updater] update installed successfully");
+                        #[cfg(target_os = "macos")]
+                        {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            app.restart();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[updater] install failed: {}", e);
+                        let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                            .title("WorkSync")
+                            .body(&format!("Update installation failed: {}", e))
+                            .show();
+                    }
                 }
             }
             Ok(_) => {

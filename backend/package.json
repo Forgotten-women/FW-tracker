@@ -21,10 +21,12 @@
     "@upstash/redis": "^1.39.0",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
+    "docxtemplater": "^3.71.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "pizzip": "^3.3.0"
   }
 }

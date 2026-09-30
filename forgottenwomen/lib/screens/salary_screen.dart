@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/hr.dart';
+import '../models/invoice.dart';
 import '../models/payroll.dart';
 import '../services/api_client.dart';
 import '../services/payslip_watcher.dart';
@@ -10,12 +11,16 @@ import '../theme.dart';
 import '../widgets/glass/glass.dart';
 import '../widgets/payroll/estimate_card.dart';
 import '../widgets/payroll/payslip_widgets.dart';
+import 'invoice_screen.dart';
 import 'payslip_detail_screen.dart';
 
 /// The Salary tab: this month's running estimate, then every published
 /// payslip (and legacy CLOSED month), newest first. Everything comes from
 /// GET /api/payroll/mine/statements; the server decides what is visible
-/// (`enabled`) and says why when it isn't.
+/// (`enabled`) and says why when it isn't. A published payslip opens its
+/// invoice (the payslip breakdown is one tap from there). While this month's
+/// estimate is shown, GET /api/payroll/mine/invoices is asked too, only for
+/// its `draft`: the provisional invoice HR may also offer.
 class SalaryScreen extends StatefulWidget {
   /// Defaults to a client of the screen's own (disposed with it).
   final ApiClient? api;
@@ -27,6 +32,7 @@ class SalaryScreen extends StatefulWidget {
   static void clearCache() {
     _SalaryScreenState._cachedStatement = null;
     _SalaryScreenState._cachedAt = null;
+    _SalaryScreenState._cachedDraft = null;
   }
 
   @override
@@ -42,8 +48,12 @@ class _SalaryScreenState extends State<SalaryScreen> {
   // which is plaintext on disk.
   static EmployeePayrollStatement? _cachedStatement;
   static DateTime? _cachedAt;
+  static InvoiceDraftRef? _cachedDraft;
 
   EmployeePayrollStatement? _statement;
+
+  /// This month's provisional invoice, when HR offers one.
+  InvoiceDraftRef? _draft;
   bool _loading = false;
   String? _error;
   bool _offline = false;
@@ -58,6 +68,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
   void initState() {
     super.initState();
     _statement = _cachedStatement;
+    _draft = _cachedDraft;
     PayslipWatcher.latestPublishedAt.addListener(_onPayslipSeen);
     PayslipWatcher.refreshRequests.addListener(_onRefreshRequested);
     _loading = true;
@@ -106,6 +117,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
         _offline = false;
       });
       _scheduleStaleRetry(res);
+      unawaited(_loadDraft(res));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -118,6 +130,30 @@ class _SalaryScreenState extends State<SalaryScreen> {
       _requestInFlight = false;
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// The draft invoice is offered only under the same HR setting and open
+  /// period as the estimate, so there is nothing to ask for without one.
+  /// Best effort: a failure keeps what was shown before.
+  Future<void> _loadDraft(EmployeePayrollStatement res) async {
+    if (!res.enabled || res.estimate == null) {
+      _cachedDraft = null;
+      if (mounted && _draft != null) setState(() => _draft = null);
+      return;
+    }
+    try {
+      final list = await _api.fetchMyInvoices();
+      _cachedDraft = list.draft;
+      if (mounted) setState(() => _draft = list.draft);
+    } catch (_) {}
+  }
+
+  void _openInvoiceDraft(InvoiceDraftRef d) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => InvoiceScreen(periodId: d.periodId, periodName: d.periodName, provisional: true, api: _api),
+      ),
+    );
   }
 
   void _scheduleStaleRetry(EmployeePayrollStatement res) {
@@ -135,9 +171,15 @@ class _SalaryScreenState extends State<SalaryScreen> {
     });
   }
 
+  /// A published payslip opens its invoice; a legacy CLOSED month has none
+  /// and opens its statement.
   void _openPayslip(PayrollPeriodStatement p) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PayslipDetailScreen(statement: p, api: _api)),
+      MaterialPageRoute(
+        builder: (_) => p.isPayslip && p.periodId.isNotEmpty
+            ? InvoiceScreen(periodId: p.periodId, periodName: p.name, statement: p, api: _api)
+            : PayslipDetailScreen(statement: p, api: _api),
+      ),
     );
   }
 
@@ -242,6 +284,10 @@ class _SalaryScreenState extends State<SalaryScreen> {
       else ...[
         if (s.estimate != null) ...[
           EstimateCard(estimate: s.estimate!),
+          SizedBox(height: _draft != null ? 10 : 22),
+        ],
+        if (_draft != null) ...[
+          _draftInvoiceTile(_draft!),
           const SizedBox(height: 22),
         ],
         SectionLabel(
@@ -268,6 +314,46 @@ class _SalaryScreenState extends State<SalaryScreen> {
         ],
       ],
     ];
+  }
+
+  Widget _draftInvoiceTile(InvoiceDraftRef d) {
+    final tone = AppColors.amber;
+    final cutoff = formatPayrollDate(d.cutoffDate);
+    return GlassCard(
+      onTap: () => _openInvoiceDraft(d),
+      radius: 20,
+      tint: tone.withValues(alpha: 0.08),
+      borderColor: tone.withValues(alpha: 0.35),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      child: Row(
+        children: [
+          GradientIconTile(icon: Icons.description_outlined, colors: [tone, const Color(0xFFF97316)], size: 38),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "This month's invoice (provisional)",
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  cutoff == null
+                      ? '${d.periodName} · will change until HR approves'
+                      : '${d.periodName} · cut-off $cutoff',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(Icons.chevron_right_rounded, size: 20, color: AppColors.textTertiary),
+        ],
+      ),
+    );
   }
 
   Widget _currentSalaryCard(SalaryInfo salary) {

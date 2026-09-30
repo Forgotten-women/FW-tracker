@@ -12,6 +12,8 @@ const router = express.Router();
 const { db } = require('../db');
 const { requireDevice, requirePermission, requireEmployeeAccess, requireUserOrAdminKey } = require('../middleware/auth');
 const PR = require('../domain/payroll');
+const INV = require('../domain/invoice');
+const multer = require('multer');
 const rbac = require('../domain/rbac');
 const T = require('../util/time');
 
@@ -22,7 +24,7 @@ const T = require('../util/time');
  * why.
  */
 function sendError(res, err, fallbackStatus = 400) {
-  if (err instanceof PR.PayrollRunError) {
+  if (err instanceof PR.PayrollRunError || err instanceof INV.InvoiceError) {
     return res.status(err.httpStatus || fallbackStatus).json({
       status: 'ERROR', code: err.code, message: err.message, ...(err.details || {}),
     });
@@ -60,6 +62,115 @@ router.get('/mine/payslips/:periodId', requireDevice, async (req, res) => {
       return res.status(404).json({ status: 'ERROR', message: 'No published payslip for that period.' });
     }
     res.json({ status: 'SUCCESS', payslip });
+  } catch (err) {
+    sendError(res, err, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Employee self-service: monthly invoices
+//
+// Generated on every request from the stored template and the figures; no
+// invoice is stored. A final invoice needs show_salary_to_employees; this
+// month's draft also needs show_payroll_estimate_to_employees.
+// ---------------------------------------------------------------------------
+
+const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+async function settingOn(key) {
+  const row = await db.prepare('SELECT value FROM org_settings WHERE key = ?').get(key);
+  return !!row && String(row.value).trim() === '1';
+}
+
+async function currentOpenPeriod() {
+  const today = T.dateKey();
+  return db.prepare(`
+    SELECT * FROM payroll_periods
+    WHERE start_date <= ? AND end_date >= ? AND status IN ('OPEN', 'IN_REVIEW')
+    ORDER BY auto_created DESC, start_date DESC LIMIT 1
+  `).get(today, today);
+}
+
+/** The period an employee may open an invoice for, or an error to send. */
+async function employeeInvoiceAccess(periodId) {
+  if (!await settingOn('show_salary_to_employees')) {
+    return { error: { status: 403, code: 'RESTRICTED', message: 'Salary and monthly invoices are restricted by company HR policy.' } };
+  }
+  const period = await db.prepare('SELECT * FROM payroll_periods WHERE id = ?').get(periodId);
+  if (!period) return { error: { status: 404, code: 'NOT_FOUND', message: 'No such invoice.' } };
+  if (['OPEN', 'IN_REVIEW'].includes(period.status) && !await settingOn('show_payroll_estimate_to_employees')) {
+    return { error: { status: 403, code: 'RESTRICTED', message: 'This month\'s invoice is shown once HR approves it.' } };
+  }
+  return { period };
+}
+
+function sendDocx(res, { buffer, fileName }) {
+  res.setHeader('Content-Type', DOCX_TYPE);
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.setHeader('Content-Length', buffer.length);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.end(buffer);
+}
+
+router.get('/mine/invoices', requireDevice, async (req, res) => {
+  try {
+    const { employeeId } = req.auth;
+    if (!await settingOn('show_salary_to_employees')) {
+      return res.json({
+        status: 'SUCCESS', enabled: false, invoices: [], draft: null,
+        message: 'Salary and monthly invoices are restricted by company HR policy.',
+      });
+    }
+    const rows = await db.prepare(`
+      SELECT s.period_id, s.currency, s.net_payable, s.published_at, s.paid_at,
+             p.name, p.start_date, p.end_date, p.pay_date
+      FROM payslips s JOIN payroll_periods p ON p.id = s.period_id
+      WHERE s.employee_id = ? AND s.status = 'PUBLISHED'
+      ORDER BY p.start_date DESC
+    `).all(employeeId);
+    let draft = null;
+    if (await settingOn('show_payroll_estimate_to_employees')) {
+      const open = await currentOpenPeriod();
+      if (open) {
+        draft = {
+          periodId: open.id, periodName: open.name, startDate: open.start_date,
+          endDate: open.end_date, cutoffDate: open.cutoff_date || null,
+        };
+      }
+    }
+    res.json({
+      status: 'SUCCESS',
+      enabled: true,
+      invoices: rows.map(r => ({
+        periodId: r.period_id, periodName: r.name, startDate: r.start_date, endDate: r.end_date,
+        payDate: r.pay_date || null, currency: r.currency, netPayable: r.net_payable,
+        publishedAt: r.published_at, paidAt: r.paid_at || null, status: r.paid_at ? 'PAID' : 'PUBLISHED',
+      })),
+      draft,
+    });
+  } catch (err) {
+    sendError(res, err, 500);
+  }
+});
+
+// Scoped to the device's own employee: there is no way to ask for anyone else's.
+router.get('/mine/invoices/:periodId', requireDevice, async (req, res) => {
+  try {
+    const access = await employeeInvoiceAccess(req.params.periodId);
+    if (access.error) return res.status(access.error.status).json({ status: 'ERROR', ...access.error });
+    const invoice = await INV.buildStatement({ periodId: req.params.periodId, employeeId: req.auth.employeeId });
+    res.json({ status: 'SUCCESS', invoice });
+  } catch (err) {
+    sendError(res, err, 500);
+  }
+});
+
+router.get('/mine/invoices/:periodId/docx', requireDevice, async (req, res) => {
+  try {
+    const access = await employeeInvoiceAccess(req.params.periodId);
+    if (access.error) return res.status(access.error.status).json({ status: 'ERROR', ...access.error });
+    const st = await INV.buildStatement({ periodId: req.params.periodId, employeeId: req.auth.employeeId });
+    sendDocx(res, await INV.renderDocx(st));
   } catch (err) {
     sendError(res, err, 500);
   }
@@ -434,6 +545,103 @@ router.post('/adjustments/:id/decide', requirePermission('payroll.approve'), asy
     res.json({ status: 'SUCCESS', ...r });
   } catch (err) {
     res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Invoices (HR). Rendered on request; nothing stored but the template.
+// ---------------------------------------------------------------------------
+
+const templateUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024, files: 1 } });
+const maskBankFor = req => !req.auth.permissions.has('employee.bank.read');
+
+router.get('/periods/:id/invoices/:employeeId', requirePermission('payroll.read'), requireEmployeeAccess(), async (req, res) => {
+  try {
+    const invoice = await INV.buildStatement({
+      periodId: req.params.id, employeeId: req.params.employeeId, maskBank: maskBankFor(req),
+    });
+    res.json({ status: 'SUCCESS', invoice });
+  } catch (err) {
+    sendError(res, err, 500);
+  }
+});
+
+router.get('/periods/:id/invoices/:employeeId/docx', requirePermission('payroll.read'), requireEmployeeAccess(), async (req, res) => {
+  try {
+    const st = await INV.buildStatement({
+      periodId: req.params.id, employeeId: req.params.employeeId, maskBank: maskBankFor(req),
+    });
+    sendDocx(res, await INV.renderDocx(st));
+  } catch (err) {
+    sendError(res, err, 500);
+  }
+});
+
+// Every published invoice of a period in one zip, for the employees this
+// account may see. Final periods only: a draft month has nothing to file.
+router.get('/periods/:id/invoices.zip', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    const period = await db.prepare('SELECT id, name, status FROM payroll_periods WHERE id = ?').get(req.params.id);
+    if (!period) return res.status(404).json({ status: 'ERROR', message: 'No such payroll period.' });
+    if (!PR.FINAL_STATUSES.includes(period.status)) {
+      return res.status(409).json({
+        status: 'ERROR', code: 'NOT_FINAL', message: 'Invoices can be downloaded together once the month is approved.',
+      });
+    }
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+    const ids = (await db.prepare(
+      "SELECT DISTINCT employee_id FROM payslips WHERE period_id = ? AND status = 'PUBLISHED'"
+    ).all(period.id)).map(r => r.employee_id).filter(id => visible.has(id));
+    const { buffer, skipped } = await INV.renderPeriodZip({ periodId: period.id, employeeIds: ids, maskBank: maskBankFor(req) });
+    const safe = String(period.name).replace(/[^A-Za-z0-9 _-]/g, '').trim().replace(/\s+/g, '_');
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="Invoices_${safe}.zip"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (skipped.length) res.setHeader('X-Invoices-Skipped', String(skipped.length));
+    res.end(buffer);
+  } catch (err) {
+    sendError(res, err, 500);
+  }
+});
+
+router.get('/invoice-template', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    res.json({
+      status: 'SUCCESS',
+      active: await INV.activeTemplate(),
+      versions: await INV.listTemplates(),
+      fields: INV.FIELDS,
+      requiredFields: INV.REQUIRED_FIELDS,
+      settingKeys: INV.COMPANY_KEYS,
+    });
+  } catch (err) {
+    sendError(res, err, 500);
+  }
+});
+
+// A new template becomes the active one; earlier versions stay, and invoices
+// already published keep the version they were issued with.
+router.post('/invoice-template', requirePermission('payroll.approve'), templateUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ status: 'ERROR', message: 'Choose a .docx file to upload.' });
+    const r = await INV.uploadTemplate({
+      buffer: req.file.buffer, name: req.body?.name || req.file.originalname, actor: getActor(req),
+    });
+    res.status(201).json({ status: 'SUCCESS', ...r });
+  } catch (err) {
+    sendError(res, err, 400);
+  }
+});
+
+// The stored template itself, so HR can edit it in Word and upload it again.
+router.get('/invoice-template/:templateId/file', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT version, file FROM invoice_templates WHERE id = ?').get(req.params.templateId);
+    if (!row) return res.status(404).json({ status: 'ERROR', message: 'No such template.' });
+    const buffer = Buffer.isBuffer(row.file) ? row.file : Buffer.from(row.file);
+    sendDocx(res, { buffer, fileName: `invoice_template_v${row.version}.docx` });
+  } catch (err) {
+    sendError(res, err, 500);
   }
 });
 

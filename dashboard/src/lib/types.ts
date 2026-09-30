@@ -1474,3 +1474,122 @@ export interface EmployeeHistoryDayResponse {
   status: string;
   day: HistoryDayDetail;
 }
+
+// ---------------------------------------------------------------------------
+// Monthly invoices (backend/src/domain/invoice.js)
+// ---------------------------------------------------------------------------
+
+/** Every placeholder an invoice template may use (INV.FIELDS). */
+export type InvoiceFieldKey =
+  | 'company_name' | 'company_email' | 'company_phone' | 'company_address'
+  | 'employee_name' | 'employee_id' | 'job_title' | 'department' | 'working_arrangement'
+  | 'payroll_month' | 'period_start' | 'period_end' | 'statement_reference'
+  | 'currency' | 'monthly_salary' | 'addition_amount' | 'overtime_amount' | 'gross_earnings' | 'total_deductions'
+  | 'scheduled_days' | 'present_days' | 'paid_leave_days' | 'unpaid_leave_days' | 'sick_leave_days'
+  | 'unauthorised_days' | 'worked_hours' | 'extra_hours' | 'shortfall_hours'
+  | 'unpaid_leave_deduction' | 'shortfall_deduction' | 'adjustment_amount'
+  | 'net_salary' | 'bank_name' | 'account_title' | 'account_number' | 'iban'
+  | 'payroll_note' | 'prepared_by' | 'generated_date';
+
+/** Already formatted by the server, exactly as the Word template prints them. */
+export type InvoiceFields = Record<InvoiceFieldKey, string>;
+
+export interface InvoiceTotals {
+  monthlySalary: number;
+  grossBaseline: number;
+  additions: number;
+  overtime: number;
+  grossEarnings: number;
+  unpaidLeave: number;
+  shortfall: number;
+  adjustments: number;
+  totalDeductions: number;
+  net: number;
+}
+
+export interface InvoiceAttendance {
+  from?: string | null;
+  to?: string | null;
+  scheduledDays?: number;
+  presentDays?: number;
+  paidLeaveDays?: number;
+  unpaidLeaveDays?: number;
+  sickLeaveDays?: number;
+  unauthorisedDays?: number;
+  workedMinutes?: number;
+  extraMinutes?: number;
+  shortfallMinutes?: number;
+}
+
+/** GET /api/payroll/periods/:periodId/invoices/:employeeId. Built on request, never stored. */
+export interface InvoiceStatement {
+  periodId: string;
+  employeeId: string;
+  periodStatus: PayrollPeriodStatus;
+  /** True for an OPEN / IN_REVIEW month: a live draft that changes until approval. */
+  draft: boolean;
+  /** False when the published payslip or its snapshot no longer matches its hash. */
+  integrityOk: boolean;
+  /** The template version a final invoice was issued with; null for a draft. */
+  templateId: string | null;
+  currency: string;
+  fields: InvoiceFields;
+  totals: InvoiceTotals;
+  attendance: InvoiceAttendance;
+  window: { from: string | null; to: string | null };
+}
+
+export type InvoiceErrorCode =
+  | 'NOT_FOUND'
+  | 'NO_SALARY'
+  | 'NOT_IN_PERIOD'
+  | 'INVOICE_MISMATCH'
+  | 'NO_TEMPLATE'
+  | 'NOT_FINAL'
+  | 'BAD_TEMPLATE'
+  | 'UNKNOWN_PLACEHOLDER'
+  | 'MISSING_PLACEHOLDER';
+
+/** One stored template version (presentTemplate()). */
+export interface InvoiceTemplate {
+  id: string;
+  version: number;
+  name: string;
+  sha256: string;
+  /** Placeholders the template uses. */
+  placeholders: string[];
+  active: boolean;
+  uploadedBy: string | null;
+  /** Epoch ms. */
+  uploadedAt: number;
+  /** Known fields this template does not print. */
+  unused: string[];
+}
+
+export interface InvoiceTemplateResponse {
+  active: InvoiceTemplate | null;
+  versions: InvoiceTemplate[];
+  fields: string[];
+  requiredFields: string[];
+  /** Field name -> org_settings key, e.g. company_name -> invoice_company_name. */
+  settingKeys: Record<string, string>;
+}
+
+export interface InvoiceTemplateReport {
+  used: string[];
+  unknown: string[];
+  missingRequired: string[];
+  unused: string[];
+}
+
+export interface InvoiceTemplateUploadResult {
+  template: InvoiceTemplate;
+  report: InvoiceTemplateReport;
+}
+
+/** A file fetched with the admin key, ready to hand to the browser. */
+export interface DownloadedFile {
+  blob: Blob;
+  fileName: string;
+  headers: Headers;
+}

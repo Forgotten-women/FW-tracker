@@ -9,6 +9,8 @@ import {
   BanknoteIcon,
   CheckIcon,
   ChevronDownIcon,
+  DownloadIcon,
+  EyeIcon,
   FileTextIcon,
   RefreshIcon,
   SearchIcon,
@@ -26,6 +28,7 @@ import {
   formatTimestamp,
   sumAcrossCurrencies,
 } from './format';
+import { type InvoiceErrorView, ErrorBox, InvoiceModal, describeInvoiceError, saveBlob } from './InvoiceView';
 
 // ---------------------------------------------------------------------------
 // Mark as paid
@@ -130,55 +133,70 @@ function MarkPaidCard({
 // One payslip
 // ---------------------------------------------------------------------------
 
-function PayslipCard({ slip, currency }: { slip: Payslip; currency: Currency }) {
+function PayslipCard({
+  slip,
+  currency,
+  onViewInvoice,
+}: {
+  slip: Payslip;
+  currency: Currency;
+  onViewInvoice: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const fmt = (n: number) => formatMoney(n, currency, slip.currency, slip.exchangeRate);
   const fmtSigned = (n: number) => formatSignedMoney(n, currency, slip.currency, slip.exchangeRate);
 
   return (
     <li className={`rounded-2xl border bg-white/3 ${slip.integrityOk ? 'border-white/10' : 'border-rose-500/50'}`}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full flex-col gap-3 p-4 text-left sm:flex-row sm:items-center sm:justify-between cursor-pointer"
-      >
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm font-bold text-white">{slip.employeeName ?? slip.employeeId}</span>
-            {slip.employeeNumber && (
-              <span className="rounded-md border border-indigo-500/30 bg-indigo-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-300">
-                {slip.employeeNumber}
-              </span>
-            )}
-            <Badge tone={slip.payslipStatus === 'PAID' ? 'ok' : 'accent'} size="sm">
-              {slip.payslipStatus === 'PAID' ? 'Paid' : 'Published'}
-            </Badge>
-            {slip.integrityOk ? (
-              <Badge tone="ok" size="sm"><ShieldCheckIcon className="h-3 w-3" /> Integrity verified</Badge>
-            ) : (
-              <Badge tone="danger" size="sm"><AlertTriangleIcon className="h-3 w-3" /> Altered after publishing</Badge>
-            )}
-            {slip.isPartial && <Badge tone="info" size="sm">Partial period</Badge>}
-            {slip.isStarter && <Badge tone="info" size="sm">Starter</Badge>}
+      <div className="flex flex-col sm:flex-row sm:items-stretch">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 flex-col gap-3 p-4 text-left sm:flex-row sm:items-center sm:justify-between cursor-pointer"
+        >
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-sm font-bold text-white">{slip.employeeName ?? slip.employeeId}</span>
+              {slip.employeeNumber && (
+                <span className="rounded-md border border-indigo-500/30 bg-indigo-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-300">
+                  {slip.employeeNumber}
+                </span>
+              )}
+              <Badge tone={slip.payslipStatus === 'PAID' ? 'ok' : 'accent'} size="sm">
+                {slip.payslipStatus === 'PAID' ? 'Paid' : 'Published'}
+              </Badge>
+              {slip.integrityOk ? (
+                <Badge tone="ok" size="sm"><ShieldCheckIcon className="h-3 w-3" /> Integrity verified</Badge>
+              ) : (
+                <Badge tone="danger" size="sm"><AlertTriangleIcon className="h-3 w-3" /> Altered after publishing</Badge>
+              )}
+              {slip.isPartial && <Badge tone="info" size="sm">Partial period</Badge>}
+              {slip.isStarter && <Badge tone="info" size="sm">Starter</Badge>}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {slip.lines.length} line{slip.lines.length === 1 ? '' : 's'} · {slip.workingDays} of {slip.fullPeriodDays} working
+              days · v{slip.version} · {slip.currency}
+            </p>
           </div>
-          <p className="mt-1 text-[11px] text-slate-500">
-            {slip.lines.length} line{slip.lines.length === 1 ? '' : 's'} · {slip.workingDays} of {slip.fullPeriodDays} working
-            days · v{slip.version} · {slip.currency}
-          </p>
+          <div className="flex shrink-0 items-center gap-4">
+            <dl className="grid grid-cols-3 gap-x-4 text-right">
+              <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Gross</dt>
+              <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Deductions</dt>
+              <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Net</dt>
+              <dd className="font-mono text-xs text-slate-300 tnum">{fmt(slip.grossBaseline)}</dd>
+              <dd className="font-mono text-xs text-rose-400 tnum">{slip.deductionsTotal > 0 ? fmt(-slip.deductionsTotal) : '—'}</dd>
+              <dd className="font-mono text-sm font-bold text-emerald-400 tnum">{fmt(slip.netPayable)}</dd>
+            </dl>
+            <ChevronDownIcon className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+        <div className="flex shrink-0 items-center px-4 pb-4 sm:pb-0 sm:pl-0">
+          <Button size="sm" variant="secondary" onClick={onViewInvoice} icon={<EyeIcon className="h-3.5 w-3.5" />}>
+            View invoice
+          </Button>
         </div>
-        <div className="flex shrink-0 items-center gap-4">
-          <dl className="grid grid-cols-3 gap-x-4 text-right">
-            <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Gross</dt>
-            <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Deductions</dt>
-            <dt className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Net</dt>
-            <dd className="font-mono text-xs text-slate-300 tnum">{fmt(slip.grossBaseline)}</dd>
-            <dd className="font-mono text-xs text-rose-400 tnum">{slip.deductionsTotal > 0 ? fmt(-slip.deductionsTotal) : '—'}</dd>
-            <dd className="font-mono text-sm font-bold text-emerald-400 tnum">{fmt(slip.netPayable)}</dd>
-          </dl>
-          <ChevronDownIcon className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
-        </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-white/8 p-4">
@@ -256,6 +274,30 @@ export function PayslipsPanel({
   const [reloadTick, setReloadTick] = useState(0);
   const [search, setSearch] = useState('');
   const [notice, setNotice] = useState<{ tone: 'ok' | 'danger'; text: string } | null>(null);
+  const [invoiceFor, setInvoiceFor] = useState<{ employeeId: string; name: string | null } | null>(null);
+  const [zipping, setZipping] = useState(false);
+  const [zipError, setZipError] = useState<InvoiceErrorView | null>(null);
+
+  const downloadZip = async () => {
+    setZipping(true);
+    setZipError(null);
+    try {
+      const file = await api.payrollInvoicesZip(periodId);
+      saveBlob(file);
+      // Employees whose invoice could not be built are left out of the zip.
+      const skipped = Number(file.headers.get('X-Invoices-Skipped') ?? 0);
+      if (skipped > 0) {
+        setNotice({
+          tone: 'danger',
+          text: `${skipped} invoice${skipped === 1 ? ' was' : 's were'} left out of the zip because ${skipped === 1 ? 'it' : 'they'} could not be generated. Open ${skipped === 1 ? 'it' : 'them'} one by one with View invoice to see why.`,
+        });
+      }
+    } catch (e) {
+      setZipError(describeInvoiceError(e, 'zip'));
+    } finally {
+      setZipping(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -290,9 +332,23 @@ export function PayslipsPanel({
       subtitle="Written once when the run was approved. They cannot be edited."
       icon={<FileTextIcon className="h-5 w-5" />}
       actions={
-        <Button size="sm" variant="ghost" onClick={() => setReloadTick((t) => t + 1)} icon={<RefreshIcon className="h-3.5 w-3.5" />}>
-          Refresh
-        </Button>
+        <>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={downloadZip}
+            disabled={zipping || !slips || slips.length === 0}
+            title="Every published invoice of this month as Word files in one zip"
+            icon={zipping
+              ? <span className="block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              : <DownloadIcon className="h-3.5 w-3.5" />}
+          >
+            {zipping ? 'Preparing zip…' : 'Download all (zip)'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setReloadTick((t) => t + 1)} icon={<RefreshIcon className="h-3.5 w-3.5" />}>
+            Refresh
+          </Button>
+        </>
       }
     >
       <div className="flex flex-col gap-4">
@@ -321,6 +377,8 @@ export function PayslipsPanel({
             {notice.text}
           </div>
         )}
+
+        {zipError && <ErrorBox error={zipError} />}
 
         {loadError && (
           <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-300">
@@ -362,13 +420,27 @@ export function PayslipsPanel({
             ) : (
               <ul className="flex flex-col gap-2">
                 {shown.map((s) => (
-                  <PayslipCard key={s.id} slip={s} currency={currency} />
+                  <PayslipCard
+                    key={s.id}
+                    slip={s}
+                    currency={currency}
+                    onViewInvoice={() => setInvoiceFor({ employeeId: s.employeeId, name: s.employeeName })}
+                  />
                 ))}
               </ul>
             )}
           </>
         ) : null}
       </div>
+
+      {invoiceFor && (
+        <InvoiceModal
+          periodId={periodId}
+          employeeId={invoiceFor.employeeId}
+          employeeName={invoiceFor.name}
+          onClose={() => setInvoiceFor(null)}
+        />
+      )}
     </Panel>
   );
 }

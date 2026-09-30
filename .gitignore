@@ -50,3 +50,4 @@ dist/
 *.xlsx
 scratch/*
 *.csv
+*.zip

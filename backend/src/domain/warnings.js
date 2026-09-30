@@ -485,6 +485,8 @@ async function reviewAbsence({
   // Chosen consequences are PROPOSED, never applied here. Spec 29: the system
   // calculates, a person approves, and the leave and payroll engines act only
   // on an approved decision.
+  // A confirmed unpaid absence changes the payroll sheet: drop its short cache.
+  try { require('./payroll').invalidatePayrollCache(); } catch (_) {}
   return {
     status,
     proposedConsequences: { deductAnnualLeave, treatAsUnpaid, createWarningTrigger },

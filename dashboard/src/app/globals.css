@@ -260,3 +260,295 @@ html[data-theme="light"] {
     transform: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Monthly invoice (components/payroll/InvoiceView.tsx)
+
+   A sheet of paper: fixed colours taken from the Word template, never theme
+   tokens, so it reads the same on screen in either theme and on the printout.
+   (The light theme remaps the slate scale, so no Tailwind colour utilities
+   inside the sheet.)
+   --------------------------------------------------------------------------- */
+
+.invoice-sheet {
+  color-scheme: light;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 794px; /* A4 width at 96 dpi */
+  margin: 0 auto;
+  padding: 28px 32px;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.inv-banner {
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.inv-banner strong {
+  font-weight: 700;
+}
+.inv-banner-draft {
+  background: #fff7e6;
+  border-color: #f2c46d !important;
+  color: #7a4b00;
+}
+.inv-banner-danger {
+  background: #fdecef;
+  border-color: #f0a3b2 !important;
+  color: #8a1631;
+}
+.inv-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #1e3a5f !important;
+}
+.inv-company {
+  color: #1e3a5f;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.inv-contact {
+  color: #64748b;
+  font-size: 11px;
+}
+.inv-stamp {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1.5px solid #b7791f !important;
+  border-radius: 4px;
+  color: #b7791f;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.inv-title {
+  margin-top: 12px;
+  color: #1e3a5f;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: center;
+}
+.inv-subtitle {
+  color: #64748b;
+  font-size: 11px;
+  text-align: center;
+}
+.inv-section {
+  margin-top: 12px;
+}
+.inv-section-title {
+  padding: 4px 8px;
+  border-left: 3px solid #1e3a5f !important;
+  background: #f1f5f9;
+  color: #1e3a5f;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.inv-grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+  margin-top: 6px;
+}
+.inv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid #eef2f6 !important;
+}
+.inv-label {
+  flex-shrink: 0;
+  color: #64748b;
+}
+.inv-value {
+  min-width: 0;
+  color: #334155;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.inv-row-strong .inv-label,
+.inv-row-strong .inv-value {
+  color: #1e3a5f;
+  font-weight: 700;
+}
+.inv-card {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.inv-card-title {
+  margin-bottom: 4px;
+  color: #1e3a5f;
+  font-size: 12px;
+  font-weight: 700;
+}
+.inv-subheading {
+  margin-top: 10px;
+  color: #1e3a5f;
+  font-size: 12px;
+  font-weight: 700;
+}
+.inv-net {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px 14px;
+  border: 1px solid #cbd9e6 !important;
+  border-radius: 6px;
+  background: #eef4f8;
+  color: #1e3a5f;
+}
+.inv-net-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.inv-net-amount {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.inv-notes {
+  min-height: 30px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fbfcfd;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inv-sign {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.inv-sign strong {
+  color: #1e3a5f;
+  font-weight: 700;
+}
+.inv-footer {
+  margin-top: 12px;
+  padding-top: 6px;
+  border-top: 1px solid #e2e8f0 !important;
+  color: #8091a5;
+  font-size: 10px;
+  text-align: center;
+}
+
+@media screen and (max-width: 640px) {
+  .invoice-sheet {
+    padding: 18px 16px;
+  }
+  .inv-head {
+    flex-direction: column;
+  }
+  .inv-grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Printing an open invoice ("Save PDF"): only the sheet, on one A4 page, on
+   white. The modal is portalled straight into <body> and marks <body> while
+   it is open, so everything else can simply be switched off. */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body.invoice-printing,
+  html:has(body.invoice-printing) {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  /* body is min-h-screen; on paper that alone can push a blank second page. */
+  body.invoice-printing {
+    min-height: 0 !important;
+  }
+  body.invoice-printing::before {
+    display: none !important;
+  }
+  body.invoice-printing > *:not(.invoice-print-root) {
+    display: none !important;
+  }
+  body.invoice-printing .invoice-print-root {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    display: block !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    animation: none !important;
+  }
+  body.invoice-printing .invoice-print-frame {
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.invoice-printing .invoice-no-print {
+    display: none !important;
+  }
+  body.invoice-printing .invoice-sheet {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    font-size: 10px;
+    line-height: 1.35;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  /* Tighter rhythm on paper: the full sheet, with a long payroll note, stays
+     well inside the 277 mm of an A4 page between 10 mm margins. */
+  body.invoice-printing .inv-row {
+    padding: 2px 0;
+  }
+  body.invoice-printing .inv-section {
+    margin-top: 9px;
+  }
+  body.invoice-printing .inv-banner {
+    margin-bottom: 8px;
+  }
+  body.invoice-printing .inv-notes {
+    min-height: 0;
+  }
+}

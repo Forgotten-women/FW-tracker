@@ -259,10 +259,18 @@ test('an attendance deficit is shown as a value, never applied', async () => {
   await PR.setSalary({ employeeId: emp, amount: 2000, effectiveFrom: '2025-01-01', reason: 'Start', actor: 'user:hr' });
 
   const A = require('../src/domain/attendance');
-  await A.adjustBalance({
-    employeeId: emp, dateKey: '2026-08-03', minutes: 500,
-    reason: 'Seeded for the test', actor: 'test',
-  });
+  // Posted during August: the payroll view is point-in-time (balanceAsOf),
+  // so a posting made after the period ends belongs to the next one.
+  const realNow = T.now;
+  T.now = () => T.endOfDay('2026-08-03') - 60 * 60 * 1000;
+  try {
+    await A.adjustBalance({
+      employeeId: emp, dateKey: '2026-08-03', minutes: 500,
+      reason: 'Seeded for the test', actor: 'test',
+    });
+  } finally {
+    T.now = realNow;
+  }
 
   const period = await db.prepare("SELECT id FROM payroll_periods WHERE name = 'August 2026'").get();
   const row = await (await PR.preparePeriod(period.id)).employees.find(e => e.employeeId === emp);

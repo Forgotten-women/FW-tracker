@@ -113,7 +113,9 @@ export function ApprovePanel({
               ? 'No line needs an individual decision.'
               : `Lines needing attention decided: ${decidedCount} of ${attentionTotal}.`}
           </Requirement>
-          <Requirement ok={noteReady}>An approval note, kept in the audit log with the run.</Requirement>
+          <Requirement ok={noteReady}>
+            An approval note. It is kept in the audit log and printed on every employee&apos;s invoice as Payroll Notes.
+          </Requirement>
           {hasBlockers && (
             <Requirement ok={waiverReady}>
               {blockers.length} blocking issue{blockers.length === 1 ? '' : 's'} waived, with a note saying why.
@@ -191,15 +193,22 @@ export function ApprovePanel({
         )}
 
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-semibold text-slate-400">Approval note (required)</span>
+          <span className="text-[11px] font-semibold text-slate-400">
+            Approval note (required, printed on every invoice)
+          </span>
           <textarea
             rows={2}
             value={note}
             onChange={(ev) => onNoteChange(ev.target.value)}
-            placeholder="e.g. September payroll, checked against the attendance report"
+            placeholder="e.g. September salaries, paid by bank transfer on the pay date."
             className={textareaClass}
             maxLength={1000}
+            aria-describedby="approval-note-help"
           />
+          <span id="approval-note-help" className="text-[11px] text-slate-500">
+            Every employee in this run sees this text on their invoice under &ldquo;Payroll Notes&rdquo;, so write it for them
+            to read. It is also kept in the audit log with the run.
+          </span>
         </label>
 
         {error && (

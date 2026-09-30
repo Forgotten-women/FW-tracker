@@ -49,6 +49,11 @@ class _NeverRespondingHttpClient implements HttpClient {
 ApiClient _statementsApi(Map<String, dynamic> body) => ApiClient(
       store: _FakeStore(),
       client: MockClient((req) async {
+        // While the estimate shows, the salary screen also asks for this
+        // month's provisional invoice (invoice_screen_test.dart covers it).
+        if (req.url.path == '/api/payroll/mine/invoices') {
+          return http.Response(jsonEncode({'status': 'SUCCESS', 'enabled': true, 'invoices': [], 'draft': null}), 200);
+        }
         expect(req.url.path, '/api/payroll/mine/statements');
         return http.Response(jsonEncode(body), 200);
       }),

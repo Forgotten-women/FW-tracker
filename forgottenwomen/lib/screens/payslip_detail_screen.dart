@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../widgets/glass/glass.dart';
 import '../widgets/payroll/payslip_widgets.dart';
+import 'invoice_screen.dart';
 
 /// One month's payslip in full. Renders at once from the statements entry it
 /// was opened from, then (for a real payslip) refreshes from
@@ -15,7 +16,11 @@ class PayslipDetailScreen extends StatefulWidget {
   final PayrollPeriodStatement statement;
   final ApiClient api;
 
-  const PayslipDetailScreen({super.key, required this.statement, required this.api});
+  /// Offers "View invoice" for a published payslip. Off when this screen was
+  /// opened from that invoice, so the two don't stack on each other.
+  final bool offerInvoice;
+
+  const PayslipDetailScreen({super.key, required this.statement, required this.api, this.offerInvoice = true});
 
   @override
   State<PayslipDetailScreen> createState() => _PayslipDetailScreenState();
@@ -141,6 +146,10 @@ class _PayslipDetailScreenState extends State<PayslipDetailScreen> {
         const SizedBox(height: 12),
       ],
       _hero(p),
+      if (widget.offerInvoice && !p.isLegacy && p.periodId.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        _invoiceButton(p),
+      ],
       const SizedBox(height: 22),
       const SectionLabel('Breakdown'),
       _breakdown(p, cur),
@@ -158,6 +167,21 @@ class _PayslipDetailScreenState extends State<PayslipDetailScreen> {
         ),
       ],
     ];
+  }
+
+  Widget _invoiceButton(PayslipDetail p) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => InvoiceScreen(periodId: p.periodId, periodName: p.periodName, api: widget.api),
+          ),
+        ),
+        icon: const Icon(Icons.description_outlined, size: 18),
+        label: const Text('View invoice'),
+      ),
+    );
   }
 
   Widget _hero(PayslipDetail p) {
