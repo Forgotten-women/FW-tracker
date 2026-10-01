@@ -8,7 +8,8 @@ ENV API_ORIGIN=$API_ORIGIN NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build && npm prune --omit=dev
+# public/ is empty and git doesn't keep empty folders; Next serves it if present.
+RUN mkdir -p public && npm run build && npm prune --omit=dev
 
 FROM node:22-bookworm-slim
 WORKDIR /app
