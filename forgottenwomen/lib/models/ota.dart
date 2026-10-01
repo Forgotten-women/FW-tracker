@@ -1,3 +1,6 @@
+/// Where an update offer came from.
+enum UpdateOrigin { backend, github }
+
 class AppUpdateInfo {
   final bool updateAvailable;
   final bool mandatory;
@@ -14,6 +17,11 @@ class AppUpdateInfo {
   final String? iosTestflightUrl;
   final String? iosManifestUrl;
 
+  /// The raw IPA, for a SideStore / AltStore install. Null on Android.
+  final String? ipaUrl;
+
+  final UpdateOrigin origin;
+
   const AppUpdateInfo({
     required this.updateAvailable,
     required this.mandatory,
@@ -29,7 +37,28 @@ class AppUpdateInfo {
     this.publishedAt,
     this.iosTestflightUrl,
     this.iosManifestUrl,
+    this.ipaUrl,
+    this.origin = UpdateOrigin.backend,
   });
+
+  /// A successful check that found nothing newer.
+  const AppUpdateInfo.upToDate(int localVersionCode)
+      : updateAvailable = false,
+        mandatory = false,
+        currentVersionCode = localVersionCode,
+        minSupportedVersionCode = 1,
+        versionName = null,
+        versionCode = null,
+        platform = null,
+        downloadUrl = null,
+        sha256 = null,
+        fileSize = null,
+        releaseNotes = null,
+        publishedAt = null,
+        iosTestflightUrl = null,
+        iosManifestUrl = null,
+        ipaUrl = null,
+        origin = UpdateOrigin.backend;
 
   factory AppUpdateInfo.fromJson(Map<String, dynamic> json, int localVersionCode) {
     final latest = json['latestRelease'] as Map<String, dynamic>?;
@@ -50,6 +79,7 @@ class AppUpdateInfo {
       publishedAt: latest?['publishedAt'] as String?,
       iosTestflightUrl: ios?['testflightUrl'] as String?,
       iosManifestUrl: ios?['manifestUrl'] as String?,
+      ipaUrl: latest?['ipaUrl'] as String?,
     );
   }
 

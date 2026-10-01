@@ -60,7 +60,7 @@ class _MainShellState extends State<MainShell> {
 
   Future<void> _checkOtaUpdate() async {
     try {
-      final info = await _otaService.checkForUpdate();
+      final info = await _otaService.checkForUpdate(automatic: true);
       if (mounted && info != null && info.updateAvailable) {
         UpdateDialog.show(context, info);
       }

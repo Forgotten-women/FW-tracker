@@ -91,6 +91,12 @@ async function getLatestRelease({ platform = 'android', currentVersionCode = 0 }
       fileName: release.file_name,
       fileSize: release.file_size,
       downloadUrl,
+      // The raw IPA link for a sideloaded (SideStore / AltStore) install.
+      // downloadUrl above may have been swapped for a TestFlight or
+      // itms-services link, neither of which works for the unsigned IPA.
+      ipaUrl: release.platform === 'ios' && /\.ipa(\?|$)/i.test(String(release.download_url || ''))
+        ? release.download_url
+        : null,
       sha256: release.sha256 || null,
       releaseNotes: release.release_notes || '',
       downloadCount: release.download_count,

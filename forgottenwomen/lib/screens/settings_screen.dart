@@ -81,7 +81,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       setState(() => _checkingUpdate = false);
 
-      if (info != null && info.updateAvailable) {
+      if (info == null) {
+        // Neither our server nor GitHub could be reached.
+        setState(() => _updateStatus =
+            'Could not check for updates. Check your internet connection and try again.');
+      } else if (info.updateAvailable) {
         UpdateDialog.show(context, info);
       } else {
         setState(() => _updateStatus = 'You are on the latest version ($_appVersion).');

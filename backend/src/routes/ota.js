@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const OTA = require('../domain/ota');
+const IosSource = require('../domain/ios_source');
 const { requireAdmin } = require('../middleware/auth');
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,23 @@ router.get('/releases/ios/manifest.plist', (req, res) => {
     res.send(plist);
   } catch (err) {
     res.status(500).send(err.message);
+  }
+});
+
+/**
+ * AltStore / SideStore source for the sideloaded iOS app.
+ * GET /api/app/ios/source.json -- see domain/ios_source.js.
+ */
+router.get('/ios/source.json', async (req, res) => {
+  try {
+    const source = await IosSource.getSource();
+    if (!source) {
+      return res.status(503).json({ status: 'ERROR', message: 'No iOS release is available yet.' });
+    }
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(source);
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
   }
 });
 
