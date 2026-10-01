@@ -15,7 +15,7 @@
 # Everything is inside main() so bash has read the whole script before any step
 # runs (the script replaces its own installed copy at the end).
 
-set -euo pipefail
+set -Eeuo pipefail
 
 main() {
   local APP=/opt/fwtracker/app
@@ -47,6 +47,20 @@ main() {
   git -C "$APP" checkout --quiet --detach "$SHA"
 
   restore_checkout() { git -C "$APP" checkout --quiet --detach "$PREV"; }
+  # Any unexpected failure from here on leaves the checkout on what's running.
+  trap 'log "failed: still running $(git -C "$APP" rev-parse --short "$PREV")"; restore_checkout' ERR
+
+  # Keep the images that are running now as :previous, so a bad release rolls
+  # back in seconds. Must happen before the build: with Docker's containerd
+  # image store an image that has lost its tag can't be tagged again.
+  local svc running latest
+  for svc in backend dashboard; do
+    running=$(docker inspect -f '{{.Image}}' "fwtracker-$svc-1" 2>/dev/null || true)
+    latest=$(docker image inspect -f '{{.Id}}' "fwtracker-$svc:latest" 2>/dev/null || true)
+    if [[ -n "$running" && "$running" == "$latest" ]]; then
+      docker image tag "fwtracker-$svc:latest" "fwtracker-$svc:previous"
+    fi
+  done
 
   log "building images"
   if ! $COMPOSE build; then
@@ -67,14 +81,6 @@ main() {
     fi
   fi
 
-  # Keep the images that are running now as :previous, so a bad release rolls
-  # back in seconds. (The build above has already moved :latest to the new ones.)
-  local RUNNING_BACKEND RUNNING_DASHBOARD
-  RUNNING_BACKEND=$(docker inspect -f '{{.Image}}' fwtracker-backend-1 2>/dev/null || true)
-  RUNNING_DASHBOARD=$(docker inspect -f '{{.Image}}' fwtracker-dashboard-1 2>/dev/null || true)
-  [[ -n "$RUNNING_BACKEND" ]] && docker image tag "$RUNNING_BACKEND" fwtracker-backend:previous
-  [[ -n "$RUNNING_DASHBOARD" ]] && docker image tag "$RUNNING_DASHBOARD" fwtracker-dashboard:previous
-
   log "switching containers"
   $COMPOSE up -d --no-build
 
@@ -89,13 +95,18 @@ main() {
   if [[ "$ok" != 1 ]]; then
     log "UNHEALTHY: rolling back to $(git -C "$APP" rev-parse --short "$PREV")"
     $COMPOSE logs --tail 40 backend || true
-    [[ -n "$RUNNING_BACKEND" ]] && docker image tag fwtracker-backend:previous fwtracker-backend:latest
-    [[ -n "$RUNNING_DASHBOARD" ]] && docker image tag fwtracker-dashboard:previous fwtracker-dashboard:latest
+    for svc in backend dashboard; do
+      if docker image inspect "fwtracker-$svc:previous" >/dev/null 2>&1; then
+        docker image tag "fwtracker-$svc:previous" "fwtracker-$svc:latest"
+      fi
+    done
     $COMPOSE up -d --no-build
     restore_checkout
+    trap - ERR
     exit 1
   fi
 
+  trap - ERR
   docker image prune -f >/dev/null 2>&1 || true
   # Self-update for next time: atomic replace, this run keeps the old inode.
   install -m 0755 "$APP/deploy/deploy.sh" /opt/fwtracker/bin/deploy.sh.new && mv -f /opt/fwtracker/bin/deploy.sh.new /opt/fwtracker/bin/deploy.sh
