@@ -31,7 +31,9 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
     // was a meaningful contributor to Supabase's egress bill. 30s still
     // feels live for a screen showing today's attendance/deficit, at a
     // third of the request volume.
-    _syncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    // Once a minute while the app is open; the 1s ticker below keeps the
+    // on-screen clock moving in between.
+    _syncTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
       add(const HomePeriodicSyncRequested());
     });
   }

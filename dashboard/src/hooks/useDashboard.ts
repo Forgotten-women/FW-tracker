@@ -7,8 +7,8 @@ import type { AdminEmployee, DashboardSummary, NotificationItem } from '@/lib/ty
 
 export type ConnectionState = 'live' | 'polling' | 'reconnecting';
 
-// Live updates are coalesced into one reload per this window (see onmessage).
-const SSE_COALESCE_MS = 5000;
+// How often the board reloads while the tab is visible (never while hidden).
+const POLL_MS = 30_000;
 // Background reloads refresh the employee directory at most this often;
 // explicit refresh() calls (after an HR edit) always include it.
 const EMPLOYEES_MAX_AGE_MS = 5 * 60 * 1000;
@@ -24,8 +24,8 @@ interface UseDashboard {
 /**
  * Loads the dashboard and keeps it current.
  *
- * Live updates arrive over SSE; the interval is a fallback so a dropped stream
- * degrades to stale-by-15s rather than silently frozen.
+ * Polls every 30s while the tab is visible, and not at all while it is
+ * hidden (see the effect below for why it no longer holds a stream open).
  */
 export function useDashboard(
   unlocked: boolean,
@@ -34,17 +34,14 @@ export function useDashboard(
 ): UseDashboard {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [employees, setEmployees] = useState<AdminEmployee[]>([]);
-  const [connection, setConnection] = useState<ConnectionState>('polling');
+  const [connection] = useState<ConnectionState>('polling');
   const [error, setError] = useState<string | null>(null);
 
-  const sourceRef = useRef<EventSource | null>(null);
-  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
   const lastEmployeesAtRef = useRef(0);
-  const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aliveRef = useRef(true);
-  const onNotificationRef = useRef(onNotification);
-  onNotificationRef.current = onNotification;
+  // Kept for callers; notifications now arrive through the page's own poll.
+  void onNotification;
 
   // The employee directory changes rarely (HR edits), unlike the live board,
   // so it is re-fetched at most every few minutes rather than on every update.
@@ -78,97 +75,37 @@ export function useDashboard(
     }
   }, [onUnauthorized]);
 
-  // Data plus the polling fallback.
+  // Data, polled while the tab is visible.
   //
-  // This used to poll every 6s unconditionally, in addition to SSE's
-  // onmessage handler (below) already calling refresh() on every push -- so
-  // a live SSE connection meant every update was fetched twice, and the
-  // timer alone fired every 6s regardless of whether the stream was healthy.
-  // Slowing it down while 'live' (SSE is doing the real-time work; this is
-  // only a safety net against a stream that silently stopped delivering
-  // without erroring) and keeping it fast while not 'live' (genuinely the
-  // only thing keeping data current) preserves the documented "stale by at
-  // most ~15s" guarantee without the redundant fetch volume.
+  // This used to hold a Server-Sent Events stream open next to a backstop
+  // timer. On Vercel an open stream keeps a function instance alive -- and
+  // billed as provisioned memory -- for as long as the tab is open, and every
+  // phone ping and laptop heartbeat on the stream triggered a reload of the
+  // whole board every few seconds. Together that used up the Hobby plan. A
+  // poll every 30s while someone is actually looking, and nothing while the
+  // tab is hidden, keeps the board current at a small fraction of the cost.
   useEffect(() => {
     if (!unlocked) return;
     aliveRef.current = true;
-    const initial = setTimeout(() => void refresh(), 0);
-    const intervalMs = connection === 'live' ? 60000 : 6000;
-    const id = setInterval(() => void refresh(), intervalMs);
+    let id: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (id) return;
+      void refresh();
+      id = setInterval(() => void refresh(), POLL_MS);
+    };
+    const stop = () => {
+      if (id) clearInterval(id);
+      id = null;
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+
+    if (typeof document === 'undefined' || !document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       aliveRef.current = false;
-      clearTimeout(initial);
-      clearInterval(id);
-    };
-  }, [unlocked, refresh, connection]);
-
-  // Live stream.
-  useEffect(() => {
-    if (!unlocked) return;
-    let cancelled = false;
-
-    const connect = async () => {
-      try {
-        const { ticket } = await api.sseTicket();
-        if (cancelled) return;
-
-        sourceRef.current?.close();
-        const source = new EventSource(
-          `/api/events?ticket=${encodeURIComponent(ticket)}`,
-        );
-        sourceRef.current = source;
-
-        source.onopen = () => {
-          if (!cancelled) setConnection('live');
-        };
-        source.onmessage = (event) => {
-          let type: string | null = null;
-          try {
-            const parsed = JSON.parse(event.data);
-            type = parsed && typeof parsed.type === 'string' ? parsed.type : null;
-            if (parsed && parsed.type === 'NOTIFICATION' && parsed.data) {
-              onNotificationRef.current?.(parsed.data as NotificationItem);
-            }
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('office-tracker-sse', { detail: parsed }));
-            }
-          } catch (_) {}
-          // Every phone ping and laptop heartbeat is a PRESENCE_UPDATED --
-          // around one a second across the team -- and each used to trigger a
-          // full reload of everyone's day, which was a large share of the
-          // database's egress. Coalesce: at most one reload per few seconds,
-          // however many updates arrive in between.
-          if (!pendingRefreshRef.current) {
-            const employees = type === 'SETTINGS_UPDATED' || type === 'DAY_ROLLOVER';
-            pendingRefreshRef.current = setTimeout(() => {
-              pendingRefreshRef.current = null;
-              void refresh({ employees });
-            }, SSE_COALESCE_MS);
-          }
-        };
-        source.onerror = () => {
-          if (cancelled) return;
-          setConnection('reconnecting');
-          source.close();
-          sourceRef.current = null;
-          retryRef.current = setTimeout(() => void connect(), 5000);
-        };
-      } catch {
-        if (!cancelled) setConnection('polling');
-      }
-    };
-
-    void connect();
-
-    return () => {
-      cancelled = true;
-      if (retryRef.current) clearTimeout(retryRef.current);
-      if (pendingRefreshRef.current) {
-        clearTimeout(pendingRefreshRef.current);
-        pendingRefreshRef.current = null;
-      }
-      sourceRef.current?.close();
-      sourceRef.current = null;
+      document.removeEventListener('visibilitychange', onVisibility);
+      stop();
     };
   }, [unlocked, refresh]);
 

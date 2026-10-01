@@ -92,6 +92,7 @@ export function WarningBoard() {
     // stream that silently stops delivering. It used to run every 4s next to
     // SSE already refreshing on every relevant event -- doubling every push.
     const interval = setInterval(() => {
+      if (document.hidden) return; // no requests while the tab isn't being looked at
       refresh(true);
     }, 60000);
 

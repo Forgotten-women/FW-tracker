@@ -116,6 +116,7 @@ export default function DashboardPage() {
     // ~900 times/hour per open dashboard regardless of whether anything had
     // changed -- a meaningful, avoidable share of Supabase egress.
     const interval = setInterval(() => {
+      if (document.hidden) return; // no requests while the tab isn't being looked at
       loadCorrections();
       loadNotifications();
       loadComplaintsCount();

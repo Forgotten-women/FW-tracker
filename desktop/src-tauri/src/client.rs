@@ -220,7 +220,26 @@ fn safe_replace_file(path: &PathBuf, content: &str) -> bool {
 /// The device's pairing lives here. Losing it means the employee has to be
 /// given a new enrolment code, so a damaged main file falls back to the
 /// primary backup copy, then secondary LocalAppData backup.
+// The backend moved off Vercel to its own server. A laptop paired before the
+// move keeps its pairing (the token is the same database row) and just talks
+// to the new address from now on.
+const OLD_SERVER_URL: &str = "https://backend-ten-lyart-57.vercel.app";
+const SERVER_URL: &str = "https://api.fwtracker.tech";
+
+fn migrate_server_url(mut cfg: AppConfig) -> AppConfig {
+    if cfg.server_url.trim_end_matches('/') == OLD_SERVER_URL || cfg.server_url.contains("vercel.app") {
+        eprintln!("[config] server moved: {} -> {}", cfg.server_url, SERVER_URL);
+        cfg.server_url = SERVER_URL.to_string();
+        save_config(&cfg);
+    }
+    cfg
+}
+
 pub fn load_config() -> AppConfig {
+    migrate_server_url(load_config_raw())
+}
+
+fn load_config_raw() -> AppConfig {
     let main = read_config(&config_path());
     if let Some(cfg) = main.as_ref().filter(|c| !c.token.is_empty()) {
         return cfg.clone();

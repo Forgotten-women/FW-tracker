@@ -2216,7 +2216,8 @@ export function PayrollPanel() {
 
   useEffect(() => {
     window.addEventListener('office-tracker-sse', loadPeriods);
-    const iv = setInterval(loadPeriods, 30_000);
+    // Only while the tab is visible.
+    const iv = setInterval(() => { if (!document.hidden) loadPeriods(); }, 60_000);
     return () => {
       window.removeEventListener('office-tracker-sse', loadPeriods);
       clearInterval(iv);

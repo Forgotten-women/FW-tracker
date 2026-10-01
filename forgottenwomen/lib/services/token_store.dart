@@ -125,6 +125,8 @@ class TokenStore {
       if (saved == null ||
           saved.isEmpty ||
           saved.contains('192.168.18.68') ||
+          // The backend moved off Vercel to its own server (api.fwtracker.tech).
+          saved.contains('backend-ten-lyart-57.vercel.app') ||
           saved.contains('localhost') ||
           saved.contains('127.0.0.1')) {
         await prefs.setString(_kServerUrl, defaultServerUrl);

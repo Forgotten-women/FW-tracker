@@ -705,8 +705,18 @@ fn main() {
 
 
 
-                    // Send heartbeat every 60 seconds (6 samples x 10s)
-                    if sample_count >= 6 {
+                    // Send a heartbeat every 60 seconds (6 samples x 10s) during
+                    // working hours, and every 10 minutes outside them, when the
+                    // server credits nothing anyway. Unsent seconds carry over to
+                    // the next heartbeat, so nothing is lost; the in-hours window
+                    // opens 15 minutes before the shift, so the first in-hours
+                    // heartbeat still arrives before the shift starts.
+                    let outside_hours = {
+                        let resp = state.latest_response.lock().unwrap();
+                        resp.as_ref().and_then(|r| r.outside_working_hours).unwrap_or(false)
+                    };
+                    let samples_per_heartbeat = if outside_hours { 60 } else { 6 };
+                    if sample_count >= samples_per_heartbeat {
                         sample_count = 0;
                         let local_ip = tracker::network::get_local_ip();
                         let ssid = tracker::network::get_connected_ssid();

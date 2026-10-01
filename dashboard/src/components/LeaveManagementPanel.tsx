@@ -166,6 +166,7 @@ export function LeaveManagementPanel() {
     // and each tick here fires 6 parallel queries (balances, calendar
     // leaves, bank holidays, absences, approaching-anniversary, holidays).
     const interval = setInterval(() => {
+      if (document.hidden) return; // no requests while the tab isn't being looked at
       refresh(true);
     }, 60000);
 

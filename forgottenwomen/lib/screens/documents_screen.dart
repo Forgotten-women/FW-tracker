@@ -27,7 +27,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   void initState() {
     super.initState();
     _loadData();
-    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _loadSilently());
+    // Every 30s while open (was every 4s); pull to refresh for sooner.
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadSilently());
   }
 
   @override

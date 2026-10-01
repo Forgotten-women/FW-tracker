@@ -1,0 +1,10 @@
+node_modules
+test
+data
+*.zip
+*.tgz
+*.log
+.env
+.env.*
+.vercel
+api

@@ -17,7 +17,19 @@ import 'server_time.dart';
 import 'token_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const heartbeatInterval = Duration(seconds: 30);
+// Every 2 minutes. The server joins pings up to 15 minutes apart into one
+// stretch of presence and only shows someone as stepped away after 3 minutes
+// without one, so this changes neither the hours recorded nor the live status.
+// It was every 30s, which with the notification check alongside was 4 requests
+// a minute per phone and, across the team, most of the backend's monthly
+// invocation allowance.
+const heartbeatInterval = Duration(minutes: 2);
+
+// Without a server-side hint (older backend), the notification list is still
+// checked, but no more often than this.
+const _notificationFallbackInterval = Duration(minutes: 15);
+const _lastNotificationAtKey = 'presence_last_notification_at';
+const _lastNotificationCheckKey = 'presence_last_notification_check';
 
 Future<PingResult?> sendHeartbeat({
   ApiClient? client,
@@ -189,9 +201,23 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
         }
       }
 
-      // Check for incoming HR notifications in background
+      // Incoming HR notifications. Fetched only when the ping says a newer
+      // one exists (or, from an older backend, every 15 minutes) rather than
+      // on every ping.
       try {
-        await NotificationService().checkAndDispatchUnseenNotifications(store: store);
+        final prefs = await SharedPreferences.getInstance();
+        final latest = result?.latestNotificationAt;
+        final seenAt = prefs.getInt(_lastNotificationAtKey) ?? -1;
+        final checkedAt = prefs.getInt(_lastNotificationCheckKey) ?? 0;
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        final due = latest != null
+            ? latest != seenAt
+            : nowMs - checkedAt >= _notificationFallbackInterval.inMilliseconds;
+        if (due) {
+          await NotificationService().checkAndDispatchUnseenNotifications(store: store);
+          await prefs.setInt(_lastNotificationCheckKey, nowMs);
+          if (latest != null) await prefs.setInt(_lastNotificationAtKey, latest);
+        }
       } catch (e) {
         debugPrint('Background notification dispatch error: $e');
       }
@@ -222,7 +248,7 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
   // Initial immediate tick on start
   unawaited(runPresenceTick());
 
-  // Periodic heartbeat every 30 seconds
+  // Periodic heartbeat (see heartbeatInterval)
   Timer.periodic(heartbeatInterval, (_) => runPresenceTick());
 }
 

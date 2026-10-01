@@ -63,6 +63,18 @@ async function notify({
 }
 
 /**
+ * When the employee's newest live notification was created (epoch ms), or 0.
+ * Returned with every phone ping so the phone only fetches its notification
+ * list when something new has arrived, instead of on every ping.
+ */
+async function latestForEmployee(employeeId) {
+  const row = await db.prepare(
+    'SELECT MAX(created_at) AS at FROM notifications WHERE employee_id = ? AND dismissed_at IS NULL'
+  ).get(employeeId);
+  return Number(row && row.at) || 0;
+}
+
+/**
  * Lists notifications for an employee.
  */
 async function listForEmployee(employeeId, { includeDismissed = false, limit = 100 } = {}) {
@@ -185,6 +197,7 @@ function present(n) {
 
 module.exports = {
   notify,
+  latestForEmployee,
   listForEmployee,
   listForHr,
   markAsRead,

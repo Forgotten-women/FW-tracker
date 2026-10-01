@@ -50,7 +50,7 @@ export function HrAlertsPanel() {
     // Deferred off the effect body so the first load resolves in a callback
     // rather than calling setState synchronously as React commits this render.
     const initial = setTimeout(() => void load(), 0);
-    const id = setInterval(() => void load(), 5 * 60 * 1000);
+    const id = setInterval(() => { if (!document.hidden) void load(); }, 5 * 60 * 1000);
     return () => {
       clearTimeout(initial);
       clearInterval(id);

@@ -53,13 +53,9 @@ jobs:
 
       - name: 📝 Configure Environment (.env)
         run: |
-          if [ -n "${{ secrets.BACKEND_URL }}" ]; then
-            echo "BACKEND_URL=${{ secrets.BACKEND_URL }}" > forgottenwomen/.env
-          elif [ -f forgottenwomen/.env.example ]; then
-            cp forgottenwomen/.env.example forgottenwomen/.env
-          else
-            echo "BACKEND_URL=https://backend-ten-lyart-57.vercel.app" > forgottenwomen/.env
-          fi
+          # The backend runs on its own server now; an old BACKEND_URL
+          # secret may still hold the Vercel address, so it is not used.
+          echo "BACKEND_URL=https://api.fwtracker.tech" > forgottenwomen/.env
 
       - name: 📦 Install Flutter Dependencies
         run: flutter pub get
@@ -140,12 +136,12 @@ jobs:
       # Offers the release to phones: the app asks the backend for the newest
       # registered versionCode (routes/ota.js). Skipped, with a note, until the
       # two secrets exist -- then no dashboard step is needed at all.
-      #   OTA_BACKEND_URL  e.g. https://backend-ten-lyart-57.vercel.app
+      #   OTA_BACKEND_URL  the backend (now always https://api.fwtracker.tech)
       #   OTA_ADMIN_KEY    the backend's ADMIN_API_KEY
       - name: 📲 Register release for in-app updates
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          OTA_BACKEND_URL: ${{ secrets.OTA_BACKEND_URL }}
+          OTA_BACKEND_URL: https://api.fwtracker.tech
           OTA_ADMIN_KEY: ${{ secrets.OTA_ADMIN_KEY }}
           TAG: ${{ steps.vars.outputs.tag }}
           VERSION_NAME: ${{ steps.version.outputs.name }}

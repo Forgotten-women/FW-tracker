@@ -213,6 +213,10 @@ class PingResult {
   /// server didn't say (older backend), so reminders are left as they are.
   final ActiveBreakInfo? breakState;
 
+  /// When the employee's newest notification was created (epoch ms). 0 when
+  /// there are none; null from an older backend that didn't send it.
+  final int? latestNotificationAt;
+
   const PingResult({
     required this.accepted,
     required this.duplicates,
@@ -221,6 +225,7 @@ class PingResult {
     required this.serverTime,
     required this.attendance,
     this.breakState,
+    this.latestNotificationAt,
   });
 
   factory PingResult.fromJson(Map<String, dynamic> json) => PingResult(
@@ -232,6 +237,7 @@ class PingResult {
         attendance: json['attendance'] == null
             ? Attendance.empty()
             : Attendance.fromJson(json['attendance'] as Map<String, dynamic>),
+        latestNotificationAt: (json['latestNotificationAt'] as num?)?.toInt(),
         breakState: json['breakState'] is Map<String, dynamic>
             ? ActiveBreakInfo(
                 onBreak: (json['breakState'] as Map<String, dynamic>)['onBreak'] as bool? ?? false,

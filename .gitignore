@@ -51,3 +51,5 @@ dist/
 scratch/*
 *.csv
 *.zip
+# Server secrets for deploy/docker-compose.yml (lives on the server only)
+deploy/backend.env

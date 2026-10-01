@@ -15,9 +15,10 @@ name: ⏰ Trigger Backend Maintenance Cron
 # expect a few minutes of slack, which the backend's own 15-minute grace
 # windows around shift start/end already tolerate.
 
+# Schedule off since the move to a long-running server (api.fwtracker.tech):
+# the backend runs runMaintenanceTick() itself every 60 seconds (jobs.js), so
+# pinging it as well would only run every job twice. Kept for manual runs.
 on:
-  schedule:
-    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -26,7 +27,7 @@ jobs:
     steps:
       - name: 📡 Hit /api/cron/daily
         run: |
-          BACKEND_URL="${{ secrets.BACKEND_URL || 'https://backend-ten-lyart-57.vercel.app' }}"
+          BACKEND_URL="${{ secrets.BACKEND_URL || 'https://api.fwtracker.tech' }}"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             "$BACKEND_URL/api/cron/daily"

@@ -369,7 +369,8 @@ export function WorkstationsPanel({
     // Not SSE-backed (unlike most other panels), so this is the only update
     // path -- kept well above 4s to limit Supabase read/egress volume for a
     // background admin view that doesn't need near-real-time refresh.
-    const interval = setInterval(loadData, 45000);
+    // Only while the tab is visible.
+    const interval = setInterval(() => { if (!document.hidden) loadData(); }, 60000);
     return () => clearInterval(interval);
   }, []);
 

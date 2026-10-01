@@ -29,7 +29,12 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::Notify;
 use tokio_tungstenite::tungstenite::Message;
 
-const FALLBACK_POLL: Duration = Duration::from_secs(20);
+// With no doorbell (Supabase Realtime not configured), a live-view request
+// still arrives within a minute: every heartbeat response carries
+// live_stream_requested and rings the worker (on_heartbeat). This poll is only
+// a slow safety net now. At 20s it was 3 requests a minute per laptop all
+// working day, the largest single share of the backend's invocation quota.
+const FALLBACK_POLL: Duration = Duration::from_secs(300);
 const IDLE_WAKE: Duration = Duration::from_secs(300);
 const MIN_CHECK_GAP: Duration = Duration::from_secs(2);
 const FRAME_INTERVAL: Duration = Duration::from_millis(1000);

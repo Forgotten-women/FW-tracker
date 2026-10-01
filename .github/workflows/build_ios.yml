@@ -40,13 +40,9 @@ jobs:
 
       - name: 📝 Configure Environment (.env)
         run: |
-          if [ -n "${{ secrets.BACKEND_URL }}" ]; then
-            echo "BACKEND_URL=${{ secrets.BACKEND_URL }}" > forgottenwomen/.env
-          elif [ -f forgottenwomen/.env.example ]; then
-            cp forgottenwomen/.env.example forgottenwomen/.env
-          else
-            echo "BACKEND_URL=https://backend-ten-lyart-57.vercel.app" > forgottenwomen/.env
-          fi
+          # The backend runs on its own server now; an old BACKEND_URL
+          # secret may still hold the Vercel address, so it is not used.
+          echo "BACKEND_URL=https://api.fwtracker.tech" > forgottenwomen/.env
 
       - name: Install dependencies
         run: |

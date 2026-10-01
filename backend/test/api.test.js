@@ -146,6 +146,20 @@ test('an authenticated heartbeat from the office records attendance', async () =
   assert.equal(data.attendance.status, 'IN_OFFICE');
 });
 
+// So the phone fetches its notification list only when something is new.
+test('a heartbeat reports when the newest notification arrived', async () => {
+  const N = require('../src/domain/notifications');
+  const ping = async () => (await (await req('POST', '/api/attendance/ping', {
+    headers: { Authorization: `Bearer ${deviceToken}`, ...OFFICE_IP },
+    body: { ssid: 'Trans K 2.4G' },
+  })).json()).latestNotificationAt;
+
+  const before = await ping();
+  assert.equal(typeof before, 'number');
+  await N.notify({ employeeId, category: 'TEST', title: 'Hello', body: 'New', nowMs: Math.max(before, Date.now()) + 1000 });
+  assert.ok(await ping() > before, 'moves when a notification is added');
+});
+
 // The buddy-punching case. Same valid token, but the request is not coming
 // from the office network.
 test('an authenticated heartbeat from outside the office does not count', async () => {
@@ -336,7 +350,14 @@ test('an attendance correction requires a note and is recorded additively', asyn
   assert.equal(entry.note, 'Off-site client meeting');
 });
 
-test('SSE requires a ticket, and a ticket is single-use', async () => {
+test('SSE is off by default: the stream answers 204 instead of holding a function open', async () => {
+  const res = await fetch(`${base}/api/events?ticket=anything`);
+  assert.equal(res.status, 204);
+});
+
+test('SSE (when enabled) requires a ticket, and a ticket is single-use', async (t) => {
+  process.env.SSE_ENABLED = '1';
+  t.after(() => { delete process.env.SSE_ENABLED; });
   assert.equal((await req('GET', '/api/events?ticket=nope')).status, 401);
 
   const { ticket } = await (await req('POST', '/api/admin/sse-ticket', { headers: ADMIN })).json();

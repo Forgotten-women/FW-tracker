@@ -133,7 +133,14 @@ app.all(['/ping', '/api/ping', '/uptime', '/api/uptime'], pingHandler);
 // admin key for a single-use, short-lived ticket (POST /api/admin/sse-ticket)
 // and passes that instead. That keeps the long-lived admin key out of URLs,
 // server logs and browser history.
+//
+// Off by default on Vercel: an open stream keeps a function instance alive for
+// as long as the tab is open, which is billed as provisioned memory and is what
+// exhausted the Hobby plan. The dashboard polls instead (only while visible).
+// 204 tells a browser's EventSource to stop. SSE_ENABLED=1 restores it for a
+// long-lived host.
 app.get('/api/events', async (req, res) => {
+  if (process.env.SSE_ENABLED !== '1') return res.status(204).end();
   const ticket = String(req.query.ticket || '');
   if (!(await consumeSseTicket(ticket))) {
     return res.status(401).json({ status: 'ERROR', message: 'A valid SSE ticket is required.' });

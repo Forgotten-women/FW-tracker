@@ -34,6 +34,14 @@ const KEEPALIVE_MS = 20000;
 // "never," which is what happened before. Override via env var if you have
 // headroom (a paid Upstash plan) and want fresher cross-instance updates.
 const REMOTE_POLL_MS = Number(process.env.SSE_REDIS_POLL_MS) || 15000;
+
+// The dashboard no longer holds an SSE stream open: on Vercel a stream keeps a
+// function instance alive (and billed for provisioned memory) for as long as
+// a tab is open, which on the Hobby plan used up the monthly allowance. With no
+// listeners, pushing every phone ping and laptop heartbeat onto Redis is two
+// wasted Upstash commands each. Set SSE_REDIS_RELAY=1 to bring the relay back
+// if a long-lived host (not serverless) serves the stream again.
+const REDIS_RELAY = process.env.SSE_REDIS_RELAY === '1';
 const REDIS_LIST_KEY = 'sse:events';
 const REDIS_LIST_MAXLEN = 200;
 
@@ -95,7 +103,7 @@ async function broadcast(type, data) {
   writeLocal(type, data);
   markDelivered(id);
 
-  const redis = getClient();
+  const redis = REDIS_RELAY ? getClient() : null;
   if (!redis) return;
   try {
     await redis.lpush(REDIS_LIST_KEY, JSON.stringify({ id, type, data, at: T.now() }));
@@ -107,7 +115,7 @@ async function broadcast(type, data) {
 
 let remotePollTimer = null;
 function ensureRemotePoll() {
-  if (remotePollTimer || !getClient()) return;
+  if (remotePollTimer || !REDIS_RELAY || !getClient()) return;
   remotePollTimer = setInterval(pollRemoteEvents, REMOTE_POLL_MS);
   remotePollTimer.unref();
 }

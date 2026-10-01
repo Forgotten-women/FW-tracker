@@ -15,6 +15,7 @@ const P = require('../domain/presence');
 const History = require('../domain/history');
 const bindings = require('../domain/bindings');
 const events = require('../events');
+const N = require('../domain/notifications');
 const T = require('../util/time');
 
 const MAX_OBSERVATIONS = 500;   // one batch of replayed offline heartbeats
@@ -164,6 +165,9 @@ router.post('/ping', requireDevice, async (req, res) => {
     // phone can schedule its break-ending reminders locally (they then fire
     // with no network at all).
     breakState: await openBreakState(employeeId),
+    // Newest notification for this employee (epoch ms). The phone fetches its
+    // list only when this moves, rather than alongside every ping.
+    latestNotificationAt: await N.latestForEmployee(employeeId).catch(() => 0),
   });
 });
 
