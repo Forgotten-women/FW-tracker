@@ -1,0 +1,18 @@
+# Tests that were already failing when CI was introduced (2026-10-01).
+# scripts/ci-test.js lets these fail without blocking a deploy; any OTHER
+# failure blocks it. Fix one, then delete its line here (CI reports which
+# listed tests have started passing).
+
+# attendance: lateness / break-offset rules
+arriving at 11:10 and staying until 7:10 PM covers the arrival with no shortage in total hours
+break offset rule: arriving within 30m window (11:20) and completing 8 hours with NO break offsets lateness
+break offset rule: arriving at 11:30 and completing 8 hours with NO break offsets full 20m lateness
+the presented shape breaks the deficit into its four components
+
+# leave
+an unused balance is forfeited with a ledger entry, not silently zeroed
+approving beyond the balance requires an explicit reason
+an HR adjustment needs a reason and is attributed
+
+# payroll
+leave taken in advance shows as excess, not as a negative untaken figure

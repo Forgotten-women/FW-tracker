@@ -109,7 +109,14 @@ async function ensureScreenshotsTable() {
  * the break, which told people their day was done 30 minutes early.
  */
 function shiftProgress(sched, workedMinutes, excessBreakMinutes = 0) {
-  const target = Number(sched && sched.dayEquivalentMinutes) || 480;
+  // The scheduled shift itself (start to end, e.g. 11:00-19:00 = 8h), which
+  // includes the break. A pattern's day_equivalent_minutes is the working
+  // time excluding the break (7h 30m here), so it can't be used on its own.
+  const shiftLength = sched && sched.scheduledEndAt && sched.scheduledStartAt
+    ? Math.round((sched.scheduledEndAt - sched.scheduledStartAt) / 60000) : 0;
+  const target = shiftLength > 0
+    ? shiftLength
+    : (Number(sched && sched.dayEquivalentMinutes) || 450) + (Number(sched && sched.permittedBreakMinutes) || 30);
   const excess = Math.max(0, Math.round(Number(excessBreakMinutes) || 0));
   const credited = Math.max(0, (Number(workedMinutes) || 0) - excess);
   const remaining = Math.max(0, target - credited);

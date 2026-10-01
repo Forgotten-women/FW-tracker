@@ -1,0 +1,167 @@
+name: 🚀 CI / CD
+
+# Every push and pull request is checked. A push to main that changes the
+# backend, the dashboard or the deploy files is then deployed to the server
+# (fwtracker.tech) once the checks pass. Desktop and phone releases are
+# separate and tag-driven (build_desktop.yml, build_and_release.yml).
+#
+# Deploying needs one repository secret: DEPLOY_SSH_KEY, the private half of a
+# key that the server only accepts for running /opt/fwtracker/bin/deploy.sh.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: Deploy the current main even if no server files changed
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.f.outputs.backend }}
+      dashboard: ${{ steps.f.outputs.dashboard }}
+      mobile: ${{ steps.f.outputs.mobile }}
+      server: ${{ steps.f.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: f
+        name: Which parts changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          # New branch, force push or manual run: check everything.
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED=$(git ls-files)
+          else
+            CHANGED=$(git diff --name-only "$BASE" "${{ github.sha }}")
+          fi
+          has() { echo "$CHANGED" | grep -qE "$1" && echo true || echo false; }
+          B=$(has '^backend/'); D=$(has '^dashboard/'); M=$(has '^forgottenwomen/'); P=$(has '^deploy/|^\.github/workflows/ci-cd\.yml$')
+          echo "backend=$B" >> "$GITHUB_OUTPUT"
+          echo "dashboard=$D" >> "$GITHUB_OUTPUT"
+          echo "mobile=$M" >> "$GITHUB_OUTPUT"
+          if [ "$B" = true ] || [ "$D" = true ] || [ "$P" = true ] || [ "${{ inputs.force_deploy }}" = true ]; then
+            echo "server=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "server=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "backend=$B dashboard=$D mobile=$M deploy-files=$P"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: testpw
+          POSTGRES_DB: office_tracker_test
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    defaults:
+      run: { working-directory: backend }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: backend/package-lock.json }
+      - run: npm ci --ignore-scripts
+      - name: Tests (fails on any failure not in test/known-failures.txt)
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:testpw@127.0.0.1:55432/office_tracker_test
+        run: node scripts/ci-test.js
+      - name: Docker image builds
+        run: docker build -q -t fwtracker-backend:ci .
+
+  dashboard:
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: dashboard }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: dashboard/package-lock.json }
+      - run: npm ci
+      - name: Type-check
+        run: npx tsc --noEmit
+      - name: Build
+        env: { API_ORIGIN: 'http://backend:5000', NEXT_TELEMETRY_DISABLED: '1' }
+        run: npm run build
+
+  mobile:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: forgottenwomen }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: App config
+        run: echo "BACKEND_URL=https://api.fwtracker.tech" > .env
+      - run: flutter pub get
+      - run: flutter test
+
+  deploy:
+    needs: [changes, backend, dashboard]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.changes.outputs.server == 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://fwtracker.tech
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Deploy ${{ github.sha }}
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::error::Repository secret DEPLOY_SSH_KEY is not set."; exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          # Pinned host key (SHA256:Mn+BlnQ8bR4dFDtm+vR1Djz7bErsEJK0fQfqesCRyYM).
+          echo "72.60.236.105 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMJhEAarIzGhF61usIQ148H2Ww0khhhWnRH7tNbTAgT" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            fwdeploy@72.60.236.105 "deploy ${{ github.sha }}"
+
+      - name: Public health check
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS --max-time 10 https://api.fwtracker.tech/api/health \
+               && curl -fsS --max-time 10 -o /dev/null https://fwtracker.tech/; then
+              echo; echo "api.fwtracker.tech and fwtracker.tech are healthy"; exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::Public health check failed"; exit 1
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

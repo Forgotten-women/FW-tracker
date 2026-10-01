@@ -140,3 +140,24 @@ test('the daily target is the full working day, break included, as attendance ju
   assert.equal(t.shiftRemainingMinutes, Math.max(0, 480 - credited));
   assert.equal(t.shiftProgressPercent, Math.min(100, Math.round((credited / 480) * 100)));
 });
+
+test('an HR-entered clock-in replaces the first sighting on the live board, lateness included', async () => {
+  const P = require('../src/domain/presence');
+  const p = await enrolPair('Late Arrival');
+  await json('POST', '/api/attendance/ping', { headers: p.phone, body: { ssid: 'Trans K 2.4G' } });
+  const dateKey = T.dateKey(clock);
+  const before = (await P.liveBoard(clock)).find(r => r.employeeId === p.employeeId);
+
+  await db.prepare(`
+    INSERT INTO attendance_events (id, employee_id, date_key, occurred_at, event_type, source, created_at, created_by)
+    VALUES (?,?,?,?, 'CLOCK_IN', 'ADMIN', ?, 'admin')
+  `).run('ae_test_' + p.employeeId, p.employeeId, dateKey, T.wallClockToEpoch(dateKey, '11:00'), clock);
+
+  const after = (await P.liveBoard(clock)).find(r => r.employeeId === p.employeeId);
+  assert.ok(after, 'on the board');
+  assert.match(after.firstCheckIn, /^11:00/);
+  assert.equal(after.isLate, false);
+  assert.equal(after.lateMinutes, 0);
+  assert.equal(after.checkInSetByHr, true);
+  if (before && before.firstCheckIn !== '--') assert.notEqual(before.firstCheckIn, after.firstCheckIn);
+});

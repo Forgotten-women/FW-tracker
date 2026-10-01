@@ -455,7 +455,18 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
 
   // Shift calculation (dynamically resolved from employee's assigned shift pattern)
   // The full day, break included: totalMinutes is time present, break and all.
-  const REQUIRED_SHIFT_MINUTES = employeeProfile?.schedule?.dayEquivalentMinutes || 480;
+  // The scheduled shift (start to end, e.g. 11:00-19:00 = 8h), break included:
+  // totalMinutes is time present, break and all.
+  const REQUIRED_SHIFT_MINUTES = (() => {
+    const sch = employeeProfile?.schedule;
+    const toMin = (t?: string) => {
+      const m = /^(\d{1,2}):(\d{2})/.exec(t || '');
+      return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+    };
+    const len = toMin(sch?.endTime) - toMin(sch?.startTime);
+    if (Number.isFinite(len) && len > 0) return len;
+    return (sch?.dayEquivalentMinutes || 450) + (sch?.breakMinutes ?? 30);
+  })();
   const workedMinutes = employee.totalMinutes || 0;
   const shiftProgressPercent = Math.min(100, Math.round((workedMinutes / REQUIRED_SHIFT_MINUTES) * 100));
   const remainingMinutes = Math.max(0, REQUIRED_SHIFT_MINUTES - workedMinutes);
@@ -710,7 +721,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   />
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1.5">
-                  <span>Target: {Math.floor(REQUIRED_SHIFT_MINUTES / 60)}h {REQUIRED_SHIFT_MINUTES % 60}m required</span>
+                  <span>Target: {Math.floor(REQUIRED_SHIFT_MINUTES / 60)}h {REQUIRED_SHIFT_MINUTES % 60}m, break included</span>
                   <span>
                     {remainingMinutes > 0 ? (
                       <span className="text-amber-400 font-medium"><HourglassIcon className="inline-block h-3.5 w-3.5" /> {remainingFormatted} remaining</span>

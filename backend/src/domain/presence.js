@@ -581,10 +581,22 @@ const selectSummaryPresence = db.prepare(
    FROM attendance_daily_summary WHERE employee_id = ? AND date_key = ?`
 );
 
+// An HR-entered clock-in (attendance_events CLOCK_IN) overrides the first
+// sighting, exactly as attendance.deriveDay does. Without this the live board
+// and the employee drawer kept showing the sensor time and its lateness after
+// HR had corrected the day.
+const selectManualClockIn = db.prepare(`
+  SELECT occurred_at FROM attendance_events
+  WHERE employee_id = ? AND date_key = ? AND event_type = 'CLOCK_IN' AND voided_at IS NULL
+  ORDER BY occurred_at ASC LIMIT 1
+`);
+
 /** Shape one derived day for an API response (formatting happens only here). */
 async function presentDay(d, employee) {
   const openBreak = await selectOpenBreakPresence.get(d.employeeId);
   const summary = await selectSummaryPresence.get(d.employeeId, d.dateKey);
+  const manualIn = await selectManualClockIn.get(d.employeeId, d.dateKey);
+  const firstInAt = manualIn ? Number(manualIn.occurred_at) : d.firstInAt;
   const onBreak = Boolean(openBreak);
   const activeBreakMinutes = openBreak ? Math.max(0, Math.round((T.now() - openBreak.started_at) / 60000)) : 0;
 
@@ -594,12 +606,16 @@ async function presentDay(d, employee) {
   let isLate = summary ? summary.late_minutes > 0 : false;
 
   // Live derivation: if firstInAt is recorded and employee arrived after latestOnTimeAt
-  if (d.firstInAt && s.isWorkingDay) {
-    if (d.firstInAt > s.latestOnTimeAt) {
+  if (firstInAt && s.isWorkingDay) {
+    if (firstInAt > s.latestOnTimeAt) {
       isLate = true;
       const graceEndMs = s.scheduledStartAt + (s.graceMinutes * 60000);
-      const computedLate = Math.max(1, Math.round((d.firstInAt - graceEndMs) / 60000));
+      const computedLate = Math.max(1, Math.round((firstInAt - graceEndMs) / 60000));
       lateMinutes = computedLate;
+    } else if (manualIn) {
+      // HR set an on-time check-in: the stored figures from before it don't apply.
+      isLate = false;
+      lateMinutes = 0;
     }
   }
 
@@ -643,7 +659,8 @@ async function presentDay(d, employee) {
     lateMinutes,
     isLate,
     scheduledStartTime: s.startTime,
-    firstCheckIn: d.firstInAt ? T.displayTime(d.firstInAt) : '--',
+    firstCheckIn: firstInAt ? T.displayTime(firstInAt) : '--',
+    checkInSetByHr: Boolean(manualIn),
     lastActiveTime: d.lastActiveAt ? T.displayTime(d.lastActiveAt) : '--',
     totalMinutes: shiftWorkedMinutes,
     timeWorkedFormatted: T.formatMinutes(shiftWorkedMinutes),

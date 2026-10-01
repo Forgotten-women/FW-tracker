@@ -6,4 +6,7 @@
 
 # Ignore local SQLite state (will be rehydrated from Supabase)
 src/db/*.db
-scripts/
+scripts/*
+# Needed by the Docker image, CI and server deploys (no credentials inside).
+!scripts/apply-migrations.js
+!scripts/ci-test.js
