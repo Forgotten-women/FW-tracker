@@ -42,6 +42,10 @@ Thumbs.db
 .idea/
 .vscode/
 *.png
+# ...except the app icons and their source, which the builds need.
+!forgottenwomen/assets/icon/*.png
+!forgottenwomen/android/app/src/main/res/**/*.png
+!forgottenwomen/ios/Runner/Assets.xcassets/**/*.png
 
 # Build output
 build/
