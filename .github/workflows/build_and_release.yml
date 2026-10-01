@@ -65,8 +65,43 @@ jobs:
         run: flutter test
         working-directory: forgottenwomen
 
+      # Every release must carry the same signature or Android won't install
+      # it over the previous one, and in-app updates can't work. Builds used
+      # to fall back to a fresh, random debug key on each CI run.
+      - name: 🔑 Restore the release signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS secrets are required to sign a release."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > android/app/fwtracker-release.jks
+          {
+            echo "storeFile=fwtracker-release.jks"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyPassword=$KEYSTORE_PASSWORD"
+          } > android/key.properties
+        working-directory: forgottenwomen
+
       - name: 🔨 Build Release APK
         run: flutter build apk --release --dart-define-from-file=.env
+        working-directory: forgottenwomen
+
+      - name: 🔏 Check the APK is signed with the release key
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          CERT=$("$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | grep -m1 'SHA-256 digest' | awk '{print $NF}')
+          echo "signing certificate SHA-256: $CERT"
+          # Fingerprint of the release key created on 2026-10-01 (CN=Forgotten Women Office Tracker).
+          if [ "$CERT" != "b1f2ba4d7580f0f793fb4fd8a43d684fef92271f10d81da258dabc06e62c8cfe" ]; then
+            echo "::error::The APK is not signed with the release key; it could not be installed as an update."
+            exit 1
+          fi
+          rm -f android/app/fwtracker-release.jks android/key.properties
         working-directory: forgottenwomen
 
       - name: 📝 Determine Tag & Version
