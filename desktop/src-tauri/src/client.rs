@@ -276,7 +276,7 @@ pub fn save_config(cfg: &AppConfig) {
 }
 
 pub async fn enroll(server_url: &str, code: &str) -> Result<AppConfig, String> {
-    let client = reqwest::Client::new();
+    let client = crate::net::http();
     let url = format!("{}/api/enroll", server_url.trim_end_matches('/'));
 
     let os_name = if cfg!(target_os = "windows") {
@@ -299,7 +299,7 @@ pub async fn enroll(server_url: &str, code: &str) -> Result<AppConfig, String> {
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Network error: {}", e))?;
+        .map_err(|e| crate::net::describe(&e))?;
 
     if !res.status().is_success() {
         let err_text = res.text().await.unwrap_or_default();
@@ -327,7 +327,7 @@ pub async fn send_heartbeat(cfg: &AppConfig, payload: HeartbeatPayload) -> Resul
         return Err("Not enrolled".to_string());
     }
 
-    let client = reqwest::Client::new();
+    let client = crate::net::http();
     let url = format!("{}/api/desktop/heartbeat", cfg.server_url.trim_end_matches('/'));
 
     let res = client
@@ -336,7 +336,7 @@ pub async fn send_heartbeat(cfg: &AppConfig, payload: HeartbeatPayload) -> Resul
         .json(&payload)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
 
     if !res.status().is_success() {
         return Err(format!("Heartbeat error: {}", res.status()));
@@ -350,7 +350,7 @@ pub async fn report_anomaly(cfg: &AppConfig, process_name: &str, duration_secs: 
         return Ok(());
     }
 
-    let client = reqwest::Client::new();
+    let client = crate::net::http();
     let url = format!("{}/api/desktop/anomaly", cfg.server_url.trim_end_matches('/'));
 
     let body = serde_json::json!({
@@ -373,7 +373,7 @@ pub async fn send_break(cfg: &AppConfig, on_break: bool) -> Result<serde_json::V
         return Err("Not enrolled".to_string());
     }
 
-    let client = reqwest::Client::new();
+    let client = crate::net::http();
     let url = format!("{}/api/desktop/break", cfg.server_url.trim_end_matches('/'));
 
     let body = serde_json::json!({
@@ -387,7 +387,7 @@ pub async fn send_break(cfg: &AppConfig, on_break: bool) -> Result<serde_json::V
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
 
     if !res.status().is_success() {
         let err_json: serde_json::Value = res.json().await.unwrap_or_default();
@@ -417,10 +417,7 @@ pub fn agent_version() -> &'static str {
 fn live_http() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
+        crate::net::http_with_timeout(std::time::Duration::from_secs(15))
     })
 }
 
@@ -454,7 +451,7 @@ pub async fn send_stream_frame(cfg: &AppConfig, frame_base64: Option<&str>) -> R
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
 
     // 413 = frame too big; still a well-formed reply saying whether to go on.
     res.json::<FrameReply>().await.map_err(|e| e.to_string())
@@ -488,7 +485,7 @@ pub async fn fetch_break_state(cfg: &AppConfig) -> Result<BreakState, String> {
         .header("X-Agent-Version", agent_version())
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
     if !res.status().is_success() {
         return Err(format!("break-state HTTP {}", res.status()));
     }
@@ -509,7 +506,7 @@ pub async fn send_agent_stopped(cfg: &AppConfig, reason: &str) -> Result<(), Str
         .json(&serde_json::json!({ "reason": reason }))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
     Ok(())
 }
 
@@ -527,7 +524,7 @@ pub async fn send_live_hello(cfg: &AppConfig, doorbell: bool, capture: &str) -> 
         .json(&serde_json::json!({ "doorbell": doorbell, "capture": capture }))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
     Ok(())
 }
 
@@ -542,7 +539,7 @@ pub async fn send_screenshot(
         return Err("Not enrolled or empty frame".to_string());
     }
 
-    let client = reqwest::Client::new();
+    let client = crate::net::http();
     let url = format!("{}/api/desktop/screenshot", cfg.server_url.trim_end_matches('/'));
 
     let body = serde_json::json!({
@@ -559,7 +556,7 @@ pub async fn send_screenshot(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
 
     if !res.status().is_success() {
         let err_text = res.text().await.unwrap_or_default();
@@ -597,7 +594,7 @@ pub async fn check_stream_status(cfg: &AppConfig) -> Result<StreamStatusResponse
         .header("X-Agent-Version", agent_version())
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
 
     res.json::<StreamStatusResponse>().await.map_err(|e| e.to_string())
 }
@@ -607,7 +604,7 @@ pub async fn send_checkout(cfg: &AppConfig) -> Result<serde_json::Value, String>
         return Err("Not enrolled".to_string());
     }
 
-    let client = reqwest::Client::new();
+    let client = crate::net::http();
     let url = format!("{}/api/desktop/checkout", cfg.server_url.trim_end_matches('/'));
 
     let res = client
@@ -615,7 +612,7 @@ pub async fn send_checkout(cfg: &AppConfig) -> Result<serde_json::Value, String>
         .header("Authorization", format!("Bearer {}", cfg.token))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::net::describe(&e))?;
 
     if !res.status().is_success() {
         let err_json: serde_json::Value = res.json().await.unwrap_or_default();

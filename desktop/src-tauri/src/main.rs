@@ -6,6 +6,7 @@ mod capture;
 mod client;
 mod db;
 mod live;
+mod net;
 mod single_instance;
 mod tracker {
     pub mod idle;
