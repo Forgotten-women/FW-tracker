@@ -21,6 +21,7 @@ main() {
   local APP=/opt/fwtracker/app
   local COMPOSE="docker compose -f $APP/deploy/docker-compose.yml"
   local REQ="${SSH_ORIGINAL_COMMAND:-${*:-}}"
+  cd /opt/fwtracker
 
   exec 9>/opt/fwtracker/deploy.lock
   if ! flock -n 9; then echo "Another deploy is in progress."; exit 75; fi
