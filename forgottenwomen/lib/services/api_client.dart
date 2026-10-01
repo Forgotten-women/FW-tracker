@@ -5,6 +5,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HandshakeException, SocketException;
 
 import 'package:http/http.dart' as http;
 
@@ -103,6 +104,17 @@ class ApiClient {
         return await fn();
       } on ApiException {
         rethrow;
+      } on HandshakeException {
+        // Not transient: the server's certificate isn't one this build trusts
+        // (pinned_http_client.dart). Retrying can't help; updating can.
+        throw ApiException(
+            'A secure connection to the server could not be made. Please install the latest version of the app.');
+      } on SocketException {
+        attempt++;
+        if (attempt > maxRetries) {
+          throw ApiException("Can't reach the server. Check your internet connection and try again.");
+        }
+        await Future.delayed(Duration(seconds: 2 * attempt));
       } on TimeoutException {
         attempt++;
         if (attempt > maxRetries) {
