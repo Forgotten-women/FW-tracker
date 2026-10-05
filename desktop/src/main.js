@@ -678,7 +678,10 @@ timerInterval = setInterval(() => {
 const headerEl = document.querySelector('.header');
 if (headerEl) {
   headerEl.addEventListener('mousedown', (e) => {
-    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) {
+    // The version badge is excluded too: dragging swallowed its clicks, and it
+    // opens the hidden developer options (7 clicks).
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')
+        || e.target.closest('#version-badge')) {
       return;
     }
     if (isTauri && tauriWindow && typeof tauriWindow.startDragging === 'function') {

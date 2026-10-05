@@ -600,3 +600,23 @@ test('8h 00m policy: working full shift caps regular hours at 480 mins', async (
 });
 
 
+
+// Recalculating a settled day twice must leave the ledger holding exactly the
+// final figure. The correction used to be measured against the ORIGINAL
+// posting, so the second one took the same minutes off again (Zoha Khan,
+// 1 Oct 2026: 630 -> 180 -> 40 left the balance clamped at 0).
+test('recalculating a day twice corrects by the difference from what is already posted', async () => {
+  const emp = await makeEmployee('emp_ledger_twice');
+  const now = Date.UTC(2026, 9, 5, 9, 0, 0);
+  await A.postDeficit(emp, '2026-09-30', 8, now);
+  await A.postDeficit(emp, '2026-10-01', 630, now + 1);
+  await A.postDeficit(emp, '2026-10-01', 180, now + 2);
+  const last = await A.postDeficit(emp, '2026-10-01', 40, now + 3);
+
+  assert.equal(last.entry.minutes_delta, -140);
+  assert.equal(last.balanceAfter, 48, '8 (30 Sep) + 40 (1 Oct)');
+  const net = await db.prepare(`SELECT SUM(minutes_delta) AS m FROM attendance_deficit_ledger
+    WHERE employee_id = ? AND date_key = '2026-10-01'`).get(emp);
+  assert.equal(Number(net.m), 40);
+  assert.equal(await A.postDeficit(emp, '2026-10-01', 40, now + 4), null, 'no change, nothing posted');
+});

@@ -502,6 +502,12 @@ const selectLedgerForDay = db.prepare(`
   WHERE employee_id = ? AND date_key = ? AND entry_type = 'DAILY_DEFICIT'
 `);
 
+// What the ledger currently holds for one day: the original posting plus its corrections.
+const selectPostedForDay = db.prepare(`
+  SELECT COALESCE(SUM(minutes_delta), 0) AS mins FROM attendance_deficit_ledger
+  WHERE employee_id = ? AND date_key = ? AND entry_type IN ('DAILY_DEFICIT', 'CORRECTION')
+`);
+
 const insertLedger = db.prepare(`
   INSERT INTO attendance_deficit_ledger
     (id, employee_id, date_key, entry_type, minutes_delta, balance_after,
@@ -581,12 +587,18 @@ async function balanceAsOf(employeeId, dateKey) {
 
 async function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { createdBy = 'system' } = {}) {
   const existing = await selectLedgerForDay.get(employeeId, dateKey);
-  // Recomputing a day must adjust by the difference, not post the whole figure
-  // again - otherwise a correction would double-count.
-  const delta = existing ? minutes - existing.minutes_delta : minutes;
+  // Recomputing a day must adjust by the difference from what the ledger
+  // already holds for it -- the original posting PLUS every earlier
+  // correction. Measuring against the original alone took the same minutes
+  // off again on a second recalculation (Zoha Khan's 1 Oct: 630 -> 180 -> 40
+  // posted -450 then -590 instead of -140, and the balance clamped to 0).
+  const posted = existing ? Number((await selectPostedForDay.get(employeeId, dateKey)).mins) || 0 : 0;
+  const delta = existing ? minutes - posted : minutes;
   if (existing && delta === 0) return null;
 
-  const current = await balanceFor(employeeId);
+  // Settled balance only: today's provisional deficit is not on the ledger yet,
+  // and folding it in would carry it into this past day's balance_after.
+  const current = await balanceFor(employeeId, nowMs, false);
   const balanceAfter = Math.max(0, current.balanceMinutes + delta);
   const dayEquivalent = current.dayEquivalentMinutes;
 
@@ -600,7 +612,7 @@ async function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { crea
     whole_days_after: Math.floor(balanceAfter / dayEquivalent),
     carry_forward_after: balanceAfter % dayEquivalent,
     description: existing
-      ? `Recalculated ${dateKey}: ${existing.minutes_delta} -> ${minutes} min`
+      ? `Recalculated ${dateKey}: ${posted} -> ${minutes} min`
       : `Attendance deficit for ${dateKey}`,
     created_at: nowMs,
     created_by: createdBy,
@@ -620,7 +632,7 @@ async function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { crea
 async function adjustBalance({ employeeId, dateKey, minutes, reason, actor }) {
   if (!reason) throw new Error('An adjustment needs a reason.');
   const nowMs = T.now();
-  const current = await balanceFor(employeeId);
+  const current = await balanceFor(employeeId, nowMs, false);
   const balanceAfter = Math.max(0, current.balanceMinutes + minutes);
 
   const entry = {

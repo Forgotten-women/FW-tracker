@@ -119,6 +119,10 @@ button, input, select, textarea, a, .icon-btn, .action-btn, .primary-btn {
 }
 
 .version-badge {
+  /* Clickable (hidden developer options) but deliberately not styled as such. */
+  -webkit-app-region: no-drag;
+  cursor: default;
+  user-select: none;
   font-size: 10px;
   font-weight: 600;
   color: var(--muted);
