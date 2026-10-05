@@ -602,11 +602,15 @@ async function presentDay(d, employee) {
 
   // Resolve employee's schedule for live lateness derivation
   const s = await schedule.resolve(d.employeeId, d.dateKey);
-  let lateMinutes = summary ? summary.late_minutes : 0;
-  let isLate = summary ? summary.late_minutes > 0 : false;
+  // Approved full-day leave: shown as such, and nothing about the day is
+  // scored even if a phone or laptop was on (attendance.deriveDay agrees).
+  const leave = s.isWorkingDay ? await schedule.leaveOn(d.employeeId, d.dateKey) : null;
+  const onLeave = Boolean(leave && leave.fullDay);
+  let lateMinutes = summary && !onLeave ? summary.late_minutes : 0;
+  let isLate = summary && !onLeave ? summary.late_minutes > 0 : false;
 
   // Live derivation: if firstInAt is recorded and employee arrived after latestOnTimeAt
-  if (firstInAt && s.isWorkingDay) {
+  if (firstInAt && s.isWorkingDay && !onLeave) {
     if (firstInAt > s.latestOnTimeAt) {
       isLate = true;
       const graceEndMs = s.scheduledStartAt + (s.graceMinutes * 60000);
@@ -621,15 +625,17 @@ async function presentDay(d, employee) {
 
   const breakMinutes = summary ? summary.break_minutes : 0;
   const excessBreakMinutes = summary ? summary.excess_break_minutes : 0;
-  const dailyDeficitMinutes = (summary ? summary.daily_deficit_minutes : 0) || (isLate ? lateMinutes : 0);
-  const earlyDepartureMinutes = summary ? summary.early_departure_minutes : 0;
-  const unauthorisedMissingMinutes = summary ? summary.unauthorised_missing_minutes : 0;
+  const dailyDeficitMinutes = onLeave ? 0 : ((summary ? summary.daily_deficit_minutes : 0) || (isLate ? lateMinutes : 0));
+  const earlyDepartureMinutes = summary && !onLeave ? summary.early_departure_minutes : 0;
+  const unauthorisedMissingMinutes = summary && !onLeave ? summary.unauthorised_missing_minutes : 0;
   const approvedAdjustmentMinutes = summary ? summary.approved_adjustment_minutes : 0;
 
   // Active shift minutes strictly count from scheduled start time onwards (e.g. 11:00 AM).
   // Early arrival before scheduled start is preserved in firstCheckIn but does not count as active worked time.
   let shiftWorkedMinutes = 0;
-  if (s.isWorkingDay && s.scheduledStartAt) {
+  if (onLeave) {
+    shiftWorkedMinutes = 0;
+  } else if (s.isWorkingDay && s.scheduledStartAt) {
     shiftWorkedMinutes = (d.sessions || []).reduce((acc, sess) => {
       const start = Math.max(sess.start, s.scheduledStartAt);
       const end = Math.max(sess.end, s.scheduledStartAt);
@@ -646,8 +652,9 @@ async function presentDay(d, employee) {
     employeeNumber: employee ? (employee.employee_number || employee.employeeNumber || null) : null,
     role: employee ? employee.role : '',
     date: d.dateKey,
-    status: d.status,
-    statusLabel: d.statusLabel,
+    status: onLeave ? 'ON_LEAVE' : d.status,
+    statusLabel: onLeave ? 'On leave' : d.statusLabel,
+    onLeave,
     onBreak,
     activeBreakMinutes,
     breakMinutes,

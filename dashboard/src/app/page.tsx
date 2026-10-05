@@ -138,6 +138,7 @@ export default function DashboardPage() {
         ...(summary.grace || []),
         ...(summary.away || []),
         ...(summary.notArrived || []),
+        ...(summary.onLeave || []),
       ];
       const found = allEmps.find((e) => e.employeeId === selectedEmployee.employeeId);
       if (found) {

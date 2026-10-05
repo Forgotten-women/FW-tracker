@@ -185,7 +185,12 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const sched = await schedule.resolve(employeeId, dateKey);
   const shiftStartThreshold = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
   const shiftEndThreshold = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
-  const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
+  // Approved full-day leave: the laptop being on is not work. Treated exactly
+  // like outside hours (nothing credited, no presence), which every agent
+  // version already understands.
+  const leaveToday = sched.isWorkingDay ? await schedule.leaveOn(employeeId, dateKey) : null;
+  const onLeave = Boolean(leaveToday && leaveToday.fullDay);
+  const isWithinWorkingHours = sched.isWorkingDay && !onLeave && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
   const outsideWorkingHours = !isWithinWorkingHours;
 
   const empRow = await db.prepare('SELECT app_tracking_enabled, screenshot_enabled, screenshot_interval_minutes, screenshot_mode, work_mode, remote_allowed FROM employees WHERE id = ?').get(employeeId);
@@ -511,6 +516,7 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     locationVerdict,
     appTrackingEnabled,
     outsideWorkingHours,
+    onLeave,
     // What this laptop's time is being booked as right now, so the widget can
     // say plainly when it isn't counting (instead of ticking a local counter
     // the server never credits, then snapping back to the real figure).
@@ -560,7 +566,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       lockScreenGraceMinutes: lockGraceMins,
       approvedWorkProcesses: approvedProcesses,
       screenshotPolicy: {
-        enabled: screenshotEnabled,
+        // Off on a leave day: nobody should be watched while not at work.
+        enabled: screenshotEnabled && !onLeave,
         intervalMinutes: screenshotIntervalMinutes,
         mode: screenshotMode,
       },
@@ -694,7 +701,9 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
 
   const shiftStart = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
   const shiftEnd = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
-  const isWithinWorkingHours = sched.isWorkingDay && (nowMs >= shiftStart && nowMs <= shiftEnd);
+  const leaveToday = sched.isWorkingDay ? await schedule.leaveOn(employeeId, dateKey) : null;
+  const onLeave = Boolean(leaveToday && leaveToday.fullDay);
+  const isWithinWorkingHours = sched.isWorkingDay && !onLeave && (nowMs >= shiftStart && nowMs <= shiftEnd);
   const outsideWorkingHours = !isWithinWorkingHours;
 
   let officePresenceMinutes = null;
@@ -715,6 +724,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
     count: syncedEventIds.length,
     appTrackingEnabled,
     outsideWorkingHours,
+    onLeave,
     today: {
       dateKey,
       activeSeconds: sessionRow ? sessionRow.active_seconds : 0,

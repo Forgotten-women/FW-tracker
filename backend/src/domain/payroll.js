@@ -474,7 +474,7 @@ async function leaverCalculation({ employeeId, lastWorkingDate, periodStart = nu
   const payableDays = Math.max(0, workedDays.length - unpaid.totalDays);
 
   // Leave position at the leaving date.
-  const balance = await leave.balanceFor(employeeId, lastWorkingDate);
+  const balance = await leave.balanceFor(employeeId, lastWorkingDate, { project: true });
   const leaveBlocked = balance.blocked;
 
   const untakenDays = leaveBlocked ? null : Math.max(0, balance.availableDays);

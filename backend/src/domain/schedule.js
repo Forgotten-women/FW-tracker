@@ -210,4 +210,43 @@ async function workingDaysBetween(employeeId, fromKey, toKey) {
   return out;
 }
 
-module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate };
+// ---------------------------------------------------------------------------
+// Approved leave on a date
+//
+// Kept apart from resolve() on purpose: a leave day is still a scheduled
+// working day (payroll and leave counting depend on that), it is just one the
+// employee is not expected to work.
+// ---------------------------------------------------------------------------
+
+const selectLeaveOn = db.prepare(`
+  SELECT id, day_portion FROM leave_requests
+  WHERE employee_id = ? AND status = 'APPROVED' AND cancelled_at IS NULL
+    AND start_date <= ? AND end_date >= ?
+  ORDER BY created_at DESC
+`);
+
+/**
+ * Approved leave covering dateKey, or null. Any leave type counts (paid,
+ * unpaid, sick): pay is payroll's question, attendance only needs to know the
+ * person was not due in.
+ *
+ * Returns { requestId, fullDay, half } where half is 'FIRST_HALF' (morning
+ * off) or 'SECOND_HALF' (afternoon off) for a part-day request. A part-day
+ * value that names neither half is treated as a full day rather than guessed.
+ */
+async function leaveOn(employeeId, dateKey) {
+  const rows = await selectLeaveOn.all(employeeId, dateKey, dateKey);
+  if (!rows.length) return null;
+  let partDay = null;
+  for (const r of rows) {
+    const p = String(r.day_portion || 'FULL_DAY').toUpperCase();
+    const half = /(^|_)(AM|MORNING|FIRST)/.test(p) ? 'FIRST_HALF'
+      : /(^|_)(PM|AFTERNOON|SECOND)/.test(p) ? 'SECOND_HALF'
+      : null;
+    if (p === 'FULL_DAY' || p === 'FULL' || !half) return { requestId: r.id, fullDay: true, half: null };
+    partDay = partDay || { requestId: r.id, fullDay: false, half };
+  }
+  return partDay;
+}
+
+module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate, leaveOn };

@@ -136,6 +136,7 @@ export function UnifiedWorkforcePanel({
       ...summary.grace,
       ...summary.away,
       ...summary.notArrived,
+      ...(summary.onLeave || []),
     ];
   }, [summary]);
 

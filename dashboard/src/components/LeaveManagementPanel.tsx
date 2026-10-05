@@ -50,6 +50,8 @@ export function LeaveManagementPanel() {
   const [historyFilter, setHistoryFilter] = useState<'ALL' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('ALL');
   const [absenceStatusFilter, setAbsenceStatusFilter] = useState<'ALL' | 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED'>('ALL');
   const [search, setSearch] = useState('');
+  // Set by the Shortfall Warnings card: the pending queue shows only requests beyond the accrued balance.
+  const [shortfallOnly, setShortfallOnly] = useState(false);
 
   // Modals & Action states (Leave Requests)
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequestItem | null>(null);
@@ -371,9 +373,13 @@ export function LeaveManagementPanel() {
   // Derive summary metrics
   const pendingCount = pendingRequests.length;
   const pendingAbsencesCount = absences.filter((a) => a.status === 'PENDING_REVIEW').length;
-  const shortfallCount = pendingRequests.filter(
-    (r) => r.exceedsBalance || (r.shortfallDays && r.shortfallDays > 0),
-  ).length;
+  const isShortfall = (r: LeaveRequestItem) => !!(r.exceedsBalance || (r.shortfallDays && r.shortfallDays > 0));
+  const shortfallCount = pendingRequests.filter(isShortfall).length;
+  const visiblePending = shortfallOnly ? pendingRequests.filter(isShortfall) : pendingRequests;
+  const openPending = (onlyShortfalls: boolean) => {
+    setActiveTab('pending');
+    setShortfallOnly(onlyShortfalls);
+  };
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const onLeaveToday = calendarLeaves.filter(
@@ -479,7 +485,7 @@ export function LeaveManagementPanel() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant={activeTab === 'pending' ? 'primary' : 'ghost'}
-            onClick={() => setActiveTab('pending')}
+            onClick={() => openPending(false)}
             className="py-1 px-3 text-xs"
           >
             Pending Approvals ({pendingCount})
@@ -556,9 +562,9 @@ export function LeaveManagementPanel() {
       {/* Summary KPI Cards (Spec 14.1 & 15.1) */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-6">
         <div
-          onClick={() => setActiveTab('pending')}
+          onClick={() => openPending(false)}
           className={`cursor-pointer rounded-xl border p-3.5 transition-all ${
-            activeTab === 'pending'
+            activeTab === 'pending' && !shortfallOnly
               ? 'border-brand bg-brand-dim/30 ring-1 ring-brand'
               : 'border-line bg-surface hover:bg-raised'
           }`}
@@ -603,7 +609,14 @@ export function LeaveManagementPanel() {
           <div className="mt-0.5 text-[10px] text-muted">Active approved coverage</div>
         </div>
 
-        <div className="rounded-xl border border-line bg-surface p-3.5">
+        <div
+          onClick={() => openPending(true)}
+          className={`cursor-pointer rounded-xl border p-3.5 transition-all ${
+            activeTab === 'pending' && shortfallOnly
+              ? 'border-danger bg-danger-dim/30 ring-1 ring-danger'
+              : 'border-line bg-surface hover:bg-raised'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-text">Shortfall Warnings</span>
             {shortfallCount > 0 && <span className="h-2 w-2 rounded-full bg-danger" />}
@@ -648,8 +661,20 @@ export function LeaveManagementPanel() {
       {/* Tab 1: Pending Approvals Queue (Spec 15) */}
       {activeTab === 'pending' && (
         <div>
-          {pendingRequests.length === 0 ? (
-            <Empty>No leave requests awaiting approval.</Empty>
+          {shortfallOnly && (
+            <div className="mb-3 flex items-center justify-between rounded-lg border border-danger/30 bg-danger-dim/20 px-3 py-2 text-xs">
+              <span className="text-text">
+                Showing only requests that exceed the accrued balance ({shortfallCount})
+              </span>
+              <button onClick={() => setShortfallOnly(false)} className="font-semibold text-brand hover:underline">
+                Show all pending
+              </button>
+            </div>
+          )}
+          {visiblePending.length === 0 ? (
+            <Empty>
+              {shortfallOnly ? 'No pending requests exceed the accrued balance.' : 'No leave requests awaiting approval.'}
+            </Empty>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs">
@@ -665,7 +690,7 @@ export function LeaveManagementPanel() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {pendingRequests.map((r) => {
+                  {visiblePending.map((r) => {
                     const hasShortfall =
                       r.exceedsBalance || (r.shortfallDays && r.shortfallDays > 0);
 

@@ -32,7 +32,16 @@ const selectEntitlement = db.prepare(`
 async function entitlementFor(employeeId, onDate = T.dateKey()) {
   const row = await selectEntitlement.get(employeeId, onDate);
   const val = Number(row?.holiday_entitlement_days);
-  return (val > 0) ? val : config.leave.annualEntitlementDays;
+  if (!(val > 0)) return config.leave.annualEntitlementDays;
+  // HR records the 10 probation days in this field. Once probation is over the
+  // employee is on the full annual entitlement (20), so a figure no larger than
+  // the probation allowance is read as that allowance, not as a yearly one.
+  // (The probation months themselves earn at the probation rate either way;
+  // see accrualTarget.)
+  if (val <= config.leave.probationEntitlementDays && await probationWindow(employeeId)) {
+    return config.leave.annualEntitlementDays;
+  }
+  return val;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +134,54 @@ const selectAccrued = db.prepare(`
   WHERE employee_id = ? AND leave_year = ? AND entry_type = 'ACCRUAL'
 `);
 
+const selectLatestAccrualDate = db.prepare(`
+  SELECT MAX(effective_date) AS d
+  FROM leave_accrual_ledger
+  WHERE employee_id = ? AND leave_year = ? AND entry_type = 'ACCRUAL'
+`);
+
+// The probation window comes from the newest record that carries one. Records
+// added later for other changes (job title, hours) usually leave the probation
+// fields empty, so "the newest record" alone would lose it.
+const selectProbation = db.prepare(`
+  SELECT start_date, probation_start_date, probation_review_date
+  FROM employment_records
+  WHERE employee_id = ?
+    AND (probation_review_date IS NOT NULL OR employment_type = 'Probationary')
+  ORDER BY effective_from DESC, created_at DESC LIMIT 1
+`);
+
+/** { from, to } of the employee's probation (to exclusive), or null. */
+async function probationWindow(employeeId) {
+  const row = await selectProbation.get(employeeId);
+  const from = row && (row.probation_start_date || row.start_date);
+  if (!from) return null;
+  const to = row.probation_review_date || addMonths(from, config.leave.probationMonths);
+  return to > from ? { from, to } : null;
+}
+
+/**
+ * Cumulative days earned in a holiday year once `months` months are complete.
+ *
+ * A month served on probation earns probationEntitlementDays / probationMonths
+ * (10 / 6 = 1.67); any other month earns entitlement / 12. The probation rate
+ * deliberately ignores the record's annual figure: HR records the 10 probation
+ * days there, and reading 10 as a yearly figure halved the rate to 0.83 a month.
+ */
+async function accrualTarget(employeeId, yearStart, months, entitlement) {
+  const { probationEntitlementDays: pDays, probationMonths: pMonths } = config.leave;
+  const window = pDays > 0 && pMonths > 0 ? await probationWindow(employeeId) : null;
+  let onProbation = 0;
+  if (window) {
+    for (let m = 0; m < months; m++) {
+      const monthStart = addMonths(yearStart, m);
+      if (monthStart >= window.from && monthStart < window.to) onProbation++;
+    }
+  }
+  // Multiply before dividing so 6 probation months land on exactly 10.00.
+  return (onProbation * pDays) / pMonths + ((months - onProbation) * entitlement) / 12;
+}
+
 const insertLedger = db.prepare(`
   INSERT INTO leave_accrual_ledger
     (id, employee_id, leave_year, entry_type, days_delta, balance_after,
@@ -159,7 +216,7 @@ async function finaliseYear(employeeId, yearsOfService, startDate, { actor = 'sy
 
   const entitlement = await entitlementFor(employeeId, startDate);
   const already = (await selectAccrued.get(employeeId, leaveYear)).days;
-  const delta = entitlement - already;
+  const delta = (await accrualTarget(employeeId, yearStart, 12, entitlement)) - already;
   if (delta < 0.005) return { finalised: false, upToDate: true };
 
   await insertLedger.run({
@@ -192,13 +249,24 @@ async function accrue(employeeId, onDate = T.dateKey(), { actor = 'system' } = {
 
   const entitlement = await entitlementFor(employeeId, onDate);
   const already = (await selectAccrued.get(employeeId, year.leaveYear)).days;
-  const target = (entitlement * year.monthsCompleted) / 12;
+  const target = await accrualTarget(employeeId, year.yearStart, year.monthsCompleted, entitlement);
   const delta = target - already;
+  const effectiveDate = addMonths(year.yearStart, year.monthsCompleted);
 
   // Rounded to a hundredth of a day before comparing, so floating-point dust
   // does not post meaningless entries.
   if (Math.abs(delta) < 0.005) {
     return { accrued: false, upToDate: true, leaveYear: year.leaveYear, accruedDays: already };
+  }
+
+  // Asked about a date before months already credited (a balance viewed as of
+  // an earlier day). That is a question about the past, not a correction:
+  // posting the difference would take back days the employee has earned.
+  if (delta < 0) {
+    const latest = (await selectLatestAccrualDate.get(employeeId, year.leaveYear))?.d;
+    if (latest && latest > effectiveDate) {
+      return { accrued: false, upToDate: true, leaveYear: year.leaveYear, accruedDays: already };
+    }
   }
 
   const balance = await balanceRaw(employeeId, year);
@@ -209,7 +277,7 @@ async function accrue(employeeId, onDate = T.dateKey(), { actor = 'system' } = {
     entry_type: 'ACCRUAL',
     days_delta: delta,
     balance_after: balance.availableDays + delta,
-    effective_date: addMonths(year.yearStart, year.monthsCompleted),
+    effective_date: effectiveDate,
     leave_request_id: null,
     description: `Accrual for ${year.monthsCompleted} month(s) of service in this holiday year`,
     created_at: T.now(),
@@ -374,6 +442,29 @@ async function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequest
 }
 
 /**
+ * Replaces the ledger's accrual with what will have been earned by onDate, in
+ * place. A holiday year already behind us is left alone: its ledger is final
+ * (topped up and forfeited), so the months formula no longer describes it.
+ */
+async function projectAccrual(employeeId, year, onDate, raw) {
+  const current = await holidayYearFor(employeeId, T.dateKey());
+  if (!current.blocked && year.yearStart < current.yearStart) return;
+
+  const entitlement = await entitlementFor(employeeId, onDate);
+  const target = await accrualTarget(employeeId, year.yearStart, year.monthsCompleted, entitlement);
+  const diff = target - raw.accruedDays;
+  if (Math.abs(diff) < 0.005) return;
+
+  raw.accruedDays += diff;
+  raw.creditedDays += diff;
+  raw.availableDays += diff;
+  const used = raw.takenDays + raw.bookedDays;
+  raw.remainingCurrentCycleDays = Math.max(
+    0, (raw.accruedDays + raw.adjustmentDays + raw.forfeitDays) - Math.max(0, used - raw.carryOverDays),
+  );
+}
+
+/**
  * The employee leave dashboard figures with full 8-metric report.
  */
 async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestIdOrOpts = null, options = {}) {
@@ -383,13 +474,18 @@ async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestIdOrOp
     opts = excludeRequestIdOrOpts;
     excludeRequestId = null;
   }
-  const { skipAccrue = false } = opts || {};
+  // project: answer "what will the balance be on onDate" without writing. Used
+  // for request previews and leaver settlements, whose dates are rarely today:
+  // persisting accrual for them credited months not yet served (future dates),
+  // reversed months already credited (past dates), and could roll a holiday
+  // year over before its anniversary.
+  const { skipAccrue = false, project = false } = opts || {};
 
   const year = await holidayYearFor(employeeId, onDate);
   if (year.blocked) return { blocked: true, ...year };
 
   // Ensure accruals and rollovers are current (skip during bulk read-only queries like payroll preview)
-  if (!skipAccrue) {
+  if (!skipAccrue && !project) {
     try {
       if (year.yearsOfService > 0) {
         await rolloverHolidayYear(employeeId, onDate);
@@ -401,6 +497,7 @@ async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestIdOrOp
   }
 
   const raw = await balanceRaw(employeeId, year, onDate, excludeRequestId);
+  if (project) await projectAccrual(employeeId, year, onDate, raw);
   const round2 = (n) => Math.round(n * 100) / 100;
 
   if (opts.summaryOnly) {
@@ -533,7 +630,7 @@ async function previewRequest({
     };
   }
 
-  const balance = await balanceFor(employeeId, startDate, excludeRequestId);
+  const balance = await balanceFor(employeeId, startDate, excludeRequestId, { project: true });
   if (balance.blocked) return { ok: false, error: balance.message, blocked: true };
 
   // Only paid requests reduce accrued annual leave entitlement.
@@ -773,7 +870,33 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
     }
   } catch (_) {}
 
+  if (decision === 'APPROVED') await recomputeAttendanceFor(req, nowMs);
   return { decision, requestId, addedToRun };
+}
+
+/**
+ * Re-derives the attendance days a leave request covers, up to today.
+ *
+ * Attendance treats an approved leave day as ON_LEAVE (no lateness, deficit or
+ * worked time). Days already scored before the decision - a request approved
+ * after the day, or cancelled - would otherwise keep their old figures, and
+ * their deficit would stay in the ledger. Best effort: the leave decision
+ * itself has already been committed.
+ */
+async function recomputeAttendanceFor(req, nowMs = T.now()) {
+  const A = require('./attendance');
+  const last = req.end_date < T.dateKey(nowMs) ? req.end_date : T.dateKey(nowMs);
+  for (let d = req.start_date; d <= last; d = addDays(d, 1)) {
+    try { await A.recomputeDay(req.employee_id, d, nowMs); } catch (err) {
+      console.error(`[leave] attendance recompute failed for ${req.employee_id} ${d}:`, err.message);
+    }
+  }
+}
+
+function addDays(dateKey, days) {
+  const t = new Date(dateKey + 'T00:00:00Z');
+  t.setUTCDate(t.getUTCDate() + days);
+  return t.toISOString().slice(0, 10);
 }
 
 async function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() }) {
@@ -836,6 +959,7 @@ async function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() 
     });
   } catch (_) {}
 
+  await recomputeAttendanceFor(req, nowMs);
   return { cancelled: true };
 }
 
@@ -1499,7 +1623,7 @@ module.exports = {
   previewRequest, submitRequest, decideRequest, cancelRequest, adjustBalance,
   recordCarryForwardApproval, rolloverHolidayYear, checkAndRolloverAll,
   historicalCyclesFor, employeesApproachingAnniversary,
-  monthlyReportFor,
+  monthlyReportFor, recomputeAttendanceFor,
   ENTITLEMENT,
 };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import type {
   AbsenceRecord,
@@ -25,6 +25,7 @@ export function WarningBoard() {
 
   // Filters
   const [bandFilter, setBandFilter] = useState<'ALL' | 'RED' | 'AMBER' | 'GREEN'>('ALL');
+  const [formalFilter, setFormalFilter] = useState<'ALL' | 'ACTIVE'>('ALL');
   const [absenceStatusFilter, setAbsenceStatusFilter] = useState<'ALL' | 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED'>('PENDING_REVIEW');
   const [search, setSearch] = useState('');
 
@@ -55,6 +56,21 @@ export function WarningBoard() {
   // Withdraw Warning Modal
   const [selectedWithdrawWarning, setSelectedWithdrawWarning] = useState<FormalWarningItem | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
+
+  // The Pending Triggers card jumps to the review queue and flashes it.
+  const triggerQueueRef = useRef<HTMLDivElement>(null);
+  const [highlightQueue, setHighlightQueue] = useState(false);
+  const showPendingTriggers = () => {
+    setActiveTab('triage');
+    setBandFilter('ALL');
+    requestAnimationFrame(() => triggerQueueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    setHighlightQueue(true);
+    setTimeout(() => setHighlightQueue(false), 1500);
+  };
+  const showActiveWarnings = () => {
+    setActiveTab('formal');
+    setFormalFilter('ACTIVE');
+  };
 
   const refresh = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -238,6 +254,8 @@ export function WarningBoard() {
   const greenCount = board?.counts.green || 0;
   const pendingCount = triggers.length;
   const activeWarningsCount = warnings.filter((w) => w.status === 'ACTIVE').length;
+  const visibleWarnings =
+    formalFilter === 'ACTIVE' ? warnings.filter((w) => w.status === 'ACTIVE') : warnings;
   const pendingAbsencesCount = absences.filter((a) => a.status === 'PENDING_REVIEW').length;
 
   const filteredAbsences = absences.filter((a) => {
@@ -275,7 +293,10 @@ export function WarningBoard() {
           </Button>
           <Button
             variant={activeTab === 'formal' ? 'primary' : 'ghost'}
-            onClick={() => setActiveTab('formal')}
+            onClick={() => {
+              setActiveTab('formal');
+              setFormalFilter('ALL');
+            }}
             className="py-1 px-3 text-xs"
           >
             Formal Warnings ({activeWarningsCount})
@@ -349,7 +370,10 @@ export function WarningBoard() {
           <div className="mt-0.5 text-[10px] text-muted">4+ lates or active warnings</div>
         </div>
 
-        <div className="rounded-xl border border-line bg-surface p-3.5">
+        <div
+          onClick={showPendingTriggers}
+          className="cursor-pointer rounded-xl border border-line bg-surface p-3.5 transition-all hover:bg-raised"
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-text">Pending Triggers</span>
             {pendingCount > 0 && <span className="h-2 w-2 rounded-full bg-warn animate-pulse" />}
@@ -358,7 +382,14 @@ export function WarningBoard() {
           <div className="mt-0.5 text-[10px] text-muted">Awaiting HR decision</div>
         </div>
 
-        <div className="rounded-xl border border-line bg-surface p-3.5">
+        <div
+          onClick={showActiveWarnings}
+          className={`cursor-pointer rounded-xl border p-3.5 transition-all ${
+            activeTab === 'formal' && formalFilter === 'ACTIVE'
+              ? 'border-danger bg-danger-dim/30 ring-1 ring-danger'
+              : 'border-line bg-surface hover:bg-raised'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-text">Active Warnings</span>
             <span className="h-2 w-2 rounded-full bg-line" />
@@ -370,7 +401,12 @@ export function WarningBoard() {
 
       {/* Pending Triggers Review Queue (Spec 9.3 & 21.2) */}
       {triggers.length > 0 && activeTab === 'triage' && (
-        <div className="mb-6 rounded-xl border border-warn/40 bg-warn-dim/20 p-4">
+        <div
+          ref={triggerQueueRef}
+          className={`mb-6 scroll-mt-4 rounded-xl border border-warn/40 bg-warn-dim/20 p-4 transition-shadow ${
+            highlightQueue ? 'ring-2 ring-warn' : ''
+          }`}
+        >
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-warn text-[10px] font-bold text-on-bright">
@@ -564,8 +600,26 @@ export function WarningBoard() {
       {/* Formal Warnings List View */}
       {activeTab === 'formal' && (
         <div>
-          {warnings.length === 0 ? (
-            <Empty>No formal warnings on record.</Empty>
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted">Show:</span>
+            {(['ALL', 'ACTIVE'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFormalFilter(f)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
+                  formalFilter === f
+                    ? 'bg-raised text-text border border-line'
+                    : 'text-dim hover:text-text'
+                }`}
+              >
+                {f === 'ALL' ? `All (${warnings.length})` : `Active (${activeWarningsCount})`}
+              </button>
+            ))}
+          </div>
+          {visibleWarnings.length === 0 ? (
+            <Empty>
+              {formalFilter === 'ACTIVE' ? 'No active formal warnings.' : 'No formal warnings on record.'}
+            </Empty>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs">
@@ -582,7 +636,7 @@ export function WarningBoard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {warnings.map((w) => {
+                  {visibleWarnings.map((w) => {
                     const statusTone =
                       w.status === 'ACTIVE' ? 'danger' : w.status === 'EXPIRED' ? 'muted' : 'warn';
 

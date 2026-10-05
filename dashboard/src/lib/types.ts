@@ -8,6 +8,7 @@ export type PresenceStatus =
   | 'GRACE_PERIOD'
   | 'AWAY'
   | 'NOT_CHECKED_IN'
+  | 'ON_LEAVE'
   | 'CLOSED';
 
 export interface WorkSession {
@@ -102,6 +103,8 @@ export interface DashboardSummary {
   grace: EmployeeDay[];
   away: EmployeeDay[];
   notArrived: EmployeeDay[];
+  /** On approved full-day leave today. Missing from older backends. */
+  onLeave?: EmployeeDay[];
   todayAttendance: EmployeeDay[];
   needsReview: EmployeeDay[];
   recentMovements: Movement[];

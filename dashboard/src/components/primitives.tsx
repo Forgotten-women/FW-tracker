@@ -11,6 +11,7 @@ export const STATUS_META: Record<
   GRACE_PERIOD: { label: 'Grace Period', tone: 'warn' },
   AWAY: { label: 'Away', tone: 'muted' },
   NOT_CHECKED_IN: { label: 'Not Arrived', tone: 'dim' },
+  ON_LEAVE: { label: 'On Leave', tone: 'accent' },
   CLOSED: { label: 'Closed', tone: 'dim' },
 };
 

@@ -454,3 +454,97 @@ test('accrueAll reports who is blocked rather than skipping them quietly', async
   assert.ok(r.blocked.some(b => b.employeeId === 'emp_blocked_a'));
   assert.ok(r.blocked.every(b => b.reason), 'each blocked employee carries a reason');
 });
+
+// ---------------------------------------------------------------------------
+// Probation (10 days over 6 months) and historical / preview queries
+// ---------------------------------------------------------------------------
+
+async function probationRecord(id, emp, startDate, { entitlement = 20, reviewDate = null, type = 'Probationary' } = {}) {
+  await db.prepare(`
+    INSERT INTO employment_records (id, employee_id, job_title, employment_type, start_date, effective_from,
+      probation_start_date, probation_review_date, holiday_entitlement_days, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(id, emp, 'Engineer', type, startDate, startDate, startDate, reviewDate, entitlement, T.now());
+}
+
+// The case that was wrong in production: HR recorded the 10 probation days in
+// the annual field, and 10 read as a yearly figure accrued 0.83 a month.
+test('probation earns 10 / 6 = 1.67 a month even when the record says 10', async () => {
+  const emp = await makeEmployee('emp_prob10');
+  await probationRecord('er_prob10_a', emp, '2026-07-15', { reviewDate: '2027-01-15' });
+  // A later record (no probation fields) carrying the 10 probation days.
+  await probationRecord('er_prob10_b', emp, '2026-07-15', { entitlement: 10, type: 'Full-time' });
+  await db.prepare('UPDATE employment_records SET probation_start_date = NULL WHERE id = ?').run('er_prob10_b');
+
+  await L.accrue(emp, '2026-10-05');                       // 15 Aug, 15 Sep completed
+  assert.equal((await L.balanceFor(emp, '2026-10-05')).accruedDays, 3.33);
+
+  await L.accrue(emp, '2027-01-15');                       // all 6 probation months
+  const atEnd = await L.balanceFor(emp, '2027-01-15');
+  assert.equal(atEnd.accruedDays, 10.00);
+  assert.equal(atEnd.annualEntitlementDays, 20, 'after probation the yearly figure is 20, not the 10 recorded');
+
+  await L.accrue(emp, '2027-02-15');                       // first month after probation: 20 / 12
+  assert.equal((await L.balanceFor(emp, '2027-02-15')).accruedDays, 11.67);
+
+  // The first year still totals exactly 20: 10 on probation + 6 x 20/12.
+  for (let m = 8; m <= 12; m++) await L.accrue(emp, L.addMonths('2026-07-15', m));
+  await L.accrue(emp, '2027-07-16');                       // crossing the anniversary finalises year one
+  const yearOne = (await db.prepare(`
+    SELECT COALESCE(SUM(days_delta), 0) AS d FROM leave_accrual_ledger
+    WHERE employee_id = ? AND leave_year LIKE '%/0' AND entry_type = 'ACCRUAL'
+  `).get(emp)).d;
+  assert.ok(Math.abs(yearOne - 20) < 1e-9, `expected 20, got ${yearOne}`);
+});
+
+test('after probation the annual rate applies, and a 20-day year still totals 20', async () => {
+  const emp = await makeEmployee('emp_prob20');
+  await probationRecord('er_prob20', emp, '2025-01-01', { reviewDate: '2025-07-01' });
+  for (let m = 1; m <= 12; m++) await L.accrue(emp, L.addMonths('2025-01-01', m));
+  const total = (await db.prepare(`
+    SELECT COALESCE(SUM(days_delta), 0) AS d FROM leave_accrual_ledger
+    WHERE employee_id = ? AND leave_year LIKE '%/0' AND entry_type = 'ACCRUAL'
+  `).get(emp)).d;
+  assert.ok(Math.abs(total - 20) < 1e-9, `expected 20, got ${total}`);
+});
+
+test('without a review date, probation runs six months from the start', async () => {
+  const emp = await makeEmployee('emp_prob_noreview');
+  await probationRecord('er_prob_noreview', emp, '2026-01-10', { entitlement: 10 });
+  await L.accrue(emp, '2026-07-10');                       // 6 probation months
+  assert.equal((await L.balanceFor(emp, '2026-07-10')).accruedDays, 10.00);
+  await L.accrue(emp, '2026-08-10');                       // 7th month at the full 20 / 12
+  assert.equal((await L.balanceFor(emp, '2026-08-10')).accruedDays, 11.67);
+});
+
+// A balance looked at "as of" an earlier day must not take back earned days.
+test('a balance as of an earlier date never reverses accrual already credited', async () => {
+  const emp = await makeEmployee('emp_noreverse', '2026-01-31');
+  await L.accrue(emp, '2026-03-31');                       // 2 months: 3.33
+  await L.accrue(emp, '2026-02-15');                       // asked about mid-February
+  await L.balanceFor(emp, '2026-02-15');
+  const accrued = (await db.prepare(`
+    SELECT COALESCE(SUM(days_delta), 0) AS d FROM leave_accrual_ledger
+    WHERE employee_id = ? AND entry_type = 'ACCRUAL'
+  `).get(emp)).d;
+  assert.equal(Math.round(accrued * 100) / 100, 3.33);
+  const reversals = await db.prepare(
+    "SELECT COUNT(*) AS n FROM leave_accrual_ledger WHERE employee_id = ? AND days_delta < 0",
+  ).get(emp);
+  assert.equal(Number(reversals.n), 0);
+});
+
+test('previewing a future request projects accrual without writing it', async () => {
+  const emp = await makeEmployee('emp_preview_future', '2026-01-05');
+  await L.accrue(emp, '2026-03-05');                       // 2 months: 3.33
+  const before = await db.prepare('SELECT COUNT(*) AS n FROM leave_accrual_ledger WHERE employee_id = ?').get(emp);
+
+  const p = await L.previewRequest({
+    employeeId: emp, leaveTypeId: 'annual', startDate: '2026-06-10', endDate: '2026-06-10',
+  });
+  assert.equal(p.ok, true);
+  assert.equal(p.balance.accruedDays, 8.33, 'five months will have been served by 10 June');
+
+  const after = await db.prepare('SELECT COUNT(*) AS n FROM leave_accrual_ledger WHERE employee_id = ?').get(emp);
+  assert.equal(Number(after.n), Number(before.n), 'nothing posted for months not yet served');
+});

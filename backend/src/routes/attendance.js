@@ -21,6 +21,14 @@ const T = require('../util/time');
 const MAX_OBSERVATIONS = 500;   // one batch of replayed offline heartbeats
 const MAX_BACKDATE_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Same rule as the desktop agent (routes/desktop.js): REMOTE and HYBRID
+// workers, and anyone HR has allowed to work remotely.
+const selectWorkMode = db.prepare('SELECT work_mode, remote_allowed FROM employees WHERE id = ?');
+async function isRemoteWorker(employeeId) {
+  const e = await selectWorkMode.get(employeeId);
+  return Boolean(e && (e.work_mode === 'REMOTE' || e.work_mode === 'HYBRID' || Number(e.remote_allowed) === 1));
+}
+
 const insertMovement = db.prepare(
   'INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)'
 );
@@ -92,6 +100,11 @@ router.post('/ping', requireDevice, async (req, res) => {
   }
 
   const before = await P.deriveDay(employeeId, T.dateKey(nowMs), nowMs);
+  // A remote worker's phone away from the office is them working remotely, so
+  // it is recorded as REMOTE_VERIFIED (counted) rather than REMOTE (ignored),
+  // exactly as their laptop's heartbeats already were. Without this a remote
+  // worker whose laptop was off or not reporting showed as "Not arrived".
+  const remoteWorker = await isRemoteWorker(employeeId);
 
   let accepted = 0, duplicates = 0, rejected = 0;
   const touchedDays = new Set();
@@ -113,19 +126,27 @@ router.post('/ping', requireDevice, async (req, res) => {
       continue;
     }
 
+    const ssid = o?.ssid ?? body.ssid ?? null;
+    const bssid = o?.bssid ?? body.bssid ?? null;
+    let location = null;
+    if (remoteWorker) {
+      const verdict = P.classifyLocation({ bssid, ssid, srcIp, localIp, source: 'APP' });
+      location = verdict === 'OFFICE' ? 'OFFICE' : 'REMOTE_VERIFIED';
+    }
     const r = await P.recordEvent({
       employeeId, deviceId, source: 'APP',
       srcIp,
       localIp,
-      ssid: o?.ssid ?? body.ssid ?? null,
-      bssid: o?.bssid ?? body.bssid ?? null,
+      ssid,
+      bssid,
       observedAt,
+      location,
     });
     if (r.inserted) accepted++; else duplicates++;
     if (observedAt > latestObservedAt) {
       latestObservedAt = observedAt;
       latestLocation = r.location;
-      latestReason = r.reason;
+      latestReason = r.location === 'REMOTE_VERIFIED' ? null : r.reason;
     }
     touchedDays.add(T.dateKey(observedAt));
   }
@@ -148,7 +169,7 @@ router.post('/ping', requireDevice, async (req, res) => {
     accepted, duplicates, rejected,
     // Whether THIS heartbeat was accepted as office presence, so the app can
     // show an honest state instead of claiming "IN OFFICE" regardless.
-    verified: latestLocation === 'OFFICE',
+    verified: latestLocation === 'OFFICE' || latestLocation === 'REMOTE_VERIFIED',
     location: latestLocation,
     // Says WHY it did not count. With BSSID enforcement on, a phone that has
     // lost location permission reports no access point and stops being
@@ -302,6 +323,7 @@ router.get('/live', requireAdmin, async (req, res) => {
     grace: board.filter(e => e.status === 'GRACE_PERIOD'),
     away: board.filter(e => e.status === 'AWAY'),
     notArrived: board.filter(e => e.status === 'NOT_CHECKED_IN'),
+    onLeave: board.filter(e => e.status === 'ON_LEAVE'),
     serverTime: T.displayTime(nowMs),
   });
 });

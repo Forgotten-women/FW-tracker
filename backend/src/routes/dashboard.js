@@ -23,7 +23,9 @@ router.get('/summary', async (req, res) => {
   const inOffice = board.filter(e => e.status === 'IN_OFFICE');
   const grace = board.filter(e => e.status === 'GRACE_PERIOD');
   const away = board.filter(e => e.status === 'AWAY');
-  const attended = board.filter(e => e.status !== 'NOT_CHECKED_IN');
+  const onLeave = board.filter(e => e.status === 'ON_LEAVE');
+  // Someone on approved leave did not attend, whatever their devices reported.
+  const attended = board.filter(e => e.status !== 'NOT_CHECKED_IN' && e.status !== 'ON_LEAVE');
 
   const totalMinutes = attended.reduce((a, e) => a + e.totalMinutes, 0);
   const avgMinutes = attended.length ? Math.round(totalMinutes / attended.length) : 0;
@@ -91,6 +93,7 @@ router.get('/summary', async (req, res) => {
     },
     inOffice, grace, away,
     notArrived: board.filter(e => e.status === 'NOT_CHECKED_IN'),
+    onLeave,
     todayAttendance: attended,
     needsReview,
     recentMovements: movements.map(m => ({

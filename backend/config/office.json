@@ -159,8 +159,11 @@
     "negativeBalanceRequiresApproval": true,
     "approvalRoute": [
       "HR"
-    ]
+    ],
+    "probationEntitlementDays": 10,
+    "probationMonths": 6
   },
+  "_comment_probation": "An employee on probation earns probationEntitlementDays over probationMonths (10 / 6 = 1.67 days for each month served on probation), whatever their annual figure says. The probation window comes from the employment record: probation_start_date (or start_date) up to probation_review_date, or probationMonths after the start when no review date is set.",
   "_comment_accrual": "MONTHLY_ON_COMPLETION means the month accrues once it has been WORKED, which is what makes the spec section 14 table come out right: 12 accruals of 20/12 reach exactly 20.00 at month 12. Accruing at the start of each month would give 13 accruals in the first year and overshoot.",
   "_comment_payroll": "Payroll policy CONFIRMED by Forgotten Women on 2026-08-27. The daily rate follows spec section 17: monthly x 12 gives the annual salary, then / 52 gives weekly and / 5 gives daily. For 2000 a month that is 24000 annual, 461.54 weekly and 92.31 daily, matching the worked example exactly.",
   "payroll": {

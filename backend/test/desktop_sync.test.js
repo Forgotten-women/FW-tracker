@@ -161,3 +161,64 @@ test('an HR-entered clock-in replaces the first sighting on the live board, late
   assert.equal(after.checkInSetByHr, true);
   if (before && before.firstCheckIn !== '--') assert.notEqual(before.firstCheckIn, after.firstCheckIn);
 });
+
+// ---------------------------------------------------------------------------
+// Approved leave, and remote workers
+// ---------------------------------------------------------------------------
+
+async function approvedLeave(employeeId, dateKey, dayPortion = 'FULL_DAY') {
+  await db.prepare(`
+    INSERT INTO leave_requests (id, employee_id, leave_type_id, start_date, end_date, day_portion,
+      total_days, status, submitted_at, decided_at, created_at)
+    VALUES (?, ?, 'annual', ?, ?, ?, 1, 'APPROVED', ?, ?, ?)
+  `).run('lr_' + employeeId + dateKey, employeeId, dateKey, dateKey, dayPortion, clock, clock, clock);
+}
+
+test('on an approved leave day the laptop counts nothing and the board says On leave', async () => {
+  const p = await enrolPair('On Leave');
+  await approvedLeave(p.employeeId, '2026-09-23');
+
+  const hb = await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.40' });
+  assert.equal(hb.body.onLeave, true);
+  assert.equal(hb.body.creditState, 'OUTSIDE_HOURS', 'treated like outside hours, which every agent understands');
+  assert.equal(hb.body.policy.screenshotPolicy.enabled, false);
+
+  const ws = await db.prepare('SELECT active_seconds FROM workstation_sessions WHERE employee_id = ?').get(p.employeeId);
+  assert.equal(Number(ws.active_seconds), 0);
+
+  // The phone still reports from the office, late; none of it is scored.
+  await json('POST', '/api/attendance/ping', { headers: p.phone, body: { localIp: '192.168.18.41' } });
+  const summary = await json('GET', '/api/dashboard/summary', { headers: ADMIN });
+  const row = summary.body.onLeave.find(e => e.employeeId === p.employeeId);
+  assert.ok(row, 'listed under onLeave, not dropped from the board');
+  assert.equal(row.status, 'ON_LEAVE');
+  assert.equal(row.isLate, false);
+  assert.equal(row.dailyDeficitMinutes, 0);
+  assert.equal(row.totalMinutes, 0);
+
+  const A = require('../src/domain/attendance');
+  const day = await A.deriveDay(p.employeeId, '2026-09-23', clock);
+  assert.equal(day.attendanceStatus, 'ON_LEAVE');
+  assert.equal(day.dailyDeficitMinutes, 0);
+});
+
+test("a remote worker's phone away from the office counts as remote work", async () => {
+  const remote = await enrolPair('Remote Worker');
+  const office = await enrolPair('Office Worker');
+  await db.prepare("UPDATE employees SET work_mode = 'REMOTE', remote_allowed = 1 WHERE id = ?").run(remote.employeeId);
+
+  // No office network: the source address (127.0.0.1) is not an office subnet.
+  const r = await json('POST', '/api/attendance/ping', { headers: remote.phone, body: {} });
+  assert.equal(r.body.verified, true);
+  assert.equal(r.body.location, 'REMOTE_VERIFIED');
+  assert.equal(r.body.notCountedReason, null);
+
+  const o = await json('POST', '/api/attendance/ping', { headers: office.phone, body: {} });
+  assert.equal(o.body.verified, false, 'an office worker at home is still not counted');
+
+  const summary = await json('GET', '/api/dashboard/summary', { headers: ADMIN });
+  const row = summary.body.inOffice.find(e => e.employeeId === remote.employeeId);
+  assert.ok(row, 'shown as active, not "Not arrived"');
+  assert.match(row.statusLabel, /Remote/);
+  assert.ok(summary.body.notArrived.some(e => e.employeeId === office.employeeId));
+});

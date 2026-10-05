@@ -337,6 +337,7 @@ export function PresenceGrid({
     ...summary.grace,
     ...summary.away,
     ...summary.notArrived,
+    ...(summary.onLeave || []),
   ];
 
   const inOfficeCount = summary.inOffice.length;

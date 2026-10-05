@@ -127,7 +127,8 @@ const selectApprovedAdjustment = db.prepare(`
  * calculation can be previewed without writing anything.
  */
 async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
-  const s = await schedule.resolve(employeeId, dateKey);
+  let s = await schedule.resolve(employeeId, dateKey);
+  const leave = s.isWorkingDay ? await schedule.leaveOn(employeeId, dateKey) : null;
   const presence = await P.deriveDay(employeeId, dateKey, nowMs);
   const breaks = await selectBreaks.all(employeeId, dateKey);
   const manual = await selectManualEvents.all(employeeId, dateKey);
@@ -194,6 +195,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     approvedAdjustmentMinutes: 0,
     dailyDeficitMinutes: 0,
     attendanceStatus: 'PENDING',
+    leaveRequestId: leave ? leave.requestId : null,
     needsReview: [],
   };
 
@@ -204,6 +206,22 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
       attendanceStatus: 'NON_WORKING_DAY',
       nonWorkingReason: s.nonWorkingReason,
     };
+  }
+
+  // Approved leave: the person was not due in, so nothing is late, missing or
+  // worked, even if a laptop or phone was on and reporting.
+  if (leave && leave.fullDay) {
+    return { ...base, workedMinutes: 0, attendanceStatus: 'ON_LEAVE' };
+  }
+
+  // Half-day leave: only the other half of the shift is expected. Morning off
+  // moves the start (and lateness) to midday; afternoon off moves the end.
+  if (leave && leave.half) {
+    const mid = s.scheduledStartAt + Math.round((s.scheduledEndAt - s.scheduledStartAt) / 2);
+    s = leave.half === 'FIRST_HALF'
+      ? { ...s, scheduledStartAt: mid, latestOnTimeAt: mid + (s.graceMinutes || 0) * MIN + 59999 }
+      : { ...s, scheduledEndAt: mid };
+    s.dayEquivalentMinutes = Math.round((s.dayEquivalentMinutes || 480) / 2);
   }
 
   if (!firstIn) {
@@ -353,13 +371,13 @@ const upsertSummary = db.prepare(`
      first_clock_in, last_clock_out, worked_minutes, break_minutes,
      late_minutes, excess_break_minutes, early_departure_minutes,
      unauthorised_missing_minutes, approved_adjustment_minutes,
-     daily_deficit_minutes, is_late_occurrence, attendance_status, derived_at)
+     daily_deficit_minutes, is_late_occurrence, attendance_status, leave_request_id, derived_at)
   VALUES
     (@employee_id, @date_key, @scheduled_start, @scheduled_end, @is_working_day,
      @first_clock_in, @last_clock_out, @worked_minutes, @break_minutes,
      @late_minutes, @excess_break_minutes, @early_departure_minutes,
      @unauthorised_missing_minutes, @approved_adjustment_minutes,
-     @daily_deficit_minutes, @is_late_occurrence, @attendance_status, @derived_at)
+     @daily_deficit_minutes, @is_late_occurrence, @attendance_status, @leave_request_id, @derived_at)
   ON CONFLICT(employee_id, date_key) DO UPDATE SET
     scheduled_start = excluded.scheduled_start,
     scheduled_end   = excluded.scheduled_end,
@@ -376,6 +394,7 @@ const upsertSummary = db.prepare(`
     daily_deficit_minutes = excluded.daily_deficit_minutes,
     is_late_occurrence = excluded.is_late_occurrence,
     attendance_status  = excluded.attendance_status,
+    leave_request_id   = excluded.leave_request_id,
     derived_at = excluded.derived_at
 `);
 
@@ -406,6 +425,7 @@ async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) 
     daily_deficit_minutes: d.dailyDeficitMinutes,
     is_late_occurrence: d.isLateOccurrence ? 1 : 0,
     attendance_status: d.attendanceStatus,
+    leave_request_id: d.leaveRequestId || null,
     derived_at: nowMs,
   });
 

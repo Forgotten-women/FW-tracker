@@ -157,6 +157,10 @@ const config = {
     allowNegativeBalance: true,
     negativeBalanceRequiresApproval: true,
     approvalRoute: ['HR'],
+    // Probation: 10 days over the 6-month probation, earned monthly
+    // (10 / 6 = 1.67 days for each month served on probation).
+    probationEntitlementDays: 10,
+    probationMonths: 6,
     ...(office.leave || {}),
   },
 
