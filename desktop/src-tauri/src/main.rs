@@ -263,6 +263,76 @@ fn request_exit(app: tauri::AppHandle) {
     );
 }
 
+/// Windows: the updater runs the MSI in passive mode and exits so the files can
+/// be replaced, and nothing starts WorkSync again afterwards -- the agent stayed
+/// closed (recording nothing) until the next sign-in. On 2026-10-05 every
+/// laptop that took the 1.0.55 update stopped reporting mid-afternoon.
+///
+/// So before installing, a hidden, detached PowerShell waits for this process
+/// to exit, then checks a few times over the next minutes and starts WorkSync
+/// if it is not running. Starting it while it already runs is harmless: the
+/// single-instance listener hands over to the running copy.
+#[cfg(target_os = "windows")]
+fn schedule_relaunch_after_update() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    let Ok(exe) = std::env::current_exe() else { return };
+    let name = exe
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "WorkSync".to_string())
+        .replace('\'', "''");
+    let path = exe.to_string_lossy().replace('\'', "''");
+    let pid = std::process::id();
+    let script = format!(
+        "$ErrorActionPreference='SilentlyContinue'; Wait-Process -Id {pid} -Timeout 900; \
+         foreach ($d in 15,30,60,120,240) {{ Start-Sleep -Seconds $d; \
+         if (-not (Get-Process -Name '{name}')) {{ Start-Process -FilePath '{path}' }} }}"
+    );
+    match std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .spawn()
+    {
+        Ok(_) => println!("[updater] relaunch scheduled after install"),
+        Err(e) => eprintln!("[updater] could not schedule relaunch: {}", e),
+    }
+}
+
+/// macOS: after an update installs, the agent restarts itself. If the new copy
+/// still fails to come up, this detached shell starts the app bundle once the
+/// old process has gone (checked a few times over the next minutes).
+#[cfg(target_os = "macos")]
+fn schedule_relaunch_after_update() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    // .../WorkSync.app/Contents/MacOS/WorkSync -> .../WorkSync.app
+    let Some(bundle) = exe.ancestors().nth(3).map(|p| p.to_path_buf()) else { return };
+    let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+    let name = exe
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "WorkSync".to_string());
+    let pid = std::process::id();
+    let script = format!(
+        "i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 900 ]; do sleep 1; i=$((i+1)); done; \
+         for d in 5 15 30 60 120; do sleep $d; pgrep -x {name} >/dev/null || open {bundle}; done",
+        name = quote(&name),
+        bundle = quote(&bundle.to_string_lossy()),
+    );
+    match std::process::Command::new("/bin/sh")
+        .args(["-c", &script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(_) => println!("[updater] relaunch watcher started"),
+        Err(e) => eprintln!("[updater] could not start relaunch watcher: {}", e),
+    }
+}
+
 async fn check_and_install_silent(app: &tauri::AppHandle) {
     match tauri::updater::builder(app.clone()).check().await {
         Ok(update) if update.is_update_available() => {
@@ -279,6 +349,8 @@ async fn check_and_install_silent(app: &tauri::AppHandle) {
                     update.current_version()
                 ))
                 .show();
+            #[cfg(target_os = "windows")]
+            schedule_relaunch_after_update();
             match update.download_and_install().await {
                 Ok(()) => {
                     println!("[updater] update installed successfully");
@@ -288,6 +360,7 @@ async fn check_and_install_silent(app: &tauri::AppHandle) {
                             .title("WorkSync Updated")
                             .body("WorkSync has been updated to the latest version and will now restart.")
                             .show();
+                        schedule_relaunch_after_update();
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         app.restart();
                     }
@@ -320,11 +393,14 @@ pub fn trigger_update_check(app: tauri::AppHandle) {
                     .body(&msg)
                     .show();
                 println!("[updater] {}", msg);
+                #[cfg(target_os = "windows")]
+                schedule_relaunch_after_update();
                 match update.download_and_install().await {
                     Ok(()) => {
                         println!("[updater] update installed successfully");
                         #[cfg(target_os = "macos")]
                         {
+                            schedule_relaunch_after_update();
                             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                             app.restart();
                         }
