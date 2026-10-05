@@ -510,6 +510,37 @@ pub async fn send_agent_stopped(cfg: &AppConfig, reason: &str) -> Result<(), Str
     Ok(())
 }
 
+/// Tells the backend this laptop is giving up its pairing (developer option).
+/// Best effort: a device whose token is already invalid gets a 401 and is
+/// unpaired locally anyway.
+pub async fn send_unpair(cfg: &AppConfig) -> Result<(), String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    let url = format!("{}/api/desktop/unpair", cfg.server_url.trim_end_matches('/'));
+    live_http()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .header("X-Device-Id", &cfg.device_id)
+        .header("X-Agent-Version", agent_version())
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .map_err(|e| crate::net::describe(&e))?;
+    Ok(())
+}
+
+/// Forgets this laptop's pairing everywhere it is kept. The backups exist to
+/// survive a damaged config file, so they must go too, or load_config() would
+/// quietly restore the old token on the next start. The server address is kept.
+pub fn clear_pairing(cfg: &AppConfig) -> AppConfig {
+    let cleared = AppConfig { server_url: cfg.server_url.clone(), ..AppConfig::default() };
+    let _ = fs::remove_file(backup_config_path());
+    let _ = fs::remove_file(secondary_backup_path());
+    save_config(&cleared);
+    cleared
+}
+
 /// Tells the backend this agent listens on the doorbell (see live.rs).
 pub async fn send_live_hello(cfg: &AppConfig, doorbell: bool, capture: &str) -> Result<(), String> {
     if cfg.token.is_empty() {

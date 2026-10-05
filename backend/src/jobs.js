@@ -518,6 +518,8 @@ let timer = null;
 async function runMaintenanceTick(nowMs = T.now()) {
   try {
     await rollover(nowMs);
+    // Its own guard: a stuck break silently books whole days as break time.
+    try { await A.closeStaleBreaks(null, nowMs); } catch (err) { console.error('[jobs] closeStaleBreaks failed:', err.message); }
     // Before transitions, so an employee whose binding has just lapsed is
     // evaluated against the new reality rather than a stale one.
     const expired = await bindings.expireStale(nowMs);

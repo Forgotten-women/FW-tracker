@@ -572,7 +572,7 @@ async function recomputeAll() {
 // ---------------------------------------------------------------------------
 
 const selectOpenBreakPresence = db.prepare(
-  'SELECT started_at, permitted_minutes FROM break_records WHERE employee_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1'
+  'SELECT started_at, permitted_minutes FROM break_records WHERE employee_id = ? AND date_key = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1'
 );
 
 const selectSummaryPresence = db.prepare(
@@ -593,7 +593,7 @@ const selectManualClockIn = db.prepare(`
 
 /** Shape one derived day for an API response (formatting happens only here). */
 async function presentDay(d, employee) {
-  const openBreak = await selectOpenBreakPresence.get(d.employeeId);
+  const openBreak = await selectOpenBreakPresence.get(d.employeeId, d.dateKey);
   const summary = await selectSummaryPresence.get(d.employeeId, d.dateKey);
   const manualIn = await selectManualClockIn.get(d.employeeId, d.dateKey);
   const firstInAt = manualIn ? Number(manualIn.occurred_at) : d.firstInAt;

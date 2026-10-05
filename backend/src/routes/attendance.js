@@ -71,6 +71,7 @@ const selectOpenBreak = db.prepare(
 
 async function openBreakState(employeeId) {
   try {
+    await require('../domain/attendance').closeStaleBreaks(employeeId);
     const open = await selectOpenBreak.get(employeeId);
     if (!open) return { onBreak: false };
     const permittedMinutes = Number(open.permitted_minutes) || 30;

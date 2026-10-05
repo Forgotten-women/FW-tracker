@@ -114,6 +114,13 @@ impl OfflineStore {
         Ok(())
     }
 
+    /// Drops every queued event. Used when the laptop is unpaired: heartbeats
+    /// queued under the old pairing must not be replayed under a new one.
+    pub async fn clear_all(&self) -> Result<u64, sqlx::Error> {
+        let res = sqlx::query("DELETE FROM local_events").execute(&self.pool).await?;
+        Ok(res.rows_affected())
+    }
+
     pub async fn cleanup_synced(&self, older_than_ms: i64) -> Result<u64, sqlx::Error> {
         let cutoff = chrono::Utc::now().timestamp_millis() - older_than_ms;
         let res = sqlx::query("DELETE FROM local_events WHERE synced_at IS NOT NULL AND synced_at < ?")

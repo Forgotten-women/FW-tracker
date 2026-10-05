@@ -881,3 +881,61 @@ updateShiftTargetDisplay(currentActiveSecs);
 
 refreshStatus();
 setInterval(refreshStatus, 10000);
+
+// ---------------------------------------------------------------------------
+// Developer options: unpair this laptop.
+//
+// Hidden on purpose. Seven clicks on the version badge within three seconds
+// open it, and it still asks for the word UNPAIR, so nobody stumbles into it.
+// ---------------------------------------------------------------------------
+(function setupDeveloperUnpair() {
+  const badge = document.getElementById('version-badge');
+  const panel = document.getElementById('dev-panel');
+  const input = document.getElementById('dev-confirm-input');
+  const unpairBtn = document.getElementById('dev-unpair-btn');
+  const cancelBtn = document.getElementById('dev-cancel-btn');
+  const errorEl = document.getElementById('dev-error');
+  if (!badge || !panel || !input || !unpairBtn || !cancelBtn) return;
+
+  let clicks = [];
+  badge.addEventListener('click', () => {
+    const now = Date.now();
+    clicks = clicks.filter((t) => now - t < 3000);
+    clicks.push(now);
+    if (clicks.length >= 7) {
+      clicks = [];
+      input.value = '';
+      unpairBtn.disabled = true;
+      if (errorEl) errorEl.textContent = '';
+      panel.classList.remove('hidden');
+      input.focus();
+    }
+  });
+
+  const close = () => panel.classList.add('hidden');
+  cancelBtn.addEventListener('click', close);
+  panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  input.addEventListener('input', () => {
+    unpairBtn.disabled = input.value.trim().toUpperCase() !== 'UNPAIR';
+  });
+
+  unpairBtn.addEventListener('click', async () => {
+    unpairBtn.disabled = true;
+    unpairBtn.textContent = 'Unpairing…';
+    try {
+      await callBackend('developer_unpair');
+      ['ot_enrolled', 'ot_emp_info', 'ot_last_checkin', 'ot_last_status_text', 'ot_last_status_class', 'ot_last_network_text']
+        .forEach((k) => { try { localStorage.removeItem(k); } catch (_) {} });
+      try { localStorage.setItem('ot_enrolled', 'false'); } catch (_) {}
+      close();
+      if (statusSection) statusSection.classList.add('hidden');
+      if (enrollSection) enrollSection.classList.remove('hidden');
+      if (employeeBadge) employeeBadge.textContent = 'Not Enrolled';
+    } catch (err) {
+      if (errorEl) errorEl.textContent = (err && err.message) || String(err);
+      unpairBtn.disabled = false;
+    } finally {
+      unpairBtn.textContent = 'Unpair laptop';
+    }
+  });
+})();

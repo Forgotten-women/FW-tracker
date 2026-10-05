@@ -217,7 +217,10 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const lockGraceMins = parseInt(await getOrgSetting('lock_screen_grace_minutes', '5'), 10) || 5;
   const approvedProcesses = await getOrgSetting('approved_work_processes', '');
 
-  // Check if employee has an active break in progress (e.g. from mobile app or HR)
+  // Check if employee has an active break in progress (e.g. from mobile app or HR).
+  // A break left open on an earlier day is closed first: otherwise it makes
+  // every heartbeat count as break time indefinitely.
+  try { await attendance.closeStaleBreaks(employeeId, nowMs); } catch (_) {}
   const activeBreak = await db.prepare(
     'SELECT * FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
   ).get(employeeId);
@@ -832,7 +835,8 @@ router.get('/break-state', requireDevice, async (req, res) => {
   const dateKey = T.dateKey(nowMs);
   try {
     const [open, taken, sched] = await Promise.all([
-      db.prepare('SELECT * FROM break_records WHERE employee_id = ? AND ended_at IS NULL').get(employeeId),
+      // Today's only: a break left open on an earlier day is not a break now.
+      db.prepare('SELECT * FROM break_records WHERE employee_id = ? AND date_key = ? AND ended_at IS NULL').get(employeeId, dateKey),
       db.prepare('SELECT id FROM break_records WHERE employee_id = ? AND date_key = ? AND ended_at IS NOT NULL LIMIT 1').get(employeeId, dateKey),
       schedule.resolve(employeeId, dateKey),
     ]);
@@ -879,6 +883,35 @@ router.post('/agent-stopped', requireDevice, async (req, res) => {
     try {
       require('../events').broadcast('PRESENCE_UPDATED', { employeeId, dateKey });
     } catch (_) {}
+    res.json({ status: 'SUCCESS' });
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/desktop/unpair
+// The agent's hidden developer option: this laptop gives up its pairing so it
+// can be paired again with a fresh code. Revokes only THIS device (the phone is
+// untouched) and leaves it on the record. A device whose token is already
+// invalid can't call this; it simply clears its pairing locally.
+// ---------------------------------------------------------------------------
+router.post('/unpair', requireDevice, async (req, res) => {
+  const { employeeId, employeeName, deviceId } = req.auth;
+  const nowMs = T.now();
+  try {
+    await tx(async () => {
+      await db.prepare('UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(nowMs, deviceId);
+      await db.prepare('UPDATE device_tokens SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL').run(nowMs, deviceId);
+      await require('../domain/bindings').revokeForDevice(deviceId, 'Unpaired from the desktop agent');
+      await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+        .run(nowMs, 'DESKTOP_AGENT_UNPAIRED', employeeId, employeeName, 'Laptop unpaired from the desktop agent (developer option)');
+      await audit({
+        actor: `device:${deviceId}`, action: 'DESKTOP_AGENT_UNPAIRED',
+        targetType: 'employee', targetId: employeeId,
+        note: 'Unpaired from the agent\'s developer option',
+      });
+    });
     res.json({ status: 'SUCCESS' });
   } catch (err) {
     res.status(500).json({ status: 'ERROR', message: err.message });

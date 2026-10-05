@@ -222,3 +222,29 @@ test("a remote worker's phone away from the office counts as remote work", async
   assert.match(row.statusLabel, /Remote/);
   assert.ok(summary.body.notArrived.some(e => e.employeeId === office.employeeId));
 });
+
+// A break whose "End break" never reached the server (the 1 Oct DNS failure)
+// made every heartbeat on later days count as break time.
+test('a break left open from an earlier day is closed and stops counting as break', async () => {
+  const p = await enrolPair('Stuck Break');
+  const yesterday = '2026-09-22';
+  const startedAt = Date.UTC(2026, 8, 22, 11, 14, 0);
+  await db.prepare(`
+    INSERT INTO break_records (id, employee_id, date_key, started_at, ended_at, permitted_minutes, actual_minutes, excess_minutes, created_at)
+    VALUES (?, ?, ?, ?, NULL, 30, NULL, 0, ?)
+  `).run('brk_stuck_' + p.employeeId, p.employeeId, yesterday, startedAt, startedAt);
+
+  const hb = await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.42' });
+  assert.notEqual(hb.body.workstationStatus, 'ON_BREAK');
+  assert.equal(hb.body.creditState, 'COUNTED');
+
+  const b = await db.prepare('SELECT ended_at, actual_minutes, excess_minutes FROM break_records WHERE id = ?').get('brk_stuck_' + p.employeeId);
+  assert.equal(Number(b.ended_at), startedAt + 30 * 60000, 'closed at the end of the allowance');
+  assert.equal(Number(b.excess_minutes), 0, 'a request that failed costs no excess');
+
+  const state = await json('GET', '/api/desktop/break-state', { headers: p.laptop });
+  assert.equal(state.body.onBreak, false);
+  const ws = await db.prepare('SELECT active_seconds, break_seconds FROM workstation_sessions WHERE employee_id = ?').get(p.employeeId);
+  assert.equal(Number(ws.break_seconds), 0);
+  assert.ok(Number(ws.active_seconds) > 0);
+});

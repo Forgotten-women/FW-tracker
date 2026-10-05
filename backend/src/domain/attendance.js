@@ -14,7 +14,7 @@
 // touches anyone's leave balance.
 
 const crypto = require('crypto');
-const { db, tx } = require('../db');
+const { db, tx, audit } = require('../db');
 const { config } = require('../config');
 const P = require('./presence');
 const schedule = require('./schedule');
@@ -46,7 +46,44 @@ const selectOpenBreak = db.prepare(`
   ORDER BY started_at DESC LIMIT 1
 `);
 
+// A break left open from an earlier day. One break per day, never spanning
+// midnight, so an open one from before today can only mean "End break" never
+// reached the server (on 2026-10-01 the laptops' DNS failed mid-break). Left
+// alone it made every later heartbeat count as break time for days: the
+// employee showed as not arrived while working.
+const selectStaleBreaks = db.prepare(`
+  SELECT * FROM break_records
+  WHERE ended_at IS NULL AND date_key < ? AND (employee_id = ? OR ?::text IS NULL)
+`);
+
+/**
+ * Closes breaks still open from before today, at the end of their permitted
+ * allowance: when the person actually came back is unknown, and a request that
+ * failed should not cost them excess break. The day is re-derived and the
+ * closure audited. Pass employeeId to limit it to one person.
+ */
+async function closeStaleBreaks(employeeId = null, nowMs = T.now()) {
+  const today = T.dateKey(nowMs);
+  const stale = await selectStaleBreaks.all(today, employeeId, employeeId);
+  for (const b of stale) {
+    const permitted = Number(b.permitted_minutes) || 30;
+    const endedAt = Number(b.started_at) + permitted * MIN;
+    await db.prepare(
+      'UPDATE break_records SET ended_at = ?, actual_minutes = ?, excess_minutes = 0 WHERE id = ? AND ended_at IS NULL'
+    ).run(endedAt, permitted, b.id);
+    await audit({
+      actor: 'system', action: 'BREAK_AUTO_CLOSED',
+      targetType: 'employee', targetId: b.employee_id,
+      after: { breakId: b.id, dateKey: b.date_key, endedAt },
+      note: 'Break was still open on a later day; closed at the end of the permitted allowance.',
+    });
+    try { await recomputeDay(b.employee_id, b.date_key, nowMs); } catch (_) {}
+  }
+  return stale.length;
+}
+
 async function startBreak(employeeId, atMs = T.now()) {
+  await closeStaleBreaks(employeeId, atMs);
   const open = await selectOpenBreak.get(employeeId);
   if (open) {
     return { ok: false, reason: 'ALREADY_ON_BREAK', startedAt: open.started_at };
@@ -84,6 +121,7 @@ async function startBreak(employeeId, atMs = T.now()) {
 }
 
 async function endBreak(employeeId, atMs = T.now()) {
+  await closeStaleBreaks(employeeId, atMs);
   const open = await selectOpenBreak.get(employeeId);
   if (!open) return { ok: false, reason: 'NOT_ON_BREAK' };
 
@@ -943,7 +981,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
 
 module.exports = {
   deriveDay, recomputeDay, present,
-  startBreak, endBreak,
+  startBreak, endBreak, closeStaleBreaks,
   balanceFor, balanceAsOf, postDeficit, adjustBalance,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,

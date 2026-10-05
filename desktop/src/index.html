@@ -20,7 +20,7 @@
         </div>
         <div class="brand-text" data-tauri-drag-region>
           <div class="app-title" data-tauri-drag-region>
-            WorkSync <span id="version-badge" class="version-badge">v1.0.54</span>
+            WorkSync <span id="version-badge" class="version-badge">v1.0.55</span>
           </div>
           <div id="employee-badge" class="sub-title" data-tauri-drag-region>Not Enrolled</div>
         </div>
@@ -166,6 +166,24 @@
       <!-- Messages float above the actions instead of pushing the layout -->
       <div id="status-feedback" class="toast hidden" role="alert"></div>
     </section>
+  </div>
+
+  <!-- Developer options. Deliberately undiscoverable: opened by clicking the
+       version badge 7 times within 3 seconds, and it still asks for UNPAIR. -->
+  <div id="dev-panel" class="dev-panel hidden" role="dialog" aria-modal="true" aria-labelledby="dev-panel-title">
+    <div class="dev-card">
+      <div id="dev-panel-title" class="dev-title">Developer options</div>
+      <p class="dev-text">
+        Unpair this laptop so it can be paired again with a new code from the HR dashboard.
+        Time stops being recorded on this laptop until it is paired again.
+      </p>
+      <input type="text" id="dev-confirm-input" class="code-input" placeholder="Type UNPAIR to confirm" autocomplete="off" spellcheck="false" />
+      <div id="dev-error" class="error-msg"></div>
+      <div class="dev-actions">
+        <button id="dev-cancel-btn" class="action-btn">Cancel</button>
+        <button id="dev-unpair-btn" class="action-btn checkout-btn" disabled>Unpair laptop</button>
+      </div>
+    </div>
   </div>
 
   <script src="main.js"></script>

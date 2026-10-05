@@ -152,6 +152,25 @@ async fn enroll_device(
     Ok(serde_json::json!({ "success": true, "name": cfg.employee_name }))
 }
 
+/// Hidden developer option in the widget: unpair this laptop so it can be
+/// paired again (e.g. its token was revoked or the record was replaced).
+#[tauri::command]
+async fn developer_unpair(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    let server_revoked = tokio::time::timeout(Duration::from_secs(6), client::send_unpair(&cfg))
+        .await
+        .map(|r| r.is_ok())
+        .unwrap_or(false);
+    let cleared = client::clear_pairing(&cfg);
+    let dropped = state.offline_store.clear_all().await.unwrap_or(0);
+    *state.config.lock().unwrap() = cleared;
+    *state.latest_response.lock().unwrap() = None;
+    IS_MANUAL_BREAK.store(false, Ordering::SeqCst);
+    PENDING_ACTIVE_SECONDS.store(0, Ordering::SeqCst);
+    eprintln!("[unpair] pairing cleared (server revoked: {server_revoked}, queued events dropped: {dropped})");
+    Ok(serde_json::json!({ "success": true, "serverRevoked": server_revoked }))
+}
+
 #[tauri::command]
 async fn set_manual_break(on_break: bool, state: State<'_, AppState>) -> Result<bool, String> {
     let cfg = state.config.lock().unwrap().clone();
@@ -408,6 +427,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_app_status,
             enroll_device,
+            developer_unpair,
             set_manual_break,
             toggle_manual_break,
             connect_office_wifi,
@@ -616,8 +636,13 @@ fn main() {
                                 );
                                 cfg_to_save.cached_active_seconds = effective_secs;
                                 cfg_to_save.cached_date_key = resp.today.date_key.clone();
-                                client::save_config(&cfg_to_save);
-                                *state.config.lock().unwrap() = cfg_to_save;
+                                // Only while still paired with the same token: an unpair
+                                // (developer option) during this request must not be undone.
+                                let still_paired = state.config.lock().unwrap().token == cfg.token;
+                                if still_paired {
+                                    client::save_config(&cfg_to_save);
+                                    *state.config.lock().unwrap() = cfg_to_save;
+                                }
                                 let _ = app_handle.emit_all("heartbeat-updated", resp);
                             }
                             Err(e) => {
@@ -771,8 +796,13 @@ fn main() {
                                 );
                                 cfg_to_save.cached_active_seconds = effective_secs;
                                 cfg_to_save.cached_date_key = final_resp.today.date_key.clone();
-                                client::save_config(&cfg_to_save);
-                                *state.config.lock().unwrap() = cfg_to_save;
+                                // Only while still paired with the same token: an unpair
+                                // (developer option) during this request must not be undone.
+                                let still_paired = state.config.lock().unwrap().token == cfg.token;
+                                if still_paired {
+                                    client::save_config(&cfg_to_save);
+                                    *state.config.lock().unwrap() = cfg_to_save;
+                                }
                                 let _ = app_handle.emit_all("heartbeat-updated", final_resp.clone());
 
                                 // If server determined we are outside office, but office Wi-Fi is visible in the air, auto-connect
