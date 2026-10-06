@@ -185,6 +185,9 @@ const checkoutBtn = document.getElementById('checkout-btn');
 const undoCheckoutWrap = document.getElementById('undo-checkout-wrap');
 const undoTimerNum = document.getElementById('undo-timer-num');
 const undoCheckoutBtn = document.getElementById('undo-checkout-btn');
+const undoBreakWrap = document.getElementById('undo-break-wrap');
+const undoBreakNum = document.getElementById('undo-break-num');
+const undoBreakBtn = document.getElementById('undo-break-btn');
 const shiftTargetCard = document.getElementById('shift-target-card');
 const shiftWorkedValue = document.getElementById('shift-worked-value');
 const shiftProgressFill = document.getElementById('shift-progress-fill');
@@ -201,6 +204,8 @@ const statusFeedback = document.getElementById('status-feedback');
 let feedbackTimeout = null;
 let isTogglingBreak = false;
 let checkoutCountdownTimer = null;
+let breakStartTimer = null;
+let breakSecondsLeft = 5;
 let checkoutSecondsLeft = 5;
 let consecutiveErrors = 0;
 
@@ -875,15 +880,52 @@ if (closeBtn) {
 }
 
 if (breakToggleBtn) {
-  breakToggleBtn.addEventListener('click', async (e) => {
+  breakToggleBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    if (isTogglingBreak || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
-    
+    if (isTogglingBreak || breakStartTimer || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
+    // Starting a break waits 5 seconds so a mis-click can be undone; ending one is immediate.
+    if (isOnBreakState) applyBreak(false);
+    else startBreakCountdown();
+  });
+}
+
+function startBreakCountdown() {
+  breakSecondsLeft = 5;
+  if (undoBreakNum) undoBreakNum.textContent = '5';
+  if (undoBreakWrap) undoBreakWrap.classList.remove('hidden');
+  breakStartTimer = setInterval(() => {
+    breakSecondsLeft--;
+    if (undoBreakNum) undoBreakNum.textContent = String(breakSecondsLeft);
+    if (breakSecondsLeft > 0) return;
+    cancelBreakCountdown();
+    // The shift may have ended, or a break started from the phone, while counting down.
+    if (isOnBreakState || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
+    applyBreak(true);
+  }, 1000);
+}
+
+function cancelBreakCountdown() {
+  if (breakStartTimer) {
+    clearInterval(breakStartTimer);
+    breakStartTimer = null;
+  }
+  if (undoBreakWrap) undoBreakWrap.classList.add('hidden');
+}
+
+if (undoBreakBtn) {
+  undoBreakBtn.addEventListener('click', () => {
+    cancelBreakCountdown();
+    showFeedback('Break cancelled. Your shift continues.', false);
+  });
+}
+
+async function applyBreak(targetIsBreak) {
+  if (!breakToggleBtn || isTogglingBreak) return;
+  {
     isTogglingBreak = true;
     breakToggleBtn.disabled = true;
     breakToggleBtn.classList.add('disabled');
 
-    const targetIsBreak = !isOnBreakState;
     if (targetIsBreak) {
       isOnBreakState = true;
       breakStartedAtMs = Date.now();
@@ -913,7 +955,7 @@ if (breakToggleBtn) {
       isTogglingBreak = false;
       await refreshStatus();
     }
-  });
+  }
 }
 
 // The shift's scheduled end as "7:00 PM", from the day view.

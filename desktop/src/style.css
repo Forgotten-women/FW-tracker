@@ -672,6 +672,7 @@ input:focus {
 }
 
 .status-section:has(#undo-checkout-wrap:not(.hidden)) .action-row { display: none; }
+.status-section:has(#undo-break-wrap:not(.hidden)) .action-row { display: none; }
 
 .action-btn {
   flex: 1;
@@ -782,6 +783,14 @@ input:focus {
 
 .undo-btn:hover { background: #dc2626; }
 .undo-btn:active { transform: scale(0.96); }
+
+.undo-break-wrap {
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.4);
+}
+.undo-break-wrap .undo-content { color: var(--amber); }
+.undo-break-wrap .undo-btn { background: #d97706; }
+.undo-break-wrap .undo-btn:hover { background: #b45309; }
 
 /* ------------------------------------------------------------------ toast */
 
