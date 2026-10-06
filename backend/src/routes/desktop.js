@@ -169,12 +169,18 @@ const selectClockOut = db.prepare(`
   LIMIT 1
 `);
 
+const selectLastIdleSpan = db.prepare(`
+  SELECT id, end_at FROM workstation_idle_spans
+  WHERE device_id = ? AND date_key = ? ORDER BY end_at DESC LIMIT 1
+`);
+
+const selectBreakEndedBetween = db.prepare(`
+  SELECT 1 FROM break_records WHERE employee_id = ? AND ended_at > ? AND ended_at <= ? LIMIT 1
+`);
+
 /** Adds [startAt, endAt] to the device's idle spans, extending the last one if they touch. */
 async function recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs }) {
-  const last = await db.prepare(`
-    SELECT id, end_at FROM workstation_idle_spans
-    WHERE device_id = ? AND date_key = ? ORDER BY end_at DESC LIMIT 1
-  `).get(deviceId, dateKey);
+  const last = await selectLastIdleSpan.get(deviceId, dateKey);
   if (last && Number(last.end_at) >= startAt - 90 * 1000) {
     await db.prepare('UPDATE workstation_idle_spans SET end_at = GREATEST(end_at, ?), updated_at = ? WHERE id = ?')
       .run(endAt, nowMs, last.id);
@@ -437,15 +443,37 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     }
   }
 
-  // Real idle intervals: only a heartbeat the server judged IDLE (no input 5+
-  // min) or AWAY (locked 5+ min) is idle time, covering the interval since
-  // this laptop's previous heartbeat. Idle slices inside an ACTIVE heartbeat
-  // are not. Worked time subtracts these spans (attendance.buildDayView).
-  if (!outsideWorkingHours && (status === 'IDLE' || status === 'AWAY')) {
+  // Real idle intervals. A heartbeat the server judged IDLE (no input 5+ min)
+  // or AWAY (locked 5+ min) is idle for the whole interval since this
+  // laptop's previous heartbeat. Worked time subtracts these spans
+  // (attendance.buildDayView).
+  //
+  // An ACTIVE heartbeat can still carry idle seconds: the minute in which the
+  // 5-minute mark passed, and the minute the person came back, are part idle
+  // and part active. Those seconds used to reach idle_seconds (the dashboard's
+  // Telemetry figure) but no span, so every away period lost up to ~2 minutes
+  // of idle from the day view and a short one was missed entirely. An idle
+  // stretch needs 5 minutes without input before it, so it can't sit in the
+  // middle of an interval: it is at the START when idle was already running
+  // (the previous heartbeat ended idle, or a break ended in this interval)
+  // and at the END otherwise.
+  if (!outsideWorkingHours && (status === 'IDLE' || status === 'AWAY' || (status === 'ACTIVE' && numIdle > 0))) {
     try {
       const prevAt = existing && existing.last_heartbeat_at ? Number(existing.last_heartbeat_at) : null;
-      const span = Math.min(batchTotal * 1000 || 60000, prevAt ? Math.max(0, nowMs - prevAt) : 60000, 15 * 60000);
-      await recordIdleSpan({ deviceId, employeeId, dateKey, startAt: nowMs - span, endAt: nowMs, kind: status, nowMs });
+      const intervalMs = Math.min(batchTotal * 1000 || 60000, prevAt ? Math.max(0, nowMs - prevAt) : 60000, 15 * 60000);
+      if (status !== 'ACTIVE') {
+        await recordIdleSpan({ deviceId, employeeId, dateKey, startAt: nowMs - intervalMs, endAt: nowMs, kind: status, nowMs });
+      } else {
+        const idleMs = Math.min(numIdle * 1000, intervalMs);
+        const intervalStart = nowMs - intervalMs;
+        const lastSpan = await selectLastIdleSpan.get(deviceId, dateKey);
+        const idleWasRunning = (lastSpan && Number(lastSpan.end_at) >= intervalStart - 2000)
+          || Boolean(await selectBreakEndedBetween.get(employeeId, intervalStart, nowMs));
+        const startAt = idleWasRunning ? intervalStart : nowMs - idleMs;
+        if (idleMs > 0) {
+          await recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt: startAt + idleMs, kind: 'IDLE', nowMs });
+        }
+      }
     } catch (err) {
       console.error('[desktop/heartbeat] idle span error:', err.message);
     }
