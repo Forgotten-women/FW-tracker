@@ -231,6 +231,16 @@ async fn checkout_shift(state: State<'_, AppState>) -> Result<serde_json::Value,
     }
 }
 
+/// "Resume shift": undoes a mistaken End shift the same day.
+#[tauri::command]
+async fn resume_shift(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    client::send_resume(&cfg).await
+}
+
 /// Tray "Exit". The agent can be closed -- it's the employee's machine -- but
 /// the stop is put on the record first so HR sees a gap with a reason, not
 /// silently missing data. It starts again at the next sign-in (autostart.rs).
@@ -510,7 +520,8 @@ fn main() {
             set_manual_break,
             toggle_manual_break,
             connect_office_wifi,
-            checkout_shift
+            checkout_shift,
+            resume_shift
         ])
         .setup(move |app| {
             let app_handle = app.handle();

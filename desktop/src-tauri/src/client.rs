@@ -642,6 +642,26 @@ pub async fn check_stream_status(cfg: &AppConfig) -> Result<StreamStatusResponse
     res.json::<StreamStatusResponse>().await.map_err(|e| e.to_string())
 }
 
+/// Undoes a mistaken End shift the same day (backend POST /api/desktop/resume).
+pub async fn send_resume(cfg: &AppConfig) -> Result<serde_json::Value, String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    let url = format!("{}/api/desktop/resume", cfg.server_url.trim_end_matches('/'));
+    let res = crate::net::http()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .send()
+        .await
+        .map_err(|e| crate::net::describe(&e))?;
+    if !res.status().is_success() {
+        let err_json: serde_json::Value = res.json().await.unwrap_or_default();
+        let msg = err_json["message"].as_str().unwrap_or("Could not resume the shift");
+        return Err(msg.to_string());
+    }
+    res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+}
+
 pub async fn send_checkout(cfg: &AppConfig) -> Result<serde_json::Value, String> {
     if cfg.token.is_empty() {
         return Err("Not enrolled".to_string());

@@ -125,6 +125,44 @@ async function clockOut(employeeId, {
   return { id, atMs, dateKey };
 }
 
+// Only a clock-out the employee made themselves can be resumed; one by HR or
+// the automatic 20:00 clock-out cannot.
+const SELF_CLOCK_OUT_SOURCES = ['DESKTOP_AGENT', 'MOBILE_APP'];
+const RESUME_UNTIL_AFTER_SHIFT_MS = 60 * 60 * 1000;
+
+/**
+ * Undo a mistaken "End shift" the same day. The time between the clock-out
+ * and the resume is not counted (nothing was recorded then); from now on the
+ * day counts again. Refused for a clock-out made by HR or the system, or once
+ * the shift (plus the hour before the automatic clock-out) is over.
+ */
+async function resumeDay(employeeId, { nowMs = T.now(), actor = 'employee' } = {}) {
+  const dateKey = T.dateKey(nowMs);
+  const out = await db.prepare(`
+    SELECT id, source FROM attendance_events
+    WHERE employee_id = ? AND date_key = ? AND event_type = 'CLOCK_OUT' AND voided_at IS NULL
+    ORDER BY occurred_at DESC LIMIT 1
+  `).get(employeeId, dateKey);
+  if (!out) return { ok: false, reason: 'NOT_CLOCKED_OUT', message: 'Your shift is not ended, so there is nothing to resume.' };
+  if (!SELF_CLOCK_OUT_SOURCES.includes(out.source)) {
+    return { ok: false, reason: 'NOT_YOURS', message: 'Your day was closed by HR or automatically, so only HR can reopen it.' };
+  }
+  const s = await schedule.resolve(employeeId, dateKey);
+  if (!s.isWorkingDay || !s.scheduledEndAt || nowMs >= s.scheduledEndAt + RESUME_UNTIL_AFTER_SHIFT_MS) {
+    return { ok: false, reason: 'SHIFT_OVER', message: 'Your shift is over, so it can no longer be resumed. Ask HR if this is wrong.' };
+  }
+  await db.prepare('UPDATE attendance_events SET voided_at = ?, voided_reason = ? WHERE id = ?')
+    .run(nowMs, 'Shift resumed by the employee', out.id);
+  await db.prepare(`UPDATE workstation_sessions SET status = 'ACTIVE', updated_at = ? WHERE employee_id = ? AND session_date = ?`)
+    .run(nowMs, employeeId, dateKey);
+  await audit({
+    actor, action: 'SHIFT_RESUMED', targetType: 'employee', targetId: employeeId,
+    after: { dateKey, voidedClockOut: out.id }, note: 'End shift undone by the employee the same day',
+  });
+  await recomputeDay(employeeId, dateKey, nowMs);
+  return { ok: true, dateKey };
+}
+
 async function startBreak(employeeId, atMs = T.now()) {
   await closeStaleBreaks(employeeId, atMs);
   const open = await selectOpenBreak.get(employeeId);
@@ -335,6 +373,12 @@ function buildDayView({
     checkInSetByHr: Boolean(manualIn),
     lastSeenAt, lastSeen: show(lastSeenAt),
     checkedOut: Boolean(clockOutAt), checkedOutAt: clockOutAt, checkedOutTime: show(clockOutAt),
+    // The employee ended the shift themselves and it is still their shift:
+    // the laptop offers "Resume shift" (attendance.resumeDay).
+    canResume: Boolean(
+      clockOutAt && isToday && shift && manualOut && ['DESKTOP_AGENT', 'MOBILE_APP'].includes(manualOut.source)
+      && nowMs < s.scheduledEndAt + 60 * 60 * 1000,
+    ),
     shiftStartAt: shift ? s.scheduledStartAt : null,
     shiftEndAt: shift ? s.scheduledEndAt : null,
     shiftStart: s.startTime || null, shiftEnd: s.endTime || null,
@@ -1217,7 +1261,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
 
 module.exports = {
   deriveDay, recomputeDay, present,
-  startBreak, endBreak, closeStaleBreaks, clockOut, buildDayView,
+  startBreak, endBreak, closeStaleBreaks, clockOut, resumeDay, buildDayView,
   balanceFor, balanceAsOf, postDeficit, adjustBalance,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,

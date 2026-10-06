@@ -168,6 +168,19 @@
     </section>
   </div>
 
+  <!-- Ending the shift before its scheduled end asks first: since 1.0.58 End
+       shift ends the working day (nothing more is counted until resumed). -->
+  <div id="end-confirm-panel" class="dev-panel hidden" role="dialog" aria-modal="true" aria-labelledby="end-confirm-title">
+    <div class="dev-card">
+      <div id="end-confirm-title" class="dev-title">End your shift now?</div>
+      <p id="end-confirm-text" class="dev-text">Your shift hasn't finished yet. After ending it, no more time is counted today.</p>
+      <div class="dev-actions">
+        <button id="end-confirm-cancel" class="action-btn">Keep working</button>
+        <button id="end-confirm-ok" class="action-btn checkout-btn">End shift</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Developer options. Deliberately undiscoverable: opened by clicking the
        version badge 7 times within 3 seconds, and it still asks for UNPAIR. -->
   <div id="dev-panel" class="dev-panel hidden" role="dialog" aria-modal="true" aria-labelledby="dev-panel-title">

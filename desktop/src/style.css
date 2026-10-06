@@ -802,6 +802,13 @@ input:focus {
   animation: fadeIn 0.2s ease-out;
 }
 
+/* "Resume shift": the End shift button after a mistaken end (main.js). */
+.checkout-btn.resume {
+  color: var(--teal);
+  border-color: rgba(45, 212, 191, 0.4);
+  background: rgba(45, 212, 191, 0.08);
+}
+
 /* Developer options (hidden; see index.html) */
 .dev-panel {
   position: fixed;

@@ -583,6 +583,7 @@ async function refreshStatus() {
         }
 
         if (dayView) renderDay();
+        updateCheckoutButton();
 
         const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
         const isBreakUsed = Boolean(data.latest && data.latest.today && data.latest.today.breakAlreadyTaken);
@@ -915,9 +916,71 @@ if (breakToggleBtn) {
   });
 }
 
+// The shift's scheduled end as "7:00 PM", from the day view.
+function shiftEndLabel() {
+  if (!dayView || !dayView.shiftEndAt) return null;
+  return new Date(dayView.shiftEndAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+// End shift becomes Resume shift while a mistaken end can be undone
+// (day.canResume: the employee ended it themselves and it is still the shift).
+function updateCheckoutButton() {
+  if (!checkoutBtn || checkoutCountdownTimer) return;
+  const resume = Boolean(dayView && dayView.canResume);
+  checkoutBtn.classList.toggle('resume', resume);
+  checkoutBtn.textContent = resume ? 'Resume shift' : 'End shift';
+  const ended = Boolean(dayView && dayView.checkedOut && !resume);
+  checkoutBtn.disabled = ended;
+  checkoutBtn.classList.toggle('disabled', ended);
+}
+
+async function resumeShift() {
+  checkoutBtn.disabled = true;
+  try {
+    if (isTauri && tauriInvoke) {
+      await tauriInvoke('resume_shift');
+    } else {
+      const res = await fetch('/api/resume', { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'Could not resume the shift');
+    }
+    showFeedback('Shift resumed. Time is counted again from now.', false);
+    refreshStatus();
+  } catch (err) {
+    showFeedback((err && err.message) || 'Could not resume the shift. Please try again.');
+  } finally {
+    checkoutBtn.disabled = false;
+  }
+}
+
+const endConfirmPanel = document.getElementById('end-confirm-panel');
+const endConfirmText = document.getElementById('end-confirm-text');
+document.getElementById('end-confirm-cancel')?.addEventListener('click', () => endConfirmPanel?.classList.add('hidden'));
+document.getElementById('end-confirm-ok')?.addEventListener('click', () => {
+  endConfirmPanel?.classList.add('hidden');
+  startCheckoutCountdown();
+});
+
 if (checkoutBtn) {
   checkoutBtn.addEventListener('click', () => {
     if (checkoutCountdownTimer) return;
+    if (dayView && dayView.canResume) { resumeShift(); return; }
+    // Ending before the scheduled end asks first.
+    if (dayView && dayView.shiftEndAt && Date.now() < dayView.shiftEndAt && endConfirmPanel) {
+      const end = shiftEndLabel();
+      if (endConfirmText) {
+        endConfirmText.textContent = `Your shift ends at ${end}. If you end it now, no more time is counted today `
+          + '(you can resume it later today if this was a mistake).';
+      }
+      endConfirmPanel.classList.remove('hidden');
+      return;
+    }
+    startCheckoutCountdown();
+  });
+}
+
+function startCheckoutCountdown() {
+  if (!checkoutBtn || checkoutCountdownTimer) return;
+  {
     checkoutSecondsLeft = 5;
     if (undoTimerNum) undoTimerNum.textContent = '5';
     if (undoCheckoutWrap) undoCheckoutWrap.classList.remove('hidden');
@@ -949,7 +1012,7 @@ if (checkoutBtn) {
         }
       }
     }, 1000);
-  });
+  }
 }
 
 if (undoCheckoutBtn) {
