@@ -547,8 +547,9 @@ async function refreshStatus() {
             UNVERIFIED: unverified > 0
               ? `Not on the office network yet: ${formatHMS(unverified)} is held and will be added once you are verified.`
               : 'Not on the office network yet, so time is held until you are verified.',
-            IDLE: 'No activity for a while, so this time is counted as idle.',
-            AWAY: 'Screen locked, so this time is not counted as active.',
+            IDLE: 'No activity for 5+ minutes, so this time is idle and not counted as worked.',
+            AWAY: 'Screen locked, so this time is not counted as worked.',
+            BEFORE_SHIFT: `Your shift starts at ${(dayView && dayView.shiftStart) || 'the scheduled time'}, so time before then isn't counted.`,
           };
           const note = notes[creditState] || '';
           creditNote.textContent = note;

@@ -640,12 +640,18 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     // What this laptop's time is being booked as right now, so the widget can
     // say plainly when it isn't counting (instead of ticking a local counter
     // the server never credits, then snapping back to the real figure).
+    // COUNTED only when the shared day view is actually counting. Before the
+    // shift starts (worked time counts from the shift start) a verified laptop
+    // is BEFORE_SHIFT: agents up to 1.0.57 tick a local timer only on COUNTED,
+    // so this stops them showing seconds that snap back to 0 every heartbeat.
     creditState: outsideWorkingHours ? 'OUTSIDE_HOURS'
       : status === 'ON_BREAK' ? 'ON_BREAK'
       : status === 'AWAY' ? 'AWAY'
       : status === 'IDLE' ? 'IDLE'
-      : isVerifiedWork ? 'COUNTED'
-      : 'UNVERIFIED',
+      : !isVerifiedWork ? 'UNVERIFIED'
+      : (day && !day.counting)
+        ? ((day.shiftStartAt && nowMs < day.shiftStartAt) ? 'BEFORE_SHIFT' : 'NOT_COUNTING')
+      : 'COUNTED',
     liveStreamRequested,
     // Where to listen for an instant live-view request (see lib/liveDoorbell.js).
     // null when Supabase Realtime isn't configured: the agent then keeps polling.

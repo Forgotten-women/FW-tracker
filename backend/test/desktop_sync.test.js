@@ -323,3 +323,17 @@ test('an hour after the shift ends, anyone not clocked out is clocked out automa
     clock = saved;
   }
 });
+
+test('before the shift starts a verified laptop is BEFORE_SHIFT, not COUNTED', async () => {
+  const p = await shared();                              // enrolment limiter: reuse the shared pair
+  const saved = clock;
+  try {
+    clock = Date.UTC(2026, 8, 24, 5, 52, 0);             // Thu 24 Sep, 10:52 PKT, inside the 10:45 window
+    const hb = await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.47' });
+    assert.equal(hb.body.creditState, 'BEFORE_SHIFT');
+    assert.equal(hb.body.today.day.workedMinutes, 0);
+    assert.equal(hb.body.today.day.counting, false);
+  } finally {
+    clock = saved;
+  }
+});
