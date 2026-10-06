@@ -620,3 +620,109 @@ test('recalculating a day twice corrects by the difference from what is already 
   assert.equal(Number(net.m), 40);
   assert.equal(await A.postDeficit(emp, '2026-10-01', 40, now + 4), null, 'no change, nothing posted');
 });
+
+// ---------------------------------------------------------------------------
+// The shared day view (what the phone, laptop and dashboard all display)
+// Rules confirmed 2026-10-05: worked counts from the shift start and stops at
+// the shift end; declared break is not worked but counts to the target up to
+// the allowance; laptop idle (IDLE/AWAY spans) is not worked.
+// ---------------------------------------------------------------------------
+
+async function breakFromTo(employeeId, fromHHMM, toHHMM) {
+  await db.prepare(`
+    INSERT INTO break_records (id, employee_id, date_key, started_at, ended_at, permitted_minutes, actual_minutes, excess_minutes, created_at)
+    VALUES (?, ?, ?, ?, ?, 30, ?, ?, ?)
+  `).run('brk_' + employeeId + fromHHMM, employeeId, DAY, at(fromHHMM), at(toHHMM),
+    Math.round((at(toHHMM) - at(fromHHMM)) / MIN), Math.max(0, Math.round((at(toHHMM) - at(fromHHMM)) / MIN) - 30), at(fromHHMM));
+}
+async function idleFromTo(employeeId, fromHHMM, toHHMM) {
+  await db.prepare(`
+    INSERT INTO workstation_idle_spans (id, device_id, employee_id, date_key, start_at, end_at, kind, created_at, updated_at)
+    VALUES (?, 'dev_test', ?, ?, ?, ?, 'IDLE', ?, ?)
+  `).run('idl_' + employeeId + fromHHMM, employeeId, DAY, at(fromHHMM), at(toHHMM), at(fromHHMM), at(fromHHMM));
+}
+
+// Abdullah's 5 Oct 2026, reproduced: in at 10:55, away during a 23-min break
+// (phone off the office Wi-Fi), ~13 min of real laptop idle, looked at 18:52.
+test('day view: the worked example (early arrival, break away, real idle)', async () => {
+  const emp = await makeEmployee('emp_view_example');
+  await present(emp, '10:55', '16:09', 1);
+  await present(emp, '16:32', '18:52', 1);
+  await breakFromTo(emp, '16:08', '16:31');
+  for (const [a, b] of [['11:39', '11:41'], ['11:47', '11:52'], ['14:47', '14:49'], ['15:22', '15:24'], ['16:32', '16:33']]) await idleFromTo(emp, a, b);
+
+  const d = await A.deriveDay(emp, DAY, at('18:52'));
+  const v = d.day;
+  assert.equal(v.checkIn, T.displayTime(at('10:55')), 'check-in shows the real arrival');
+  assert.equal(v.targetMinutes, 480);
+  assert.equal(v.breakMinutes, 23);
+  assert.equal(v.idleMinutes, 12);                       // 2 + 5 + 2 + 2 + 1; the 10:55 idle is before the shift
+  assert.equal(v.presentMinutes, 309 + 140);             // 11:00-16:09 and 16:32-18:52
+  // The break began 16:08 while presence ran to 16:09: that minute is break.
+  assert.equal(v.workedMinutes, 449 - 1 - 12);           // 436 = 7h 16m
+  assert.equal(v.progressMinutes, 436 + 23);              // 459 / 480 = 96%
+  assert.equal(v.progressPercent, 96);
+  assert.equal(v.remainingMinutes, 21);
+  assert.equal(d.workedMinutes, v.workedMinutes, 'deriveDay.workedMinutes is the shared figure');
+});
+
+test('day view: a break counts the same whether or not the phone kept pinging', async () => {
+  const away = await makeEmployee('emp_view_break_away');
+  await present(away, '11:00', '14:00', 1);
+  await present(away, '14:30', '19:00', 1);
+  await breakFromTo(away, '14:00', '14:30');
+
+  const desk = await makeEmployee('emp_view_break_desk');
+  await present(desk, '11:00', '19:00', 1);                // phone stayed on office Wi-Fi
+  await breakFromTo(desk, '14:00', '14:30');
+
+  const a = (await A.deriveDay(away, DAY, at('19:30'))).day;
+  const b = (await A.deriveDay(desk, DAY, at('19:30'))).day;
+  assert.equal(a.workedMinutes, 450);
+  assert.equal(b.workedMinutes, 450, 'break taken at the desk is not worked either');
+  assert.equal(a.progressMinutes, 480);
+  assert.equal(b.progressPercent, 100, 'a full day with a 30-min break meets the 8h target');
+});
+
+test('day view: a break beyond the allowance counts only up to it', async () => {
+  const emp = await makeEmployee('emp_view_long_break');
+  await present(emp, '11:00', '14:00', 1);
+  await present(emp, '14:45', '19:00', 1);
+  await breakFromTo(emp, '14:00', '14:45');
+  const v = (await A.deriveDay(emp, DAY, at('19:30'))).day;
+  assert.equal(v.breakMinutes, 45);
+  assert.equal(v.workedMinutes, 435);
+  assert.equal(v.progressMinutes, 465, '435 worked + 30 allowance, not 45');
+  assert.equal(v.remainingMinutes, 15);
+});
+
+test('day view: idle during a break or outside presence is never subtracted', async () => {
+  const emp = await makeEmployee('emp_view_idle_break');
+  await present(emp, '11:00', '14:00', 1);
+  await present(emp, '14:30', '19:00', 1);
+  await breakFromTo(emp, '14:00', '14:30');
+  await idleFromTo(emp, '14:05', '14:25');                 // laptop idle while on break
+  await idleFromTo(emp, '19:10', '19:40');                 // after the shift
+  const v = (await A.deriveDay(emp, DAY, at('19:45'))).day;
+  assert.equal(v.idleMinutes, 0);
+  assert.equal(v.workedMinutes, 450);
+});
+
+test('day view: counting stops at the shift end; later presence is overtime', async () => {
+  const emp = await makeEmployee('emp_view_overtime');
+  await present(emp, '11:00', '20:30', 1);
+  const v = (await A.deriveDay(emp, DAY, at('20:50'))).day;   // last sighting 20:30, session closed
+  assert.equal(v.workedMinutes, 480);
+  assert.equal(v.overtimeMinutes, 90);
+  assert.equal(v.counting, false);
+});
+
+test('day view: a clock-out ends the day; presence after it is not worked', async () => {
+  const emp = await makeEmployee('emp_view_clockout');
+  await present(emp, '11:00', '18:00', 1);
+  await A.clockOut(emp, { atMs: at('17:00'), dateKey: DAY, nowMs: at('17:00') });
+  const v = (await A.deriveDay(emp, DAY, at('18:30'))).day;
+  assert.equal(v.checkedOut, true);
+  assert.equal(v.workedMinutes, 360);
+  assert.equal(await A.clockOut(emp, { atMs: at('18:00'), dateKey: DAY, nowMs: at('18:00') }), null, 'only once a day');
+});

@@ -288,6 +288,57 @@ let lastRetentionKey = null;
  * no retention at all: it kept the MAC of every visitor and neighbour phone
  * indefinitely, in a git-tracked file.
  */
+/**
+ * Automatic clock-out (confirmed 2026-10-05): an hour after an employee's
+ * shift ends (20:00 for 11:00-19:00), anyone who was present today and has
+ * not clocked out is clocked out at their last sighting, or at the shift end
+ * if they were still around. Worked time already stops at the shift end; this
+ * makes the day over everywhere so a laptop left on overnight, an open break
+ * or an open session can't spill into the next morning.
+ */
+const AUTO_CLOCK_OUT_AFTER_MS = 60 * 60 * 1000;
+
+async function autoClockOut(nowMs = T.now()) {
+  const dateKey = T.dateKey(nowMs);
+  const candidates = await db.prepare(`
+    SELECT e.id, e.name FROM employees e
+    WHERE e.active = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM attendance_events ae
+        WHERE ae.employee_id = e.id AND ae.date_key = ? AND ae.event_type = 'CLOCK_OUT' AND ae.voided_at IS NULL
+      )
+  `).all(dateKey);
+  let done = 0;
+  for (const e of candidates) {
+    try {
+      const s = await schedule.resolve(e.id, dateKey);
+      if (!s.isWorkingDay || !s.scheduledEndAt || nowMs < s.scheduledEndAt + AUTO_CLOCK_OUT_AFTER_MS) continue;
+      const leave = await schedule.leaveOn(e.id, dateKey);
+      if (leave && leave.fullDay) continue;
+      const d = await P.deriveDay(e.id, dateKey, nowMs);
+      if (!d.firstInAt) continue;                       // never arrived: nothing to close
+      const atMs = Math.min(Number(d.lastActiveAt || s.scheduledEndAt), s.scheduledEndAt);
+      const r = await A.clockOut(e.id, {
+        atMs: Math.max(atMs, Number(d.firstInAt)), dateKey, source: 'SYSTEM', actor: 'system:auto-clock-out',
+        nowMs, capOpenBreak: true,
+      });
+      if (!r) continue;
+      done++;
+      await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+        .run(nowMs, 'SHIFT_AUTO_CLOCKED_OUT', e.id, e.name, `Clocked out automatically at ${T.displayTime(r.atMs)}`);
+      await audit({
+        actor: 'system', action: 'AUTO_CLOCK_OUT', targetType: 'employee', targetId: e.id,
+        after: { dateKey, clockedOutAt: r.atMs },
+        note: 'No clock-out an hour after the shift ended',
+      });
+    } catch (err) {
+      console.error(`[jobs] auto clock-out failed for ${e.id}:`, err.message);
+    }
+  }
+  if (done) console.log(`[jobs] auto clock-out: ${done} employee(s)`);
+  return done;
+}
+
 async function retention(nowMs = T.now()) {
   const todayKey = T.dateKey(nowMs);
   if (lastRetentionKey === todayKey) return;
@@ -520,6 +571,7 @@ async function runMaintenanceTick(nowMs = T.now()) {
     await rollover(nowMs);
     // Its own guard: a stuck break silently books whole days as break time.
     try { await A.closeStaleBreaks(null, nowMs); } catch (err) { console.error('[jobs] closeStaleBreaks failed:', err.message); }
+    try { await autoClockOut(nowMs); } catch (err) { console.error('[jobs] autoClockOut failed:', err.message); }
     // Before transitions, so an employee whose binding has just lapsed is
     // evaluated against the new reality rather than a stale one.
     const expired = await bindings.expireStale(nowMs);
@@ -558,4 +610,4 @@ function stop() {
   timer = null;
 }
 
-module.exports = { start, stop, rollover, retention, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, payrollRun, nightlyBackup, sendAttendanceReminders, runMaintenanceTick };
+module.exports = { start, stop, rollover, retention, autoClockOut, detectTransitions, evaluateWarnings, scanAbsences, accrueLeave, notifyHrAlerts, payrollRun, nightlyBackup, sendAttendanceReminders, runMaintenanceTick };

@@ -16,8 +16,15 @@ const ADMIN = { 'X-Admin-Key': process.env.ADMIN_API_KEY };
 let base;
 let server;
 
+// Fixed inside working hours (Wednesday 23 Sep 2026, 14:00 Asia/Karachi). On
+// the real clock this file failed whenever it ran before 10:45 or after 19:15,
+// when a heartbeat is rightly OUTSIDE_HOURS.
+const realNow = T.now;
+const clock = Date.UTC(2026, 8, 23, 9, 0, 0);
+
 test.before(prepareDatabase);
 test.before(async () => {
+  T.now = () => clock;
   await prepareDatabase();
   await new Promise(resolve => {
     server = app.listen(0, '127.0.0.1', resolve);
@@ -26,6 +33,7 @@ test.before(async () => {
 });
 
 test.after(async () => {
+  T.now = realNow;
   // closeAllConnections() first: fetch() keeps its sockets alive, and
   // server.close() waits for every open connection, so on its own it never
   // resolves and the file times out after every test has already passed.

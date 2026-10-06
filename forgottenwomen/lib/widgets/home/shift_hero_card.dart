@@ -13,6 +13,9 @@ class ShiftHeroCard extends StatelessWidget {
   final String? networkSsid;
   final int? serverTimeMs;
 
+  /// Device time the summary arrived (0 = from the offline cache: frozen).
+  final int receivedAtMs;
+
   const ShiftHeroCard({
     super.key,
     required this.todayDetails,
@@ -20,6 +23,7 @@ class ShiftHeroCard extends StatelessWidget {
     this.isVerified = false,
     this.networkSsid,
     this.serverTimeMs,
+    this.receivedAtMs = 0,
   });
 
   @override
@@ -49,22 +53,31 @@ class ShiftHeroCard extends StatelessWidget {
       statusLabel = 'NOT CHECKED IN';
     }
 
-    final serverTarget = todayDetails.workingHours.daily.requiredMinutes;
+    // The shared day view: the same worked / progress / remaining / break /
+    // idle figures the laptop widget and the HR dashboard show.
+    final DayView? day = attendance.day;
+    final serverTarget = day?.targetMinutes ?? todayDetails.workingHours.daily.requiredMinutes;
     final int targetMinutes = serverTarget > 0 ? serverTarget : 480;
 
-    // Tick the worked total forward with the local clock while the employee
-    // is present, so the ring moves between server syncs.
+    // Between syncs the figures move on only while the server says the day
+    // is counting, measured from when THIS response arrived on the phone
+    // (device clock on both ends), never past the shift end and never more
+    // than 15 minutes ahead. A summary from the offline cache stays frozen.
     int extraMinutes = 0;
-    if (isPresent && !onBreak && serverTimeMs != null && serverTimeMs! > 0) {
-      final elapsedMs = liveNow.millisecondsSinceEpoch - serverTimeMs!;
-      if (elapsedMs > 0 && elapsedMs < 12 * 3600 * 1000) {
-        extraMinutes = elapsedMs ~/ 60000;
+    if (day != null && day.counting && receivedAtMs > 0) {
+      int elapsedMs = liveNow.millisecondsSinceEpoch - receivedAtMs;
+      if (day.shiftEndAt != null && day.asOf > 0) {
+        final untilEnd = day.shiftEndAt! - day.asOf;
+        if (elapsedMs > untilEnd) elapsedMs = untilEnd;
       }
+      if (elapsedMs > 15 * 60 * 1000) elapsedMs = 15 * 60 * 1000;
+      if (elapsedMs > 0) extraMinutes = elapsedMs ~/ 60000;
     }
-    final int workedMinutes = attendance.totalMinutes + extraMinutes;
-    final double progress = (workedMinutes / targetMinutes).clamp(0.0, 1.0);
+    final int workedMinutes = (day?.workedMinutes ?? attendance.totalMinutes) + extraMinutes;
+    final int progressMinutes = day != null ? day.progressMinutes + extraMinutes : workedMinutes;
+    final double progress = (progressMinutes / targetMinutes).clamp(0.0, 1.0);
     final int percent = (progress * 100).round();
-    final int remainingMinutes = (targetMinutes - workedMinutes).clamp(0, targetMinutes);
+    final int remainingMinutes = (targetMinutes - progressMinutes).clamp(0, targetMinutes);
     final bool targetMet = remainingMinutes == 0;
 
     final ringColors = onBreak
@@ -148,7 +161,7 @@ class ShiftHeroCard extends StatelessWidget {
               Expanded(
                 child: _tile(
                   'First in',
-                  attendance.firstCheckIn.isEmpty ? '—' : attendance.firstCheckIn,
+                  (day?.checkIn ?? attendance.firstCheckIn).isEmpty ? '—' : (day?.checkIn ?? attendance.firstCheckIn),
                   AppColors.textPrimary,
                 ),
               ),
@@ -163,8 +176,16 @@ class ShiftHeroCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: _tile(
-                  'Last seen',
-                  attendance.lastActiveTime.isEmpty ? '—' : attendance.lastActiveTime,
+                  'Break',
+                  '${day?.breakMinutes ?? 0}m',
+                  AppColors.amber,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _tile(
+                  'Idle',
+                  '${day?.idleMinutes ?? 0}m',
                   AppColors.textPrimary,
                 ),
               ),

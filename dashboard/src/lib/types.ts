@@ -18,6 +18,41 @@ export interface WorkSession {
   open: boolean;
 }
 
+/**
+ * The shared "today" figures (backend attendance.buildDayView). The phone app,
+ * the desktop agent and this dashboard all display exactly these, so they
+ * always agree. Rules (2026-10-05): worked counts from the shift start to the
+ * shift end or clock-out; declared break and laptop idle are not worked;
+ * progress = worked + break up to the allowance, against the scheduled shift.
+ */
+export interface DayView {
+  dateKey: string;
+  asOf: number;
+  counting: boolean;
+  checkIn: string | null;
+  checkInSetByHr: boolean;
+  lastSeen: string | null;
+  checkedOut: boolean;
+  checkedOutTime: string | null;
+  shiftStart: string | null;
+  shiftEnd: string | null;
+  targetMinutes: number;
+  presentMinutes: number;
+  breakMinutes: number;
+  permittedBreakMinutes: number;
+  idleMinutes: number;
+  workedMinutes: number;
+  workedFormatted: string;
+  progressMinutes: number;
+  progressPercent: number;
+  remainingMinutes: number;
+  overtimeMinutes: number;
+  onBreak: boolean;
+  onLeave: boolean;
+  isWorkingDay: boolean;
+  laptop: { activeMinutes: number };
+}
+
 export interface EmployeeDay {
   employeeId: string;
   employeeName: string;
@@ -55,6 +90,10 @@ export interface EmployeeDay {
    */
   sensorCarried: boolean;
   sessions: WorkSession[];
+  /** The shared day view; prefer it over the legacy fields above. */
+  day?: DayView;
+  checkedOut?: boolean;
+  onLeave?: boolean;
 }
 
 export interface Movement {

@@ -82,6 +82,49 @@ async function closeStaleBreaks(employeeId = null, nowMs = T.now()) {
   return stale.length;
 }
 
+/**
+ * Ends the employee's working day: a CLOCK_OUT attendance event (once per
+ * day), any open break closed, the day's laptop sessions marked CHECKED_OUT.
+ * After it nothing more is credited that day (buildDayView stops at the
+ * clock-out, and the desktop heartbeat stops crediting).
+ *
+ * Used by "End shift" on the laptop and by the automatic clock-out after the
+ * shift (jobs.autoClockOut). Returns null if the day was already clocked out.
+ */
+async function clockOut(employeeId, {
+  atMs = T.now(), dateKey = T.dateKey(atMs), source = 'SYSTEM', deviceId = null, actor = 'system',
+  nowMs = T.now(), capOpenBreak = false,
+} = {}) {
+  const existing = await db.prepare(`
+    SELECT id FROM attendance_events
+    WHERE employee_id = ? AND date_key = ? AND event_type = 'CLOCK_OUT' AND voided_at IS NULL LIMIT 1
+  `).get(employeeId, dateKey);
+  if (existing) return null;
+
+  const open = await db.prepare(
+    'SELECT started_at, permitted_minutes FROM break_records WHERE employee_id = ? AND date_key = ? AND ended_at IS NULL'
+  ).get(employeeId, dateKey);
+  if (open) {
+    // A person clocking out ends their break then. The automatic clock-out
+    // (capOpenBreak) can't know when they came back, so it closes the break
+    // no later than its allowance rather than charging hours of excess.
+    const allowanceEnd = Number(open.started_at) + (Number(open.permitted_minutes) || 30) * MIN;
+    const endAt = capOpenBreak ? Math.min(atMs, allowanceEnd, nowMs) : atMs;
+    await endBreak(employeeId, Math.max(Number(open.started_at), endAt));
+  }
+
+  const id = 'ae_' + crypto.randomBytes(8).toString('hex');
+  await db.prepare(`
+    INSERT INTO attendance_events
+      (id, employee_id, date_key, occurred_at, event_type, source, device_id, created_at, created_by)
+    VALUES (?, ?, ?, ?, 'CLOCK_OUT', ?, ?, ?, ?)
+  `).run(id, employeeId, dateKey, atMs, source, deviceId, nowMs, actor);
+  await db.prepare(`UPDATE workstation_sessions SET status = 'CHECKED_OUT', updated_at = ? WHERE employee_id = ? AND session_date = ?`)
+    .run(nowMs, employeeId, dateKey);
+  await recomputeDay(employeeId, dateKey, nowMs);
+  return { id, atMs, dateKey };
+}
+
 async function startBreak(employeeId, atMs = T.now()) {
   await closeStaleBreaks(employeeId, atMs);
   const open = await selectOpenBreak.get(employeeId);
@@ -158,6 +201,161 @@ const selectApprovedAdjustment = db.prepare(`
   WHERE employee_id = ? AND date_key = ? AND entry_type = 'HR_ADJUSTMENT'
 `);
 
+// ---------------------------------------------------------------------------
+// The day view: ONE definition of "today" for the phone, laptop and dashboard
+//
+// Each app used to compute its own figure from different server fields (four
+// "worked today" formulas between them), so the same person showed three
+// different numbers. Rules confirmed by Forgotten Women on 2026-10-05:
+//   - worked counts from the shift start (early arrival shows as check-in only)
+//     and stops at the shift end or a clock-out;
+//   - declared break is not worked, whether or not the phone pinged during it;
+//     it counts towards the target up to the permitted allowance;
+//   - laptop idle (IDLE: no input for 5+ min, AWAY: locked 5+ min) is not
+//     worked, measured from real idle spans, never inside a break;
+//   - target = the scheduled shift (11:00-19:00 = 480, break included).
+// Deficit, lateness and payroll rules are NOT changed by this.
+// ---------------------------------------------------------------------------
+
+const selectIdleSpans = db.prepare(`
+  SELECT start_at, end_at FROM workstation_idle_spans
+  WHERE employee_id = ? AND date_key = ? ORDER BY start_at
+`);
+const selectLaptopActive = db.prepare(`
+  SELECT COALESCE(SUM(active_seconds), 0) AS s FROM workstation_sessions
+  WHERE employee_id = ? AND session_date = ?
+`);
+
+// Interval helpers. Lists are [start, end] pairs in epoch ms.
+function mergeIntervals(list) {
+  const sorted = list.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  const out = [];
+  for (const [a, b] of sorted) {
+    if (out.length && a <= out[out.length - 1][1]) out[out.length - 1][1] = Math.max(out[out.length - 1][1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+function clipIntervals(list, from, to) {
+  return mergeIntervals(list.map(([a, b]) => [Math.max(a, from), Math.min(b, to)]));
+}
+function intersectIntervals(A, B) {
+  const out = [];
+  let i = 0, j = 0;
+  while (i < A.length && j < B.length) {
+    const a = Math.max(A[i][0], B[j][0]);
+    const b = Math.min(A[i][1], B[j][1]);
+    if (b > a) out.push([a, b]);
+    if (A[i][1] < B[j][1]) i++; else j++;
+  }
+  return out;
+}
+function subtractIntervals(A, B) {
+  const out = [];
+  for (const [a0, b0] of A) {
+    let cur = a0;
+    for (const [c, d] of B) {
+      if (d <= cur || c >= b0) continue;
+      if (c > cur) out.push([cur, c]);
+      cur = Math.max(cur, d);
+      if (cur >= b0) break;
+    }
+    if (cur < b0) out.push([cur, b0]);
+  }
+  return out;
+}
+const totalMs = (list) => list.reduce((acc, [a, b]) => acc + (b - a), 0);
+const toMinutes = (ms) => Math.round(ms / MIN);
+
+/**
+ * Builds the shared day view from what deriveDay already loaded. Pure.
+ * `s` is the schedule actually in force for the day (half-day leave applied).
+ */
+function buildDayView({
+  employeeId, dateKey, s, presence, breaks, manualIn, manualOut, onLeave,
+  idleSpans, laptopActiveSeconds, nowMs,
+}) {
+  const dayStart = T.startOfDay(dateKey);
+  const dayEnd = T.endOfDay(dateKey);
+  const isToday = nowMs >= dayStart && nowMs < dayEnd;
+  const shift = s.isWorkingDay && s.scheduledStartAt && s.scheduledEndAt;
+  const targetMinutes = shift ? toMinutes(s.scheduledEndAt - s.scheduledStartAt) : 0;
+  const permittedBreakMinutes = Number(s.permittedBreakMinutes ?? 30);
+  const clockOutAt = manualOut ? Number(manualOut.occurred_at) : null;
+
+  // The window worked time is counted in.
+  const winStart = shift ? s.scheduledStartAt : dayStart;
+  let winEnd = Math.min(shift ? s.scheduledEndAt : dayEnd, nowMs);
+  if (clockOutAt) winEnd = Math.min(winEnd, clockOutAt);
+
+  const sessions = mergeIntervals((presence.sessions || []).map(x => [Number(x.start), Number(x.end)]));
+  const P_ = winEnd > winStart ? clipIntervals(sessions, winStart, winEnd) : [];
+  const B_all = mergeIntervals(breaks.map(b => [Number(b.started_at), b.ended_at ? Number(b.ended_at) : nowMs]));
+  const B_ = winEnd > winStart ? clipIntervals(B_all, winStart, winEnd) : [];
+  const I_raw = mergeIntervals((idleSpans || []).map(x => [Number(x.start_at), Number(x.end_at)]));
+  const I_ = subtractIntervals(intersectIntervals(I_raw, P_), B_);
+
+  const presentMs = totalMs(P_);
+  const breakInPresenceMs = totalMs(intersectIntervals(P_, B_));
+  const idleMs = totalMs(I_);
+  const adjustment = Number(presence.adjustmentMinutes || 0);
+
+  // Rounded parts first, then worked from them, so what each app shows adds
+  // up exactly: worked = present - break - idle (+ HR adjustments).
+  let presentMinutes = toMinutes(presentMs);
+  let idleMinutes = toMinutes(idleMs);
+  let breakMinutes = toMinutes(totalMs(B_));
+  let workedMinutes = Math.max(0, presentMinutes - toMinutes(breakInPresenceMs) - idleMinutes + adjustment);
+  if (onLeave) { workedMinutes = 0; breakMinutes = 0; presentMinutes = 0; idleMinutes = 0; }
+
+  const progressMinutes = workedMinutes + Math.min(breakMinutes, permittedBreakMinutes);
+  const progressPercent = targetMinutes > 0 ? Math.min(100, Math.round((progressMinutes / targetMinutes) * 100)) : 0;
+  const remainingMinutes = Math.max(0, targetMinutes - progressMinutes);
+  const overtimeMinutes = shift && !onLeave
+    ? toMinutes(totalMs(clipIntervals(sessions, s.scheduledEndAt, Math.min(nowMs, dayEnd))))
+    : 0;
+
+  const onBreak = breaks.some(b => b.ended_at === null);
+  const idleNow = I_raw.some(([, b]) => b >= nowMs - 90 * 1000);
+  const presentNow = presence.status === 'IN_OFFICE' || presence.status === 'GRACE_PERIOD';
+  const counting = Boolean(
+    isToday && shift && !onLeave && !clockOutAt && !onBreak && !idleNow && presentNow
+    && nowMs >= s.scheduledStartAt && nowMs < s.scheduledEndAt,
+  );
+
+  const checkInAt = manualIn ? Number(manualIn.occurred_at) : (presence.firstInAt || null);
+  const lastSeenAt = clockOutAt || presence.lastActiveAt || null;
+  const show = (ms) => (ms ? T.displayTime(ms) : null);
+
+  return {
+    employeeId, dateKey,
+    asOf: nowMs,
+    counting,
+    checkInAt, checkIn: show(checkInAt),
+    checkInSetByHr: Boolean(manualIn),
+    lastSeenAt, lastSeen: show(lastSeenAt),
+    checkedOut: Boolean(clockOutAt), checkedOutAt: clockOutAt, checkedOutTime: show(clockOutAt),
+    shiftStartAt: shift ? s.scheduledStartAt : null,
+    shiftEndAt: shift ? s.scheduledEndAt : null,
+    shiftStart: s.startTime || null, shiftEnd: s.endTime || null,
+    targetMinutes,
+    presentMinutes,
+    breakMinutes,
+    permittedBreakMinutes,
+    idleMinutes,
+    workedMinutes,
+    workedFormatted: T.formatMinutes(workedMinutes),
+    progressMinutes,
+    progressPercent,
+    remainingMinutes,
+    overtimeMinutes,
+    onBreak,
+    onLeave: Boolean(onLeave),
+    isWorkingDay: Boolean(s.isWorkingDay),
+    laptop: { activeMinutes: Math.round(Number(laptopActiveSeconds || 0) / 60) },
+  };
+}
+
 /**
  * Derive one employee-day.
  *
@@ -170,6 +368,8 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const presence = await P.deriveDay(employeeId, dateKey, nowMs);
   const breaks = await selectBreaks.all(employeeId, dateKey);
   const manual = await selectManualEvents.all(employeeId, dateKey);
+  const idleSpans = await selectIdleSpans.all(employeeId, dateKey);
+  const laptopActive = (await selectLaptopActive.get(employeeId, dateKey))?.s || 0;
 
   const dayStart = T.startOfDay(dateKey);
   const dayEnd = T.endOfDay(dateKey);
@@ -183,9 +383,27 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const firstIn = manualIn ? manualIn.occurred_at : presence.firstInAt;
   const lastSeen = manualOut ? manualOut.occurred_at : presence.lastActiveAt;
 
-  // Active shift worked minutes strictly count within the scheduled window (e.g. 11:00 AM to 7:00 PM).
-  // Check-in before scheduled start is recorded in firstInAt but does not accumulate worked shift minutes.
-  // Staying past scheduled end is recorded in lastSeenAt and overtimeMinutes, but does not inflate standard shift worked minutes.
+  // Half-day leave: only the other half of the shift is expected. Morning off
+  // moves the start (and lateness) to midday; afternoon off moves the end.
+  // Applied before anything is measured so worked time, the target and
+  // lateness all use the same half-day window.
+  if (leave && leave.half && s.isWorkingDay && s.scheduledStartAt && s.scheduledEndAt) {
+    const mid = s.scheduledStartAt + Math.round((s.scheduledEndAt - s.scheduledStartAt) / 2);
+    s = leave.half === 'FIRST_HALF'
+      ? { ...s, scheduledStartAt: mid, latestOnTimeAt: mid + (s.graceMinutes || 0) * MIN + 59999 }
+      : { ...s, scheduledEndAt: mid };
+    s.dayEquivalentMinutes = Math.round((s.dayEquivalentMinutes || 480) / 2);
+  }
+
+  const day = buildDayView({
+    employeeId, dateKey, s, presence, breaks, manualIn, manualOut,
+    onLeave: Boolean(leave && leave.fullDay),
+    idleSpans, laptopActiveSeconds: laptopActive, nowMs,
+  });
+
+  // Presence inside the shift window, before break and idle are taken off.
+  // Only the break-offset rule below uses it, so deficit and lateness keep
+  // exactly the rules they had; everything shown as "worked" is day.workedMinutes.
   let shiftWorkedMinutes = 0;
   if (s.isWorkingDay && s.scheduledStartAt) {
     shiftWorkedMinutes = (presence.sessions || []).reduce((acc, sess) => {
@@ -209,7 +427,10 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     presenceStatus: presence.status,
     presenceSource: presence.lastSource,
     sensorCarried: presence.sensorCarried,
-    workedMinutes: shiftWorkedMinutes,
+    // What every app shows as worked (see buildDayView).
+    workedMinutes: day.workedMinutes,
+    presenceWorkedMinutes: shiftWorkedMinutes,
+    day,
     rawPresenceMinutes: presence.totalMinutes,
     adjustmentMinutes: presence.adjustmentMinutes || 0,
     sessions: presence.sessions,
@@ -250,16 +471,6 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   // worked, even if a laptop or phone was on and reporting.
   if (leave && leave.fullDay) {
     return { ...base, workedMinutes: 0, attendanceStatus: 'ON_LEAVE' };
-  }
-
-  // Half-day leave: only the other half of the shift is expected. Morning off
-  // moves the start (and lateness) to midday; afternoon off moves the end.
-  if (leave && leave.half) {
-    const mid = s.scheduledStartAt + Math.round((s.scheduledEndAt - s.scheduledStartAt) / 2);
-    s = leave.half === 'FIRST_HALF'
-      ? { ...s, scheduledStartAt: mid, latestOnTimeAt: mid + (s.graceMinutes || 0) * MIN + 59999 }
-      : { ...s, scheduledEndAt: mid };
-    s.dayEquivalentMinutes = Math.round((s.dayEquivalentMinutes || 480) / 2);
   }
 
   if (!firstIn) {
@@ -791,6 +1002,8 @@ function present(d) {
     lastSeen: d.lastSeenAt ? T.displayTime(d.lastSeenAt) : '--',
     worked: T.formatMinutes(d.workedMinutes),
     workedMinutes: d.workedMinutes,
+    // The shared day view: what the phone, laptop and dashboard all display.
+    day: d.day || null,
     presenceSource: d.presenceSource ? d.presenceSource.label : null,
     sensorCarried: d.sensorCarried,
 
@@ -856,14 +1069,23 @@ function formatHoursMinutes(minutes) {
  */
 async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), existingDay = null) {
   const sched = await schedule.resolve(employeeId, dateKey);
-  const targetPerDay = sched.requiredWorkingMinutes || config.office.requiredDailyWorkingMinutes || 480; // 480 = 8h 00m
+  // The scheduled shift is the target (11:00-19:00 = 480, break included),
+  // the same figure the day view uses. requiredWorkingMinutes was never set
+  // by schedule.resolve, so every pattern used to fall back to config 480.
+  const shiftLength = (sched.scheduledStartAt && sched.scheduledEndAt)
+    ? Math.round((sched.scheduledEndAt - sched.scheduledStartAt) / MIN) : 0;
+  const targetPerDay = shiftLength > 0 ? shiftLength : (config.office.requiredDailyWorkingMinutes || 480);
 
   const todayDay = existingDay || await deriveDay(employeeId, dateKey);
+  const view = todayDay.day || null;
   const isWorkingDay = sched.isWorkingDay;
-  const dailyRequiredMinutes = isWorkingDay ? targetPerDay : 0;
+  // Today's figures come straight from the day view so the phone's ring,
+  // the widget and the dashboard agree: progress = worked + break allowance.
+  const dailyRequiredMinutes = view ? view.targetMinutes : (isWorkingDay ? targetPerDay : 0);
   const dailyWorkedMinutes = todayDay.workedMinutes || 0;
-  const dailyShortMinutes = Math.max(0, dailyRequiredMinutes - dailyWorkedMinutes);
-  const dailyAdditionalMinutes = Math.max(0, dailyWorkedMinutes - dailyRequiredMinutes);
+  const dailyProgressMinutes = view ? view.progressMinutes : dailyWorkedMinutes;
+  const dailyShortMinutes = view ? view.remainingMinutes : Math.max(0, dailyRequiredMinutes - dailyWorkedMinutes);
+  const dailyAdditionalMinutes = view ? view.overtimeMinutes : Math.max(0, dailyWorkedMinutes - dailyRequiredMinutes);
   const dailyRecoveredMinutes = todayDay.recoveredLateMinutes || 0;
 
   // --- Week calculation (Monday through Sunday) ---
@@ -942,6 +1164,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
       isWorkingDay,
       requiredMinutes: dailyRequiredMinutes,
       workedMinutes: dailyWorkedMinutes,
+      progressMinutes: dailyProgressMinutes,
       shortMinutes: dailyShortMinutes,
       additionalMinutes: dailyAdditionalMinutes,
       recoveredMinutes: dailyRecoveredMinutes,
@@ -950,8 +1173,9 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
       formattedShort: formatHoursMinutes(dailyShortMinutes),
       formattedAdditional: formatHoursMinutes(dailyAdditionalMinutes),
       formattedRecovered: formatHoursMinutes(dailyRecoveredMinutes),
-      isTargetMet: dailyWorkedMinutes >= dailyRequiredMinutes,
-      percent: dailyRequiredMinutes > 0 ? Math.min(100, Math.round((dailyWorkedMinutes / dailyRequiredMinutes) * 100)) : 100,
+      isTargetMet: dailyProgressMinutes >= dailyRequiredMinutes,
+      percent: view ? view.progressPercent
+        : (dailyRequiredMinutes > 0 ? Math.min(100, Math.round((dailyWorkedMinutes / dailyRequiredMinutes) * 100)) : 100),
     },
     weekly: {
       weekStartKey,
@@ -993,7 +1217,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
 
 module.exports = {
   deriveDay, recomputeDay, present,
-  startBreak, endBreak, closeStaleBreaks,
+  startBreak, endBreak, closeStaleBreaks, clockOut, buildDayView,
   balanceFor, balanceAsOf, postDeficit, adjustBalance,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,

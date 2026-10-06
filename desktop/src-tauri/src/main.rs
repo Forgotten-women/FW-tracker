@@ -480,13 +480,16 @@ fn main() {
                 // heartbeat replaces it.
                 office_presence_minutes: None,
                 office_presence_formatted: None,
-                shift_target_minutes: Some(450),
+                // No target until the server says (the widget shows "--"
+                // rather than a guessed 7h 30m).
+                shift_target_minutes: None,
                 shift_progress_percent: None,
                 shift_remaining_minutes: None,
                 shift_remaining_formatted: None,
                 ..Default::default()
             },
             policy: client::PolicySettings::default(),
+            extra: serde_json::Map::new(),
         })
     } else {
         None

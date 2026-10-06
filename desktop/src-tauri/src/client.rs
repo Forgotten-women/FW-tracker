@@ -80,6 +80,9 @@ pub struct HeartbeatResponse {
     pub live_view: Option<LiveViewConfig>,
     pub today: SessionStats,
     pub policy: PolicySettings,
+    // Any other top-level field (onLeave, shiftWindow...), passed through.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -137,6 +140,15 @@ pub struct SessionStats {
     pub shift_remaining_minutes: Option<u32>,
     #[serde(default)]
     pub shift_remaining_formatted: Option<String>,
+    // The shared day view (backend attendance.buildDayView): the figures the
+    // phone app and the HR dashboard show. The widget displays only these.
+    #[serde(default)]
+    pub day: Option<serde_json::Value>,
+    // Every other field the server sends, passed through to the widget as-is.
+    // A typed struct used to drop new fields silently (shiftExcessBreakMinutes,
+    // unverifiedSeconds...), which is how the widget fell out of step.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

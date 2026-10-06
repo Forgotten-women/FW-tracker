@@ -684,6 +684,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             // Wi-Fi has been verified; grace/away don't count.
                             isVerified: today.attendance.status == PresenceStatus.inOffice,
                             serverTimeMs: loaded.summary.serverTimeMs,
+                            receivedAtMs: loaded.summary.receivedAtMs,
                           ),
                           const SizedBox(height: 14),
 

@@ -67,6 +67,79 @@ enum PresenceStatus {
       this == PresenceStatus.inOffice || this == PresenceStatus.gracePeriod;
 }
 
+/// The shared "today" figures (backend attendance.buildDayView). The phone,
+/// the desktop agent and the HR dashboard all display exactly these, so they
+/// agree. Worked counts from the shift start to the shift end or clock-out,
+/// without declared break or laptop idle; progress = worked + break up to the
+/// allowance, against the scheduled shift.
+class DayView {
+  final String dateKey;
+  final int asOf;
+  final bool counting;
+  final String? checkIn;
+  final String? lastSeen;
+  final bool checkedOut;
+  final int? shiftEndAt;
+  final int targetMinutes;
+  final int breakMinutes;
+  final int permittedBreakMinutes;
+  final int idleMinutes;
+  final int workedMinutes;
+  final int progressMinutes;
+  final int progressPercent;
+  final int remainingMinutes;
+  final int overtimeMinutes;
+  final bool onBreak;
+  final bool onLeave;
+
+  const DayView({
+    required this.dateKey,
+    required this.asOf,
+    required this.counting,
+    this.checkIn,
+    this.lastSeen,
+    this.checkedOut = false,
+    this.shiftEndAt,
+    required this.targetMinutes,
+    required this.breakMinutes,
+    required this.permittedBreakMinutes,
+    required this.idleMinutes,
+    required this.workedMinutes,
+    required this.progressMinutes,
+    required this.progressPercent,
+    required this.remainingMinutes,
+    required this.overtimeMinutes,
+    this.onBreak = false,
+    this.onLeave = false,
+  });
+
+  static int _i(dynamic v) => (v as num?)?.toInt() ?? 0;
+
+  static DayView? tryParse(dynamic json) {
+    if (json is! Map<String, dynamic>) return null;
+    return DayView(
+      dateKey: json['dateKey'] as String? ?? '',
+      asOf: _i(json['asOf']),
+      counting: json['counting'] as bool? ?? false,
+      checkIn: json['checkIn'] as String?,
+      lastSeen: json['lastSeen'] as String?,
+      checkedOut: json['checkedOut'] as bool? ?? false,
+      shiftEndAt: (json['shiftEndAt'] as num?)?.toInt(),
+      targetMinutes: _i(json['targetMinutes']),
+      breakMinutes: _i(json['breakMinutes']),
+      permittedBreakMinutes: _i(json['permittedBreakMinutes']),
+      idleMinutes: _i(json['idleMinutes']),
+      workedMinutes: _i(json['workedMinutes']),
+      progressMinutes: _i(json['progressMinutes']),
+      progressPercent: _i(json['progressPercent']),
+      remainingMinutes: _i(json['remainingMinutes']),
+      overtimeMinutes: _i(json['overtimeMinutes']),
+      onBreak: json['onBreak'] as bool? ?? false,
+      onLeave: json['onLeave'] as bool? ?? false,
+    );
+  }
+}
+
 class Attendance {
   final String employeeId;
   final String employeeName;
@@ -92,6 +165,9 @@ class Attendance {
   final int approvedAdjustmentMinutes;
   final int dailyDeficitMinutes;
 
+  /// The shared day view, when the server sent one (today's figures).
+  final DayView? day;
+
   const Attendance({
     required this.employeeId,
     required this.employeeName,
@@ -113,6 +189,7 @@ class Attendance {
     this.unauthorisedMissingMinutes = 0,
     this.approvedAdjustmentMinutes = 0,
     this.dailyDeficitMinutes = 0,
+    this.day,
   });
 
   /// True when this day has any deficit reason at all -- the summary badge
@@ -174,6 +251,7 @@ class Attendance {
       approvedAdjustmentMinutes:
           (json['approvedAdjustmentMinutes'] as num?)?.toInt() ?? 0,
       dailyDeficitMinutes: (json['dailyDeficitMinutes'] as num?)?.toInt() ?? 0,
+      day: DayView.tryParse(json['day']),
     );
   }
 
@@ -636,6 +714,10 @@ class HomeSummary {
   final int warningCount;
   final int serverTimeMs;
 
+  /// Device time when this summary arrived from the server; 0 for one read
+  /// from the offline cache, which is shown as it was (never extrapolated).
+  final int receivedAtMs;
+
   const HomeSummary({
     required this.todayDetails,
     required this.history,
@@ -643,9 +725,10 @@ class HomeSummary {
     this.unreadNotificationsCount = 0,
     this.warningCount = 0,
     required this.serverTimeMs,
+    this.receivedAtMs = 0,
   });
 
-  factory HomeSummary.fromJson(Map<String, dynamic> json) {
+  factory HomeSummary.fromJson(Map<String, dynamic> json, {int receivedAtMs = 0}) {
     final today = TodayAttendanceDetails.fromJson(json);
     final historyList = (json['history'] as List<dynamic>? ?? [])
         .map((d) => Attendance.fromJson(d as Map<String, dynamic>))
@@ -661,6 +744,7 @@ class HomeSummary {
       unreadNotificationsCount: (json['unreadNotificationsCount'] as num?)?.toInt() ?? 0,
       warningCount: (json['warningCount'] as num?)?.toInt() ?? 0,
       serverTimeMs: (json['serverTimeMs'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+      receivedAtMs: receivedAtMs,
     );
   }
 }

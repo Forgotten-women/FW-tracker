@@ -273,19 +273,15 @@ router.post('/clock-out', requireDevice, async (req, res) => {
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
 
-  const open = await db.prepare(
-    'SELECT * FROM break_records WHERE employee_id = ? AND ended_at IS NULL'
-  ).get(employeeId);
-  if (open) await A.endBreak(employeeId, nowMs);
+  // The same clock-out the laptop's End shift and the automatic 20:00
+  // clock-out use (attendance.clockOut): ends any open break, marks the day
+  // over everywhere. Clocking out twice is a no-op.
+  await A.clockOut(employeeId, {
+    atMs: nowMs, dateKey, source: 'MOBILE_APP', deviceId: req.auth.deviceId,
+    actor: `employee:${employeeId}`, nowMs,
+  });
 
-  const id = 'ae_' + crypto.randomBytes(8).toString('hex');
-  await db.prepare(`
-    INSERT INTO attendance_events
-      (id, employee_id, date_key, occurred_at, event_type, source, device_id, created_at, created_by)
-    VALUES (?,?,?,?, 'CLOCK_OUT', 'MOBILE_APP', ?, ?, ?)
-  `).run(id, employeeId, dateKey, nowMs, req.auth.deviceId, nowMs, `employee:${employeeId}`);
-
-  const day = await A.recomputeDay(employeeId, dateKey, nowMs);
+  const day = await A.deriveDay(employeeId, dateKey, nowMs);
   res.json({ status: 'SUCCESS', clockedOutAt: T.displayTime(nowMs), today: A.present(day) });
 });
 

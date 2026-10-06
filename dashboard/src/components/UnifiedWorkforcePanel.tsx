@@ -11,6 +11,7 @@ import type {
   PresenceStatus,
   WorkstationItem,
 } from '@/lib/types';
+import { formatHM } from '@/lib/dayView';
 import { Badge, Button, Empty, STATUS_META } from '@/components/primitives';
 import { AttendanceCorrectionsPanel } from '@/components/panels';
 import { OverviewHero, type HeroFilter } from '@/components/OverviewHero';
@@ -82,7 +83,9 @@ export function UnifiedWorkforcePanel({
     [corrections],
   );
 
-  // Load workstation and app telemetry on mount
+  // Workstation and app telemetry: loaded on mount and refreshed every 60s
+  // while the tab is visible (it used to be fetched once and go stale, so the
+  // laptop pill and "Laptops active" disagreed with the 30s attendance figures).
   useEffect(() => {
     let isMounted = true;
     const loadTelemetry = async () => {
@@ -98,8 +101,12 @@ export function UnifiedWorkforcePanel({
       } catch (_) {}
     };
     loadTelemetry();
+    const timer = setInterval(() => {
+      if (!document.hidden) loadTelemetry();
+    }, 60000);
     return () => {
       isMounted = false;
+      clearInterval(timer);
     };
   }, [summary.currentDateKey]);
 
@@ -518,11 +525,9 @@ export function UnifiedWorkforcePanel({
                 const topApp = topAppMap.get(e.employeeId);
                 const isLate = (e.lateMinutes ?? 0) > 0 || e.isLate;
 
-                // Shift target calculations
-                const workedMinutes = e.totalMinutes || 0;
-                // Time present includes the break, so it is measured against the
-                // full 8h day (7h 30m + the 30m break), as attendance judges it.
-                const targetPercent = Math.min(100, Math.round((workedMinutes / 480) * 100));
+                // The shared day view (same figures as the phone and the laptop).
+                const day = e.day;
+                const targetPercent = day ? day.progressPercent : 0;
 
                 const initials = e.employeeName
                   .split(' ')
@@ -586,9 +591,16 @@ export function UnifiedWorkforcePanel({
                         <span className="text-slate-400 font-medium">Worked Today:</span>
                         <div className="flex items-center gap-1.5 font-mono">
                           <span className="font-bold text-emerald-400">
-                            {e.timeWorkedFormatted}
+                            {day ? day.workedFormatted : e.timeWorkedFormatted}
                           </span>
-                          <span className="text-slate-500 text-[10px]">/ 8h 00m</span>
+                          {day && day.targetMinutes > 0 && (
+                            <span className="text-slate-500 text-[10px]">
+                              / {formatHM(day.targetMinutes)} · {day.progressPercent}%
+                            </span>
+                          )}
+                          {day && day.overtimeMinutes > 0 && (
+                            <span className="text-[10px] text-sky-400">+{formatHM(day.overtimeMinutes)} after shift</span>
+                          )}
                         </div>
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
@@ -600,23 +612,31 @@ export function UnifiedWorkforcePanel({
                     </div>
 
                     {/* Quick Metrics Ribbon (First In, Last Seen, Break) */}
-                    <div className="mt-3 grid grid-cols-3 gap-2 rounded-2xl bg-white/5 p-2.5 text-center border border-white/6">
+                    <div className="mt-3 grid grid-cols-4 gap-2 rounded-2xl bg-white/5 p-2.5 text-center border border-white/6">
                       <div>
                         <div className="text-[9px] uppercase font-bold text-slate-500">First In</div>
                         <div className="font-mono text-xs font-semibold text-slate-200 mt-0.5">
-                          {e.firstCheckIn || '—'}
+                          {day?.checkIn || e.firstCheckIn || '—'}
                         </div>
                       </div>
                       <div>
-                        <div className="text-[9px] uppercase font-bold text-slate-500">Last Seen</div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">
+                          {day?.checkedOut ? 'Out' : 'Last Seen'}
+                        </div>
                         <div className="font-mono text-xs font-semibold text-slate-200 mt-0.5">
-                          {e.lastActiveTime || '—'}
+                          {day?.lastSeen || e.lastActiveTime || '—'}
                         </div>
                       </div>
                       <div>
                         <div className="text-[9px] uppercase font-bold text-slate-500">Break</div>
                         <div className="font-mono text-xs font-semibold text-amber-400 mt-0.5">
-                          {e.breakMinutes ?? 0}m
+                          {day ? day.breakMinutes : (e.breakMinutes ?? 0)}m
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase font-bold text-slate-500">Idle</div>
+                        <div className="font-mono text-xs font-semibold text-slate-300 mt-0.5">
+                          {day ? day.idleMinutes : 0}m
                         </div>
                       </div>
                     </div>
@@ -661,8 +681,8 @@ export function UnifiedWorkforcePanel({
                   <th className="px-3 py-3.5">Live Status</th>
                   <th className="px-3 py-3.5">First In</th>
                   <th className="px-3 py-3.5">Last Seen</th>
-                  <th className="px-3 py-3.5">Worked (Target 8h incl. break)</th>
-                  <th className="px-3 py-3.5">Break / Deficit</th>
+                  <th className="px-3 py-3.5">Worked / Progress</th>
+                  <th className="px-3 py-3.5">Break · Idle / Deficit</th>
                   <th className="px-3 py-3.5">Workstation & App</th>
                   <th className="px-4 py-3.5 text-right">Action</th>
                 </tr>
@@ -720,22 +740,26 @@ export function UnifiedWorkforcePanel({
                       <td className="px-3 py-3.5 font-mono text-slate-300">{e.firstCheckIn || '—'}</td>
 
                       {/* Last Seen */}
-                      <td className="px-3 py-3.5 font-mono text-slate-300">{e.lastActiveTime || '—'}</td>
+                      <td className="px-3 py-3.5 font-mono text-slate-300">{e.day?.lastSeen || e.lastActiveTime || '—'}</td>
 
-                      {/* Worked Hours */}
+                      {/* Worked Hours (shared day view) */}
                       <td className="px-3 py-3.5">
                         <div className="font-mono font-bold text-emerald-400">
-                          {e.timeWorkedFormatted}
+                          {e.day ? e.day.workedFormatted : e.timeWorkedFormatted}
                         </div>
-                        <div className="text-[10px] text-slate-500">
-                          of 8h target (incl. 30m break)
-                        </div>
+                        {e.day && e.day.targetMinutes > 0 && (
+                          <div className="text-[10px] text-slate-500">
+                            {e.day.progressPercent}% of {formatHM(e.day.targetMinutes)}
+                            {e.day.remainingMinutes > 0 ? ` · ${formatHM(e.day.remainingMinutes)} left` : ' · target met'}
+                          </div>
+                        )}
                       </td>
 
-                      {/* Break / Deficit */}
+                      {/* Break / Idle / Deficit */}
                       <td className="px-3 py-3.5">
                         <div className="text-slate-300">
-                          Break: <strong className="text-amber-400 font-mono">{e.breakMinutes ?? 0}m</strong>
+                          Break: <strong className="text-amber-400 font-mono">{e.day ? e.day.breakMinutes : (e.breakMinutes ?? 0)}m</strong>
+                          {' · '}Idle: <strong className="font-mono">{e.day ? e.day.idleMinutes : 0}m</strong>
                         </div>
                         {(e.dailyDeficitMinutes ?? 0) > 0 ? (
                           <div className="text-[10px] text-rose-400 font-mono font-semibold">

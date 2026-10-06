@@ -403,6 +403,19 @@ export default function DashboardPage() {
               <div className="flex flex-col gap-6">
                 <WorkstationsPanel
                   onSelectEmployee={(empId) => {
+                    // Today's real row (with the shared day view) when there is one,
+                    // so the drawer shows the same figures as everywhere else
+                    // instead of a 0m placeholder.
+                    const live = summary
+                      ? [
+                          ...(summary.inOffice || []), ...(summary.grace || []), ...(summary.away || []),
+                          ...(summary.notArrived || []), ...(summary.onLeave || []),
+                        ].find((e) => e.employeeId === empId)
+                      : undefined;
+                    if (live) {
+                      setSelectedEmployee(live);
+                      return;
+                    }
                     const found = employees.find(e => e.id === empId || e.employeeNumber === empId);
                     if (found) {
                       setSelectedEmployee({

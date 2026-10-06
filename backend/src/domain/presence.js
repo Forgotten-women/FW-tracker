@@ -592,7 +592,11 @@ const selectManualClockIn = db.prepare(`
 `);
 
 /** Shape one derived day for an API response (formatting happens only here). */
-async function presentDay(d, employee) {
+async function presentDay(d, employee, nowMs = T.now()) {
+  // Worked, break, target and progress come from the attendance day view, the
+  // single definition every app displays (attendance.buildDayView).
+  const att = await require('./attendance').deriveDay(d.employeeId, d.dateKey, nowMs);
+  const view = att.day;
   const openBreak = await selectOpenBreakPresence.get(d.employeeId, d.dateKey);
   const summary = await selectSummaryPresence.get(d.employeeId, d.dateKey);
   const manualIn = await selectManualClockIn.get(d.employeeId, d.dateKey);
@@ -623,28 +627,15 @@ async function presentDay(d, employee) {
     }
   }
 
-  const breakMinutes = summary ? summary.break_minutes : 0;
-  const excessBreakMinutes = summary ? summary.excess_break_minutes : 0;
+  const breakMinutes = view.breakMinutes;
+  const excessBreakMinutes = att.excessBreakMinutes || 0;
   const dailyDeficitMinutes = onLeave ? 0 : ((summary ? summary.daily_deficit_minutes : 0) || (isLate ? lateMinutes : 0));
   const earlyDepartureMinutes = summary && !onLeave ? summary.early_departure_minutes : 0;
   const unauthorisedMissingMinutes = summary && !onLeave ? summary.unauthorised_missing_minutes : 0;
   const approvedAdjustmentMinutes = summary ? summary.approved_adjustment_minutes : 0;
 
-  // Active shift minutes strictly count from scheduled start time onwards (e.g. 11:00 AM).
-  // Early arrival before scheduled start is preserved in firstCheckIn but does not count as active worked time.
-  let shiftWorkedMinutes = 0;
-  if (onLeave) {
-    shiftWorkedMinutes = 0;
-  } else if (s.isWorkingDay && s.scheduledStartAt) {
-    shiftWorkedMinutes = (d.sessions || []).reduce((acc, sess) => {
-      const start = Math.max(sess.start, s.scheduledStartAt);
-      const end = Math.max(sess.end, s.scheduledStartAt);
-      return acc + Math.max(0, Math.round((end - start) / 60000));
-    }, 0);
-    shiftWorkedMinutes = Math.max(0, shiftWorkedMinutes + (d.adjustmentMinutes || 0));
-  } else {
-    shiftWorkedMinutes = d.totalMinutes;
-  }
+  // The shared figure: shift window only, break and idle taken off.
+  const shiftWorkedMinutes = view.workedMinutes;
 
   return {
     employeeId: d.employeeId,
@@ -653,8 +644,9 @@ async function presentDay(d, employee) {
     role: employee ? employee.role : '',
     date: d.dateKey,
     status: onLeave ? 'ON_LEAVE' : d.status,
-    statusLabel: onLeave ? 'On leave' : d.statusLabel,
+    statusLabel: onLeave ? 'On leave' : (view.checkedOut ? 'Checked out' : d.statusLabel),
     onLeave,
+    checkedOut: view.checkedOut,
     onBreak,
     activeBreakMinutes,
     breakMinutes,
@@ -668,7 +660,7 @@ async function presentDay(d, employee) {
     scheduledStartTime: s.startTime,
     firstCheckIn: firstInAt ? T.displayTime(firstInAt) : '--',
     checkInSetByHr: Boolean(manualIn),
-    lastActiveTime: d.lastActiveAt ? T.displayTime(d.lastActiveAt) : '--',
+    lastActiveTime: view.lastSeen || '--',
     totalMinutes: shiftWorkedMinutes,
     timeWorkedFormatted: T.formatMinutes(shiftWorkedMinutes),
     rawPresenceMinutes: d.totalMinutes,
@@ -687,6 +679,8 @@ async function presentDay(d, employee) {
       duration: T.formatMinutes(s.minutes),
       open: s.open,
     })),
+    // The shared day view: identical on the phone, laptop and dashboard.
+    day: view,
   };
 }
 
@@ -716,7 +710,7 @@ async function liveBoard(nowMs = T.now()) {
     const chunk = activeEmployees.slice(i, i + chunkSize);
     const chunkResults = await Promise.all(chunk.map(async emp => {
       const d = await deriveDay(emp.id, dayKey, nowMs);
-      return await presentDay(d, emp);
+      return await presentDay(d, emp, nowMs);
     }));
     results.push(...chunkResults);
   }

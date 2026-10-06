@@ -50,7 +50,7 @@ class AttendanceRepository {
       // Non-fatal cache write failure
     }
 
-    final summary = HomeSummary.fromJson(rawJson);
+    final summary = HomeSummary.fromJson(rawJson, receivedAtMs: DateTime.now().millisecondsSinceEpoch);
     // Keeps the OS-scheduled break reminders in step with the server --
     // including a break started or ended on the laptop.
     final b = summary.todayDetails.breakInfo;

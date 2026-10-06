@@ -296,6 +296,89 @@ function formatMS(seconds) {
   return isNegative ? `+${m}:${s}` : `${m}:${s}`;
 }
 
+// ---------------------------------------------------------------------------
+// Shared day view (1.0.58)
+//
+// The server sends `today.day`: the same worked / break / idle / progress
+// figures the phone app and the HR dashboard show. The widget displays only
+// those. Between heartbeats it advances worked time and progress by the time
+// that has passed, but only while the server says the day is `counting` and
+// this laptop isn't idle or locked, never past the shift end, and never more
+// than 15 minutes ahead of the last server figure. Each heartbeat snaps it back.
+// ---------------------------------------------------------------------------
+let dayView = null;
+let dayAsOf = 0;
+let daySyncedLocalMs = 0;
+let localIdleSecs = 0;
+let localLocked = false;
+
+function hm(mins) {
+  const m = Math.max(0, Math.floor(mins || 0));
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function dayExtraSeconds() {
+  if (!dayView || !dayView.counting || localLocked || localIdleSecs >= 300) return 0;
+  let extra = Math.max(0, Math.floor((Date.now() - daySyncedLocalMs) / 1000));
+  if (dayView.shiftEndAt && dayView.asOf) {
+    extra = Math.min(extra, Math.max(0, Math.floor((dayView.shiftEndAt - dayView.asOf) / 1000)));
+  }
+  return Math.min(extra, 15 * 60);
+}
+
+function renderDay() {
+  if (!dayView) return;
+  const extra = dayExtraSeconds();
+  const workedSecs = (dayView.workedMinutes || 0) * 60 + extra;
+  const target = dayView.targetMinutes || 0;
+  const progressSecs = (dayView.progressMinutes || 0) * 60 + extra;
+  const pct = target > 0 ? Math.min(100, Math.round((progressSecs / (target * 60)) * 100)) : 0;
+  const remMins = target > 0 ? Math.max(0, Math.ceil((target * 60 - progressSecs) / 60)) : 0;
+
+  currentActiveSecs = workedSecs;
+  if (activeTimer) activeTimer.textContent = formatHMS(workedSecs);
+  if (shiftWorkedValue) {
+    shiftWorkedValue.innerHTML = `${hm(workedSecs / 60)} <span class="shift-pct">(${pct}%)</span>`;
+  }
+  const ring = document.getElementById('shift-ring');
+  if (ring) {
+    const circumference = 263.89; // 2 * pi * r (r = 42)
+    ring.style.strokeDashoffset = String(circumference * (1 - pct / 100));
+    ring.classList.toggle('completed', pct >= 100);
+  }
+  const ringPct = document.getElementById('shift-ring-pct');
+  if (ringPct) ringPct.textContent = target > 0 ? `${pct}%` : '--';
+  const targetLabel = document.getElementById('shift-target-label');
+  if (targetLabel) {
+    targetLabel.textContent = target > 0
+      ? `of ${Math.floor(target / 60)}h ${String(target % 60).padStart(2, '0')}m`
+      : 'no shift today';
+  }
+  const ringEl = document.querySelector('.ring');
+  if (ringEl && target > 0) {
+    ringEl.title = `Worked ${hm(workedSecs / 60)} + break up to ${dayView.permittedBreakMinutes}m, of a ${hm(target)} shift`;
+  }
+  if (shiftProgressFill) {
+    shiftProgressFill.style.width = `${Math.max(4, pct)}%`;
+    shiftProgressFill.className = pct >= 100 ? 'shift-progress-fill completed' : 'shift-progress-fill';
+  }
+  if (shiftRemText) {
+    const after = dayView.overtimeMinutes > 0 ? ` · ${hm(dayView.overtimeMinutes)} after shift` : '';
+    if (dayView.checkedOut) {
+      shiftRemText.innerHTML = `<span class="rem-emerald">Shift ended${after}</span>`;
+    } else if (target > 0 && remMins <= 0) {
+      shiftRemText.innerHTML = `<span class="rem-emerald">Target reached${after}</span>`;
+    } else if (target > 0) {
+      shiftRemText.innerHTML = `<span class="rem-amber">${hm(remMins)} remaining</span>`;
+    } else {
+      shiftRemText.innerHTML = '';
+    }
+  }
+  if (statBreak) statBreak.textContent = `${dayView.breakMinutes || 0}m`;
+  if (statIdle) statIdle.textContent = `${dayView.idleMinutes || 0}m`;
+  if (checkinText) checkinText.textContent = dayView.checkIn ? shortTime(dayView.checkIn) : '--:--';
+}
+
 // The full working day, break included (8h by default), as the server's
 // attendance engine judges it. A break longer than the allowance extends it.
 let currentShiftTargetMins = 480;
@@ -418,6 +501,21 @@ async function refreshStatus() {
       statusSection.classList.remove('hidden');
 
       if (data.latest && data.latest.today) {
+        // The shared day view, if the server sent one for today. A new one is
+        // recognised by its asOf; the local clock then measures time since.
+        const dv = data.latest.today.day || null;
+        if (dv && dv.dateKey === getTodayDateKey()) {
+          if (dv.asOf !== dayAsOf) {
+            dayView = dv;
+            dayAsOf = dv.asOf;
+            daySyncedLocalMs = Date.now();
+          }
+        } else {
+          dayView = null;
+        }
+        localIdleSecs = Number(data.idleSeconds) || 0;
+        localLocked = data.lockState === 'LOCKED' || data.lockState === 'SLEEPING';
+
         const serverDateKey = data.latest.today.dateKey || '';
         const serverActive = data.latest.today.activeSeconds || 0;
         const presenceMins = (data.latest.today.officePresenceMinutes !== null && data.latest.today.officePresenceMinutes !== undefined)
@@ -430,7 +528,9 @@ async function refreshStatus() {
         // its last heartbeat -- but only while the server is crediting at all.
         // (creditState is absent from older backends: treat that as counting.)
         const creditState = data.latest.creditState || null;
-        creditCounting = !creditState || creditState === 'COUNTED';
+        // Without a day view (the start-up placeholder) nothing ticks: the
+        // widget waits for the server instead of guessing.
+        creditCounting = !dayView && Boolean(creditState) && creditState === 'COUNTED';
         const pending = creditCounting ? (Number(data.pendingActiveSeconds) || 0) : 0;
         
         // Take the highest verified worked/presence time (e.g. 6h 22m) so the widget matches the HR dashboard
@@ -467,8 +567,9 @@ async function refreshStatus() {
           }
         }
 
-        // Official Daily Shift Target (HR Dashboard Synced)
-        if (shiftTargetCard) {
+        // Official Daily Shift Target (HR Dashboard Synced). With a day view
+        // renderDay() below draws it from the server's figures instead.
+        if (shiftTargetCard && !dayView) {
           const REQUIRED_SHIFT_MINS = data.latest.today.shiftTargetMinutes || 480;
           currentExcessBreakMins = Number(data.latest.today.shiftExcessBreakMinutes) || 0;
           const breakIncluded = Number(data.latest.today.shiftBreakIncludedMinutes) || 30;
@@ -479,6 +580,8 @@ async function refreshStatus() {
             : 0;
           updateShiftTargetDisplay(currentActiveSecs, REQUIRED_SHIFT_MINS, presenceMins);
         }
+
+        if (dayView) renderDay();
 
         const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
         const isBreakUsed = Boolean(data.latest && data.latest.today && data.latest.today.breakAlreadyTaken);
@@ -653,6 +756,8 @@ timerInterval = setInterval(() => {
   const nowDay = new Date().toDateString();
   if (nowDay !== lastLocalDay) {
     lastLocalDay = nowDay;
+    dayView = null;
+    dayAsOf = 0;
     currentActiveSecs = 0;
     lastSyncedServerSecs = -1;
     lastSyncedDateKey = '';
@@ -662,6 +767,9 @@ timerInterval = setInterval(() => {
 
   if (isOnBreakState) {
     updateBreakCountdown();
+  } else if (dayView) {
+    renderDay();
+    if (currentActiveSecs % 30 === 0) saveLocalProgress(currentActiveSecs);
   } else if (creditCounting && statusBanner && !statusBanner.classList.contains('away') && !statusBanner.classList.contains('offline')) {
     currentActiveSecs++;
     if (activeTimer) {

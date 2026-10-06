@@ -9,7 +9,7 @@ const router = express.Router();
 const crypto = require('crypto');
 
 const { db, tx, audit } = require('../db');
-const { requireDevice } = require('../middleware/auth');
+const { requireDevice, requireAdmin } = require('../middleware/auth');
 const presence = require('../domain/presence');
 const attendance = require('../domain/attendance');
 const schedule = require('../domain/schedule');
@@ -130,6 +130,62 @@ function shiftProgress(sched, workedMinutes, excessBreakMinutes = 0) {
   };
 }
 
+/**
+ * The widget's shift figures, straight from the shared day view
+ * (attendance.buildDayView) so the laptop shows exactly what the phone and the
+ * dashboard show. Falls back to shiftProgress only if the day couldn't be
+ * derived.
+ */
+function shiftFromDay(day, sched) {
+  if (!day) return shiftProgress(sched, 0);
+  const remaining = day.remainingMinutes;
+  return {
+    targetMinutes: day.targetMinutes,
+    breakIncludedMinutes: day.permittedBreakMinutes,
+    // Already reflected in progress (break counts only up to the allowance);
+    // 0 so no client subtracts it a second time.
+    excessBreakMinutes: 0,
+    percent: day.progressPercent,
+    remainingMinutes: remaining,
+    remainingFormatted: `${Math.floor(remaining / 60)}h ${remaining % 60}m`,
+  };
+}
+
+// Heartbeat log for diagnosing laptop overcounting: the last 200 heartbeats
+// per device, in memory (one server; lost on restart, which is fine for a
+// diagnostic). Read with GET /api/desktop/debug/heartbeats/:deviceId (admin).
+const HEARTBEAT_LOG_SIZE = 200;
+const heartbeatLog = new Map();
+function logHeartbeat(deviceId, entry) {
+  let list = heartbeatLog.get(deviceId);
+  if (!list) { list = []; heartbeatLog.set(deviceId, list); }
+  list.push(entry);
+  if (list.length > HEARTBEAT_LOG_SIZE) list.splice(0, list.length - HEARTBEAT_LOG_SIZE);
+}
+
+const selectClockOut = db.prepare(`
+  SELECT occurred_at FROM attendance_events
+  WHERE employee_id = ? AND date_key = ? AND event_type = 'CLOCK_OUT' AND voided_at IS NULL
+  LIMIT 1
+`);
+
+/** Adds [startAt, endAt] to the device's idle spans, extending the last one if they touch. */
+async function recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs }) {
+  const last = await db.prepare(`
+    SELECT id, end_at FROM workstation_idle_spans
+    WHERE device_id = ? AND date_key = ? ORDER BY end_at DESC LIMIT 1
+  `).get(deviceId, dateKey);
+  if (last && Number(last.end_at) >= startAt - 90 * 1000) {
+    await db.prepare('UPDATE workstation_idle_spans SET end_at = GREATEST(end_at, ?), updated_at = ? WHERE id = ?')
+      .run(endAt, nowMs, last.id);
+  } else {
+    await db.prepare(`
+      INSERT INTO workstation_idle_spans (id, device_id, employee_id, date_key, start_at, end_at, kind, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('idl_' + crypto.randomBytes(8).toString('hex'), deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs, nowMs);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/desktop/heartbeat
 // ---------------------------------------------------------------------------
@@ -190,7 +246,11 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   // version already understands.
   const leaveToday = sched.isWorkingDay ? await schedule.leaveOn(employeeId, dateKey) : null;
   const onLeave = Boolean(leaveToday && leaveToday.fullDay);
-  const isWithinWorkingHours = sched.isWorkingDay && !onLeave && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
+  // Once clocked out (End shift, HR, or the automatic 20:00 clock-out) the day
+  // is over: nothing more is credited and the widget shows "Shift ended".
+  const clockedOut = Boolean(await selectClockOut.get(employeeId, dateKey));
+  const isWithinWorkingHours = sched.isWorkingDay && !onLeave && !clockedOut
+    && (nowMs >= shiftStartThreshold && nowMs <= shiftEndThreshold);
   const outsideWorkingHours = !isWithinWorkingHours;
 
   const empRow = await db.prepare('SELECT app_tracking_enabled, screenshot_enabled, screenshot_interval_minutes, screenshot_mode, work_mode, remote_allowed FROM employees WHERE id = ?').get(employeeId);
@@ -230,7 +290,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
 
   // 5. Determine current status
   let status = 'ACTIVE';
-  if (outsideWorkingHours) {
+  if (clockedOut) {
+    status = 'CHECKED_OUT';
+  } else if (outsideWorkingHours) {
     status = 'OUTSIDE_HOURS';
   } else if (activeBreak || (isManualBreak && !breakRecordTaken)) {
     status = 'ON_BREAK';
@@ -336,6 +398,58 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   }
 
   const inOfficeFlag = inOffice ? 1 : (isRemoteWorker ? 2 : 0);
+
+  logHeartbeat(deviceId, {
+    at: nowMs,
+    sinceLastSeconds: existing && existing.last_heartbeat_at ? Math.round((nowMs - Number(existing.last_heartbeat_at)) / 1000) : null,
+    sentActive: numActive, sentIdle: numIdle,
+    status, eventId: eventId || null,
+    version: String(req.get('x-agent-version') || '').slice(0, 32) || null,
+    credited: { active: effectiveActive, idle: effectiveIdle, break: effectiveBreak, unverified: addUnverified },
+  });
+
+  // Laptop counters can never exceed the time that has actually passed since
+  // the session began (+2 min slack). Active + idle + break had drifted above
+  // wall-clock time (e.g. 525 min counted in 479 elapsed); duplicate or
+  // replayed heartbeats can't inflate them past this. Replays later in the
+  // day still fit, because elapsed time keeps growing.
+  if (existing) {
+    const counted = Number(existing.active_seconds || 0) + Number(existing.idle_seconds || 0)
+      + Number(existing.break_seconds || 0) + Number(existing.unverified_seconds || 0);
+    const allowed = Math.max(0, Math.floor((nowMs - Number(existing.created_at)) / 1000) + 120 - counted);
+    const adding = effectiveActive + effectiveIdle + effectiveBreak + addUnverified;
+    if (adding > allowed) {
+      const f = adding > 0 ? allowed / adding : 0;
+      effectiveActive = Math.floor(effectiveActive * f);
+      effectiveIdle = Math.floor(effectiveIdle * f);
+      effectiveBreak = Math.floor(effectiveBreak * f);
+      addUnverified = Math.floor(addUnverified * f);
+    }
+  } else {
+    const cap = 120;
+    const adding = effectiveActive + effectiveIdle + effectiveBreak + addUnverified;
+    if (adding > cap) {
+      const f = cap / adding;
+      effectiveActive = Math.floor(effectiveActive * f);
+      effectiveIdle = Math.floor(effectiveIdle * f);
+      effectiveBreak = Math.floor(effectiveBreak * f);
+      addUnverified = Math.floor(addUnverified * f);
+    }
+  }
+
+  // Real idle intervals: only a heartbeat the server judged IDLE (no input 5+
+  // min) or AWAY (locked 5+ min) is idle time, covering the interval since
+  // this laptop's previous heartbeat. Idle slices inside an ACTIVE heartbeat
+  // are not. Worked time subtracts these spans (attendance.buildDayView).
+  if (!outsideWorkingHours && (status === 'IDLE' || status === 'AWAY')) {
+    try {
+      const prevAt = existing && existing.last_heartbeat_at ? Number(existing.last_heartbeat_at) : null;
+      const span = Math.min(batchTotal * 1000 || 60000, prevAt ? Math.max(0, nowMs - prevAt) : 60000, 15 * 60000);
+      await recordIdleSpan({ deviceId, employeeId, dateKey, startAt: nowMs - span, endAt: nowMs, kind: status, nowMs });
+    } catch (err) {
+      console.error('[desktop/heartbeat] idle span error:', err.message);
+    }
+  }
 
   try {
     if (existing) {
@@ -487,21 +601,24 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   // dashboard and payroll actually use. Surfaced here so the desktop widget
   // can show both side by side instead of an employee only ever seeing the
   // (often lower) workstation-only figure with no context for the gap.
+  // Every "today" figure comes from the shared day view, the same object the
+  // phone and the dashboard display. The legacy fields below are filled from
+  // it too, so agents older than 1.0.58 (which compute their own figures from
+  // activeSeconds / officePresenceMinutes) show the same worked time.
   let officePresenceMinutes = null;
   let officePresenceFormatted = null;
   let shift = shiftProgress(sched, 0);
   let dayDerived = null;
+  let day = null;
   try {
     dayDerived = await attendance.deriveDay(employeeId, dateKey, nowMs);
-    const workstationMins = sessionRow ? Math.floor((sessionRow.active_seconds || 0) / 60) : 0;
-    const presenceMins = dayDerived
-      ? Math.max(dayDerived.workedMinutes || 0, dayDerived.rawPresenceMinutes || 0)
-      : 0;
-    const effectiveWorkedMinutes = Math.max(presenceMins, workstationMins);
-    officePresenceMinutes = effectiveWorkedMinutes;
-    officePresenceFormatted = T.formatMinutes(effectiveWorkedMinutes);
-    shift = shiftProgress(sched, effectiveWorkedMinutes, dayDerived ? dayDerived.excessBreakMinutes : 0);
-  } catch (_) {}
+    day = dayDerived.day;
+    officePresenceMinutes = day.workedMinutes;
+    officePresenceFormatted = day.workedFormatted;
+    shift = shiftFromDay(day, sched);
+  } catch (err) {
+    console.error('[desktop/heartbeat] day view failed:', err.message);
+  }
 
   // Check if an authorized HR stream request is active (requested within last 25s)
   let liveStreamRequested = false;
@@ -543,13 +660,13 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     },
     today: {
       dateKey,
-      checkInTime: (dayDerived && dayDerived.firstInAt)
-        ? T.displayTime(dayDerived.firstInAt)
-        : ((sessionRow && sessionRow.created_at) ? T.displayTime(sessionRow.created_at) : null),
-      activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
+      checkInTime: day ? day.checkIn : null,
+      // Worked time, for older agents that display max(activeSeconds, presence).
+      activeSeconds: day ? day.workedMinutes * 60 : 0,
+      laptopActiveSeconds: sessionRow ? sessionRow.active_seconds : 0,
       unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
-      idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
-      breakSeconds: effectiveBreakSeconds,
+      idleSeconds: day ? day.idleMinutes * 60 : 0,
+      breakSeconds: day ? day.breakMinutes * 60 : effectiveBreakSeconds,
       onBreak: Boolean(hasOpenBreak),
       breakAlreadyTaken: breakAlreadyTaken && !hasOpenBreak,
       breakPermittedMinutes,
@@ -563,6 +680,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       shiftProgressPercent: shift.percent,
       shiftRemainingMinutes: shift.remainingMinutes,
       shiftRemainingFormatted: shift.remainingFormatted,
+      // The shared day view (1.0.58+ display only this).
+      day,
     },
     policy: {
       idleThresholdMinutes: idleThresholdMins,
@@ -709,16 +828,16 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
   const isWithinWorkingHours = sched.isWorkingDay && !onLeave && (nowMs >= shiftStart && nowMs <= shiftEnd);
   const outsideWorkingHours = !isWithinWorkingHours;
 
+  // Same shared day view as the heartbeat (see there).
   let officePresenceMinutes = null;
   let officePresenceFormatted = null;
   let shift = shiftProgress(sched, 0);
+  let day = null;
   try {
-    const day = await attendance.deriveDay(employeeId, dateKey, nowMs);
-    const workstationMins = sessionRow ? Math.floor((sessionRow.active_seconds || 0) / 60) : 0;
-    const effectiveWorkedMinutes = Math.max(day ? (day.workedMinutes || 0) : 0, workstationMins);
-    officePresenceMinutes = effectiveWorkedMinutes;
-    officePresenceFormatted = T.formatMinutes(effectiveWorkedMinutes);
-    shift = shiftProgress(sched, effectiveWorkedMinutes, day ? day.excessBreakMinutes : 0);
+    day = (await attendance.deriveDay(employeeId, dateKey, nowMs)).day;
+    officePresenceMinutes = day.workedMinutes;
+    officePresenceFormatted = day.workedFormatted;
+    shift = shiftFromDay(day, sched);
   } catch (_) {}
 
   res.json({
@@ -730,9 +849,10 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
     onLeave,
     today: {
       dateKey,
-      activeSeconds: sessionRow ? sessionRow.active_seconds : 0,
+      activeSeconds: day ? day.workedMinutes * 60 : 0,
+      laptopActiveSeconds: sessionRow ? sessionRow.active_seconds : 0,
       unverifiedSeconds: sessionRow ? (sessionRow.unverified_seconds || 0) : 0,
-      idleSeconds: sessionRow ? sessionRow.idle_seconds : 0,
+      idleSeconds: day ? day.idleMinutes * 60 : 0,
       officePresenceMinutes,
       officePresenceFormatted,
       shiftTargetMinutes: shift.targetMinutes,
@@ -741,6 +861,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
       shiftProgressPercent: shift.percent,
       shiftRemainingMinutes: shift.remainingMinutes,
       shiftRemainingFormatted: shift.remainingFormatted,
+      day,
     },
   });
 });
@@ -919,6 +1040,15 @@ router.post('/unpair', requireDevice, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/desktop/debug/heartbeats/:deviceId  (admin)
+// What each recent heartbeat sent and what was credited (before the cap), to
+// find where laptop counters exceed wall-clock time.
+// ---------------------------------------------------------------------------
+router.get('/debug/heartbeats/:deviceId', requireAdmin, (req, res) => {
+  res.json({ status: 'SUCCESS', heartbeats: heartbeatLog.get(req.params.deviceId) || [] });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/desktop/checkout
 // ---------------------------------------------------------------------------
 router.post('/checkout', requireDevice, async (req, res) => {
@@ -937,16 +1067,12 @@ router.post('/checkout', requireDevice, async (req, res) => {
       ).run(nowMs, sessionRow.id);
     }
 
-    try {
-      await presence.recordEvent({
-        employeeId,
-        deviceId,
-        source: 'APP',
-        observedAt: nowMs,
-        note: 'Desktop Agent Shift Checkout',
-      });
-      await presence.recomputeDay(employeeId, dateKey, nowMs);
-    } catch (_) {}
+    // A real clock-out, so every app agrees the day is over and nothing more
+    // is credited. (It used to record a presence event, which only extended
+    // the day.)
+    await attendance.clockOut(employeeId, {
+      atMs: nowMs, dateKey, source: 'DESKTOP_AGENT', deviceId, actor: `device:${deviceId}`, nowMs,
+    });
 
     await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
       .run(nowMs, 'SHIFT_CHECKED_OUT', employeeId, employeeName, 'Employee completed shift via Desktop Agent');

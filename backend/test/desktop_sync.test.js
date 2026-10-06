@@ -248,3 +248,78 @@ test('a break left open from an earlier day is closed and stops counting as brea
   assert.equal(Number(ws.break_seconds), 0);
   assert.ok(Number(ws.active_seconds) > 0);
 });
+
+// ---------------------------------------------------------------------------
+// One "today" for every app (2026-10-05): the phone, the laptop and the
+// dashboard must show the same figures for the same person at the same moment.
+// ---------------------------------------------------------------------------
+
+// One pair shared by the tests below: the enrolment limiter allows 20 per IP
+// per 10 minutes, and this file already enrols many devices.
+let sharedPair = null;
+const shared = async () => (sharedPair = sharedPair || await enrolPair('Same Numbers'));
+
+test('the phone, laptop and dashboard all get the same day view', async () => {
+  const p = await shared();
+  await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.43' });
+  await json('POST', '/api/attendance/ping', { headers: p.phone, body: { localIp: '192.168.18.44' } });
+
+  const ping = await json('POST', '/api/attendance/ping', { headers: p.phone, body: { localIp: '192.168.18.44' } });
+  const home = await json('GET', '/api/attendance/home-summary', { headers: p.phone });
+  const hb = await heartbeat(p.laptop, { activeSeconds: 0, idleSeconds: 0, localIp: '192.168.18.43' });
+  const board = await json('GET', '/api/dashboard/summary', { headers: ADMIN });
+  const row = [...board.body.inOffice, ...board.body.grace, ...board.body.away, ...board.body.notArrived]
+    .find(e => e.employeeId === p.employeeId);
+
+  const views = {
+    ping: ping.body.attendance.day,
+    home: home.body.today.day,
+    laptop: hb.body.today.day,
+    dashboard: row.day,
+  };
+  for (const [name, v] of Object.entries(views)) assert.ok(v, `${name} has a day view`);
+  for (const name of ['home', 'laptop', 'dashboard']) {
+    assert.deepEqual(views[name], views.ping, `${name} day view equals the phone's`);
+  }
+  // The legacy fields older apps read are the same figure.
+  assert.equal(ping.body.attendance.totalMinutes, views.ping.workedMinutes);
+  assert.equal(hb.body.today.officePresenceMinutes, views.ping.workedMinutes);
+  assert.equal(hb.body.today.shiftProgressPercent, views.ping.progressPercent);
+  assert.equal(home.body.workingHours.daily.percent, views.ping.progressPercent);
+});
+
+test('laptop counters can never exceed the time that has passed', async () => {
+  const p = await shared();
+  await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.45' });
+  // A burst of duplicate/replayed heartbeats claiming far more time than elapsed.
+  for (let i = 0; i < 5; i++) {
+    await heartbeat(p.laptop, { activeSeconds: 600, idleSeconds: 600, localIp: '192.168.18.45' });
+  }
+  const ws = await db.prepare('SELECT active_seconds, idle_seconds, break_seconds, created_at FROM workstation_sessions WHERE employee_id = ?').get(p.employeeId);
+  const counted = Number(ws.active_seconds) + Number(ws.idle_seconds) + Number(ws.break_seconds);
+  assert.ok(counted <= (clock - Number(ws.created_at)) / 1000 + 120, `counted ${counted}s`);
+});
+
+test('an hour after the shift ends, anyone not clocked out is clocked out automatically', async () => {
+  const p = await shared();
+  await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.46' });
+  const jobs = require('../src/jobs');
+  const saved = clock;
+  try {
+    clock = Date.UTC(2026, 8, 23, 14, 30, 0);          // 19:30 PKT: not yet
+    assert.equal(await jobs.autoClockOut(clock), 0);
+    clock = Date.UTC(2026, 8, 23, 15, 1, 0);           // 20:01 PKT
+    assert.ok(await jobs.autoClockOut(clock) >= 1);
+    const out = await db.prepare(`SELECT occurred_at FROM attendance_events WHERE employee_id = ? AND event_type = 'CLOCK_OUT'`).all(p.employeeId);
+    assert.equal(out.length, 1);
+    assert.ok(Number(out[0].occurred_at) <= Date.UTC(2026, 8, 23, 14, 0, 0), 'no later than the 19:00 shift end');
+    assert.equal(await jobs.autoClockOut(clock), 0, 'only once');
+
+    // After clock-out the laptop credits nothing and says the shift ended.
+    const hb = await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.46' });
+    assert.equal(hb.body.workstationStatus, 'CHECKED_OUT');
+    assert.equal(hb.body.today.day.checkedOut, true);
+  } finally {
+    clock = saved;
+  }
+});

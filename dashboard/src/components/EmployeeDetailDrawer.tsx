@@ -467,10 +467,18 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     if (Number.isFinite(len) && len > 0) return len;
     return (sch?.dayEquivalentMinutes || 450) + (sch?.breakMinutes ?? 30);
   })();
-  const workedMinutes = employee.totalMinutes || 0;
-  const shiftProgressPercent = Math.min(100, Math.round((workedMinutes / REQUIRED_SHIFT_MINUTES) * 100));
-  const remainingMinutes = Math.max(0, REQUIRED_SHIFT_MINUTES - workedMinutes);
+  // The shared day view decides today's numbers (identical on the phone and
+  // the laptop). The profile-based target above is only a fallback for a
+  // backend that doesn't send `day`.
+  const day = employee.day;
+  const targetMinutes = day ? day.targetMinutes : REQUIRED_SHIFT_MINUTES;
+  const workedMinutes = day ? day.workedMinutes : (employee.totalMinutes || 0);
+  const shiftProgressPercent = day
+    ? day.progressPercent
+    : Math.min(100, Math.round((workedMinutes / REQUIRED_SHIFT_MINUTES) * 100));
+  const remainingMinutes = day ? day.remainingMinutes : Math.max(0, REQUIRED_SHIFT_MINUTES - workedMinutes);
   const remainingFormatted = `${Math.floor(remainingMinutes / 60)}h ${remainingMinutes % 60}m`;
+  const permittedBreak = day ? day.permittedBreakMinutes : 30;
 
   const isLate = (employee.lateMinutes ?? 0) > 0 || employee.isLate;
 
@@ -703,10 +711,10 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
               <div className="mt-4 pt-4 border-t border-white/8">
                 <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <TimerIcon className="h-3.5 w-3.5 shrink-0" /> Daily Shift Target ({Math.floor(REQUIRED_SHIFT_MINUTES / 60)}h {REQUIRED_SHIFT_MINUTES % 60}m / day)
+                    <TimerIcon className="h-3.5 w-3.5 shrink-0" /> Daily Shift Target ({Math.floor(targetMinutes / 60)}h {targetMinutes % 60}m / day)
                   </span>
                   <span className="font-mono font-bold text-emerald-400">
-                    {employee.timeWorkedFormatted}{' '}
+                    {day ? day.workedFormatted : employee.timeWorkedFormatted}{' '}
                     <span className="text-slate-400 font-normal">({shiftProgressPercent}%)</span>
                   </span>
                 </div>
@@ -721,7 +729,12 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   />
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1.5">
-                  <span>Target: {Math.floor(REQUIRED_SHIFT_MINUTES / 60)}h {REQUIRED_SHIFT_MINUTES % 60}m, break included</span>
+                  <span>
+                    Worked {day ? day.workedFormatted : employee.timeWorkedFormatted}
+                    {day ? ` + break ${Math.min(day.breakMinutes, permittedBreak)}m` : ''} of {Math.floor(targetMinutes / 60)}h {targetMinutes % 60}m
+                    {day && day.idleMinutes > 0 ? ` · ${day.idleMinutes}m idle not counted` : ''}
+                    {day && day.overtimeMinutes > 0 ? ` · ${day.overtimeMinutes}m after shift` : ''}
+                  </span>
                   <span>
                     {remainingMinutes > 0 ? (
                       <span className="text-amber-400 font-medium"><HourglassIcon className="inline-block h-3.5 w-3.5" /> {remainingFormatted} remaining</span>
@@ -740,19 +753,21 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   First In
                 </span>
                 <span className={`text-sm font-extrabold tnum ${isLate ? 'text-rose-400 font-bold' : 'text-white'}`}>
-                  {employee.firstCheckIn || '—'}
+                  {day?.checkIn || employee.firstCheckIn || '—'}
                 </span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">Office Arrival</span>
               </div>
 
               <div className="glass-panel rounded-xl p-3 text-center">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
-                  Last Active
+                  {day?.checkedOut ? 'Clocked Out' : 'Last Active'}
                 </span>
                 <span className="text-sm font-extrabold text-white tnum">
-                  {employee.lastActiveTime || '—'}
+                  {day?.lastSeen || employee.lastActiveTime || '—'}
                 </span>
-                <span className="text-[10px] text-slate-400 block mt-0.5">Network Ping</span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  {day ? `Idle ${day.idleMinutes}m (not counted)` : 'Network Ping'}
+                </span>
               </div>
 
               <div className="glass-panel rounded-xl p-3 text-center">
@@ -760,9 +775,9 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   Break Taken
                 </span>
                 <span className="text-sm font-extrabold text-amber-300 tnum">
-                  {employee.breakMinutes ? `${employee.breakMinutes}m` : '0m'}
+                  {`${day ? day.breakMinutes : (employee.breakMinutes ?? 0)}m`}
                 </span>
-                <span className="text-[10px] text-slate-400 block mt-0.5">of 30m permitted</span>
+                <span className="text-[10px] text-slate-400 block mt-0.5">of {permittedBreak}m permitted</span>
               </div>
 
               <div className="glass-panel rounded-xl p-3 text-center">
@@ -1211,20 +1226,22 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   <h4 className="font-bold text-white text-sm">Policy & Deficit Rules</h4>
                   <div className="space-y-2 text-slate-300 text-xs">
                     <div className="flex items-center justify-between py-1.5 border-b border-white/5">
-                      <span className="text-slate-400">Official Office Hours Window</span>
-                      <span className="font-semibold text-white">11:00 AM – 7:00 PM (Mon – Fri)</span>
+                      <span className="text-slate-400">Shift</span>
+                      <span className="font-semibold text-white">
+                        {day?.shiftStart || employeeProfile?.schedule?.startTime || '—'} – {day?.shiftEnd || employeeProfile?.schedule?.endTime || '—'}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between py-1.5 border-b border-white/5">
-                      <span className="text-slate-400">Required Daily Working Time</span>
-                      <span className="font-semibold text-white">7 hours 30 minutes / day</span>
+                      <span className="text-slate-400">Daily Target (break included)</span>
+                      <span className="font-semibold text-white">{Math.floor(targetMinutes / 60)}h {targetMinutes % 60}m</span>
                     </div>
                     <div className="flex items-center justify-between py-1.5 border-b border-white/5">
-                      <span className="text-slate-400">Authorised Daily Break</span>
-                      <span className="font-semibold text-amber-300">30 minutes</span>
+                      <span className="text-slate-400">Break Counted Towards Target</span>
+                      <span className="font-semibold text-amber-300">up to {permittedBreak} minutes</span>
                     </div>
                     <div className="flex items-center justify-between py-1.5 border-b border-white/5">
-                      <span className="text-slate-400">Arrival Grace Period</span>
-                      <span className="font-semibold text-white">5 minutes (up to 11:05 AM)</span>
+                      <span className="text-slate-400">Not Counted As Worked</span>
+                      <span className="font-semibold text-white">Break · laptop idle 5+ min · before shift start · after shift end</span>
                     </div>
                   </div>
                 </div>
@@ -1235,7 +1252,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     <div className="flex items-center justify-between bg-slate-900/60 p-2.5 rounded-xl border border-white/5">
                       <div>
                         <span className="font-semibold text-white block">Late Arrival Time</span>
-                        <span className="text-[10px] text-slate-400">Arrival after 11:05 AM grace window</span>
+                        <span className="text-[10px] text-slate-400">Arrival after the grace window</span>
                       </div>
                       <span className={`font-mono font-bold ${isLate ? 'text-rose-400 text-sm' : 'text-slate-400'}`}>
                         {isLate ? `+${employee.lateMinutes}m` : '0m'}

@@ -1650,3 +1650,18 @@ ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS approval_note TEXT;
 
 -- Migration 030
 ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS processing_fee_basis TEXT NOT NULL DEFAULT 'FIXED';
+
+-- Migration 031: real laptop idle intervals (see migrations/031_idle_spans.sql).
+CREATE TABLE IF NOT EXISTS workstation_idle_spans (
+  id TEXT PRIMARY KEY,
+  device_id TEXT NOT NULL,
+  employee_id TEXT NOT NULL,
+  date_key TEXT NOT NULL,
+  start_at BIGINT NOT NULL,
+  end_at BIGINT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'IDLE',
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_idle_spans_emp_day ON workstation_idle_spans (employee_id, date_key);
+CREATE INDEX IF NOT EXISTS idx_idle_spans_dev_day ON workstation_idle_spans (device_id, date_key, end_at);
