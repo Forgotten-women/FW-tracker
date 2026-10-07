@@ -342,7 +342,7 @@ test('a mistaken End shift can be resumed the same day; an automatic clock-out c
   const p = await shared();
   const saved = clock;
   try {
-    clock = Date.UTC(2026, 8, 25, 6, 30, 0);             // Fri 25 Sep, 11:30 PKT
+    clock = Date.UTC(2026, 8, 25, 8, 30, 0);             // Fri 25 Sep, 13:30 PKT
     await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.48' });
     const out = await json('POST', '/api/desktop/checkout', { headers: p.laptop });
     assert.equal(out.status, 200);
