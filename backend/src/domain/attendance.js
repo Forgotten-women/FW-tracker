@@ -463,12 +463,44 @@ function buildDayView({
  * Pure: reads, computes, returns. Persisting is a separate step so the same
  * calculation can be previewed without writing anything.
  */
+/**
+ * A day HR entered from its own records (source HR_RECORDS), from before the
+ * tracker recorded the employee: with no tracked presence that day, HR's
+ * clock-in/clock-out pairs ARE the presence (in -> out, and in -> out again
+ * after a gap such as "out 1pm, back 5pm"). A day with any tracked presence is
+ * left to the tracker: HR's clock times then only override first-in/last-seen
+ * as any HR correction does.
+ */
+function hrRecordedPresence(presence, manual) {
+  if ((presence.sessions || []).length) return presence;
+  const hr = manual.filter(e => e.source === 'HR_RECORDS' && (e.event_type === 'CLOCK_IN' || e.event_type === 'CLOCK_OUT'));
+  const sessions = [];
+  let open = null;
+  for (const e of hr) {
+    const at = Number(e.occurred_at);
+    if (e.event_type === 'CLOCK_IN') open = open ?? at;
+    else if (open !== null && at > open) { sessions.push({ start: open, end: at }); open = null; }
+  }
+  if (!sessions.length) return presence;
+  const sessionMinutes = sessions.reduce((n, x) => n + Math.round((x.end - x.start) / MIN), 0);
+  return {
+    ...presence,
+    firstInAt: sessions[0].start,
+    lastActiveAt: sessions[sessions.length - 1].end,
+    sessions,
+    totalMinutes: Math.max(0, sessionMinutes + (presence.adjustmentMinutes || 0)),
+    status: 'HR_RECORDS', statusLabel: 'Present (HR records)',
+    lastSource: 'HR_RECORDS',
+  };
+}
+
 async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   let s = await schedule.resolve(employeeId, dateKey);
   const leave = s.isWorkingDay ? await schedule.leaveOn(employeeId, dateKey) : null;
-  const presence = await P.deriveDay(employeeId, dateKey, nowMs);
+  let presence = await P.deriveDay(employeeId, dateKey, nowMs);
   const breaks = await selectBreaks.all(employeeId, dateKey);
   const manual = await selectManualEvents.all(employeeId, dateKey);
+  presence = hrRecordedPresence(presence, manual);
   const idleSpans = await selectIdleSpans.all(employeeId, dateKey);
   const laptopActive = (await selectLaptopActive.get(employeeId, dateKey))?.s || 0;
 

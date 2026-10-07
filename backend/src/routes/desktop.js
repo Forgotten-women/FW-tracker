@@ -322,6 +322,31 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, dateKey);
   let reconciledActiveSeconds = 0;
 
+  // Arrival before the working window opens (e.g. laptop started at 10:20 for
+  // an 11:00 shift, when the window opens at 10:45): record the sighting so the
+  // day's first-in is when the employee actually came in. Nothing is credited:
+  // worked time still starts at the shift start (attendance.buildDayView) and
+  // the laptop counters stay untouched outside hours. Only someone at the
+  // laptop counts: unlocked, and either real input or the start-up probe the
+  // agent sends right after login; and only from 3 hours before the shift, so
+  // a laptop left on overnight can't fake an arrival.
+  const sentActive = Math.max(0, parseInt(activeSeconds, 10) || 0);
+  const isStartupProbe = Number(activeSeconds) === 0 && Number(idleSeconds) === 0;
+  const earlyArrival = inOffice && sched.isWorkingDay && !onLeave && !clockedOut && sched.scheduledStartAt
+    && nowMs < shiftStartThreshold && nowMs >= sched.scheduledStartAt - 3 * 60 * 60 * 1000
+    && lockState !== 'LOCKED' && lockState !== 'SLEEPING'
+    && (sentActive > 0 || isStartupProbe);
+  if (earlyArrival) {
+    try {
+      await presence.recordEvent({
+        employeeId, deviceId, source: 'DESKTOP_AGENT', srcIp, localIp,
+        bssid: connectedBssid, ssid: effectiveSsid, visibleOfficeBssids, mac: currentWifiMac,
+        observedAt: nowMs, location: 'OFFICE', note: 'Desktop Agent (arrival before shift)',
+      });
+      await presence.recomputeDay(employeeId, dateKey, nowMs);
+    } catch (_) {}
+  }
+
   if (isVerifiedWork && !outsideWorkingHours) {
     if (inOffice && existing && (existing.in_office === 0 || (Number(existing.unverified_seconds || 0) > 0))) {
       const sessionAgeMs = nowMs - Number(existing.created_at);
