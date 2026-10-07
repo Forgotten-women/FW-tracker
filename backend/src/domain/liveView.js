@@ -24,27 +24,12 @@ const OFFLINE_AFTER_MS = 3 * 60 * 1000;
 const permissionCache = new Map(); // deviceId -> { value, expiresAtMs }
 const leaseCache = new Map(); // deviceId -> { value, expiresAtMs }
 
-let tableEnsured = false;
 async function ensureLiveStreamTable() {
-  if (tableEnsured) return;
-  try {
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS workstation_live_streams (
-        device_id           TEXT PRIMARY KEY,
-        employee_id         TEXT NOT NULL,
-        requested_at        BIGINT NOT NULL,
-        last_frame_at       BIGINT,
-        frame_base64        TEXT,
-        status              TEXT NOT NULL DEFAULT 'ACTIVE',
-        updated_at          BIGINT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_live_stream_updated ON workstation_live_streams (updated_at);
-      CREATE INDEX IF NOT EXISTS idx_live_stream_requested ON workstation_live_streams (requested_at);
-    `);
-  } catch (_) {
-    // Already exists, or no DDL rights: either way the queries below will say.
-  }
-  tableEnsured = true;
+  // No-op. These tables and columns are created by migrations (025 backfilled
+  // them; pg/schema.sql has them). Creating them at request time took an
+  // exclusive lock on live tables: on 2026-10-07 an ALTER TABLE employees
+  // queued behind a long transaction and every query on employees queued
+  // behind it, so the API returned 500s until it was cleared.
 }
 
 /**

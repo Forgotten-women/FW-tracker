@@ -37,65 +37,20 @@ async function getOrgSetting(key, defaultValue) {
   return orgSettingsCache.has(key) ? orgSettingsCache.get(key) : defaultValue;
 }
 
-let liveStreamTableEnsured = false;
 async function ensureLiveStreamTable() {
-  if (liveStreamTableEnsured) return;
-  try {
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS workstation_live_streams (
-        device_id           TEXT PRIMARY KEY,
-        employee_id         TEXT NOT NULL,
-        requested_at        BIGINT NOT NULL,
-        last_frame_at       BIGINT,
-        frame_base64        TEXT,
-        status              TEXT NOT NULL DEFAULT 'ACTIVE',
-        updated_at          BIGINT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_live_stream_updated ON workstation_live_streams (updated_at);
-      CREATE INDEX IF NOT EXISTS idx_live_stream_requested ON workstation_live_streams (requested_at);
-    `);
-    liveStreamTableEnsured = true;
-  } catch (err) {
-    liveStreamTableEnsured = true;
-  }
+  // No-op. These tables and columns are created by migrations (025 backfilled
+  // them; pg/schema.sql has them). Creating them at request time took an
+  // exclusive lock on live tables: on 2026-10-07 an ALTER TABLE employees
+  // queued behind a long transaction and every query on employees queued
+  // behind it, so the API returned 500s until it was cleared.
 }
 
-let screenshotsTableEnsured = false;
 async function ensureScreenshotsTable() {
-  if (screenshotsTableEnsured) return;
-  try {
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS workstation_screenshots (
-        id                  TEXT PRIMARY KEY,
-        employee_id         TEXT NOT NULL,
-        device_id           TEXT NOT NULL,
-        date_key            TEXT NOT NULL,
-        captured_at         BIGINT NOT NULL,
-        storage_path        TEXT NOT NULL,
-        file_size_bytes     BIGINT NOT NULL DEFAULT 0,
-        mime_type           TEXT NOT NULL DEFAULT 'image/jpeg',
-        active_app          TEXT,
-        window_title        TEXT,
-        capture_status      TEXT NOT NULL DEFAULT 'SUCCESS',
-        created_at          BIGINT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_ws_shots_emp_date ON workstation_screenshots (employee_id, date_key);
-      CREATE INDEX IF NOT EXISTS idx_ws_shots_captured ON workstation_screenshots (captured_at);
-    `);
-
-    // Ensure employee columns exist
-    try {
-      await db.exec(`
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_enabled INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_interval_minutes INTEGER NOT NULL DEFAULT 5;
-        ALTER TABLE employees ADD COLUMN IF NOT EXISTS screenshot_mode TEXT NOT NULL DEFAULT 'ACTIVE_ONLY';
-      `);
-    } catch (_) {}
-
-    screenshotsTableEnsured = true;
-  } catch (err) {
-    screenshotsTableEnsured = true;
-  }
+  // No-op. These tables and columns are created by migrations (025 backfilled
+  // them; pg/schema.sql has them). Creating them at request time took an
+  // exclusive lock on live tables: on 2026-10-07 an ALTER TABLE employees
+  // queued behind a long transaction and every query on employees queued
+  // behind it, so the API returned 500s until it was cleared.
 }
 
 /**
