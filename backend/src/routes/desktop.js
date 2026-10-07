@@ -264,7 +264,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   const screenshotEnabled = empRow ? (empRow.screenshot_enabled === 1) : false;
   const screenshotIntervalMinutes = empRow ? (parseInt(empRow.screenshot_interval_minutes, 10) || 5) : 5;
   const screenshotMode = empRow ? (empRow.screenshot_mode || 'ACTIVE_ONLY') : 'ACTIVE_ONLY';
-  const isRemoteWorker = empRow && (empRow.work_mode === 'REMOTE' || empRow.work_mode === 'HYBRID' || empRow.remote_allowed === 1);
+  // Approved work from home makes an office-based employee remote for the day.
+  const isRemoteWorker = Boolean(empRow && (empRow.work_mode === 'REMOTE' || empRow.work_mode === 'HYBRID' || empRow.remote_allowed === 1))
+    || await schedule.wfhOn(employeeId, dateKey);
 
   // 3. In-Office Verification (Multi-Signal: Direct BSSID, Air Proximity Beacon, Office Subnet, Office SSID)
   const locationVerdict = presence.classifyLocation({

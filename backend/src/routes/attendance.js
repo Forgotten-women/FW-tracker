@@ -12,6 +12,7 @@ const { db } = require('../db');
 const { config } = require('../config');
 const { requireDevice, requireSensor, requireAdmin } = require('../middleware/auth');
 const P = require('../domain/presence');
+const schedule = require('../domain/schedule');
 const History = require('../domain/history');
 const bindings = require('../domain/bindings');
 const events = require('../events');
@@ -22,7 +23,8 @@ const MAX_OBSERVATIONS = 500;   // one batch of replayed offline heartbeats
 const MAX_BACKDATE_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Same rule as the desktop agent (routes/desktop.js): REMOTE and HYBRID
-// workers, and anyone HR has allowed to work remotely.
+// workers, anyone HR has allowed to work remotely, and on a day of approved
+// work from home, anyone.
 const selectWorkMode = db.prepare('SELECT work_mode, remote_allowed FROM employees WHERE id = ?');
 async function isRemoteWorker(employeeId) {
   const e = await selectWorkMode.get(employeeId);
@@ -106,6 +108,7 @@ router.post('/ping', requireDevice, async (req, res) => {
   // exactly as their laptop's heartbeats already were. Without this a remote
   // worker whose laptop was off or not reporting showed as "Not arrived".
   const remoteWorker = await isRemoteWorker(employeeId);
+  const wfhByDay = new Map();
 
   let accepted = 0, duplicates = 0, rejected = 0;
   const touchedDays = new Set();
@@ -130,7 +133,10 @@ router.post('/ping', requireDevice, async (req, res) => {
     const ssid = o?.ssid ?? body.ssid ?? null;
     const bssid = o?.bssid ?? body.bssid ?? null;
     let location = null;
-    if (remoteWorker) {
+    // Per observation: a replayed batch can span days, and WFH is per day.
+    const obsDay = T.dateKey(observedAt);
+    if (!wfhByDay.has(obsDay)) wfhByDay.set(obsDay, remoteWorker || await schedule.wfhOn(employeeId, obsDay));
+    if (wfhByDay.get(obsDay)) {
       const verdict = P.classifyLocation({ bssid, ssid, srcIp, localIp, source: 'APP' });
       location = verdict === 'OFFICE' ? 'OFFICE' : 'REMOTE_VERIFIED';
     }

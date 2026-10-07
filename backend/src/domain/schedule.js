@@ -218,12 +218,32 @@ async function workingDaysBetween(employeeId, fromKey, toKey) {
 // employee is not expected to work.
 // ---------------------------------------------------------------------------
 
+// Work from home (leave type 'wfh') is a working day, not time off: it is
+// excluded here and answered by wfhOn() instead.
 const selectLeaveOn = db.prepare(`
   SELECT id, day_portion FROM leave_requests
   WHERE employee_id = ? AND status = 'APPROVED' AND cancelled_at IS NULL
+    AND leave_type_id <> 'wfh'
     AND start_date <= ? AND end_date >= ?
   ORDER BY created_at DESC
 `);
+
+const selectWfhOn = db.prepare(`
+  SELECT id FROM leave_requests
+  WHERE employee_id = ? AND status = 'APPROVED' AND cancelled_at IS NULL
+    AND leave_type_id = 'wfh'
+    AND start_date <= ? AND end_date >= ?
+  LIMIT 1
+`);
+
+/**
+ * True when the employee has approved work from home covering dateKey. On
+ * such a day they are treated as a remote worker: phone and laptop time away
+ * from the office is recorded as REMOTE_VERIFIED and counted as worked.
+ */
+async function wfhOn(employeeId, dateKey) {
+  return Boolean(await selectWfhOn.get(employeeId, dateKey, dateKey));
+}
 
 /**
  * Approved leave covering dateKey, or null. Any leave type counts (paid,
@@ -249,4 +269,4 @@ async function leaveOn(employeeId, dateKey) {
   return partDay;
 }
 
-module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate, leaveOn };
+module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate, leaveOn, wfhOn };

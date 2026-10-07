@@ -897,7 +897,19 @@ async function balanceAsOf(employeeId, dateKey) {
   };
 }
 
+// HR's records set the shortfall balance up to a date (an HR_OPENING_BALANCE
+// row, e.g. the 2026 attendance workbook up to 2 Oct). Days up to that date are
+// settled by those records: recomputing one must not post a delta on top, or
+// the balance would drift away from HR's figure.
+const selectOpeningThrough = db.prepare(`
+  SELECT MAX(date_key) AS d FROM attendance_deficit_ledger
+  WHERE employee_id = ? AND entry_type = 'HR_OPENING_BALANCE'
+`);
+
 async function postDeficit(employeeId, dateKey, minutes, nowMs = T.now(), { createdBy = 'system' } = {}) {
+  const lockedThrough = (await selectOpeningThrough.get(employeeId))?.d;
+  if (lockedThrough && dateKey <= lockedThrough) return null;
+
   const existing = await selectLedgerForDay.get(employeeId, dateKey);
   // Recomputing a day must adjust by the difference from what the ledger
   // already holds for it -- the original posting PLUS every earlier

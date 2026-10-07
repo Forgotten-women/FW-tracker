@@ -302,6 +302,7 @@ const selectUnclaimedAbsences = db.prepare(`
     AND ar.status = 'CONFIRMED'
     AND ar.treat_as_unpaid = 1
     AND ar.date_key <= ?
+    AND ar.date_key >= ?
     AND NOT EXISTS (
       SELECT 1 FROM payroll_adjustments pa
       WHERE pa.adjustment_type = ? AND pa.source_reference = ar.id
@@ -317,9 +318,11 @@ const selectUnclaimedAbsences = db.prepare(`
  * being silently lost forever - it will land in whichever period is
  * currently open when this is next run. The same property is what carries
  * anything dated after a monthly run's cut-off into the next month's run.
+ * The one lower bound is payroll's go-live date (goLiveDate): anything before
+ * it was settled in salaries paid before this system ran payroll.
  */
 async function unclaimedUnpaidAbsences({ employeeId, throughDate }) {
-  return await selectUnclaimedAbsences.all(employeeId, throughDate, UNAUTHORISED_ABSENCE_UNPAID);
+  return await selectUnclaimedAbsences.all(employeeId, throughDate, await goLiveDate(), UNAUTHORISED_ABSENCE_UNPAID);
 }
 
 const selectUnclaimedUnpaidLeave = db.prepare(`
@@ -330,6 +333,7 @@ const selectUnclaimedUnpaidLeave = db.prepare(`
     AND lr.status = 'APPROVED'
     AND COALESCE(lr.is_paid, lt.is_paid) = 0
     AND lr.start_date <= ?
+    AND lr.start_date >= ?
     AND NOT EXISTS (
       SELECT 1 FROM payroll_adjustments pa
       WHERE pa.adjustment_type = ? AND pa.source_reference = lr.id
@@ -346,7 +350,7 @@ const selectUnclaimedUnpaidLeave = db.prepare(`
  * attached to whichever period processes them first.
  */
 async function unclaimedUnpaidLeave({ employeeId, throughDate }) {
-  return await selectUnclaimedUnpaidLeave.all(employeeId, throughDate, UNPAID_LEAVE_DEDUCTION);
+  return await selectUnclaimedUnpaidLeave.all(employeeId, throughDate, await goLiveDate(), UNPAID_LEAVE_DEDUCTION);
 }
 
 /**
@@ -591,6 +595,18 @@ async function settingIsOn(key) {
 }
 
 const DEFAULT_CUTOFF_DAY = 25;
+
+/**
+ * The first date payroll deducts unpaid days for (org_settings.payroll_go_live_date,
+ * YYYY-MM-DD). Unpaid leave and unpaid absences dated before it were settled
+ * in salaries paid before this system ran payroll, so they are history, never
+ * a new deduction. Unset means no lower bound (every date is in scope).
+ */
+async function goLiveDate() {
+  const row = await selectSetting.get('payroll_go_live_date');
+  const v = String(row?.value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '';
+}
 
 /** The org's cut-off day of the month (org_settings.payroll_cutoff_day). */
 async function cutoffDay() {

@@ -379,6 +379,46 @@ router.get('/employee/:employeeId',
     });
   });
 
+// POST /api/leave/employee/:employeeId/request - HR records leave or work
+// from home FOR an employee (e.g. WFH agreed in person). It goes through the
+// same checks as an employee's own request and is approved at once.
+router.post('/employee/:employeeId/request',
+  requireUserOrAdminKey('leave.approve'), requireEmployeeAccess(),
+  async (req, res) => {
+    const b = req.body || {};
+    const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
+    try {
+      const created = await L.submitRequest({
+        employeeId: req.params.employeeId,
+        leaveTypeId: b.leaveTypeId,
+        startDate: b.startDate,
+        endDate: b.endDate || b.startDate,
+        dayPortion: b.dayPortion || 'FULL_DAY',
+        reason: b.reason || 'Recorded by HR',
+      });
+      let out;
+      try {
+        out = await L.decideRequest({
+          requestId: created.id,
+          decision: 'APPROVED',
+          notes: b.notes || b.reason || 'Recorded by HR',
+          overdraftReason: b.overdraftReason || null,
+          isPaid: b.isPaid !== undefined ? (b.isPaid === true || b.isPaid === 1 || b.isPaid === 'true') : null,
+          actor,
+        });
+      } catch (err) {
+        // Not approved (e.g. an overdraft with no reason): don't leave HR's own
+        // entry sitting in the queue as if the employee had asked.
+        await db.prepare("UPDATE leave_requests SET status = 'CANCELLED', cancelled_at = ? WHERE id = ?")
+          .run(T.now(), created.id);
+        throw err;
+      }
+      res.status(201).json({ status: 'SUCCESS', requestId: created.id, ...out, balance: presentBalance(await L.balanceFor(req.params.employeeId)) });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
 router.post('/employee/:employeeId/adjust',
   requireUserOrAdminKey('leave.write'), requireEmployeeAccess(),
   async (req, res) => {

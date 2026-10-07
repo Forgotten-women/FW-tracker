@@ -1235,8 +1235,8 @@ export function LeaveManagementPanel() {
                 </h3>
                 <p className="mt-1 text-xs text-muted leading-relaxed">
                   Each employee's annual leave entitlement is tied strictly to their <strong>Official Joining Date</strong>.
-                  Upon their work anniversary, management can review and approve up to <strong>5.0 days</strong> of unused leave to carry forward into the new 12-month cycle.
-                  Any unapproved leave or unused balance exceeding 5 days automatically lapses upon rollover.
+                  Upon their work anniversary, management can review and approve unused leave to carry forward into the new 12-month cycle (usually up to <strong>5.0 days</strong>; more with management approval).
+                  Any unused balance that is not approved automatically lapses upon rollover.
                   Employees approaching their anniversary receive automated 14-day cycle-end notifications.
                 </p>
               </div>
@@ -2071,16 +2071,16 @@ export function LeaveManagementPanel() {
 
               <div>
                 <label className="block text-xs font-semibold text-text mb-1.5">
-                  Approved Days to Carry Forward (Max 5.0 Days)
+                  Approved Days to Carry Forward (usually up to 5; more with management approval)
                 </label>
                 <div className="flex items-center gap-3">
                   <Input
                     type="number"
                     min="0"
-                    max={Math.min(5, Math.max(0, carryModalEmployee.availableDays))}
+                    max={Math.max(0, carryModalEmployee.availableDays)}
                     step="0.5"
                     value={carryApprovedDays}
-                    onChange={(e) => setCarryApprovedDays(Math.min(5, Math.max(0, parseFloat(e.target.value) || 0)))}
+                    onChange={(e) => setCarryApprovedDays(Math.min(Math.max(0, carryModalEmployee.availableDays), Math.max(0, parseFloat(e.target.value) || 0)))}
                     className="w-32 text-sm font-bold py-1.5 text-center"
                   />
                   <div className="flex gap-1.5 flex-wrap">

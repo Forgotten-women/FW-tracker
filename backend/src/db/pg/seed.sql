@@ -168,7 +168,7 @@ INSERT INTO leave_approval_routes (id, leave_type_id, step, approver_role, creat
 -- leave_policies (1 row)
 INSERT INTO leave_policies (id, name, annual_entitlement_days, accrual_method, carry_over_days, carry_over_expiry_months, allow_negative_balance, holiday_year_start, active, created_at) VALUES ('lp_default', 'Forgotten Women standard (20 days, anniversary year)', 20, 'MONTHLY_ON_COMPLETION', 0, NULL, 1, 'ANNIVERSARY', 1, 0) ON CONFLICT DO NOTHING;
 
--- leave_types (14 rows)
+-- leave_types (15 rows)
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('annual', 'Paid annual leave', 1, 1, 1, 0, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('unpaid', 'Unpaid leave', 1, 0, 0, 0, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('sick', 'Sick leave', 0, 0, 1, 1, 0, 1) ON CONFLICT DO NOTHING;
@@ -183,6 +183,8 @@ INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_pa
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('authorised', 'Authorised absence', 1, 0, 1, 0, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('unauthorised', 'Unauthorised absence', 0, 0, 0, 0, 1, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('other', 'Other', 1, 0, 1, 0, 0, 1) ON CONFLICT DO NOTHING;
+-- Migration 032: work from home (a working day counted as remote, not time off).
+INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('wfh', 'Work from home', 1, 0, 1, 0, 0, 1) ON CONFLICT DO NOTHING;
 
 -- org_settings (9 rows)
 INSERT INTO org_settings (key, value, updated_at, updated_by) VALUES ('show_salary_to_employees', '0', 0, 'system') ON CONFLICT DO NOTHING;

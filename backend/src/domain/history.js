@@ -82,6 +82,7 @@ const selectLeave = db.prepare(`
   FROM leave_requests lr
   LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
   WHERE lr.employee_id = ? AND lr.status IN ('APPROVED', 'PENDING')
+    AND lr.leave_type_id <> 'wfh'
     AND lr.start_date <= ? AND lr.end_date >= ?
 `);
 const selectAbsences = db.prepare(`

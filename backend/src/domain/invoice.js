@@ -141,6 +141,7 @@ async function attendanceSummary(employeeId, fromDate, toDate) {
              COALESCE(r.is_paid, t.is_paid) AS is_paid -- a request can override its type
       FROM leave_requests r JOIN leave_types t ON t.id = r.leave_type_id
       WHERE r.employee_id = ? AND r.status = 'APPROVED' AND r.cancelled_at IS NULL
+        AND r.leave_type_id <> 'wfh'
         AND r.start_date <= ? AND r.end_date >= ?
     `).all(employeeId, toDate, fromDate),
     db.prepare(`

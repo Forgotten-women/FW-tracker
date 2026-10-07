@@ -29,7 +29,30 @@ const selectEntitlement = db.prepare(`
   ORDER BY effective_from DESC, created_at DESC LIMIT 1
 `);
 
+// A part-time arrangement is pro-rata for the whole leave cycle it falls in:
+// its holiday_entitlement_days (e.g. 10 at 50%) is the cycle's entitlement,
+// and probation months earn at the same fraction of the probation rate.
+// (Confirmed 2026-10-07 for Mahnoor: part-time from 8 Sep 2026, 10 days for
+// her cycle from 6 Jul 2026, 0.83 a month on probation.)
+const selectPartTime = db.prepare(`
+  SELECT holiday_entitlement_days FROM employment_records
+  WHERE employee_id = ? AND employment_type = 'Part-time'
+    AND effective_from < ? AND (effective_to IS NULL OR effective_to >= ?)
+  ORDER BY effective_from DESC, created_at DESC LIMIT 1
+`);
+
+/** The part-time entitlement for the cycle starting yearStart, or null if full-time. */
+async function partTimeEntitlement(employeeId, yearStart) {
+  if (!yearStart) return null;
+  const row = await selectPartTime.get(employeeId, addMonths(yearStart, 12), yearStart);
+  const val = Number(row?.holiday_entitlement_days);
+  return val > 0 ? val : null;
+}
+
 async function entitlementFor(employeeId, onDate = T.dateKey()) {
+  const year = await holidayYearFor(employeeId, onDate);
+  const partTime = year.blocked ? null : await partTimeEntitlement(employeeId, year.yearStart);
+  if (partTime) return partTime;
   const row = await selectEntitlement.get(employeeId, onDate);
   const val = Number(row?.holiday_entitlement_days);
   if (!(val > 0)) return config.leave.annualEntitlementDays;
@@ -169,7 +192,12 @@ async function probationWindow(employeeId) {
  * days there, and reading 10 as a yearly figure halved the rate to 0.83 a month.
  */
 async function accrualTarget(employeeId, yearStart, months, entitlement) {
-  const { probationEntitlementDays: pDays, probationMonths: pMonths } = config.leave;
+  const { probationMonths: pMonths } = config.leave;
+  // Part-time: probation earns the same fraction as the entitlement (5 over 6
+  // months at 50%).
+  const partTime = await partTimeEntitlement(employeeId, yearStart);
+  const pDays = config.leave.probationEntitlementDays
+    * (partTime ? partTime / config.leave.annualEntitlementDays : 1);
   const window = pDays > 0 && pMonths > 0 ? await probationWindow(employeeId) : null;
   let onProbation = 0;
   if (window) {
@@ -332,14 +360,15 @@ const upsertCarryForwardRecord = db.prepare(`
 `);
 
 /**
- * Closes a holiday year, carrying forward approved days (max 5) and forfeiting remainder.
+ * Closes a holiday year, carrying forward approved days (up to the unused balance) and
+ * forfeiting the remainder.
  */
 async function closeHolidayYear(employeeId, leaveYear, unusedDays, onDate, { actor = 'system' } = {}) {
   if (unusedDays <= 0.005) return { forfeited: 0, carried: 0 };
 
   const cf = await selectCarryForwardRecord.get(employeeId, leaveYear);
   const approved = (cf && cf.decision === 'APPROVED')
-    ? Math.min(cf.approved_days, Math.min(5, unusedDays))
+    ? Math.min(cf.approved_days, unusedDays)
     : (config.leave.carryOverDays > 0 ? Math.min(unusedDays, config.leave.carryOverDays) : 0);
   const lapsed = Math.max(0, unusedDays - approved);
 
@@ -394,6 +423,7 @@ const selectYearRequests = db.prepare(`
       (r.status IN ('PENDING_MANAGER', 'PENDING_HR') AND t.reduces_entitlement = 1)
     )
     AND r.cancelled_at IS NULL
+    AND r.leave_type_id <> 'wfh'   -- work from home is a working day, never leave used
     AND r.start_date >= ? AND r.start_date < ?
     AND r.id != COALESCE(?, '')
 `);
@@ -745,7 +775,9 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
 
   // Crucial policy rule: If approved as paid, it is deducted from accrued leave.
   // If not paid (unpaid), it is not deducted from accrued leave (deducted from pay/salary in payroll).
-  const reducesEntitlement = (decision === 'APPROVED') && (effectiveIsPaid === 1);
+  // Work from home is a working day, so it never uses annual leave.
+  const reducesEntitlement = (decision === 'APPROVED') && (effectiveIsPaid === 1)
+    && req.leave_type_id !== 'wfh';
 
   const preview = await previewRequest({
     employeeId: req.employee_id, leaveTypeId: req.leave_type_id,
@@ -998,8 +1030,10 @@ async function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateK
 // ---------------------------------------------------------------------------
 
 /**
- * HR/Management records an approval or rejection for carrying forward up to 5 days
- * of unused annual leave into the next leave cycle.
+ * HR/Management records an approval or rejection for carrying forward unused
+ * annual leave into the next leave cycle. Usually up to 5 days, but management
+ * can approve more (confirmed 2026-10-07: 7 and 6 days were approved), so the
+ * only hard limit is the leave actually available.
  */
 async function recordCarryForwardApproval({ employeeId, approvedDays, notes = '', actor, onDate, today }) {
   const effectiveDate = today || onDate || T.dateKey();
@@ -1007,15 +1041,16 @@ async function recordCarryForwardApproval({ employeeId, approvedDays, notes = ''
   if (isNaN(numDays) || numDays < 0) {
     throw new Error('Approved carry-forward days must be a non-negative number.');
   }
-  if (numDays > 5) {
-    throw new Error('Maximum allowable carry-forward is 5 days.');
-  }
-
   const year = await holidayYearFor(employeeId, effectiveDate);
   if (year.blocked) throw new Error(year.message);
 
   const raw = await balanceRaw(employeeId, year, effectiveDate);
-  const available = Math.max(0, raw.availableDays);
+  // HR decides near the end of the cycle, before its last month has accrued.
+  // Judge the request against what the cycle will hold once complete (the
+  // rollover tops it up to the full year first), not what has accrued so far.
+  const fullYear = await accrualTarget(employeeId, year.yearStart, 12, await entitlementFor(employeeId, effectiveDate));
+  const accruedSoFar = Number((await selectAccrued.get(employeeId, year.leaveYear))?.days) || 0;
+  const available = Math.max(0, raw.availableDays + Math.max(0, fullYear - accruedSoFar));
   if (numDays > available) {
     throw new Error(`Cannot approve ${numDays} days: employee only has ${available.toFixed(2)} days available.`);
   }
@@ -1059,7 +1094,7 @@ async function recordCarryForwardApproval({ employeeId, approvedDays, notes = ''
 /**
  * Executes work anniversary rollover for an employee:
  * - Credits full 20 days final accrual for the outgoing year.
- * - Applies approved carry-forward (max 5 days) as CARRY_OVER in the new cycle ledger.
+ * - Applies approved carry-forward (up to the unused balance) as CARRY_OVER in the new cycle ledger.
  * - Forfeits any remaining unused days with a FORFEIT entry in the outgoing cycle ledger.
  * - If no approval was recorded, all remaining unused days forfeit per policy.
  */
@@ -1116,7 +1151,7 @@ async function rolloverHolidayYear(employeeId, onDate = T.dateKey(), { actor = '
     const cf = await selectCarryForwardRecord.get(employeeId, leaveYear);
     let approvedDays = 0;
     if (cf && cf.decision === 'APPROVED') {
-      approvedDays = Math.min(cf.approved_days, Math.min(5, unusedDays));
+      approvedDays = Math.min(cf.approved_days, unusedDays);
     }
     const lapsedDays = Math.max(0, unusedDays - approvedDays);
     const nowMs = T.now();
@@ -1229,7 +1264,7 @@ async function checkAndRolloverAll(onDate = T.dateKey()) {
             const cf = await selectCarryForwardRecord.get(e.id, year.leaveYear);
             const carryInfo = (cf && cf.decision === 'APPROVED')
               ? `${cf.approved_days} day(s) approved by management to carry forward.`
-              : 'No carry-forward has been approved yet (up to 5 days permitted, subject to Management approval).';
+              : 'No carry-forward has been approved yet (usually up to 5 days, subject to Management approval).';
 
             await N.notify({
               employeeId: e.id,

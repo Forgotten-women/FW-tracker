@@ -548,7 +548,8 @@ async function scanDailyAbsences(dateKey = T.dateKey(), nowMs = T.now(), isManua
     // Check if employee has an approved leave request covering this date
     const approvedLeave = await db.prepare(`
       SELECT id, leave_type_id FROM leave_requests
-      WHERE employee_id = ? AND status = 'APPROVED' AND start_date <= ? AND end_date >= ?
+      WHERE employee_id = ? AND status = 'APPROVED' AND leave_type_id <> 'wfh'
+        AND start_date <= ? AND end_date >= ?
     `).get(emp.id, dateKey, dateKey);
 
     if (approvedLeave) continue;
