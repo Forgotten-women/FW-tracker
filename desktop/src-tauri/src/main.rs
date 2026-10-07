@@ -831,8 +831,21 @@ fn main() {
                         let resp = state.latest_response.lock().unwrap();
                         resp.as_ref().and_then(|r| r.outside_working_hours).unwrap_or(false)
                     };
-                    let samples_per_heartbeat = if outside_hours { 60 } else { 6 };
-                    if sample_count >= samples_per_heartbeat {
+                    // A new day starts fresh as soon as the server answers, so
+                    // don't wait for the outside-hours cadence then: after a
+                    // wake from sleep (a long gap since the last tick) send at
+                    // once, and while the last answer is from an earlier day
+                    // (yesterday's clock-out left the cadence at 10 minutes)
+                    // send every minute. The widget shows nothing from an
+                    // earlier day meanwhile.
+                    let today_key = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    let stale_day = {
+                        let resp = state.latest_response.lock().unwrap();
+                        resp.as_ref().map(|r| r.today.date_key != today_key).unwrap_or(false)
+                    };
+                    let woke = elapsed_secs > 120;
+                    let samples_per_heartbeat = if outside_hours && !stale_day { 60 } else { 6 };
+                    if sample_count >= samples_per_heartbeat || woke {
                         sample_count = 0;
                         let local_ip = tracker::network::get_local_ip();
                         let ssid = tracker::network::get_connected_ssid();

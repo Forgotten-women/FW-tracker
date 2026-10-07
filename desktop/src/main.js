@@ -331,6 +331,33 @@ function dayExtraSeconds() {
   return Math.min(extra, 15 * 60);
 }
 
+// A new day before the server has answered: nothing from yesterday (worked
+// time, "Shift ended", check-in) stays on screen, and the buttons wait.
+function renderFreshDay() {
+  dayView = null;
+  dayAsOf = 0;
+  creditCounting = false;
+  currentActiveSecs = 0;
+  if (activeTimer) activeTimer.textContent = formatHMS(0);
+  if (shiftWorkedValue) shiftWorkedValue.innerHTML = '0h 0m <span class="shift-pct">(0%)</span>';
+  const ring = document.getElementById('shift-ring');
+  if (ring) { ring.style.strokeDashoffset = '263.89'; ring.classList.remove('completed'); }
+  const ringPct = document.getElementById('shift-ring-pct');
+  if (ringPct) ringPct.textContent = '--';
+  if (shiftProgressFill) { shiftProgressFill.style.width = '4%'; shiftProgressFill.className = 'shift-progress-fill'; }
+  if (shiftRemText) shiftRemText.innerHTML = '';
+  if (creditNote) { creditNote.textContent = ''; creditNote.classList.add('hidden'); }
+  if (checkinText) checkinText.textContent = '--:--';
+  if (statusBanner) statusBanner.className = 'status-banner syncing';
+  if (statusText) statusText.textContent = 'New day · Connecting to server…';
+  if (breakToggleBtn && !isTogglingBreak) {
+    breakToggleBtn.textContent = 'Take break';
+    breakToggleBtn.disabled = true;
+    breakToggleBtn.classList.add('disabled');
+  }
+  updateCheckoutButton();
+}
+
 function renderDay() {
   if (!dayView) return;
   const extra = dayExtraSeconds();
@@ -505,7 +532,15 @@ async function refreshStatus() {
       enrollSection.classList.add('hidden');
       statusSection.classList.remove('hidden');
 
-      if (data.latest && data.latest.today) {
+      // A response from an earlier day (the laptop slept overnight, or was
+      // clocked out last night) is never shown: the new day starts fresh and
+      // waits for the server, which the agent contacts at once on waking.
+      const latestDate = (data.latest && data.latest.today)
+        ? (data.latest.today.dateKey || (data.latest.today.day && data.latest.today.day.dateKey) || '')
+        : '';
+      const latestIsToday = !latestDate || latestDate === getTodayDateKey();
+
+      if (data.latest && data.latest.today && latestIsToday) {
         // The shared day view, if the server sent one for today. A new one is
         // recognised by its asOf; the local clock then measures time since.
         const dv = data.latest.today.day || null;
@@ -710,7 +745,9 @@ async function refreshStatus() {
         // If we already have today's confirmed active status cached, keep showing it instead of glitching to "Connecting..."
         const cachedDate = localStorage.getItem(CACHE_KEY_DATE);
         const cachedStatusText = localStorage.getItem('ot_last_status_text');
-        if (cachedDate === todayDateStr && cachedStatusText) {
+        if (data.latest && !latestIsToday) {
+          renderFreshDay();
+        } else if (cachedDate === getTodayDateKey() && cachedStatusText) {
           const cachedStatusClass = localStorage.getItem('ot_last_status_class');
           if (statusBanner && cachedStatusClass) statusBanner.className = cachedStatusClass;
           if (statusText) statusText.textContent = plainText(cachedStatusText);
@@ -768,6 +805,7 @@ timerInterval = setInterval(() => {
     currentActiveSecs = 0;
     lastSyncedServerSecs = -1;
     lastSyncedDateKey = '';
+    renderFreshDay();
     refreshStatus();
     return;
   }
@@ -971,9 +1009,21 @@ function updateCheckoutButton() {
   const resume = Boolean(dayView && dayView.canResume);
   checkoutBtn.classList.toggle('resume', resume);
   checkoutBtn.textContent = resume ? 'Resume shift' : 'End shift';
-  const ended = Boolean(dayView && dayView.checkedOut && !resume);
-  checkoutBtn.disabled = ended;
-  checkoutBtn.classList.toggle('disabled', ended);
+  // Not before the server has sent today's day, not before the shift has run
+  // an hour, not before arriving (the server refuses those: people pressed End
+  // shift on arriving), and not once the day is over.
+  const firstHourEndsAt = dayView && dayView.shiftStartAt ? dayView.shiftStartAt + 60 * 60 * 1000 : 0;
+  let blocked = '';
+  if (!resume) {
+    if (!dayView) blocked = 'Waiting for today from the server';
+    else if (dayView.checkedOut) blocked = 'Your shift has ended';
+    else if (firstHourEndsAt && Date.now() < firstHourEndsAt) {
+      blocked = `End shift is available from ${new Date(firstHourEndsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    } else if (!dayView.checkInAt) blocked = "You haven't been recorded as arrived today";
+  }
+  checkoutBtn.disabled = Boolean(blocked);
+  checkoutBtn.classList.toggle('disabled', Boolean(blocked));
+  checkoutBtn.title = blocked;
 }
 
 async function resumeShift() {
@@ -1047,10 +1097,13 @@ function startCheckoutCountdown() {
           showFeedback('Shift checked out.', false);
           refreshStatus();
         } catch (err) {
-          showFeedback('Checkout failed. Please try again.');
+          // The server explains a refusal (e.g. too early in the shift).
+          const msg = typeof err === 'string' ? err : (err && err.message);
+          showFeedback(msg || 'Checkout failed. Please try again.');
         } finally {
           checkoutBtn.disabled = false;
           checkoutBtn.classList.remove('disabled');
+          updateCheckoutButton();
         }
       }
     }, 1000);
