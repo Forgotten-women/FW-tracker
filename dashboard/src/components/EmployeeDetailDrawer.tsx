@@ -190,6 +190,12 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
   const [generatingPairing, setGeneratingPairing] = useState(false);
   const [isManualTimeModalOpen, setIsManualTimeModalOpen] = useState(false);
+  // HR "Resume shift": reopen today's day after any clock-out.
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const [resumeCredit, setResumeCredit] = useState(true);
+  const [resumeReason, setResumeReason] = useState('');
+  const [resuming, setResuming] = useState(false);
+  const [resumeMsg, setResumeMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Live Screen View State (the session itself lives in LiveScreenViewer)
   const [isLiveScreenOpen, setIsLiveScreenOpen] = useState(false);
@@ -471,6 +477,24 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
   // the laptop). The profile-based target above is only a fallback for a
   // backend that doesn't send `day`.
   const day = employee.day;
+  const canHrResume = Boolean(day?.checkedOut && employee.date === historyToday);
+
+  const handleResumeShift = async () => {
+    if (!employee || resuming) return;
+    setResuming(true);
+    setResumeMsg(null);
+    try {
+      const r = await api.resumeEmployeeShift(employee.employeeId, resumeCredit, resumeReason.trim() || undefined);
+      setResumeMsg({ ok: true, text: r.message || 'Shift resumed.' });
+      setResumeOpen(false);
+      setResumeReason('');
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      setResumeMsg({ ok: false, text: err?.message || 'Could not resume the shift.' });
+    } finally {
+      setResuming(false);
+    }
+  };
   const targetMinutes = day ? day.targetMinutes : REQUIRED_SHIFT_MINUTES;
   const workedMinutes = day ? day.workedMinutes : (employee.totalMinutes || 0);
   const shiftProgressPercent = day
@@ -632,6 +656,19 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     <span>Add Manual Time</span>
                   </button>
 
+                  {/* HR Resume Shift: reopen today's day after any clock-out */}
+                  {canHrResume && (
+                    <button
+                      type="button"
+                      onClick={() => { setResumeOpen(o => !o); setResumeMsg(null); }}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-200 border border-emerald-500/30 px-3.5 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95 shadow-sm"
+                      title="Reopen today's working day after a clock-out"
+                    >
+                      <RefreshIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span>Resume Shift</span>
+                    </button>
+                  )}
+
                   {/* Screenshots Quick Button */}
                   <button
                     type="button"
@@ -690,6 +727,56 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   )}
                 </div>
               </div>
+
+              {resumeOpen && canHrResume && (
+                <div className="mt-4 rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-3.5 py-3 text-xs text-emerald-100 space-y-2.5">
+                  <div>
+                    <strong className="font-semibold">Resume {employee.employeeName}&apos;s shift?</strong>{' '}
+                    The clock-out at {day?.checkedOutTime || 'today'} is cancelled (kept in the audit log) and today counts again from now.
+                  </div>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={resumeCredit}
+                      onChange={(e) => setResumeCredit(e.target.checked)}
+                    />
+                    <span>
+                      They were working the whole time: count the time since {day?.checkedOutTime || 'the clock-out'} as present
+                      (entered by HR). Untick if they really were away.
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    value={resumeReason}
+                    onChange={(e) => setResumeReason(e.target.value)}
+                    placeholder="Reason (optional), e.g. End shift pressed by mistake"
+                    className="w-full rounded-lg bg-black/20 border border-white/10 px-2.5 py-1.5 text-xs text-white placeholder:text-white/40"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={resuming}
+                      onClick={handleResumeShift}
+                      className="rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 px-3 py-1.5 text-xs font-bold text-slate-950 cursor-pointer"
+                    >
+                      {resuming ? 'Resuming…' : 'Resume shift'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setResumeOpen(false)}
+                      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-white/5 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {resumeMsg && (
+                <div className={`mt-3 rounded-xl px-3.5 py-2 text-xs border ${resumeMsg.ok ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-200' : 'bg-rose-500/10 border-rose-500/25 text-rose-300'}`}>
+                  {resumeMsg.text}
+                </div>
+              )}
 
               {/* Policy Warning Callout if Late */}
               {isLate && (

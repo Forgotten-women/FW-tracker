@@ -273,6 +273,12 @@ router.post('/clock-out', requireDevice, async (req, res) => {
   const nowMs = T.now();
   const dateKey = T.dateKey(nowMs);
 
+  // Refused on arrival or before the shift, like the laptop's End shift.
+  const refusal = await A.selfClockOutRefusal(employeeId, nowMs);
+  if (refusal) {
+    return res.status(409).json({ status: 'ERROR', code: refusal.reason, message: refusal.message });
+  }
+
   // The same clock-out the laptop's End shift and the automatic 20:00
   // clock-out use (attendance.clockOut): ends any open break, marks the day
   // over everywhere. Clocking out twice is a no-op.
@@ -601,6 +607,39 @@ router.post('/corrections/:id/review',
 router.post('/corrections/:id/decide',
   requireUserOrAdminKey('attendance.correction.review'),
   handleCorrectionDecision);
+
+// POST /api/attendance/employee/:employeeId/resume - HR reopens today's
+// working day after any clock-out (End shift, phone, HR or automatic).
+// creditGap: they were working all along, so the time since the clock-out
+// counts (see attendance.resumeDay).
+router.post('/employee/:employeeId/resume',
+  requireUserOrAdminKey('attendance.write'),
+  async (req, res) => {
+    const employeeId = req.params.employeeId;
+    const { creditGap = false, reason = '' } = req.body || {};
+    const nowMs = T.now();
+    const actor = req.auth.kind === 'user' ? `user:${req.auth.id}` : (req.auth.actor || 'admin');
+    try {
+      const emp = await db.prepare('SELECT id, name FROM employees WHERE id = ?').get(employeeId);
+      if (!emp) return res.status(404).json({ status: 'ERROR', message: 'Employee not found.' });
+
+      const r = await A.resumeDay(employeeId, { nowMs, actor, byHr: true, creditGap: Boolean(creditGap) });
+      if (!r.ok) return res.status(409).json({ status: 'ERROR', code: r.reason, message: r.message });
+
+      const note = String(reason || '').trim();
+      const details = `HR resumed the shift (clock-out at ${T.displayTime(r.voidedClockOutAt)} voided`
+        + `${r.creditedFrom ? `; present since ${T.displayTime(r.creditedFrom)}` : ''})${note ? `: ${note}` : ''}`;
+      await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+        .run(nowMs, 'SHIFT_RESUMED', employeeId, emp.name, details);
+      events.broadcast('PRESENCE_UPDATED', { employeeId });
+
+      const day = await A.deriveDay(employeeId, r.dateKey, nowMs);
+      res.json({ status: 'SUCCESS', message: 'Shift resumed.', today: A.present(day) });
+    } catch (err) {
+      console.error('[attendance/resume] error:', err);
+      res.status(500).json({ status: 'ERROR', message: err.message });
+    }
+  });
 
 // POST /api/attendance/employee/:employeeId/adjust - direct HR manual adjustment.
 router.post('/employee/:employeeId/adjust',

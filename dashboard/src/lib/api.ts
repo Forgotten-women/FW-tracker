@@ -390,6 +390,16 @@ export const api = {
       },
     ),
 
+  /** HR reopens today's working day after any clock-out. creditGap counts the time since the clock-out. */
+  resumeEmployeeShift: (employeeId: string, creditGap: boolean, reason?: string) =>
+    request<{ status: string; message: string }>(
+      `/api/attendance/employee/${encodeURIComponent(employeeId)}/resume`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ creditGap, reason }),
+      },
+    ),
+
   warningBoard: (date?: string) =>
     request<WarningBoardSummary>(
       `/api/warnings/board${date ? `?date=${encodeURIComponent(date)}` : ''}`,

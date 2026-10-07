@@ -337,3 +337,35 @@ test('before the shift starts a verified laptop is BEFORE_SHIFT, not COUNTED', a
     clock = saved;
   }
 });
+
+test('a mistaken End shift can be resumed the same day; an automatic clock-out cannot', async () => {
+  const p = await shared();
+  const saved = clock;
+  try {
+    clock = Date.UTC(2026, 8, 25, 8, 30, 0);             // Fri 25 Sep, 13:30 PKT
+    await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.48' });
+    const out = await json('POST', '/api/desktop/checkout', { headers: p.laptop });
+    assert.equal(out.status, 200);
+    let hb = await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.48' });
+    assert.equal(hb.body.today.day.checkedOut, true);
+    assert.equal(hb.body.today.day.canResume, true);
+
+    clock += 5 * 60000;
+    const r = await json('POST', '/api/desktop/resume', { headers: p.laptop });
+    assert.equal(r.status, 200);
+    hb = await heartbeat(p.laptop, { activeSeconds: 60, idleSeconds: 0, localIp: '192.168.18.48' });
+    assert.equal(hb.body.workstationStatus, 'ACTIVE');
+    assert.equal(hb.body.today.day.checkedOut, false);
+
+    // Nothing to resume now.
+    assert.equal((await json('POST', '/api/desktop/resume', { headers: p.laptop })).status, 409);
+
+    // The automatic clock-out (20:00) cannot be resumed by the employee.
+    clock = Date.UTC(2026, 8, 25, 15, 1, 0);
+    await require('../src/jobs').autoClockOut(clock);
+    const late = await json('POST', '/api/desktop/resume', { headers: p.laptop });
+    assert.equal(late.status, 409);
+  } finally {
+    clock = saved;
+  }
+});

@@ -1083,6 +1083,25 @@ router.get('/debug/heartbeats/:deviceId', requireAdmin, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/desktop/resume
+// Undo a mistaken End shift the same day (see attendance.resumeDay).
+// ---------------------------------------------------------------------------
+router.post('/resume', requireDevice, async (req, res) => {
+  const { employeeId, employeeName, deviceId } = req.auth;
+  const nowMs = T.now();
+  try {
+    const r = await attendance.resumeDay(employeeId, { nowMs, actor: `device:${deviceId}` });
+    if (!r.ok) return res.status(409).json({ status: 'ERROR', code: r.reason, message: r.message });
+    await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+      .run(nowMs, 'SHIFT_RESUMED', employeeId, employeeName, 'Employee resumed the shift from the Desktop Agent');
+    res.json({ status: 'SUCCESS', message: 'Shift resumed.', resumedAt: T.displayTime(nowMs) });
+  } catch (err) {
+    console.error('[desktop/resume] error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/desktop/checkout
 // ---------------------------------------------------------------------------
 router.post('/checkout', requireDevice, async (req, res) => {
@@ -1091,6 +1110,15 @@ router.post('/checkout', requireDevice, async (req, res) => {
   const dateKey = T.dateKey(nowMs);
 
   try {
+    // An End shift on arrival or before the shift (people pressed it every
+    // morning on arriving) is refused rather than ending the day.
+    const refusal = await attendance.selfClockOutRefusal(employeeId, nowMs);
+    if (refusal) {
+      await db.prepare('INSERT INTO movements (at, type, employee_id, employee_name, details) VALUES (?,?,?,?,?)')
+        .run(nowMs, 'END_SHIFT_REFUSED', employeeId, employeeName, `End shift from the Desktop Agent refused: ${refusal.message}`);
+      return res.status(409).json({ status: 'ERROR', code: refusal.reason, message: refusal.message });
+    }
+
     const sessionRow = await db.prepare(
       'SELECT id FROM workstation_sessions WHERE device_id = ? AND session_date = ?'
     ).get(deviceId, dateKey);
