@@ -260,7 +260,7 @@ class _UpdateDialogState extends State<UpdateDialog> with WidgetsBindingObserver
       _iosNotice = !ok
           ? 'Could not open $appName.'
           : install
-              ? '$appName is installing $_versionLabel. Wait for it to finish, then open Office Tracker again.'
+              ? '$appName is installing $_versionLabel. Wait for it to finish, then open FWSync again.'
               : 'Source added to $appName. New versions now show up there by themselves.';
     });
   }
@@ -386,7 +386,7 @@ class _UpdateDialogState extends State<UpdateDialog> with WidgetsBindingObserver
     return [
       if (_phase == _Phase.needsPermission) ...[
         _message(
-          'Android needs your permission before Office Tracker can install updates. '
+          'Android needs your permission before FWSync can install updates. '
           'In the settings screen, turn on "Allow from this source" (under Install '
           'unknown apps), then come back here.',
           tone: AppColors.amber,
@@ -452,7 +452,7 @@ class _UpdateDialogState extends State<UpdateDialog> with WidgetsBindingObserver
       _panel(
         title: 'HOW UPDATING WORKS ON IPHONE',
         child: Text(
-          'Office Tracker is installed through SideStore or AltStore, which sign it '
+          'FWSync is installed through SideStore or AltStore, which sign it '
           'with a free Apple ID. An iPhone app cannot replace itself, so that app '
           'downloads $_versionLabel and installs it over this one.\n\n'
           'With a free Apple ID the app must be refreshed every 7 days or it stops '
@@ -489,7 +489,7 @@ class _UpdateDialogState extends State<UpdateDialog> with WidgetsBindingObserver
             '1. Install SideStore from sidestore.io (or AltStore from altstore.io) '
             'by following its setup guide.\n'
             '2. In SideStore, open Sources, tap +, and add:\n$_sourceUrl\n'
-            '3. Install Office Tracker from that source. New versions then show up '
+            '3. Install FWSync from that source. New versions then show up '
             'there by themselves.',
             style: TextStyle(fontSize: 12.5, color: AppColors.textPrimary, height: 1.5),
           ),

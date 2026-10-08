@@ -133,7 +133,7 @@ class NotificationService {
         styleInformation: BigTextStyleInformation(
           body,
           contentTitle: title,
-          summaryText: category != null ? 'HR: $category' : 'Office Tracker',
+          summaryText: category != null ? 'HR: $category' : 'FWSync',
         ),
       );
 

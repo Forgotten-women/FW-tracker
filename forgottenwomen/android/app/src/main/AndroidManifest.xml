@@ -39,7 +39,7 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
 
     <application
-        android:label="Office Tracker"
+        android:label="FWSync"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

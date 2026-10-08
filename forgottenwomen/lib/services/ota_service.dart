@@ -110,7 +110,7 @@ class OtaService {
       return await PackageInfo.fromPlatform();
     } catch (_) {
       return PackageInfo(
-        appName: 'Office Tracker',
+        appName: 'FWSync',
         packageName: 'com.rethink.officetracker',
         version: '1.0.1',
         buildNumber: '2',

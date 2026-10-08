@@ -99,7 +99,7 @@ jobs:
         continue-on-error: true
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
-          name: Office Tracker ${{ steps.vars.outputs.tag }}
+          name: FWSync ${{ steps.vars.outputs.tag }}
           make_latest: 'false'
           files: forgottenwomen/build/ios/iphoneos/OfficeTracker.ipa
         env:

@@ -174,7 +174,7 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
         if (result.verified) {
           if (service is AndroidServiceInstance) {
             service.setForegroundNotificationInfo(
-              title: 'Office Tracker Active',
+              title: 'FWSync Active',
               content: '🟢 In Office · Logged ${result.attendance.timeWorkedFormatted}',
             );
           }
@@ -194,7 +194,7 @@ Future<void> onBackgroundStart(ServiceInstance service) async {
           await prefs.setBool('was_in_office', false);
           if (service is AndroidServiceInstance) {
             service.setForegroundNotificationInfo(
-              title: 'Office Tracker Active',
+              title: 'FWSync Active',
               content: 'Monitoring office presence in background',
             );
           }
@@ -316,7 +316,7 @@ class PresenceService {
           autoStartOnBoot: true,
           isForegroundMode: withinHours,
           notificationChannelId: 'office_tracker_presence',
-          initialNotificationTitle: 'Office Tracker Active',
+          initialNotificationTitle: 'FWSync Active',
           initialNotificationContent: 'Monitoring office presence in background',
           foregroundServiceNotificationId: 8800,
         ),

@@ -144,7 +144,7 @@ void main() {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
       PackageInfo.setMockInitialValues(
-        appName: 'Office Tracker',
+        appName: 'FWSync',
         packageName: 'com.rethink.officetracker',
         version: '1.0.29',
         buildNumber: '12',
@@ -217,7 +217,7 @@ void main() {
 
     test('up to date when GitHub has nothing newer than the installed version', () async {
       PackageInfo.setMockInitialValues(
-        appName: 'Office Tracker',
+        appName: 'FWSync',
         packageName: 'com.rethink.officetracker',
         version: '1.0.30',
         buildNumber: '13',

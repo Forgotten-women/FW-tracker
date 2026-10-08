@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Forgottenwomen</string>
+	<string>FWSync</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>forgottenwomen</string>
+	<string>FWSync</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -72,11 +72,11 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Office Tracker checks which Wi-Fi network you are connected to, so your time at the office can be recorded for payroll.</string>
+	<string>FWSync checks which Wi-Fi network you are connected to, so your time at the office can be recorded for payroll.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Office Tracker needs background location to record when you arrive at and leave the office. It does not track where you are at other times.</string>
+	<string>FWSync needs background location to record when you arrive at and leave the office. It does not track where you are at other times.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Office Tracker needs background location to record when you arrive at and leave the office. It does not track where you are at other times.</string>
+	<string>FWSync needs background location to record when you arrive at and leave the office. It does not track where you are at other times.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

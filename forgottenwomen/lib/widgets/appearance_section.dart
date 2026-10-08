@@ -26,7 +26,7 @@ class AppearanceSection extends StatelessWidget {
                   Text('Theme', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
                   const SizedBox(height: 2),
                   Text(
-                    'Choose how Office Tracker looks on this device.',
+                    'Choose how FWSync looks on this device.',
                     style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 14),

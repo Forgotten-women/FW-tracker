@@ -101,7 +101,7 @@ class _OfficeTrackerAppState extends State<OfficeTrackerApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Office Tracker',
+      title: 'FWSync',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       home: switch (_enrolled) {

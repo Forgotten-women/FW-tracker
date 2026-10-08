@@ -1,4 +1,4 @@
-name: Build & Release Office Tracker Mobile App
+name: Build & Release FWSync Mobile App
 
 on:
   push:
@@ -146,7 +146,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
-          name: Office Tracker ${{ steps.vars.outputs.tag }}
+          name: FWSync ${{ steps.vars.outputs.tag }}
           generate_release_notes: true
           draft: false
           prerelease: false
