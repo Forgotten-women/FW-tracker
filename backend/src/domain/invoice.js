@@ -131,11 +131,11 @@ async function attendanceSummary(employeeId, fromDate, toDate) {
       SELECT
         COUNT(*) FILTER (WHERE is_working_day = 1 AND attendance_status IN ('PRESENT','LATE','RECOVERED')) AS present,
         COALESCE(SUM(worked_minutes), 0) AS worked,
-        COALESCE(SUM(CASE WHEN is_working_day = 1 THEN GREATEST(0, worked_minutes - ?) ELSE worked_minutes END), 0) AS extra,
+        0 AS extra, -- Company policy: extra time is not counted or compensated
         COALESCE(SUM(daily_deficit_minutes), 0) AS shortfall
       FROM attendance_daily_summary
       WHERE employee_id = ? AND date_key >= ? AND date_key <= ?
-    `).get(dayEquivalent, employeeId, fromDate, toDate),
+    `).get(employeeId, fromDate, toDate),
     db.prepare(`
       SELECT r.start_date, r.end_date, r.day_portion, r.leave_type_id,
              COALESCE(r.is_paid, t.is_paid) AS is_paid -- a request can override its type
@@ -458,7 +458,7 @@ async function buildStatementUncached({ periodId, employeeId, maskBank = false, 
     sick_leave_days: fmtDays(a.sickLeaveDays),
     unauthorised_days: fmtDays(a.unauthorisedDays),
     worked_hours: fmtHours(a.workedMinutes),
-    extra_hours: fmtHours(a.extraMinutes),
+    extra_hours: '-', // Company policy: extra time is not counted
     shortfall_hours: fmtHours(a.shortfallMinutes),
     unpaid_leave_deduction: fmtMoney(c.unpaidLeave),
     shortfall_deduction: fmtMoney(c.shortfall),

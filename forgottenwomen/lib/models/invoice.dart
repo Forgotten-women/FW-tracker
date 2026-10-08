@@ -188,7 +188,7 @@ class InvoiceFields {
     'monthly_salary', 'addition_amount', 'overtime_amount', 'gross_earnings', 'total_deductions',
     'scheduled_days', 'present_days', 'paid_leave_days', 'unpaid_leave_days', 'sick_leave_days',
     'unauthorised_days',
-    'worked_hours', 'extra_hours', 'shortfall_hours',
+    'worked_hours', 'shortfall_hours',
     'unpaid_leave_deduction', 'shortfall_deduction', 'adjustment_amount',
     'net_salary',
     'bank_name', 'account_title', 'account_number', 'iban',
@@ -256,7 +256,6 @@ class InvoiceFields {
         ('Sick Leave', or('sick_leave_days')),
         ('Unauthorised', or('unauthorised_days')),
         ('Hours Worked', or('worked_hours')),
-        ('Extra Hours', or('extra_hours')),
         ('Shortfall Hours', or('shortfall_hours')),
       ];
 

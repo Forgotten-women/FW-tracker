@@ -621,7 +621,10 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   // 10 minutes grace allowed: arrivals up to 11:10 are on time (0 late minutes, 0 deficit).
   // Arrivals from 11:11 onwards are late, and the deficit is measured beyond grace
   // (e.g., at 11:11, deficit is 1 min; at 11:12, deficit is 2 mins).
-  const isLateArrival = firstIn > s.latestOnTimeAt;
+  // HR can excuse a day's lateness (a LATE_EXCUSED event, e.g. its own records
+  // show the person on time): the arrival time stays as recorded, nothing is late.
+  const lateExcused = manual.some(e => e.event_type === 'LATE_EXCUSED');
+  const isLateArrival = firstIn > s.latestOnTimeAt && !lateExcused;
   const graceEndMs = s.scheduledStartAt + (s.graceMinutes * MIN);
   const lateMinutes = isLateArrival
     ? Math.max(1, Math.round((firstIn - graceEndMs) / MIN))
@@ -737,6 +740,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     approvedAdjustmentMinutes,
     dailyDeficitMinutes,
     attendanceStatus,
+    lateExcused,
     onBreak: !!openBreak,
     breakDueBackAt: openBreak ? openBreak.started_at + openBreak.permitted_minutes * MIN : null,
     needsReview,

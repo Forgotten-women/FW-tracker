@@ -193,7 +193,9 @@ export function InvoiceSheet({ invoice }: { invoice: InvoiceStatement }) {
             <h4 className="inv-card-title">Salary Summary</h4>
             <Row label="Monthly Salary" value={f.monthly_salary} />
             <Row label="Bonus / Addition" value={f.addition_amount} />
-            <Row label="Overtime" value={f.overtime_amount} />
+            {parseFloat(String(f.overtime_amount || '0').replace(/,/g, '')) > 0 && (
+              <Row label="Overtime" value={f.overtime_amount} />
+            )}
             <Row label="Gross Earnings" value={f.gross_earnings} strong />
             <Row label="Total Deductions" value={f.total_deductions} />
           </div>
@@ -206,7 +208,6 @@ export function InvoiceSheet({ invoice }: { invoice: InvoiceStatement }) {
             <Row label="Sick Leave" value={f.sick_leave_days} />
             <Row label="Unauthorised" value={f.unauthorised_days} />
             <Row label="Hours Worked" value={f.worked_hours} />
-            <Row label="Extra Hours" value={f.extra_hours} />
             <Row label="Shortfall Hours" value={f.shortfall_hours} />
           </div>
         </div>

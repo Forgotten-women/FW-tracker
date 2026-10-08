@@ -143,3 +143,20 @@ test('a suspected no-show clears once approved leave covers the day', async () =
   const left = await db.prepare("SELECT COUNT(*) AS n FROM absence_records WHERE employee_id = ? AND status = 'PENDING_REVIEW'").get(emp);
   assert.equal(Number(left.n), 0);
 });
+
+test('HR-excused lateness keeps the arrival time but nothing is late', async () => {
+  const emp = await makeEmployee('emp_late_excused');
+  const day = '2026-09-14';
+  await hrDay(emp, day, [['11:50', '19:00']]);
+  const before = await A.deriveDay(emp, day, at('23:00', day));
+  assert.equal(before.attendanceStatus, 'LATE');
+  await db.prepare(`INSERT INTO attendance_events (id, employee_id, date_key, occurred_at, event_type, source, created_at, created_by)
+    VALUES ('ae_excuse_1', ?, ?, ?, 'LATE_EXCUSED', 'HR_RECORDS', ?, 'test')`).run(emp, day, at('11:00', day), T.now());
+  const d = await A.deriveDay(emp, day, at('23:00', day));
+  assert.equal(d.attendanceStatus, 'PRESENT');
+  assert.equal(d.lateMinutes, 0);
+  assert.equal(d.isLateOccurrence, false);
+  assert.equal(d.lateExcused, true);
+  assert.equal(T.displayTime(d.firstInAt), T.displayTime(at('11:50', day)), 'arrival unchanged');
+  assert.equal(d.dailyDeficitMinutes, 0);
+});
