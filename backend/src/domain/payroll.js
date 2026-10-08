@@ -1091,9 +1091,27 @@ function presentSheetPeriod(period) {
 
 // In-memory caches for payroll calculation sheets
 const prepMemoryCache = new Map();
-const PREP_CACHE_TTL_MS = 20 * 1000;
+const PREP_CACHE_TTL_MS = 60 * 1000;
 const reviewMemoryCache = new Map();
-const REVIEW_CACHE_TTL_MS = 20 * 1000;
+const REVIEW_CACHE_TTL_MS = 60 * 1000;
+const syncingPeriods = new Set();
+
+function scheduleBackgroundDeductionsSync(periodId) {
+  if (syncingPeriods.has(periodId)) return;
+  syncingPeriods.add(periodId);
+  setImmediate(async () => {
+    try {
+      const res = await generatePeriodDeductions({ periodId, actor: 'system' });
+      if (res && res.createdCount > 0) {
+        invalidatePayrollCache(null, periodId);
+      }
+    } catch (err) {
+      console.warn('[payroll] lightweight background sync warning:', err.message);
+    } finally {
+      syncingPeriods.delete(periodId);
+    }
+  });
+}
 
 /**
  * Builds the preparation sheet for a period.
@@ -2003,6 +2021,9 @@ async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis
   const rateBasis = basis || await getDailyRateBasis();
   const memKey = `${periodId}:${rateBasis}:${visibleEmployeeIds ? [...visibleEmployeeIds].sort().join(',') : 'all'}`;
 
+  const isFinalPeriod = isFinal(period.status);
+  const cacheTtl = isFinalPeriod ? 60 * 60 * 1000 : REVIEW_CACHE_TTL_MS;
+
   if (!forceSync) {
     const memHit = reviewMemoryCache.get(memKey);
     if (memHit && Date.now() < memHit.expiresAt) {
@@ -2011,16 +2032,21 @@ async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis
   }
 
   // Automatic realtime deduction sync: ensure deductions are calculated and up-to-date
-  if (!isFinal(period.status)) {
-    try {
-      await generatePeriodDeductions({ periodId: period.id, actor: 'system' });
-      if (!period.generated_at) {
-        const nowMs = T.now();
-        await db.prepare("UPDATE payroll_periods SET generated_at = ? WHERE id = ?").run(nowMs, period.id);
-        period.generated_at = nowMs;
+  if (!isFinalPeriod) {
+    if (forceSync || !period.generated_at) {
+      try {
+        await generatePeriodDeductions({ periodId: period.id, actor: 'system' });
+        if (!period.generated_at) {
+          const nowMs = T.now();
+          await db.prepare("UPDATE payroll_periods SET generated_at = ? WHERE id = ?").run(nowMs, period.id);
+          period.generated_at = nowMs;
+        }
+      } catch (err) {
+        console.warn('[payroll] auto-sync deductions warning:', err.message);
       }
-    } catch (err) {
-      console.warn('[payroll] auto-sync deductions non-blocking warning:', err.message);
+    } else {
+      // Lightweight non-blocking background sync: returns immediately without hanging HTTP response
+      scheduleBackgroundDeductionsSync(period.id);
     }
   }
 
@@ -2113,7 +2139,7 @@ async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis
         + 'decided explicitly. Nothing is paid until the run is approved.',
   };
 
-  reviewMemoryCache.set(memKey, { data: result, expiresAt: Date.now() + REVIEW_CACHE_TTL_MS });
+  reviewMemoryCache.set(memKey, { data: result, expiresAt: Date.now() + cacheTtl });
   return result;
 }
 
@@ -3048,6 +3074,7 @@ module.exports = {
   ensureCurrentPeriod, generateRun, runPayrollAutomation,
   payrollPreflight, reviewPeriod, approveRun, markPaid,
   listPayslips, employeePayslip, latestPayslipFor,
+  runMembers, writePayslip,
   // For invoices (domain/invoice.js)
   employeePosition,
   payslipIntegrityOk: r => payslipHash(r) === r.content_hash,
