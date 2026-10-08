@@ -442,8 +442,9 @@ router.get('/periods/:id/preflight', requirePermission('payroll.read'), async (r
 router.get('/periods/:id/review', requirePermission('payroll.read'), async (req, res) => {
   try {
     const basis = req.query.basis || null;
+    const forceSync = req.query.forceSync === 'true' || req.query.sync === '1';
     const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
-    const sheet = await PR.reviewPeriod(req.params.id, { visibleEmployeeIds: visible, basis });
+    const sheet = await PR.reviewPeriod(req.params.id, { visibleEmployeeIds: visible, basis, forceSync });
     res.json({
       status: 'SUCCESS',
       ...sheet,
@@ -559,6 +560,7 @@ router.post('/adjustments/:id/decide', requirePermission('payroll.approve'), asy
       decision: req.body?.decision,
       approvedDays: req.body?.approvedDays ?? null,
       approvedAmount: req.body?.approvedAmount ?? null,
+      deductFromPaidLeave: req.body?.deductFromPaidLeave === true,
       notes: req.body?.notes,
       actor: getActor(req),
     });

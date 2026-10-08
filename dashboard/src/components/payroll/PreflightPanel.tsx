@@ -117,12 +117,22 @@ export function PreflightPanel({
       subtitle="Anything that would make approving this run wrong right now"
       icon={<ShieldCheckIcon className="h-5 w-5" />}
       actions={
-        checks.length > 0 ? (
-          <>
-            <Badge tone={blocking > 0 ? 'danger' : 'muted'} size="sm">{blocking} blocking</Badge>
-            <Badge tone={warnings > 0 ? 'warn' : 'muted'} size="sm">{warnings} warning{warnings === 1 ? '' : 's'}</Badge>
-          </>
-        ) : undefined
+        <div className="flex flex-wrap items-center gap-2">
+          {blocking > 0 && <Badge tone="danger" size="sm">{blocking} blocking</Badge>}
+          {warnings > 0 && <Badge tone="warn" size="sm">{warnings} warning{warnings === 1 ? '' : 's'}</Badge>}
+          {checks.length === 0 && <Badge tone="ok" size="sm">All clear</Badge>}
+          {onRegenerate && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onRegenerate}
+              disabled={regenerating}
+              icon={<RefreshIcon className={`h-3.5 w-3.5 ${regenerating ? 'animate-spin' : ''}`} />}
+            >
+              {regenerating ? 'Recalculating…' : 'Generate / Sync Deductions'}
+            </Button>
+          )}
+        </div>
       }
     >
       {notice && (

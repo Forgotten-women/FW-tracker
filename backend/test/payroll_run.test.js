@@ -780,7 +780,7 @@ test('an absence confirmed as unpaid while the run is in review joins that run a
 // Processing fee as a percentage of gross (May 2026, manual period)
 // ---------------------------------------------------------------------------
 
-test('the processing fee is a percentage of each employee\'s gross, kept current until decided', async () => {
+test('the processing fee is a period-level HR metric, never deducted from employee salaries', async () => {
   const full = await makeEmployee('emp_fee_full', '2024-12-02', { salary: 3000 });
   const p = await PR.createPeriod({
     name: 'May 2026 (fee)', startDate: '2026-05-01', endDate: '2026-05-31', cutoffDate: '2026-05-25',
@@ -791,25 +791,19 @@ test('the processing fee is a percentage of each employee\'s gross, kept current
     name: 'Bad', startDate: '2026-06-01', endDate: '2026-06-30', processingFee: 150, actor: 'user:hr',
   }), /percentage between 0 and 100/);
 
+  // Processing fee must NOT exist in employee payroll adjustments
   const feeLine = async emp => (await linesFor(p.id, emp)).find(l => l.adjustment_type === 'PROCESSING_FEE');
-  assert.equal(Number((await feeLine(full)).calculated_amount), -31.8, '1.06% of 3000');
-  assert.equal((await feeLine(full)).review_level, 'ROUTINE');
+  assert.equal(await feeLine(full), undefined, 'processing fee is not an employee deduction');
 
-  // Joined after the period was created, part-way through: fee on their pro-rated gross.
-  const starter = await makeEmployee('emp_fee_starter', '2026-05-18', { salary: 2600 });
-  assert.equal(await feeLine(starter), undefined);
-  // A salary change before the run is generated.
-  await PR.setSalary({ employeeId: full, amount: 4000, effectiveFrom: '2026-05-01', reason: 'Raise', actor: 'user:hr' });
-
-  await PR.generatePeriodDeductions({ periodId: p.id, actor: 'user:hr' });
-  assert.equal(Number((await feeLine(full)).calculated_amount), -42.4, 'refreshed to 1.06% of 4000');
-  const basis = await PR.preparePeriod(p.id);
-  const starterRow = basis.employees.find(e => e.employeeId === starter);
-  assert.equal(Number((await feeLine(starter)).calculated_amount), -Math.round(starterRow.grossBaseline * 1.06) / 100);
-  assert.match((await feeLine(starter)).explanation, /1\.06% of gross pay/);
+  // Instead, it is computed at the period level for HR
+  const review = await PR.reviewPeriod(p.id);
+  const expectedFee = Math.round((review.totals.gross * 1.06)) / 100;
+  assert.equal(review.totals.processingFee, expectedFee, '1.06% of gross calculated for HR');
+  assert.equal(review.totals.net, review.totals.gross - review.totals.deductions, 'employee net pay is untouched by processing fee');
+  assert.equal(review.totals.totalCompanyCost, Math.round((review.totals.net + expectedFee) * 100) / 100, 'company total outflow includes processing fee');
 });
 
-test('an automatic month carries the processing fee forward from the previous month', async () => {
+test('an automatic month carries the processing fee percentage forward from the previous month', async () => {
   await tick('2026-06-03');
   const june = await periodStarting('2026-06-01');
   assert.equal(june.auto_created, 1);
@@ -817,20 +811,22 @@ test('an automatic month carries the processing fee forward from the previous mo
   assert.equal(june.processing_fee_basis, 'PERCENT');
   assert.equal(june.processing_fee_type, 'DEDUCTION');
   const line = (await linesFor(june.id, 'emp_fee_full')).find(l => l.adjustment_type === 'PROCESSING_FEE');
-  assert.equal(Number(line.calculated_amount), -42.4, '1.06% of the 4000 salary');
+  assert.equal(line, undefined, 'no processing fee deduction on employee');
 });
 
 test('HR can change or remove the processing fee until the run is final', async () => {
   const june = await periodStarting('2026-06-01');
-  const feeOf = async () => (await linesFor(june.id, 'emp_fee_full')).find(l => l.adjustment_type === 'PROCESSING_FEE');
-
   const r = await PR.updatePeriodProcessingFee({ periodId: june.id, processingFee: 2, processingFeeType: 'DEDUCTION', actor: 'user:hr' });
   assert.equal(r.processingFeeBasis, 'PERCENT');
-  assert.equal(Number((await feeOf()).calculated_amount), -80, '2% of 4000');
+
+  const review = await PR.reviewPeriod(june.id);
+  const expectedJuneFee = Math.round((review.totals.gross * 2)) / 100;
+  assert.equal(review.totals.processingFee, expectedJuneFee, '2% of gross calculated for HR');
 
   await assert.rejects(PR.updatePeriodProcessingFee({ periodId: june.id, processingFee: 101, actor: 'user:hr' }), /between 0 and 100/);
 
   const off = await PR.updatePeriodProcessingFee({ periodId: june.id, processingFee: 0, actor: 'user:hr' });
-  assert.ok(off.removed >= 1);
-  assert.equal(await feeOf(), undefined, 'undecided fee lines are withdrawn');
+  assert.ok(off);
+  const reviewOff = await PR.reviewPeriod(june.id);
+  assert.equal(reviewOff.totals.processingFee, 0, '0 fee calculated when removed');
 });

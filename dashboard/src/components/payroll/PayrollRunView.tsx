@@ -87,6 +87,7 @@ export function PayrollRunView({
 
   const [regenerating, setRegenerating] = useState(false);
   const [regenNotice, setRegenNotice] = useState<{ tone: 'ok' | 'danger'; text: string } | null>(null);
+  const [forceSyncNext, setForceSyncNext] = useState(false);
 
   const reload = () => setReloadTick((t) => t + 1);
 
@@ -94,8 +95,9 @@ export function PayrollRunView({
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.payrollReview(period.id, rateBasis);
+        const res = await api.payrollReview(period.id, rateBasis, forceSyncNext);
         if (cancelled) return;
+        setForceSyncNext(false);
         setSheet(res);
         setLoadError('');
       } catch (e) {
@@ -106,7 +108,7 @@ export function PayrollRunView({
     return () => {
       cancelled = true;
     };
-  }, [period.id, rateBasis, refreshKey, reloadTick]);
+  }, [period.id, rateBasis, refreshKey, reloadTick, forceSyncNext]);
 
   // The review sheet is a heavy read, so it follows payroll events only, not
   // every presence update on the stream: this run being published, and HR's
@@ -257,8 +259,9 @@ export function PayrollRunView({
         tone: 'ok',
         text: r.createdCount > 0
           ? `${r.createdCount} new line${r.createdCount === 1 ? '' : 's'} added to this run: ${r.classification.routine} routine, ${r.classification.attention} needing attention in total.`
-          : 'Nothing new to add: every deduction is already in this run.',
+          : 'Deductions calculated and in sync with latest attendance data.',
       });
+      setForceSyncNext(true);
       reload();
       onChanged();
     } catch (e) {
@@ -288,6 +291,8 @@ export function PayrollRunView({
         currency={currency}
         rate={rate}
         today={today}
+        onSyncDeductions={!final ? regenerate : undefined}
+        syncingDeductions={regenerating}
       />
 
       {loadError && (
@@ -322,7 +327,7 @@ export function PayrollRunView({
       {!final && (
         <PreflightPanel
           checks={sheet.preflight}
-          onRegenerate={status === 'IN_REVIEW' ? regenerate : undefined}
+          onRegenerate={regenerate}
           regenerating={regenerating}
           notice={regenNotice}
         />

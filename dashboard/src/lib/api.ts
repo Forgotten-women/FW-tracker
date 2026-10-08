@@ -792,10 +792,15 @@ export const api = {
   // Refusals throw ApiError; its `body` is a PayrollRunErrorBody.
 
   /** Read-only: rows, ROUTINE/ATTENTION lines, employee flags, totals and the preflight. */
-  payrollReview: (periodId: string, basis?: string) =>
-    request<{ status: string } & PayrollReviewSheet>(
-      `/api/payroll/periods/${encodeURIComponent(periodId)}/review${basis ? `?basis=${encodeURIComponent(basis)}` : ''}`,
-    ),
+  payrollReview: (periodId: string, basis?: string, forceSync?: boolean) => {
+    const params = new URLSearchParams();
+    if (basis) params.set('basis', basis);
+    if (forceSync) params.set('forceSync', 'true');
+    const qs = params.toString();
+    return request<{ status: string } & PayrollReviewSheet>(
+      `/api/payroll/periods/${encodeURIComponent(periodId)}/review${qs ? `?${qs}` : ''}`,
+    );
+  },
 
   /** Read-only: what would make approving this run wrong right now. */
   payrollPreflight: (periodId: string) =>

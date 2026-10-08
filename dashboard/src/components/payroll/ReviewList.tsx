@@ -49,6 +49,10 @@ export function lineDomId(lineId: string): string {
 }
 
 export function toDecidable(e: PayrollReviewEmployee, l: PayrollReviewLine): DecidableLine {
+  const availablePaidLeave =
+    e.leave && !('blocked' in e.leave && e.leave.blocked) && typeof e.leave.available === 'number'
+      ? e.leave.available
+      : null;
   return {
     id: l.id,
     employeeId: e.employeeId,
@@ -59,6 +63,7 @@ export function toDecidable(e: PayrollReviewEmployee, l: PayrollReviewLine): Dec
     explanation: l.explanation,
     reviewReasons: l.reviewReasons,
     currency: e.salary.currency || 'GBP',
+    availablePaidLeave,
   };
 }
 
@@ -96,6 +101,7 @@ export function LineDecisionCard({
   highlighted: boolean;
 }) {
   const d = decision ?? EMPTY_DECISION;
+  const isDeficit = line.type === 'ATTENDANCE_DEFICIT_DAY';
   const fmt = (n: number) => (line.currency ? formatSignedMoney(n, currency, line.currency, rate) : formatPlainAmount(n));
   const problem = decisionProblem(line.calculatedAmount, d);
   const sign = amountSign(line.calculatedAmount);
@@ -114,6 +120,12 @@ export function LineDecisionCard({
   let outcome: ReactNode;
   if (!d.choice) {
     outcome = <span className="text-amber-400">Awaiting your decision</span>;
+  } else if (d.choice === 'DEDUCT_PAID_LEAVE') {
+    outcome = (
+      <span className="text-sky-300">
+        Paid Leave Offset <span className="text-[10px] font-sans text-slate-400">({fmt(0)} cut · 1d balance)</span>
+      </span>
+    );
   } else if (d.choice === 'REJECTED') {
     outcome = <span className="text-rose-400">Rejected: nothing {sign < 0 ? 'deducted' : 'paid'}</span>;
   } else if (d.choice === 'CHANGED') {
@@ -123,6 +135,35 @@ export function LineDecisionCard({
   } else {
     outcome = <span className="text-emerald-400">{fmt(line.calculatedAmount)}</span>;
   }
+
+  const choicesList = isDeficit
+    ? [
+        {
+          choice: 'DEDUCT_PAID_LEAVE' as LineChoice,
+          label: `Deduct from Paid Leaves${line.availablePaidLeave !== null && line.availablePaidLeave !== undefined ? ` (${line.availablePaidLeave}d avail)` : ''}`,
+          icon: <CheckCircleIcon className="h-3.5 w-3.5" />,
+          active: 'border-sky-500/60 bg-sky-500/15 text-sky-300',
+        },
+        {
+          choice: 'APPROVED' as LineChoice,
+          label: 'Deduct as Unpaid Leave',
+          icon: <CheckIcon className="h-3.5 w-3.5" />,
+          active: 'border-amber-500/60 bg-amber-500/15 text-amber-300',
+        },
+        {
+          choice: 'REJECTED' as LineChoice,
+          label: 'Waive Deficit',
+          icon: <XIcon className="h-3.5 w-3.5" />,
+          active: 'border-rose-500/60 bg-rose-500/15 text-rose-300',
+        },
+        {
+          choice: 'CHANGED' as LineChoice,
+          label: 'Different Amount',
+          icon: <PencilIcon className="h-3.5 w-3.5" />,
+          active: 'border-indigo-500/60 bg-indigo-500/15 text-indigo-300',
+        },
+      ]
+    : CHOICES;
 
   const box = highlighted && problem
     ? 'border-rose-500/50 bg-rose-500/5'
@@ -172,7 +213,7 @@ export function LineDecisionCard({
 
       <div className="mt-3 flex flex-col gap-2.5">
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={`Decision for ${lineLabel(line.type)}, ${line.employeeName}`}>
-          {CHOICES.map((c) => (
+          {choicesList.map((c) => (
             <button
               key={c.choice}
               type="button"
@@ -196,6 +237,18 @@ export function LineDecisionCard({
             </button>
           )}
         </div>
+
+        {isDeficit && d.choice === 'DEDUCT_PAID_LEAVE' && (
+          <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
+            🌴 <strong>Paid leave offset:</strong> 1 day will be deducted from employee&apos;s accrued leave balance ({line.availablePaidLeave ?? 0}d currently available). Net salary take-home pay is <strong>not reduced</strong>.
+          </div>
+        )}
+
+        {isDeficit && d.choice === 'APPROVED' && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            ✂️ <strong>Unpaid leave deduction:</strong> 1 day will be deducted from salary ({fmt(line.calculatedAmount)}). This will be reflected as an unpaid deduction on their payslip and invoice.
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
           {d.choice === 'CHANGED' && (

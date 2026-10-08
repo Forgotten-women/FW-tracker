@@ -252,6 +252,7 @@ const UNPAID_TYPES = new Set(['UNPAID_LEAVE_DEDUCTION', 'UNAUTHORISED_ABSENCE_UN
 function categorise(lines) {
   const out = { additions: 0, overtime: 0, unpaidLeave: 0, shortfall: 0, adjustments: 0 };
   for (const l of lines) {
+    if (l.type === 'PROCESSING_FEE') continue; // Processing fee is company/HR internal only; never deduct from employee salary/invoice
     const amt = Number(l.amount) || 0;
     if (amt >= 0) {
       if (l.type === 'OVERTIME') out.overtime += amt;
@@ -261,7 +262,7 @@ function categorise(lines) {
     const d = -amt;
     if (UNPAID_TYPES.has(l.type)) out.unpaidLeave += d;
     else if (l.type === 'ATTENDANCE_DEFICIT_DAY') out.shortfall += d;
-    else out.adjustments += d; // processing fee, manual and other deductions
+    else out.adjustments += d; // manual and other deductions
   }
   for (const k of Object.keys(out)) out[k] = round2(out[k]);
   return out;
@@ -338,7 +339,7 @@ async function draftFigures(period, employeeId, throughDate) {
 
   const standing = a => (a.status === 'APPROVED' ? Number(a.approved_amount) : Number(a.calculated_amount)) || 0;
   const lines = existing
-    .filter(a => a.status !== 'REJECTED')
+    .filter(a => a.status !== 'REJECTED' && a.adjustment_type !== 'PROCESSING_FEE')
     .map(a => ({ type: a.adjustment_type, amount: round2(standing(a)), days: a.approved_days ?? a.calculated_days }));
 
   // What the run would still propose: sources with no adjustment row yet.

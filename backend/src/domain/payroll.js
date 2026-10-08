@@ -987,43 +987,15 @@ const selectProcessingFeeLine = db.prepare(
  * HR has already decided is never touched. Returns the line's id or null.
  */
 async function syncProcessingFeeFor(period, employeeId, basis) {
-  if (isFinal(period.status)) return null;
-  const amount = processingFeeFor(period, basis.grossBaseline);
-  const existing = await selectProcessingFeeLine.get(period.id, employeeId);
-  if (!amount) return existing ? existing.id : null;
-  const explanation = processingFeeExplanation(period, basis.grossBaseline, basis.salary.currency);
-  if (!existing) {
-    const adjId = 'pa_' + crypto.randomBytes(8).toString('hex');
-    await db.prepare(`
-      INSERT INTO payroll_adjustments
-        (id, period_id, employee_id, adjustment_type, calculated_days, calculated_amount,
-         source_reference, explanation, status, created_at, review_level, review_reasons)
-      VALUES (?,?,?, 'PROCESSING_FEE', 0, ?, NULL, ?, 'PROPOSED', ?, 'ROUTINE', ?)
-    `).run(adjId, period.id, employeeId, amount, explanation, T.now(),
-      JSON.stringify([ROUTINE_REASON.PROCESSING_FEE]));
-    return adjId;
-  }
-  if (existing.status === 'PROPOSED' && Math.abs(Number(existing.calculated_amount) - amount) > 0.004) {
-    await db.prepare(
-      "UPDATE payroll_adjustments SET calculated_amount = ?, explanation = ? WHERE id = ? AND status = 'PROPOSED'"
-    ).run(amount, explanation, existing.id);
-  }
-  return existing.id;
+  // Processing fee is an organizational cost displayed to HR only.
+  // It is never deducted from or added to an employee's salary or invoice.
+  return null;
 }
 
 /** Every eligible employee's fee line for a period (see syncProcessingFeeFor). */
 async function syncProcessingFees(period, { employeeIds = null } = {}) {
-  if (!period || !(Number(period.processing_fee) > 0) || isFinal(period.status)) return 0;
-  const only = employeeIds ? new Set(employeeIds) : null;
-  let n = 0;
-  for (const e of await payrollEmployees(period)) {
-    if (only && !only.has(e.id)) continue;
-    const basis = await periodBasis(period, e.id);
-    if (basis.blocked || !basis.inPeriod) continue;
-    if (await syncProcessingFeeFor(period, e.id, basis)) n++;
-  }
-  invalidatePayrollCache(null, period.id);
-  return n;
+  // Processing fee is calculated at period/totals level for HR, not as employee adjustments.
+  return 0;
 }
 
 async function updatePeriodExchangeRate({ periodId, exchangeRate, actor }) {
@@ -1117,12 +1089,11 @@ function presentSheetPeriod(period) {
   };
 }
 
-// In-memory cache for preparePeriod
+// In-memory caches for payroll calculation sheets
 const prepMemoryCache = new Map();
-// Absorbs repeated renders of the same sheet, nothing more: attendance
-// changes clear it on this instance (invalidatePayrollCache), and other
-// instances catch up within the TTL.
-const PREP_CACHE_TTL_MS = 15 * 1000;
+const PREP_CACHE_TTL_MS = 20 * 1000;
+const reviewMemoryCache = new Map();
+const REVIEW_CACHE_TTL_MS = 20 * 1000;
 
 /**
  * Builds the preparation sheet for a period.
@@ -1245,7 +1216,7 @@ function validateDecision(decision, notes) {
  * still being PROPOSED, so two people deciding the same line at once cannot
  * both succeed.
  */
-async function applyDecision(adj, { decision, approvedDays = null, approvedAmount = null, notes }, actor, nowMs) {
+async function applyDecision(adj, { decision, approvedDays = null, approvedAmount = null, notes, deductFromPaidLeave = false }, actor, nowMs) {
   validateDecision(decision, notes);
   if (adj.status !== 'PROPOSED') throw new Error(`This adjustment is already ${adj.status.toLowerCase()}.`);
   if (approvedAmount !== null && !Number.isFinite(Number(approvedAmount))) {
@@ -1255,12 +1226,30 @@ async function applyDecision(adj, { decision, approvedDays = null, approvedAmoun
     throw new Error('approvedDays must be a number.');
   }
 
-  const finalAmount = decision === 'APPROVED'
+  let finalAmount = decision === 'APPROVED'
     ? (approvedAmount === null ? adj.calculated_amount : Number(approvedAmount))
     : null;
   const finalDays = decision === 'APPROVED'
     ? (approvedDays === null ? adj.calculated_days : Number(approvedDays))
     : null;
+
+  // If HR decides to deduct from the employee's accrued paid leave balance instead of unpaid salary deduction
+  if (decision === 'APPROVED' && deductFromPaidLeave) {
+    finalAmount = 0; // Salary is NOT deducted; paid leave balance absorbs it
+    try {
+      const leaveDomain = require('./leave');
+      const daysCount = Math.abs(finalDays || adj.calculated_days || 1);
+      await leaveDomain.adjustBalance({
+        employeeId: adj.employee_id,
+        days: -daysCount,
+        reason: `Attendance deficit offset: ${daysCount} day(s) deducted from accrued paid leaves`,
+        actor,
+      });
+    } catch (err) {
+      console.error('[payroll] could not deduct from paid leave:', err.message);
+      throw new Error(`Failed to deduct from paid leave balance: ${err.message}`);
+    }
+  }
 
   const res = await db.prepare(`
     UPDATE payroll_adjustments
@@ -1281,14 +1270,15 @@ async function applyDecision(adj, { decision, approvedDays = null, approvedAmoun
     actor, action: 'PAYROLL_ADJUSTMENT_DECIDED',
     targetType: 'employee', targetId: adj.employee_id,
     before: { status: adj.status, calculatedAmount: adj.calculated_amount },
-    after: { status: decision, approvedAmount: finalAmount },
+    after: { status: decision, approvedAmount: finalAmount, deductFromPaidLeave: !!deductFromPaidLeave },
     note: String(notes).trim()
-      + (finalAmount !== null && finalAmount !== adj.calculated_amount
+      + (deductFromPaidLeave ? ' (Offset against accrued paid leaves: salary not deducted)' : '')
+      + (finalAmount !== null && finalAmount !== adj.calculated_amount && !deductFromPaidLeave
           ? ` (overridden from the calculated ${adj.calculated_amount})`
           : ''),
   });
 
-  return { employeeId: adj.employee_id, decision, approvedAmount: finalAmount, approvedDays: finalDays };
+  return { employeeId: adj.employee_id, decision, approvedAmount: finalAmount, approvedDays: finalDays, deductFromPaidLeave: !!deductFromPaidLeave };
 }
 
 /**
@@ -1296,7 +1286,7 @@ async function applyDecision(adj, { decision, approvedDays = null, approvedAmoun
  * the calculated one, so a figure that was overridden stays visible as an
  * override rather than replacing the calculation.
  */
-async function decideAdjustment({ adjustmentId, decision, approvedDays = null, approvedAmount = null, notes, actor }) {
+async function decideAdjustment({ adjustmentId, decision, approvedDays = null, approvedAmount = null, notes, actor, deductFromPaidLeave = false }) {
   validateDecision(decision, notes);
 
   const r = await tx(async () => {
@@ -1304,12 +1294,12 @@ async function decideAdjustment({ adjustmentId, decision, approvedDays = null, a
     if (!adj) throw new Error('No such adjustment.');
     const period = await selectPeriod.get(adj.period_id);
     if (period && isFinal(period.status) && adj.status === 'PROPOSED') throw new Error(finalMessage(period));
-    return await applyDecision(adj, { decision, approvedDays, approvedAmount, notes }, actor, T.now());
+    return await applyDecision(adj, { decision, approvedDays, approvedAmount, notes, deductFromPaidLeave }, actor, T.now());
   });
 
   invalidatePayrollCache(r.employeeId);
 
-  return { decision: r.decision, approvedAmount: r.approvedAmount, approvedDays: r.approvedDays };
+  return { decision: r.decision, approvedAmount: r.approvedAmount, approvedDays: r.approvedDays, deductFromPaidLeave: r.deductFromPaidLeave };
 }
 
 /**
@@ -1393,9 +1383,11 @@ async function generatePeriodDeductions({ periodId, actor, employeeIds = null })
           periodId, employeeId: e.id, adjustmentType: ATTENDANCE_DEFICIT_DAY,
           calculatedDays: deficit.days,
           calculatedAmount: -money(salary.dailyPrecise * deficit.days),
-          explanation: `Attendance deficit: ${deficit.days} whole day(s) crossed (480+ accumulated `
-                     + `minutes) as of ${windowEnd}. Auto-calculated.`,
+          explanation: `Attendance deficit: ${deficit.days} whole day(s) threshold crossed (480+ accumulated `
+                     + `minutes) as of ${windowEnd}. Decision required: deduct from paid leave accrual or unpaid leave.`,
           sourceReference: null, actor,
+          reviewLevel: 'ATTENTION',
+          reviewReasons: ['Deficit threshold reached: choose paid leave accrual or unpaid leave deduction'],
         });
         created.push({ employeeId: e.id, adjustmentType: ATTENDANCE_DEFICIT_DAY, ...adj });
       }
@@ -1664,7 +1656,13 @@ async function ensureCurrentPeriod({ nowMs = T.now() } = {}) {
     },
     note: 'Opened automatically for the calendar month.',
   });
-  if (fee > 0) await syncProcessingFees(await selectPeriod.get(id));
+  // Automatically calculate deductions from the month start so calculations are already available
+  try {
+    await generatePeriodDeductions({ periodId: id, actor: 'system' });
+    await db.prepare("UPDATE payroll_periods SET generated_at = ? WHERE id = ?").run(nowMs, id);
+  } catch (err) {
+    console.warn('[payroll] ensureCurrentPeriod auto-deduction error:', err.message);
+  }
 
   return { created: true, periodId: id, name: month.name, cutoffDate: month.cutoff, payDate: month.end, exchangeRate: rate };
 }
@@ -1998,13 +1996,33 @@ function reviewPeriod(periodId, opts = {}) {
   return withReadMemo(() => reviewPeriodUncached(periodId, opts));
 }
 
-async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis = null } = {}) {
+async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis = null, forceSync = false } = {}) {
   const period = await selectPeriod.get(periodId);
   if (!period) throw new PayrollRunError('No such payroll period.', { code: 'NOT_FOUND', httpStatus: 404 });
 
-  // Not cached: this is the sheet HR approves pay from, so it must reflect
-  // every decision the moment it's made.
   const rateBasis = basis || await getDailyRateBasis();
+  const memKey = `${periodId}:${rateBasis}:${visibleEmployeeIds ? [...visibleEmployeeIds].sort().join(',') : 'all'}`;
+
+  if (!forceSync) {
+    const memHit = reviewMemoryCache.get(memKey);
+    if (memHit && Date.now() < memHit.expiresAt) {
+      return memHit.data;
+    }
+  }
+
+  // Automatic realtime deduction sync: ensure deductions are calculated and up-to-date
+  if (!isFinal(period.status)) {
+    try {
+      await generatePeriodDeductions({ periodId: period.id, actor: 'system' });
+      if (!period.generated_at) {
+        const nowMs = T.now();
+        await db.prepare("UPDATE payroll_periods SET generated_at = ? WHERE id = ?").run(nowMs, period.id);
+        period.generated_at = nowMs;
+      }
+    } catch (err) {
+      console.warn('[payroll] auto-sync deductions non-blocking warning:', err.message);
+    }
+  }
 
   const emps = await payrollEmployees(period);
   const allPositions = await Promise.all(
@@ -2079,8 +2097,14 @@ async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis
   totals.deductions = money(totals.deductions);
   totals.net = money(totals.net);
 
+  // Processing fee is an organizational cost displayed to HR only; never added to employee salary
+  const feePct = Number(period.processing_fee) || 0;
+  const processingFeeAmount = feePct > 0 ? money((totals.gross * feePct) / 100) : 0;
+  totals.processingFee = processingFeeAmount;
+  totals.totalCompanyCost = money(totals.net + processingFeeAmount);
+
   const result = {
-    period: { ...presentPeriod(period), dailyRateBasis: rateBasis },
+    period: { ...presentPeriod(period), dailyRateBasis: rateBasis, processingFeeAmount },
     totals,
     preflight,
     employees,
@@ -2089,6 +2113,7 @@ async function reviewPeriodUncached(periodId, { visibleEmployeeIds = null, basis
         + 'decided explicitly. Nothing is paid until the run is approved.',
   };
 
+  reviewMemoryCache.set(memKey, { data: result, expiresAt: Date.now() + REVIEW_CACHE_TTL_MS });
   return result;
 }
 
@@ -2177,7 +2202,8 @@ const insertPayslip = db.prepare(`
  */
 async function writePayslip(period, member, { actor, nowMs, approvalNote = null, templateId = null }) {
   const { employee, basis } = member;
-  const approved = await selectApprovedLines.all(period.id, employee.id);
+  const approved = (await selectApprovedLines.all(period.id, employee.id))
+    .filter(a => a.adjustment_type !== 'PROCESSING_FEE');
 
   const lines = approved.map(a => ({
     adjustmentId: a.id,
@@ -2350,6 +2376,7 @@ async function approveRun({ periodId, note, decisions = [], waiveBlockers = fals
         decision: d.decision,
         approvedDays: d.approvedDays ?? null,
         approvedAmount: d.approvedAmount ?? null,
+        deductFromPaidLeave: d.deductFromPaidLeave === true || d.choice === 'DEDUCT_PAID_LEAVE',
         notes: String(d.notes || '').trim() || `Decided in the payroll run: ${runNote}`,
       }, actor, nowMs);
     }
@@ -2555,6 +2582,7 @@ const STATEMENTS_CACHE_TTL_MS = 60 * 1000;
 
 async function invalidatePayrollCache(employeeId = null, periodId = null) {
   prepMemoryCache.clear();
+  reviewMemoryCache.clear();
   if (employeeId) {
     statementsCache.delete(employeeId);
   } else {

@@ -696,6 +696,8 @@ export interface PayrollRunPeriod {
   paidAt: number | null;
   approvedBy: string | null;
   approvedAt: number | null;
+  processingFee?: number;
+  processingFeeAmount?: number;
 }
 
 export type PayrollPreflightCode =
@@ -823,6 +825,8 @@ export interface PayrollReviewTotals {
   gross: number;
   deductions: number;
   net: number;
+  processingFee?: number;
+  totalCompanyCost?: number;
   routineCount: number;
   attentionCount: number;
   pendingCount: number;
@@ -844,6 +848,7 @@ export interface PayrollRunDecision {
   decision: 'APPROVED' | 'REJECTED';
   approvedAmount?: number;
   approvedDays?: number;
+  deductFromPaidLeave?: boolean;
   notes?: string;
 }
 

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import type { PayrollReviewEmployee, PayrollReviewTotals, PayrollRunPeriod } from '@/lib/types';
-import { Badge } from '@/components/primitives';
+import { Badge, Button } from '@/components/primitives';
 import {
   AlertTriangleIcon,
   BanknoteIcon,
@@ -10,6 +10,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   HourglassIcon,
+  RefreshIcon,
   UsersIcon,
 } from '@/components/icons';
 import {
@@ -169,6 +170,8 @@ export function RunHeader({
   currency,
   rate,
   today,
+  onSyncDeductions,
+  syncingDeductions,
 }: {
   period: PayrollRunPeriod;
   totals: PayrollReviewTotals;
@@ -176,6 +179,8 @@ export function RunHeader({
   currency: Currency;
   rate: number;
   today: string;
+  onSyncDeductions?: () => void;
+  syncingDeductions?: boolean;
 }) {
   const meta = PERIOD_STATUS_META[period.status];
 
@@ -221,6 +226,17 @@ export function RunHeader({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {onSyncDeductions && period.status !== 'PUBLISHED' && period.status !== 'PAID' && period.status !== 'CLOSED' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onSyncDeductions}
+              disabled={syncingDeductions}
+              icon={<RefreshIcon className={`h-3.5 w-3.5 ${syncingDeductions ? 'animate-spin' : ''}`} />}
+            >
+              {syncingDeductions ? 'Recalculating…' : 'Sync Deductions'}
+            </Button>
+          )}
           <Badge tone={meta.tone} dot>{meta.label}</Badge>
           <Badge tone={period.autoCreated ? 'accent' : 'muted'} size="sm">
             {period.autoCreated ? 'Opened automatically' : 'Created by hand'}
@@ -252,11 +268,28 @@ export function RunHeader({
         <Fact label="Exchange rate" value={`£1 = ₨${rate.toFixed(2)}`} />
       </dl>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Tile icon={<UsersIcon className="h-3.5 w-3.5" />} label="Employees" value={String(totals.employees)} />
         <Tile icon={<BanknoteIcon className="h-3.5 w-3.5" />} label="Gross" value={gross} />
         <Tile icon={<BanknoteIcon className="h-3.5 w-3.5" />} label="Deductions" value={deductions} tone="text-rose-400" />
-        <Tile icon={<BanknoteIcon className="h-3.5 w-3.5" />} label="Net" value={net} tone="text-emerald-400" />
+        <Tile icon={<BanknoteIcon className="h-3.5 w-3.5" />} label="Net (Payroll)" value={net} tone="text-emerald-400" />
+        <Tile
+          icon={<BanknoteIcon className="h-3.5 w-3.5" />}
+          label="Proc. Fee (HR)"
+          value={formatMoney(totals.processingFee || 0, currency, recorded, rate)}
+          tone="text-slate-400"
+        />
+        <Tile
+          icon={<BanknoteIcon className="h-3.5 w-3.5" />}
+          label="Total Cost (HR)"
+          value={formatMoney(totals.totalCompanyCost || totals.net, currency, recorded, rate)}
+          tone="text-indigo-300"
+        />
+      </div>
+
+      <div className="mt-2.5 flex items-center gap-2 text-[11px] text-slate-400">
+        <span className="font-semibold text-slate-500">Note:</span>
+        <span>Processing fee is an organizational cost displayed to HR only; it is never deducted from employee salaries or invoices.</span>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">

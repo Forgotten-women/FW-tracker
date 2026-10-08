@@ -4,8 +4,8 @@
 import type { PayrollReviewLine, PayrollRunDecision } from '@/lib/types';
 import { money, needsDecision, standingAmount } from './format';
 
-/** CHANGED is "approve, at a different amount". */
-export type LineChoice = 'APPROVED' | 'REJECTED' | 'CHANGED';
+/** CHANGED is "approve, at a different amount". DEDUCT_PAID_LEAVE offsets deficit against paid leave accrual without salary cut. */
+export type LineChoice = 'APPROVED' | 'REJECTED' | 'CHANGED' | 'DEDUCT_PAID_LEAVE';
 
 export interface LineDecision {
   choice: LineChoice | null;
@@ -30,6 +30,8 @@ export interface DecidableLine {
   reviewReasons: string[];
   /** The employee's salary currency; null when they have no salary on record. */
   currency: string | null;
+  /** Available accrued paid leave days for threshold decisions */
+  availablePaidLeave?: number | null;
 }
 
 /**
@@ -55,7 +57,7 @@ export function parseChangedAmount(calculated: number, input: string): number | 
 
 /** What is still missing before this decision can be sent, or null when it is complete. */
 export function decisionProblem(calculated: number, d: LineDecision | undefined): string | null {
-  if (!d || !d.choice) return 'Choose approve, reject or a different amount.';
+  if (!d || !d.choice) return 'Choose an option to decide this line.';
   if (d.choice === 'CHANGED' && parseChangedAmount(calculated, d.amount) === null) {
     return amountSign(calculated) === 0
       ? 'Enter the amount to approve.'
@@ -70,13 +72,23 @@ export function decisionProblem(calculated: number, d: LineDecision | undefined)
 /** The amount a line would stand at if the run were approved with this decision. */
 export function projectedAmount(line: PayrollReviewLine, d: LineDecision | undefined): number {
   if (!needsDecision(line) || !d || !d.choice) return standingAmount(line);
-  if (d.choice === 'REJECTED') return 0;
+  if (d.choice === 'REJECTED' || d.choice === 'DEDUCT_PAID_LEAVE') return 0;
   if (d.choice === 'CHANGED') return parseChangedAmount(line.calculatedAmount, d.amount) ?? line.calculatedAmount;
   return line.calculatedAmount;
 }
 
 /** The body entry approve-run takes for one decided line. */
 export function toRunDecision(line: DecidableLine, d: LineDecision): PayrollRunDecision {
+  if (d.choice === 'DEDUCT_PAID_LEAVE') {
+    return {
+      adjustmentId: line.id,
+      decision: 'APPROVED',
+      approvedAmount: 0,
+      approvedDays: line.calculatedDays || 1,
+      deductFromPaidLeave: true,
+      notes: d.note.trim() || 'Offset against accrued paid leaves: 1 day deducted from leave balance, salary not cut',
+    };
+  }
   const out: PayrollRunDecision = {
     adjustmentId: line.id,
     decision: d.choice === 'REJECTED' ? 'REJECTED' : 'APPROVED',
