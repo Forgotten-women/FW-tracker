@@ -130,3 +130,16 @@ test('the laptop records the arrival time before the working window opens, credi
   assert.equal(d.lateMinutes, 0);
   assert.ok(d.day.workedMinutes >= 29 && d.day.workedMinutes <= 31, `worked ${d.day.workedMinutes} (from 11:00)`);
 });
+
+test('a suspected no-show clears once approved leave covers the day', async () => {
+  const emp = await makeEmployee('emp_noshow_leave');
+  const day = '2026-09-25';
+  await db.prepare(`INSERT INTO absence_records (id, employee_id, date_key, absence_type, detected_at, status)
+    VALUES ('ab_test_1', ?, ?, 'SUSPECTED_NO_SHOW', ?, 'PENDING_REVIEW')`).run(emp, day, T.now());
+  await db.prepare(`INSERT INTO leave_requests (id, employee_id, leave_type_id, start_date, end_date, day_portion, total_days,
+    reason, status, is_paid, submitted_at, decided_at, created_at) VALUES ('lr_test_ns', ?, 'annual', ?, ?, 'FULL_DAY', 1, 'test', 'APPROVED', 1, ?, ?, ?)`)
+    .run(emp, day, day, T.now(), T.now(), T.now());
+  await A.recomputeDay(emp, day, at('23:00', day));
+  const left = await db.prepare("SELECT COUNT(*) AS n FROM absence_records WHERE employee_id = ? AND status = 'PENDING_REVIEW'").get(emp);
+  assert.equal(Number(left.n), 0);
+});

@@ -811,8 +811,10 @@ async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) 
     derived_at: nowMs,
   });
 
-  // If the employee is present or has worked minutes, clear any unreviewed suspected no-show records
-  if (d.firstInAt != null || d.workedMinutes > 0) {
+  // If the employee is present or has worked minutes, or the day is approved
+  // leave (often recorded after the no-show was flagged), clear any unreviewed
+  // suspected no-show records: the day is accounted for.
+  if (d.firstInAt != null || d.workedMinutes > 0 || d.attendanceStatus === 'ON_LEAVE') {
     try {
       await db.prepare(`
         DELETE FROM absence_records
