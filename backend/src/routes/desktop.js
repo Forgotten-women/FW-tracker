@@ -451,9 +451,22 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         const lastSpan = await selectLastIdleSpan.get(deviceId, dateKey);
         const idleWasRunning = (lastSpan && Number(lastSpan.end_at) >= intervalStart - 2000)
           || Boolean(await selectBreakEndedBetween.get(employeeId, intervalStart, nowMs));
-        const startAt = idleWasRunning ? intervalStart : nowMs - idleMs;
-        if (idleMs > 0) {
-          await recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt: startAt + idleMs, kind: 'IDLE', nowMs });
+        // The first heartbeat of the day, or one after a long silence, comes
+        // from a laptop that was off or asleep: its idle seconds are that
+        // sleep, before the person sat down, and its active seconds are the
+        // last part. (Placing that idle at the end marked people idle, and not
+        // counting, in their first minute every morning.)
+        const sleptBefore = !prevAt || nowMs - prevAt > 3 * 60000;
+        let startAt, endAt;
+        if (sleptBefore) {
+          endAt = nowMs - numActive * 1000;
+          startAt = Math.max(endAt - Math.min(numIdle * 1000, 15 * 60000), prevAt || 0);
+        } else {
+          startAt = idleWasRunning ? intervalStart : nowMs - idleMs;
+          endAt = startAt + idleMs;
+        }
+        if (endAt > startAt) {
+          await recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, kind: 'IDLE', nowMs });
         }
       }
     } catch (err) {

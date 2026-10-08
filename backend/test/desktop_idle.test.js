@@ -148,3 +148,21 @@ test('idle at the end of a break is not moved onto working time', async () => {
   });
   assert.equal(hb.body.today.day.idleMinutes, 0, 'break time is never idle');
 });
+
+test('the first heartbeat after a night asleep puts the sleep before the work, not on the last minute', async () => {
+  const p = await enrolLaptop('Morning Wake');
+  const from = START + 3600 * 1000;   // 15:00 PKT on the test day: in hours
+  clock = from;
+  // The laptop slept for an hour, woke, and was used for 5 minutes: the agent
+  // reports 3600 s idle (the sleep) and 300 s active in its first heartbeat.
+  const r = await json('POST', '/api/desktop/heartbeat', {
+    headers: p.auth,
+    body: { lockState: 'UNLOCKED', lockDurationSeconds: 0, activeSeconds: 300, idleSeconds: 3600, localIp: '192.168.18.63' },
+  });
+  assert.equal(r.body.workstationStatus, 'ACTIVE');
+  const spans = await spansOf(p.employeeId);
+  for (const s of spans) {
+    assert.ok(Number(s.end_at) <= from - 300 * 1000, `idle span ends before the 5 active minutes, got ${(from - Number(s.end_at)) / 1000}s before now`);
+  }
+  assert.notEqual(r.body.today.day.counting, false, 'counting: the person is working, not idle');
+});
