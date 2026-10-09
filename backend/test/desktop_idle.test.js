@@ -194,3 +194,22 @@ test('Friday prayers: idle or locked between 13:00 and 14:00 (office time) is ac
   });
   assert.equal(locked.body.workstationStatus, 'ACTIVE');
 });
+
+test('a remote worker\'s offline-queued heartbeats count as worked from their home network', async () => {
+  const p = await enrolLaptop('Home Worker');
+  await db.prepare("UPDATE employees SET work_mode = 'REMOTE', remote_allowed = 1 WHERE id = ?").run(p.employeeId);
+  // Thursday 24 Sep 2026, 12:00-12:30 PKT, queued while offline, synced later.
+  const from = Date.UTC(2026, 8, 24, 7, 0, 0);
+  const events = Array.from({ length: 30 }, (_, i) => ({
+    eventId: `home-${i}`, observedAt: from + (i + 1) * 60000, activeSeconds: 60, idleSeconds: 0,
+    localIp: '10.0.0.23', connectedSsid: 'HomeWiFi',
+  }));
+  clock = from + 40 * 60000;
+  const r = await json('POST', '/api/desktop/sync-batch', { headers: p.auth, body: { events } });
+  assert.equal(r.body.syncedEventIds.length, 30);
+  const ws = await db.prepare('SELECT active_seconds, unverified_seconds FROM workstation_sessions WHERE employee_id = ?').get(p.employeeId);
+  assert.equal(Number(ws.active_seconds), 1800, 'counted as active, not parked as unverified');
+  assert.equal(Number(ws.unverified_seconds || 0), 0);
+  const pe = await db.prepare("SELECT COUNT(*) AS n FROM presence_events WHERE employee_id = ? AND location = 'REMOTE_VERIFIED'").get(p.employeeId);
+  assert.equal(Number(pe.n), 30, 'presence recorded as remote-verified');
+});

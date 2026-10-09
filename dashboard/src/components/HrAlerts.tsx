@@ -36,6 +36,12 @@ export function HrAlertsPanel() {
   const [data, setData] = useState<HrAlerts | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Contract renewal form, open for one alert at a time.
+  const [renewing, setRenewing] = useState<HrAlert | null>(null);
+  const [renewEnd, setRenewEnd] = useState('');
+  const [openEnded, setOpenEnded] = useState(false);
+  const [renewReason, setRenewReason] = useState('');
+  const [renewError, setRenewError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -65,6 +71,33 @@ export function HrAlertsPanel() {
     } catch {
       // A failed dismissal just leaves the alert showing, which is the safe way
       // for it to fail.
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openRenew = (a: HrAlert) => {
+    // Suggest one year after the current end date.
+    const d = new Date(`${a.value}T00:00:00Z`);
+    d.setUTCFullYear(d.getUTCFullYear() + 1);
+    setRenewEnd(d.toISOString().slice(0, 10));
+    setOpenEnded(false);
+    setRenewReason('');
+    setRenewError(null);
+    setRenewing(a);
+  };
+
+  const renew = async () => {
+    if (!renewing) return;
+    if (!renewReason.trim()) { setRenewError('Add a reason (e.g. "Renewed for another year").'); return; }
+    if (!openEnded && !renewEnd) { setRenewError('Choose the new end date, or tick "No end date".'); return; }
+    setBusy(renewing.key);
+    try {
+      await api.renewContract(renewing.employeeId, openEnded ? null : renewEnd, renewReason.trim());
+      setRenewing(null);
+      await load();
+    } catch (err) {
+      setRenewError(err instanceof Error ? err.message : 'Could not renew the contract.');
     } finally {
       setBusy(null);
     }
@@ -105,17 +138,66 @@ export function HrAlertsPanel() {
                     {a.detail} · {whenText(a.daysUntil)}
                   </p>
                 </div>
-                <Button
-                  onClick={() => dismiss(a)}
-                  disabled={busy === a.key}
-                  title="Hide until this date changes"
-                >
-                  {busy === a.key ? '…' : 'Dismiss'}
-                </Button>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {a.type === 'CONTRACT_EXPIRY' && (
+                    <Button onClick={() => openRenew(a)} disabled={busy === a.key} title="Set a new contract end date">
+                      Renew
+                    </Button>
+                  )}
+                  <Button
+                    onClick={() => dismiss(a)}
+                    disabled={busy === a.key}
+                    title="Hide until this date changes"
+                  >
+                    {busy === a.key ? '…' : 'Dismiss'}
+                  </Button>
+                </div>
               </li>
             );
           })}
         </ul>
+      )}
+
+      {renewing && (
+        <div className="mt-3 rounded-lg border border-line bg-raised p-3 text-xs">
+          <p className="font-semibold text-text">
+            Renew {renewing.employeeName}&apos;s contract (currently ends {renewing.value})
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted">
+            Payroll pays up to the contract end date, so an expired contract stops pay.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-muted">
+              New end date
+              <input
+                type="date"
+                value={renewEnd}
+                min={renewing.value}
+                disabled={openEnded}
+                onChange={(e) => setRenewEnd(e.target.value)}
+                className="rounded border border-line bg-surface px-2 py-1 text-text disabled:opacity-50"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-muted">
+              <input type="checkbox" checked={openEnded} onChange={(e) => setOpenEnded(e.target.checked)} />
+              No end date (open-ended)
+            </label>
+          </div>
+          <input
+            type="text"
+            value={renewReason}
+            onChange={(e) => setRenewReason(e.target.value)}
+            placeholder="Reason, e.g. Renewed for another year"
+            className="mt-2 w-full rounded border border-line bg-surface px-2 py-1 text-text"
+          />
+          {renewError && <p className="mt-1.5 text-danger">{renewError}</p>}
+          <div className="mt-2 flex gap-2">
+            <Button onClick={renew} disabled={busy === renewing.key}>
+              {busy === renewing.key ? 'Saving…' : 'Save renewal'}
+            </Button>
+            <Button onClick={() => setRenewing(null)} disabled={busy === renewing.key}>Cancel</Button>
+          </div>
+        </div>
       )}
     </Panel>
   );

@@ -307,6 +307,13 @@ export const api = {
       body: JSON.stringify({ key, value, note }),
     }),
 
+  // Renew the current contract; contractEndDate null = open-ended (no end date).
+  renewContract: (employeeId: string, contractEndDate: string | null, reason: string) =>
+    request<{ status: string; contract: { contractStartDate: string; contractEndDate: string | null } }>(
+      `/api/people/employee/${encodeURIComponent(employeeId)}/renew-contract`,
+      { method: 'POST', body: JSON.stringify({ contractEndDate, reason }) },
+    ),
+
   exportCsv: async (from: string, to: string) => {
     const res = await fetch(
       `/api/admin/export?from=${from}&to=${to}`,

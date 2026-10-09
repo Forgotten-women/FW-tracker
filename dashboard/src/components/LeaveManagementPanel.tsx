@@ -351,6 +351,12 @@ export function LeaveManagementPanel() {
     setMonthlyLoading(true);
     try {
       const res = await api.fetchEmployeeMonthlyLeaveReport(empId, monthKey);
+      const blocked = (res.report as unknown as { blocked?: boolean; message?: string } | undefined);
+      if (blocked?.blocked) {
+        setShowMonthlyModal(false);
+        alert(blocked.message || 'No leave statement for this employee yet (no employment start date).');
+        return;
+      }
       setMonthlyReport(res.report || null);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Failed to load monthly leave report.');

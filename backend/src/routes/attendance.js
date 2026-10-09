@@ -323,7 +323,7 @@ router.post('/heartbeat', requireSensor, async (req, res) => {
 // recomputed from the ledger, so the two could disagree about the same person.
 router.get('/live', requireAdmin, async (req, res) => {
   const nowMs = T.now();
-  const board = await P.liveBoard(nowMs);
+  const board = await P.liveBoardCached();
   res.json({
     status: 'SUCCESS',
     inOffice: board.filter(e => e.status === 'IN_OFFICE'),

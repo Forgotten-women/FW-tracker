@@ -10,9 +10,16 @@ const {
   sha256, safeEqual,
 } = require('../middleware/auth');
 const L = require('../domain/leave');
+const cache = require('../lib/swrCache');
 const rbac = require('../domain/rbac');
 const T = require('../util/time');
 const holidays = require('../domain/holidays');
+
+// A successful leave write clears the cached leave views (balances, anniversaries).
+router.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => { if (res.statusCode < 400) cache.invalidate('leave:'); });
+  next();
+});
 
 function presentBalance(b) {
   if (!b || b.blocked) {
@@ -275,20 +282,20 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
 });
 
 router.get('/balances', requireUserOrAdminKey('leave.read'), async (req, res) => {
-  const visible = await rbac.accessibleEmployeeIds(req.auth);
-  const employees = (await db.prepare('SELECT id, name, role, employee_number FROM employees WHERE active = 1').all())
-    .filter(e => visible.includes(e.id));
-
-  const rows = await Promise.all(employees.map(async e => {
-    const b = await L.balanceFor(e.id);
-    return {
+  const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+  // Everyone's balance, cached for a minute (about 6 s to compute); any leave
+  // change made through this router clears it at once.
+  const all = await cache.swr('leave:balances', 60 * 1000, async () => {
+    const employees = await db.prepare('SELECT id, name, role, employee_number FROM employees WHERE active = 1').all();
+    return Promise.all(employees.map(async e => ({
       employeeId: e.id,
       employeeName: e.name,
       employeeNumber: e.employee_number || null,
       role: e.role,
-      balance: presentBalance(b),
-    };
-  }));
+      balance: presentBalance(await L.balanceFor(e.id)),
+    })));
+  });
+  const rows = all.filter(r => visible.has(r.employeeId));
 
   res.json({
     status: 'SUCCESS',
@@ -472,7 +479,7 @@ router.get('/carry-forward/approaching',
   async (req, res) => {
     try {
       const today = String(req.query.date || T.dateKey());
-      const list = await L.employeesApproachingAnniversary(today);
+      const list = await cache.swr(`leave:approaching:${today}`, 60 * 1000, () => L.employeesApproachingAnniversary(today));
       res.json({ status: 'SUCCESS', employees: list });
     } catch (err) {
       res.status(500).json({ status: 'ERROR', message: err.message });
@@ -530,12 +537,71 @@ router.get('/employee/:employeeId/cycles',
     }
   });
 
+// The HR dashboard's statement dialog reads its own field names
+// (MonthlyLeaveReport in dashboard/src/lib/types.ts); the phone reads the
+// domain's. The domain fields are kept, the dashboard's added alongside.
+async function presentMonthlyReportForDashboard(employeeId, r) {
+  if (!r || r.blocked) return r;
+  const e = await db.prepare('SELECT name, role, employee_number FROM employees WHERE id = ?').get(employeeId);
+  const months = r.availableMonths || [];
+  // Months in cycle order (the list is newest first): index 1 = the cycle's first month.
+  const ordered = [...months].reverse();
+  const indexOf = (key) => Math.max(1, ordered.findIndex(m => m.monthKey === key) + 1);
+  const suff = r.requestedLeaveSufficiency || {};
+  const adj = r.monthAdjustments || {};
+  return {
+    ...r,
+    employeeName: e?.name || '',
+    role: e?.role || '',
+    employeeNumber: e?.employee_number || null,
+    monthLabel: r.monthName,
+    monthIndex: indexOf(r.monthKey),
+    totalMonthsInCycle: 12,
+    totalAnnualEntitlement: r.annualEntitlementDays,
+    leaveTakenAnnual: r.leaveAlreadyTaken,
+    paidLeaveUsedAnnual: r.paidLeaveUsed?.cycleTotal ?? 0,
+    unpaidLeaveTakenAnnual: r.unpaidLeaveTaken?.cycleTotal ?? 0,
+    remainingLeaveBalance: r.remainingAnnualLeave,
+    leaveAccruedToDate: r.accruedUpToMonth,
+    plainEnglishSummary: r.summaryExplanation,
+    plainEnglishDetail: r.approvedCarryForwardDays
+      ? `Includes ${r.approvedCarryForwardDays} day(s) carried forward from the previous cycle.`
+      : `Cycle ${r.cycleStartDate} to ${r.cycleEndDate}; renews on ${r.nextRenewalDate}.`,
+    monthWindow: {
+      startDate: r.monthStart,
+      endDate: r.monthEnd,
+      workingDaysInMonth: null,
+      leaveTakenInMonth: Math.round(((r.paidLeaveUsed?.thisMonth || 0) + (r.unpaidLeaveTaken?.thisMonth || 0)) * 100) / 100,
+      paidLeaveInMonth: r.paidLeaveUsed?.thisMonth ?? 0,
+      unpaidLeaveInMonth: r.unpaidLeaveTaken?.thisMonth ?? 0,
+    },
+    requestedLeaveSufficiency: {
+      ...suff,
+      hasPendingRequests: Boolean(suff.hasRequestedLeave),
+      totalPendingDays: suff.pendingDays || 0,
+      currentlyEntitledPaidLeave: r.currentlyEntitledPaidLeave,
+      status: suff.hasRequestedLeave ? suff.status : 'NONE_PENDING',
+      pendingRequests: (suff.pendingRequests || []).map(p => ({
+        ...p, leaveType: p.typeName, totalDays: p.days, reducesEntitlement: true, status: 'PENDING',
+      })),
+    },
+    monthAdjustmentsSummary: { totalDays: adj.totalDays || 0, count: adj.count || 0 },
+    monthAdjustments: (adj.items || []).map(a => ({
+      id: a.id, adjustmentDate: a.date, days: a.days, reason: a.description, createdAt: a.createdBy || undefined,
+    })),
+    monthOptions: months.map(m => ({
+      monthKey: m.monthKey, monthLabel: m.label, monthIndex: indexOf(m.monthKey), isCurrentMonth: Boolean(m.isCurrent),
+    })),
+  };
+}
+
 router.get('/employee/:employeeId/monthly-report',
   requireUserOrAdminKey('leave.read'), requireEmployeeAccess(),
   async (req, res) => {
     try {
       const { month } = req.query;
-      const report = await L.monthlyReportFor(req.params.employeeId, { monthKey: month });
+      const report = await presentMonthlyReportForDashboard(req.params.employeeId,
+        await L.monthlyReportFor(req.params.employeeId, { monthKey: month }));
       res.json({
         status: 'SUCCESS',
         employeeId: req.params.employeeId,

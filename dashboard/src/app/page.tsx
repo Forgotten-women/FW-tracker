@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { Gate } from '@/components/Gate';
 import {
@@ -24,6 +24,7 @@ import { WorkstationsPanel } from '@/components/WorkstationsPanel';
 
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
+import { notifyDesktop } from '@/lib/desktopNotify';
 import type { AdminEmployee, AttendanceCorrection, EmployeeDay, EnrollmentCode, NotificationItem } from '@/lib/types';
 
 type DashboardTab = 'overview' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
@@ -50,11 +51,25 @@ export default function DashboardPage() {
     notifyKeyChanged();
   }, []);
 
+  // Newest notification time already known: the first load only sets it, so
+  // opening the dashboard doesn't replay old notifications on the desktop.
+  const notifiedUpTo = useRef<number | null>(null);
+
   const loadNotifications = useCallback(async () => {
     try {
       const res = await api.notifications();
-      setNotifications(res.notifications || []);
+      const list = res.notifications || [];
+      setNotifications(list);
       setUnreadNotificationsCount(res.unreadCount || 0);
+      const newest = list.reduce((m, n) => Math.max(m, Number(n.createdAt) || 0), 0);
+      if (notifiedUpTo.current !== null) {
+        for (const n of list) {
+          if (!n.read && Number(n.createdAt) > notifiedUpTo.current) {
+            notifyDesktop(n, () => setNotificationDrawerOpen(true));
+          }
+        }
+      }
+      notifiedUpTo.current = Math.max(notifiedUpTo.current ?? 0, newest);
     } catch (_) {}
   }, []);
 
@@ -66,6 +81,7 @@ export default function DashboardPage() {
   }, []);
 
   const handleIncomingNotification = useCallback((n: NotificationItem) => {
+    notifyDesktop(n, () => setNotificationDrawerOpen(true));
     setToastNotification(n);
     setNotifications((prev) => [n, ...prev.filter((item) => item.id !== n.id)]);
     setUnreadNotificationsCount((c) => c + 1);

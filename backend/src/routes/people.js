@@ -187,6 +187,23 @@ router.post('/employee/:employeeId/employment',
     }
   });
 
+// Renew the current contract (new end date, or none for open-ended).
+router.post('/employee/:employeeId/renew-contract',
+  requireUserOrAdminKey('employee.write'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const r = await people.renewContract({
+        employeeId: req.params.employeeId,
+        contractEndDate: req.body?.contractEndDate || null,
+        reason: req.body?.reason,
+        actor: req.auth.actor,
+      });
+      res.json({ status: 'SUCCESS', contract: r });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
 router.post('/employee/:employeeId/status',
   requireUserOrAdminKey('employee.write'), requireEmployeeAccess(),
   async (req, res) => {

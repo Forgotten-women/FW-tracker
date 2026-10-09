@@ -18,7 +18,7 @@ router.use(requireAdmin);
 router.get('/summary', async (req, res) => {
   const nowMs = T.now();
   const todayKey = T.dateKey(nowMs);
-  const board = await P.liveBoard(nowMs);
+  const board = await P.liveBoardCached();
 
   const inOffice = board.filter(e => e.status === 'IN_OFFICE');
   const grace = board.filter(e => e.status === 'GRACE_PERIOD');

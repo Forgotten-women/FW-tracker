@@ -184,6 +184,39 @@ async function setEmployment({
   return { id: eid, employeeId, startDate };
 }
 
+/**
+ * Renews (or makes open-ended) the current contract: the contract dates on the
+ * employee's current terms change, nothing else. Updated in place rather than
+ * opening a new record, so the record's id - and everything keyed on it, such
+ * as dismissed probation alerts - stays the same; the audit row keeps the old
+ * dates. Payroll reads contract_end_date as the last working day, so an
+ * expired contract stops pay: renewing is what keeps someone on payroll.
+ */
+async function renewContract({ employeeId, contractEndDate = null, reason, actor }) {
+  if (!reason || !String(reason).trim()) throw new Error('A reason is required for a contract renewal.');
+  if (contractEndDate && !DATE_RE.test(String(contractEndDate))) throw new Error('contractEndDate must be YYYY-MM-DD, or empty for no end date.');
+  const er = await db.prepare('SELECT * FROM employment_records WHERE employee_id = ? AND effective_to IS NULL').get(employeeId);
+  if (!er) throw new Error('This employee has no current employment terms.');
+  if (contractEndDate && er.contract_end_date && contractEndDate <= er.contract_end_date) {
+    throw new Error(`The new end date must be after the current one (${er.contract_end_date}).`);
+  }
+  const today = T.dateKey();
+  // The renewed contract starts the day after the old one ends (or today, if it had no end).
+  const contractStartDate = er.contract_end_date ? T.dateKey(T.endOfDay(er.contract_end_date)) : today;
+  await tx(async () => {
+    await db.prepare('UPDATE employment_records SET contract_start_date = ?, contract_end_date = ? WHERE id = ?')
+      .run(contractStartDate, contractEndDate || null, er.id);
+    await audit({
+      actor, action: 'CONTRACT_RENEWED', targetType: 'employee', targetId: employeeId,
+      before: { contractStartDate: er.contract_start_date, contractEndDate: er.contract_end_date },
+      after: { contractStartDate, contractEndDate: contractEndDate || null },
+      note: String(reason).trim(),
+    });
+  });
+  try { await require('./payroll').invalidatePayrollCache(); } catch (_) {}
+  return { employeeId, contractStartDate, contractEndDate: contractEndDate || null };
+}
+
 async function currentEmployment(employeeId) {
   return await db.prepare(
     'SELECT * FROM employment_records WHERE employee_id = ? AND effective_to IS NULL ORDER BY effective_from DESC LIMIT 1'
@@ -617,7 +650,7 @@ async function unpairEmployeeDevices({ employeeId, actor }) {
 module.exports = {
   createOffice, listOffices, createDepartment, listDepartments,
   assignManager, endManagerAssignment,
-  setEmployment, currentEmployment, employmentHistory,
+  setEmployment, renewContract, currentEmployment, employmentHistory,
   setStatus, setPersonal, setBank, addEmergencyContact,
   updateEmergencyContact, deleteEmergencyContact,
   profile, myEmployeeProfile, nextEmployeeNumber, unpairEmployeeDevices,

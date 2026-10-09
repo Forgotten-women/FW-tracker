@@ -766,7 +766,22 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
   const sched = await schedule.resolve(employeeId, dateKey);
 
   const syncedEventIds = [];
-  let dayNeedsRecompute = false;
+  // Days whose presence changed: each is recomputed after the batch (a queue
+  // can hold yesterday's heartbeats, not only today's).
+  const daysToRecompute = new Set();
+  // Each event is judged by ITS day's schedule and remote status, not today's.
+  const workRow = await db.prepare('SELECT work_mode, remote_allowed FROM employees WHERE id = ?').get(employeeId);
+  const remoteByMode = Boolean(workRow && (workRow.work_mode === 'REMOTE' || workRow.work_mode === 'HYBRID' || workRow.remote_allowed === 1));
+  const dayInfo = new Map();
+  const infoFor = async (dk) => {
+    if (!dayInfo.has(dk)) {
+      dayInfo.set(dk, {
+        sched: dk === dateKey ? sched : await schedule.resolve(employeeId, dk),
+        remote: remoteByMode || await schedule.wfhOn(employeeId, dk),
+      });
+    }
+    return dayInfo.get(dk);
+  };
 
   // Sort events chronologically to preserve accurate playback
   const sortedEvents = [...events].sort(
@@ -801,18 +816,22 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
       source: 'APP',
     });
     const inOffice = locationVerdict === 'OFFICE';
+    const { sched: evSched, remote: isRemote } = await infoFor(evtDateKey);
+    // A remote / WFH employee's queued work counts from their own network, as
+    // their live heartbeats do (it used to be parked as unverified and lost).
+    const verified = inOffice || isRemote;
 
     const numActive = Math.max(0, parseInt(evt.activeSeconds || evt.active_seconds, 10) || 0);
     const numIdle = Math.max(0, parseInt(evt.idleSeconds || evt.idle_seconds, 10) || 0);
 
-    const shiftStart = (sched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
-    const shiftEnd = (sched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
-    const isWithinHours = sched.isWorkingDay && (evtObserved >= shiftStart && evtObserved <= shiftEnd);
+    const shiftStart = (evSched.scheduledStartAt || nowMs) - 15 * 60 * 1000;
+    const shiftEnd = (evSched.scheduledEndAt || nowMs) + 15 * 60 * 1000;
+    const isWithinHours = evSched.isWorkingDay && (evtObserved >= shiftStart && evtObserved <= shiftEnd);
 
     let effectiveActive = 0;
     let addUnverified = 0;
 
-    if (inOffice && isWithinHours) {
+    if (verified && isWithinHours) {
       effectiveActive = numActive;
       try {
         await presence.recordEvent({
@@ -825,11 +844,12 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
           ssid: effectiveSsid,
           visibleOfficeBssids: evt.visibleOfficeBssids || [],
           observedAt: evtObserved,
-          note: 'Desktop Agent (Offline Synced)',
+          location: inOffice ? 'OFFICE' : 'REMOTE_VERIFIED',
+          note: `Desktop Agent (Offline Synced${inOffice ? '' : ' - Remote'})`,
         });
-        dayNeedsRecompute = true;
+        daysToRecompute.add(evtDateKey);
       } catch (_) {}
-    } else if (!inOffice && isWithinHours) {
+    } else if (!verified && isWithinHours) {
       addUnverified = numActive;
     }
 
@@ -838,7 +858,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
     const prayerIdle = Math.min(numIdle, Math.round(schedule.prayerOverlapMs(evtDateKey, evtObserved - (numActive + numIdle) * 1000, evtObserved) / 1000));
     if (prayerIdle > 0 && isWithinHours) {
       idleToAdd -= prayerIdle;
-      if (inOffice) effectiveActive += prayerIdle; else addUnverified += prayerIdle;
+      if (verified) effectiveActive += prayerIdle; else addUnverified += prayerIdle;
     }
 
     const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, evtDateKey);
@@ -851,7 +871,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
             last_heartbeat_at = ?,
             updated_at = ?
         WHERE id = ?
-      `).run(effectiveActive, idleToAdd, inOffice ? 1 : 0, addUnverified, nowMs, nowMs, existing.id);
+      `).run(effectiveActive, idleToAdd, verified ? 1 : 0, addUnverified, nowMs, nowMs, existing.id);
     } else {
       const sessionId = `ws_${deviceId}_${evtDateKey}_${crypto.randomUUID().slice(0, 8)}`;
       await db.prepare(`
@@ -863,16 +883,16 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
       `).run(
         sessionId, deviceId, employeeId, 'ACTIVE', evtDateKey,
         effectiveActive, idleToAdd, 0, addUnverified, 'UNLOCKED',
-        evt.connectedBssid, inOffice ? 1 : 0, nowMs, evtObserved, nowMs
+        evt.connectedBssid, inOffice ? 1 : (isRemote ? 2 : 0), nowMs, evtObserved, nowMs
       );
     }
 
     if (eventId) syncedEventIds.push(eventId);
   }
 
-  if (dayNeedsRecompute) {
+  for (const dk of daysToRecompute) {
     try {
-      await presence.recomputeDay(employeeId, dateKey, nowMs);
+      await presence.recomputeDay(employeeId, dk, nowMs);
     } catch (_) {}
   }
 

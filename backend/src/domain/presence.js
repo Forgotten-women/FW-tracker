@@ -701,11 +701,21 @@ const selectActiveEmployees = db.prepare(`
 `);
 
 /** Live board for every active employee, all from the same derivation. */
+/**
+ * The live board, cached: every employee's day is derived on each call (about
+ * 10 s for the team), and the dashboard polls it every 15 s. Served from the
+ * cache and refreshed in the background once older than 10 s, so a status
+ * change shows within one poll or two.
+ */
+async function liveBoardCached() {
+  return require('../lib/swrCache').swr('liveBoard', 10 * 1000, () => liveBoard(T.now()), { maxStaleMs: 60 * 1000 });
+}
+
 async function liveBoard(nowMs = T.now()) {
   const dayKey = T.dateKey(nowMs);
   const activeEmployees = await selectActiveEmployees.all();
   const results = [];
-  const chunkSize = 4;
+  const chunkSize = 6;
   for (let i = 0; i < activeEmployees.length; i += chunkSize) {
     const chunk = activeEmployees.slice(i, i + chunkSize);
     const chunkResults = await Promise.all(chunk.map(async emp => {
@@ -719,7 +729,7 @@ async function liveBoard(nowMs = T.now()) {
 
 module.exports = {
   recordEvent, deriveDay, recomputeDay, recomputeAll,
-  presentDay, liveBoard, classifyLocation, explainLocation,
+  presentDay, liveBoard, liveBoardCached, classifyLocation, explainLocation,
   ATTRIBUTED_VIA_BINDING,
   SOURCE_CONFIDENCE,
 };

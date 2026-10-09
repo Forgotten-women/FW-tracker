@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import type { NotificationItem } from '@/lib/types';
 import { api } from '@/lib/api';
+import { DesktopNotifySettings } from './DesktopNotifySettings';
 import {
   AlertTriangleIcon,
   BellIcon,
@@ -151,6 +152,8 @@ export function NotificationDrawer({
             </button>
           </div>
         </div>
+
+        <DesktopNotifySettings />
 
         {/* Filter Tabs */}
         <div className="flex gap-1.5 overflow-x-auto border-b border-zinc-800/60 px-4 py-2.5 text-xs scrollbar-none">
