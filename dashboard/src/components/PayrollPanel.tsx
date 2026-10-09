@@ -270,6 +270,7 @@ function AddExceptionModal({
 
   const empCurrency = employee.salary?.currency || 'PKR';
   const currSymbol = empCurrency === 'GBP' ? '£' : '₨';
+  const isDeduction = type === 'SALARY_DEDUCTION';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -287,7 +288,8 @@ function AddExceptionModal({
     try {
       await api.addPayrollException(periodId, {
         employeeId: employee.employeeId,
-        amount: num,
+        // The server makes a deduction negative too; sent negative so it reads the same.
+        amount: isDeduction ? -Math.abs(num) : num,
         type,
         explanation: explanation.trim(),
         autoApprove,
@@ -337,6 +339,7 @@ function AddExceptionModal({
               <option value="ALLOWANCE">Monthly / Transport / Shift Allowance</option>
               <option value="SPECIAL_ADDITION">Special / Festive Addition</option>
               <option value="OVERTIME">Overtime (paid extra hours)</option>
+              <option value="SALARY_DEDUCTION">Salary Deduction (taken off this month&apos;s pay)</option>
               <option value="MANUAL_ADJUSTMENT">Custom Manual Adjustment</option>
             </select>
             {type === 'OVERTIME' && (
@@ -345,17 +348,23 @@ function AddExceptionModal({
                 on its Overtime line.
               </p>
             )}
+            {isDeduction && (
+              <p className="mt-1 text-[11px] text-rose-300/80">
+                Deducted from this month&apos;s net payable only. The invoice shows it under deductions.
+              </p>
+            )}
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-400 mb-1">
-              Amount ({empCurrency})
+              {isDeduction ? 'Amount to deduct' : 'Amount'} ({empCurrency})
             </label>
             <div className="relative">
               <span className="absolute left-3 top-2 text-xs text-slate-500 font-mono">{currSymbol}</span>
               <input
                 type="number"
                 step="any"
+                min={isDeduction ? 0 : undefined}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="e.g. 5000"
@@ -364,7 +373,9 @@ function AddExceptionModal({
               />
             </div>
             <p className="mt-1 text-[11px] text-slate-500">
-              Positive values (e.g. 5000) increase pay; negative values deduct.
+              {isDeduction
+                ? 'Enter the amount as a positive number (e.g. 5000); it is taken off the net payable.'
+                : 'Positive values (e.g. 5000) increase pay; negative values deduct.'}
             </p>
           </div>
 
@@ -374,7 +385,7 @@ function AddExceptionModal({
               rows={2}
               value={explanation}
               onChange={(e) => setExplanation(e.target.value)}
-              placeholder="e.g. Approved discretionary bonus for outstanding milestone achievement"
+              placeholder={isDeduction ? 'e.g. Deduction for unreturned equipment, agreed with the employee' : 'e.g. Approved discretionary bonus for outstanding milestone achievement'}
               required
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
             />
@@ -399,7 +410,7 @@ function AddExceptionModal({
               disabled={submitting}
               className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition"
             >
-              {submitting ? 'Applying...' : 'Apply Exception'}
+              {submitting ? 'Applying...' : isDeduction ? 'Apply Deduction' : 'Apply Exception'}
             </button>
             <button
               type="button"

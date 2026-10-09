@@ -164,6 +164,22 @@ test('the open month is a live draft, and its fields add up', async () => {
   assert.equal(st.totals.grossEarnings, 2700);
 });
 
+test('a salary deduction is taken off the month whichever sign HR typed', async () => {
+  const before = await INV.buildStatement({ periodId: ctx.march.id, employeeId: EMP, throughDate: '2025-03-20' });
+  const r = await PR.addException({ periodId: ctx.march.id, employeeId: EMP, amount: 50, type: 'SALARY_DEDUCTION', explanation: 'Equipment', actor: 'user:hr' });
+  assert.equal(r.type, 'SALARY_DEDUCTION');
+  assert.equal(r.amount, -50);
+  const st = await INV.buildStatement({ periodId: ctx.march.id, employeeId: EMP, throughDate: '2025-03-20' });
+  assert.equal(st.totals.net, before.totals.net - 50);
+  assert.equal(st.totals.totalDeductions, before.totals.totalDeductions + 50);
+  // Typed negative: still a deduction of the same size.
+  const neg = await PR.addException({ periodId: ctx.march.id, employeeId: EMP, amount: -20, type: 'SALARY_DEDUCTION', explanation: 'Equipment', actor: 'user:hr' });
+  assert.equal(neg.amount, -20);
+  // Later steps check the March figures exactly: take both lines out again.
+  await db.prepare('DELETE FROM payroll_adjustments WHERE id IN (?, ?)').run(r.id, neg.id);
+  await PR.invalidatePayrollCache();
+});
+
 test('approval freezes the invoice: it matches the payslip to the penny', async () => {
   await PR.runPayrollAutomation({ nowMs: at('2025-03-26') });
   const proposed = await db.prepare(

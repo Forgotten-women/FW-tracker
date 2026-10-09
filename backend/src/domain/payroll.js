@@ -2642,10 +2642,12 @@ async function addException({ periodId, employeeId, amount, type = 'BONUS', expl
   if (!explanation || !String(explanation).trim()) {
     throw new Error('An explanation or reason is required for an exception addition.');
   }
-  const numericAmount = Number(amount);
+  let numericAmount = Number(amount);
   if (!Number.isFinite(numericAmount) || numericAmount === 0) {
     throw new Error('A non-zero numeric amount is required.');
   }
+  // A salary deduction always reduces pay, whichever sign HR typed.
+  if (type === 'SALARY_DEDUCTION') numericAmount = -Math.abs(numericAmount);
 
   const period = await selectPeriod.get(periodId);
   if (!period) throw new Error('No such payroll period.');
@@ -2653,7 +2655,7 @@ async function addException({ periodId, employeeId, amount, type = 'BONUS', expl
 
   // OVERTIME is never calculated automatically: HR adds it here when it is
   // paid, and the invoice prints it on its own line.
-  const validTypes = ['BONUS', 'ALLOWANCE', 'SPECIAL_ADDITION', 'OVERTIME', 'HR_EXCEPTION', 'MANUAL_ADJUSTMENT'];
+  const validTypes = ['BONUS', 'ALLOWANCE', 'SPECIAL_ADDITION', 'OVERTIME', 'SALARY_DEDUCTION', 'HR_EXCEPTION', 'MANUAL_ADJUSTMENT'];
   const adjType = validTypes.includes(type) ? type : 'BONUS';
 
   const id = 'pa_' + crypto.randomBytes(8).toString('hex');
