@@ -387,7 +387,12 @@ function buildDayView({
   const P_ = winEnd > winStart ? clipIntervals(sessions, winStart, winEnd) : [];
   const B_all = mergeIntervals(breaks.map(b => [Number(b.started_at), b.ended_at ? Number(b.ended_at) : nowMs]));
   const B_ = winEnd > winStart ? clipIntervals(B_all, winStart, winEnd) : [];
-  const I_raw = mergeIntervals((idleSpans || []).map(x => [Number(x.start_at), Number(x.end_at)]));
+  // Idle inside the Friday prayer hour is not idle (schedule.prayerWindow).
+  const prayer = schedule.prayerWindow(dateKey);
+  const I_raw = subtractIntervals(
+    mergeIntervals((idleSpans || []).map(x => [Number(x.start_at), Number(x.end_at)])),
+    prayer ? [prayer] : [],
+  );
   const I_ = subtractIntervals(intersectIntervals(I_raw, P_), B_);
 
   const presentMs = totalMs(P_);

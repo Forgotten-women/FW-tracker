@@ -166,3 +166,31 @@ test('the first heartbeat after a night asleep puts the sleep before the work, n
   }
   assert.notEqual(r.body.today.day.counting, false, 'counting: the person is working, not idle');
 });
+
+test('Friday prayers: idle or locked between 13:00 and 14:00 (office time) is active, not idle', async () => {
+  const p = await enrolLaptop('Friday Prayer');
+  // Friday 25 Sep 2026, 12:50 PKT (UTC+5) = 07:50 UTC.
+  const from = Date.UTC(2026, 8, 25, 7, 50, 0);
+  // No input from 12:50 to 14:05: idle from 12:54:50 until the person is back.
+  const { last } = await simulate(p.auth, { from, minutes: 80, away: [[0, 4500]] });
+
+  const prayerStart = Date.UTC(2026, 8, 25, 8, 0, 0);   // 13:00 PKT
+  const prayerEnd = Date.UTC(2026, 8, 25, 9, 0, 0);     // 14:00 PKT
+  const spans = await spansOf(p.employeeId);
+  for (const s of spans) {
+    assert.ok(Number(s.end_at) <= prayerStart || Number(s.start_at) >= prayerEnd, 'no idle span inside the prayer hour');
+  }
+  // Idle only outside the hour: 12:54:50-13:00 and 14:00-14:04:50.
+  assert.equal(last.body.today.day.idleMinutes, 10);
+  const ws = await db.prepare('SELECT idle_seconds, active_seconds FROM workstation_sessions WHERE employee_id = ?').get(p.employeeId);
+  assert.equal(Number(ws.idle_seconds), 600, 'the laptop counter has the same idle');
+  assert.equal(Number(ws.active_seconds), 80 * 60 - 600, 'the prayer hour is counted active');
+
+  // Locked for 15 minutes at 13:30: still active.
+  clock = Date.UTC(2026, 8, 25, 8, 30, 0);
+  const locked = await json('POST', '/api/desktop/heartbeat', {
+    headers: p.auth,
+    body: { lockState: 'LOCKED', lockDurationSeconds: 900, activeSeconds: 0, idleSeconds: 0, localIp: '192.168.18.64' },
+  });
+  assert.equal(locked.body.workstationStatus, 'ACTIVE');
+});

@@ -62,6 +62,23 @@ const selectCalendarDay = db.prepare(
   'SELECT * FROM calendar_days WHERE office_id = ? AND date = ?'
 );
 
+// Friday prayers (Jumu'ah): every Friday 13:00-14:00 office time (config.timeZone,
+// Asia/Karachi). Laptop idle in this hour is not idle: it counts as active.
+const FRIDAY_PRAYER = { start: '13:00', end: '14:00' };
+
+/** [start, end] epoch ms of a date's Friday prayer hour, or null on other days. */
+function prayerWindow(dateKey) {
+  if (weekdayKey(dateKey) !== 'fri') return null;
+  return [T.wallClockToEpoch(dateKey, FRIDAY_PRAYER.start), T.wallClockToEpoch(dateKey, FRIDAY_PRAYER.end)];
+}
+
+/** Milliseconds of [from, to] inside the Friday prayer hour of dateKey. */
+function prayerOverlapMs(dateKey, from, to) {
+  const w = prayerWindow(dateKey);
+  if (!w) return 0;
+  return Math.max(0, Math.min(to, w[1]) - Math.max(from, w[0]));
+}
+
 /** The local weekday key for a date, e.g. 'mon'. */
 function weekdayKey(dateKey) {
   const [y, m, d] = String(dateKey).split('-').map(Number);
@@ -269,4 +286,4 @@ async function leaveOn(employeeId, dateKey) {
   return partDay;
 }
 
-module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate, leaveOn, wfhOn };
+module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate, leaveOn, wfhOn, prayerWindow, prayerOverlapMs, FRIDAY_PRAYER };

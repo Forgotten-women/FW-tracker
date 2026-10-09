@@ -135,6 +135,13 @@ const selectBreakEndedBetween = db.prepare(`
 
 /** Adds [startAt, endAt] to the device's idle spans, extending the last one if they touch. */
 async function recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs }) {
+  // The Friday prayer hour is never idle: store only the parts outside it.
+  const prayer = schedule.prayerWindow(dateKey);
+  if (prayer && endAt > prayer[0] && startAt < prayer[1]) {
+    if (startAt < prayer[0]) await recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt: prayer[0], kind, nowMs });
+    if (endAt > prayer[1]) await recordIdleSpan({ deviceId, employeeId, dateKey, startAt: prayer[1], endAt, kind, nowMs });
+    return;
+  }
   const last = await selectLastIdleSpan.get(deviceId, dateKey);
   if (last && Number(last.end_at) >= startAt - 90 * 1000) {
     await db.prepare('UPDATE workstation_idle_spans SET end_at = GREATEST(end_at, ?), updated_at = ? WHERE id = ?')
@@ -269,6 +276,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   } else if (currentIdleSeconds >= (idleThresholdMins * 60) || (idleSeconds >= 55 && activeSeconds <= 5)) {
     status = 'IDLE';
   }
+  // Friday prayers (13:00-14:00 office time): idle or locked counts as active.
+  const inPrayerHour = schedule.prayerOverlapMs(dateKey, nowMs - 1, nowMs) > 0;
+  if (inPrayerHour && (status === 'IDLE' || status === 'AWAY')) status = 'ACTIVE';
 
   // 6. Retroactive Arrival Reconciliation & Presence Logging
   // If this device was actively working earlier this morning while not yet verified
@@ -383,6 +393,18 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       addUnverified = numActive;
     }
     effectiveIdle = numIdle;
+  }
+
+  // Idle seconds that fall inside the Friday prayer hour are credited as active
+  // (or unverified, like any active time off the office network).
+  if (effectiveIdle > 0) {
+    const prevAt = existing && existing.last_heartbeat_at ? Number(existing.last_heartbeat_at) : null;
+    const spanMs = Math.min(batchTotal * 1000 || 60000, prevAt ? Math.max(0, nowMs - prevAt) : 60000, 15 * 60000);
+    const prayerIdle = Math.min(effectiveIdle, Math.round(schedule.prayerOverlapMs(dateKey, nowMs - spanMs, nowMs) / 1000));
+    if (prayerIdle > 0) {
+      effectiveIdle -= prayerIdle;
+      if (isVerifiedWork) effectiveActive += prayerIdle; else addUnverified += prayerIdle;
+    }
   }
 
   const inOfficeFlag = inOffice ? 1 : (isRemoteWorker ? 2 : 0);
@@ -811,6 +833,14 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
       addUnverified = numActive;
     }
 
+    // Idle inside the Friday prayer hour counts as active, as in the live heartbeat.
+    let idleToAdd = numIdle;
+    const prayerIdle = Math.min(numIdle, Math.round(schedule.prayerOverlapMs(evtDateKey, evtObserved - (numActive + numIdle) * 1000, evtObserved) / 1000));
+    if (prayerIdle > 0 && isWithinHours) {
+      idleToAdd -= prayerIdle;
+      if (inOffice) effectiveActive += prayerIdle; else addUnverified += prayerIdle;
+    }
+
     const existing = await db.prepare('SELECT * FROM workstation_sessions WHERE device_id = ? AND session_date = ?').get(deviceId, evtDateKey);
     if (existing) {
       await db.prepare(`
@@ -821,7 +851,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
             last_heartbeat_at = ?,
             updated_at = ?
         WHERE id = ?
-      `).run(effectiveActive, numIdle, inOffice ? 1 : 0, addUnverified, nowMs, nowMs, existing.id);
+      `).run(effectiveActive, idleToAdd, inOffice ? 1 : 0, addUnverified, nowMs, nowMs, existing.id);
     } else {
       const sessionId = `ws_${deviceId}_${evtDateKey}_${crypto.randomUUID().slice(0, 8)}`;
       await db.prepare(`
@@ -832,7 +862,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         sessionId, deviceId, employeeId, 'ACTIVE', evtDateKey,
-        effectiveActive, numIdle, 0, addUnverified, 'UNLOCKED',
+        effectiveActive, idleToAdd, 0, addUnverified, 'UNLOCKED',
         evt.connectedBssid, inOffice ? 1 : 0, nowMs, evtObserved, nowMs
       );
     }
