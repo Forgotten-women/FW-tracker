@@ -1146,8 +1146,9 @@ export interface ApproachingAnniversaryEmployee {
     lapsedDays: number;
     decision: string;
     approvedBy?: string;
-    approvedAt?: number;
+    approvedAt?: number | null;
     notes?: string;
+    appliedAt?: number | null;
   } | null;
 }
 

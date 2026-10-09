@@ -79,6 +79,8 @@ export function LeaveManagementPanel() {
 
   // Carry Forward Review Modal
   const [carryModalEmployee, setCarryModalEmployee] = useState<ApproachingAnniversaryEmployee | null>(null);
+  // The most that can be carried: the unused balance once the cycle is complete.
+  const carryMax = carryModalEmployee ? (carryModalEmployee.maxEligibleCarryForward ?? carryModalEmployee.availableDays) : 0;
   const [carryApprovedDays, setCarryApprovedDays] = useState<number>(0);
   const [carryNotes, setCarryNotes] = useState<string>('');
   const [carrySaving, setCarrySaving] = useState<boolean>(false);
@@ -303,7 +305,7 @@ export function LeaveManagementPanel() {
     setCarryModalEmployee(emp);
     const existingDays = emp.carryForwardDecision?.approvedDays != null
       ? emp.carryForwardDecision.approvedDays
-      : Math.min(5, Math.max(0, emp.availableDays));
+      : Math.min(5, Math.max(0, emp.maxEligibleCarryForward ?? emp.availableDays));
     setCarryApprovedDays(existingDays);
     setCarryNotes(emp.carryForwardDecision?.notes || '');
   };
@@ -1316,6 +1318,9 @@ export function LeaveManagementPanel() {
                                 <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-bold text-emerald-400 border border-emerald-500/20">
                                   <CheckIcon className="h-3.5 w-3.5 shrink-0" /> Approved: {dec.approvedDays}d
                                 </span>
+                                <div className="text-[10px] text-muted mt-0.5">
+                                  {dec.appliedAt ? 'Added to the new cycle' : `Added on ${emp.nextRenewalDate}`}
+                                </div>
                                 {dec.lapsedDays > 0 && (
                                   <div className="text-[10px] text-muted mt-0.5">
                                     {dec.lapsedDays}d will lapse
@@ -2060,6 +2065,11 @@ export function LeaveManagementPanel() {
                   <span className="text-base font-extrabold text-text">
                     {carryModalEmployee.availableDays} days
                   </span>
+                  {carryModalEmployee.maxEligibleCarryForward != null && carryModalEmployee.maxEligibleCarryForward !== carryModalEmployee.availableDays && (
+                    <span className="block text-[10px] text-muted">
+                      {carryModalEmployee.maxEligibleCarryForward} days once the cycle&apos;s last accrual is added
+                    </span>
+                  )}
                 </div>
                 <div>
                   <span className="text-muted block text-[10px] uppercase font-semibold">Company Policy Cap</span>
@@ -2077,15 +2087,15 @@ export function LeaveManagementPanel() {
                   <Input
                     type="number"
                     min="0"
-                    max={Math.max(0, carryModalEmployee.availableDays)}
+                    max={Math.max(0, carryMax)}
                     step="0.5"
                     value={carryApprovedDays}
-                    onChange={(e) => setCarryApprovedDays(Math.min(Math.max(0, carryModalEmployee.availableDays), Math.max(0, parseFloat(e.target.value) || 0)))}
+                    onChange={(e) => setCarryApprovedDays(Math.min(Math.max(0, carryMax), Math.max(0, parseFloat(e.target.value) || 0)))}
                     className="w-32 text-sm font-bold py-1.5 text-center"
                   />
                   <div className="flex gap-1.5 flex-wrap">
                     {[0, 1, 2, 3, 4, 5]
-                      .filter((d) => d <= carryModalEmployee.availableDays)
+                      .filter((d) => d <= carryMax)
                       .map((d) => (
                         <button
                           key={d}
@@ -2108,9 +2118,12 @@ export function LeaveManagementPanel() {
                     Will Carry Forward: <strong className="text-emerald-400">{carryApprovedDays} days</strong>
                   </span>
                   <span>
-                    Will Automatically Lapse: <strong className="text-rose-400">{Math.max(0, carryModalEmployee.availableDays - carryApprovedDays)} days</strong>
+                    Will Automatically Lapse: <strong className="text-rose-400">{Math.max(0, Math.round((carryMax - carryApprovedDays) * 100) / 100)} days</strong>
                   </span>
                 </div>
+                <p className="mt-1 text-[11px] text-muted">
+                  Approved days are added to the new cycle on its renewal date ({carryModalEmployee.nextRenewalDate}); the balance changes then, not now.
+                </p>
               </div>
 
               <div>

@@ -160,3 +160,35 @@ test('HR-excused lateness keeps the arrival time but nothing is late', async () 
   assert.equal(T.displayTime(d.firstInAt), T.displayTime(at('11:50', day)), 'arrival unchanged');
   assert.equal(d.dailyDeficitMinutes, 0);
 });
+
+test('Friday prayers: going out 13:00-14:00 is worked, not a gap; the same on Thursday is a gap', async () => {
+  const emp = await makeEmployee('emp_friday_gap');
+  await hrDay(emp, '2026-09-25', [['11:00', '13:00'], ['14:00', '19:00']]);   // Friday
+  const fri = await A.deriveDay(emp, '2026-09-25', at('23:00', '2026-09-25'));
+  assert.equal(fri.day.workedMinutes, 480);
+  assert.equal(fri.unauthorisedMissingMinutes, 0);
+  assert.equal(fri.dailyDeficitMinutes, 0);
+  await hrDay(emp, '2026-09-24', [['11:00', '13:00'], ['14:00', '19:00']]);   // Thursday
+  const thu = await A.deriveDay(emp, '2026-09-24', at('23:00', '2026-09-24'));
+  assert.equal(thu.day.workedMinutes, 420);
+  assert.equal(thu.unauthorisedMissingMinutes, 60);
+});
+
+test('HR manual time that covers all the lateness: on time, not late; partly covered: still late', async () => {
+  const emp = await makeEmployee('emp_hr_late_cover');
+  const credit = async (day, mins) => db.prepare(`INSERT INTO attendance_deficit_ledger (id, employee_id, date_key, entry_type, minutes_delta,
+      balance_after, whole_days_after, carry_forward_after, description, created_at, created_by)
+    VALUES (?, ?, ?, 'HR_ADJUSTMENT', ?, 0, 0, 0, 'HR Manual Entry: arrived on time', ?, 'test')`).run(`def_t_${day}`, emp, day, -mins, T.now());
+  await hrDay(emp, '2026-09-21', [['11:30', '19:00']]);   // 20 min late beyond grace
+  await credit('2026-09-21', 20);
+  const full = await A.deriveDay(emp, '2026-09-21', at('23:00', '2026-09-21'));
+  assert.equal(full.isLateOccurrence, false);
+  assert.equal(full.attendanceStatus, 'RECOVERED');
+  assert.equal(full.dailyDeficitMinutes, 0);
+
+  await hrDay(emp, '2026-09-22', [['11:30', '19:00']]);
+  await credit('2026-09-22', 10);
+  const part = await A.deriveDay(emp, '2026-09-22', at('23:00', '2026-09-22'));
+  assert.equal(part.attendanceStatus, 'LATE');
+  assert.equal(part.dailyDeficitMinutes, 10);
+});

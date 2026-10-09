@@ -384,11 +384,23 @@ function buildDayView({
   if (clockOutAt) winEnd = Math.min(winEnd, clockOutAt);
 
   const sessions = mergeIntervals((presence.sessions || []).map(x => [Number(x.start), Number(x.end)]));
-  const P_ = winEnd > winStart ? clipIntervals(sessions, winStart, winEnd) : [];
-  const B_all = mergeIntervals(breaks.map(b => [Number(b.started_at), b.ended_at ? Number(b.ended_at) : nowMs]));
-  const B_ = winEnd > winStart ? clipIntervals(B_all, winStart, winEnd) : [];
-  // Idle inside the Friday prayer hour is not idle (schedule.prayerWindow).
+  let P_ = winEnd > winStart ? clipIntervals(sessions, winStart, winEnd) : [];
+  // Friday prayers (schedule.prayerWindow, 13:00-14:00 office time): the hour is
+  // worked for anyone at work that day, between when they were first and last
+  // seen. Going out for prayers, a break or a locked laptop in it costs nothing.
   const prayer = schedule.prayerWindow(dateKey);
+  let prayerFill = [];
+  if (prayer && sessions.length && winEnd > winStart) {
+    const from = Math.max(prayer[0], sessions[0][0], winStart);
+    const to = Math.min(prayer[1], sessions[sessions.length - 1][1], winEnd);
+    if (to > from) {
+      prayerFill = subtractIntervals([[from, to]], P_);
+      P_ = mergeIntervals([...P_, [from, to]]);
+    }
+  }
+  const B_all = mergeIntervals(breaks.map(b => [Number(b.started_at), b.ended_at ? Number(b.ended_at) : nowMs]));
+  const B_ = winEnd > winStart ? subtractIntervals(clipIntervals(B_all, winStart, winEnd), prayer ? [prayer] : []) : [];
+  // Idle inside the prayer hour is not idle either.
   const I_raw = subtractIntervals(
     mergeIntervals((idleSpans || []).map(x => [Number(x.start_at), Number(x.end_at)])),
     prayer ? [prayer] : [],
@@ -459,6 +471,8 @@ function buildDayView({
     onLeave: Boolean(onLeave),
     isWorkingDay: Boolean(s.isWorkingDay),
     laptop: { activeMinutes: Math.round(Number(laptopActiveSeconds || 0) / 60) },
+    // Minutes of the Friday prayer hour counted as worked with no presence recorded.
+    prayerMinutes: toMinutes(totalMs(prayerFill)),
   };
 }
 
@@ -550,7 +564,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
       if (end <= start) return acc;
       return acc + Math.max(0, Math.round((end - start) / MIN));
     }, 0);
-    shiftWorkedMinutes = Math.max(0, shiftWorkedMinutes + (presence.adjustmentMinutes || 0));
+    shiftWorkedMinutes = Math.max(0, shiftWorkedMinutes + (presence.adjustmentMinutes || 0) + (day.prayerMinutes || 0));
   } else {
     shiftWorkedMinutes = presence.totalMinutes;
   }
@@ -636,13 +650,18 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     : 0;
 
   // --- excess break (spec 12) ----------------------------------------------
-  let excessBreakMinutes = breaks.reduce((a, b) => a + (b.excess_minutes || 0), 0);
-  const openBreak = breaks.find(b => b.ended_at === null);
-  if (openBreak) {
-    const ongoingMinutes = Math.max(0, Math.round((nowMs - openBreak.started_at) / MIN));
-    const ongoingExcess = Math.max(0, ongoingMinutes - openBreak.permitted_minutes);
-    excessBreakMinutes += ongoingExcess;
+  // Break taken inside the Friday prayer hour doesn't use the allowance.
+  const prayer = schedule.prayerWindow(dateKey);
+  const prayerMins = (a, b) => (prayer ? Math.max(0, Math.round((Math.min(b, prayer[1]) - Math.max(a, prayer[0])) / MIN)) : 0);
+  let excessBreakMinutes = 0;
+  for (const b of breaks) {
+    const end = b.ended_at === null ? nowMs : Number(b.ended_at);
+    const inPrayer = prayerMins(Number(b.started_at), end);
+    if (b.ended_at !== null && !inPrayer) { excessBreakMinutes += b.excess_minutes || 0; continue; }
+    const taken = Math.max(0, Math.round((end - Number(b.started_at)) / MIN)) - inPrayer;
+    excessBreakMinutes += Math.max(0, taken - b.permitted_minutes);
   }
+  const openBreak = breaks.find(b => b.ended_at === null);
 
   // --- early departure ------------------------------------------------------
   // Only meaningful once the scheduled end has passed; someone still at their
@@ -675,7 +694,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
       b.started_at <= gapStart + 5 * MIN &&
       (b.ended_at === null || b.ended_at >= gapEnd - 5 * MIN)
     );
-    if (!coveredByBreak) unauthorisedMissingMinutes += gapMinutes;
+    if (!coveredByBreak) unauthorisedMissingMinutes += Math.max(0, gapMinutes - prayerMins(from, to));
   }
 
   // --- late arrival & break offset policy ----------------------------------
@@ -695,7 +714,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     const mins = b.actual_minutes != null
       ? b.actual_minutes
       : (b.ended_at ? Math.max(0, Math.round((b.ended_at - b.started_at) / MIN)) : Math.max(0, Math.round((nowMs - b.started_at) / MIN)));
-    return sum + mins;
+    return sum + Math.max(0, mins - prayerMins(Number(b.started_at), b.ended_at === null ? nowMs : Number(b.ended_at)));
   }, 0);
 
   const completes8Hours = shiftWorkedMinutes >= (s.dayEquivalentMinutes || 480);
@@ -704,11 +723,19 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     breakOffsetLateMinutes = Math.min(lateMinutes, s.permittedBreakMinutes || 30);
   }
 
-  const recoveredLateMinutes = breakOffsetLateMinutes;
+  const approvedAdjustmentMinutes = (await selectApprovedAdjustment.get(employeeId, dateKey)).mins || 0;
+  const hrCredit = Math.abs(approvedAdjustmentMinutes);
+
+  // 3. HR manual time that covers all of the remaining lateness (e.g. "arrived
+  //    on time", the app was installed late) means the arrival is not counted
+  //    as late. The credit pays the lateness first; what is left of it reduces
+  //    the rest of the deficit. Partly covered lateness is still late.
+  const lateAfterOffset = Math.max(0, lateMinutes - breakOffsetLateMinutes);
+  const hrCoveredLateMinutes = lateAfterOffset > 0 && hrCredit >= lateAfterOffset ? lateAfterOffset : 0;
+
+  const recoveredLateMinutes = breakOffsetLateMinutes + hrCoveredLateMinutes;
   const netLateMinutes = Math.max(0, lateMinutes - recoveredLateMinutes);
   const isLateOccurrence = isLateArrival && netLateMinutes > 0;
-
-  const approvedAdjustmentMinutes = (await selectApprovedAdjustment.get(employeeId, dateKey)).mins || 0;
 
   // Deficit calculation:
   const dailyDeficitMinutes = Math.max(0,
@@ -716,7 +743,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     + excessBreakMinutes
     + earlyDepartureMinutes
     + unauthorisedMissingMinutes
-    - Math.abs(approvedAdjustmentMinutes)
+    - (hrCredit - hrCoveredLateMinutes)
   );
 
   let attendanceStatus = 'PRESENT';

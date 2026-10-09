@@ -1035,6 +1035,16 @@ async function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateK
  * can approve more (confirmed 2026-10-07: 7 and 6 days were approved), so the
  * only hard limit is the leave actually available.
  */
+// What can be carried out of the current cycle: the unused balance once the
+// cycle is complete. HR decides near the end of the cycle, before its last
+// month has accrued, so the rollover's top-up to the full year is counted.
+async function carryForwardAvailable(employeeId, year, effectiveDate) {
+  const raw = await balanceRaw(employeeId, year, effectiveDate);
+  const fullYear = await accrualTarget(employeeId, year.yearStart, 12, await entitlementFor(employeeId, effectiveDate));
+  const accruedSoFar = Number((await selectAccrued.get(employeeId, year.leaveYear))?.days) || 0;
+  return Math.round(Math.max(0, raw.availableDays + Math.max(0, fullYear - accruedSoFar)) * 100) / 100;
+}
+
 async function recordCarryForwardApproval({ employeeId, approvedDays, notes = '', actor, onDate, today }) {
   const effectiveDate = today || onDate || T.dateKey();
   const numDays = Number(approvedDays);
@@ -1044,13 +1054,8 @@ async function recordCarryForwardApproval({ employeeId, approvedDays, notes = ''
   const year = await holidayYearFor(employeeId, effectiveDate);
   if (year.blocked) throw new Error(year.message);
 
-  const raw = await balanceRaw(employeeId, year, effectiveDate);
-  // HR decides near the end of the cycle, before its last month has accrued.
-  // Judge the request against what the cycle will hold once complete (the
-  // rollover tops it up to the full year first), not what has accrued so far.
-  const fullYear = await accrualTarget(employeeId, year.yearStart, 12, await entitlementFor(employeeId, effectiveDate));
-  const accruedSoFar = Number((await selectAccrued.get(employeeId, year.leaveYear))?.days) || 0;
-  const available = Math.max(0, raw.availableDays + Math.max(0, fullYear - accruedSoFar));
+  // Judged against what the cycle will hold once complete, not what has accrued so far.
+  const available = await carryForwardAvailable(employeeId, year, effectiveDate);
   if (numDays > available) {
     throw new Error(`Cannot approve ${numDays} days: employee only has ${available.toFixed(2)} days available.`);
   }
@@ -1365,25 +1370,38 @@ async function employeesApproachingAnniversary(today = T.dateKey()) {
     if (daysLeft >= 0 && daysLeft <= 30) {
       const bal = await balanceFor(e.id, today);
       const cf = await selectCarryForwardRecord.get(e.id, year.leaveYear);
+      // The most that can be carried: the unused balance once the cycle is complete.
+      const maxCarry = await carryForwardAvailable(e.id, year, today);
+      const decision = cf ? {
+        approvedDays: Number(cf.approved_days),
+        lapsedDays: Math.max(0, Math.round((maxCarry - Number(cf.approved_days)) * 100) / 100),
+        decision: cf.decision,
+        approvedBy: cf.approved_by,
+        approvedAt: cf.approved_at ? Number(cf.approved_at) : null,
+        notes: cf.notes,
+        appliedAt: cf.applied_at ? Number(cf.applied_at) : null,
+      } : null;
+      // Field names are the dashboard's (ApproachingAnniversaryEmployee); the
+      // older names are kept alongside for anything that still reads them.
       list.push({
         employeeId: e.id,
+        name: e.name,
         employeeName: e.name,
         employeeNumber: e.employee_number || null,
         role: e.role,
+        officialJoiningDate: year.startDate,
         cycleStartDate: year.cycleStartDate,
         cycleEndDate: year.cycleEndDate,
         nextRenewalDate: year.nextRenewalDate,
+        daysUntilAnniversary: daysLeft,
         daysUntilRenewal: daysLeft,
         availableDays: bal.availableDays,
         accruedDays: bal.accruedDays,
         takenDays: bal.takenDays,
-        carryForwardRecord: cf ? {
-          approvedDays: cf.approved_days,
-          decision: cf.decision,
-          approvedBy: cf.approved_by,
-          approvedAt: cf.approved_at ? T.displayTime(cf.approved_at) : null,
-          notes: cf.notes,
-        } : null,
+        maxEligibleCarryForward: maxCarry,
+        potentialLapsedDays: decision ? decision.lapsedDays : maxCarry,
+        carryForwardDecision: decision,
+        carryForwardRecord: decision,
       });
     }
   }
