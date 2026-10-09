@@ -9,6 +9,7 @@ import React, { useState } from 'react';
 import type { NotificationItem } from '@/lib/types';
 import { api } from '@/lib/api';
 import { DesktopNotifySettings } from './DesktopNotifySettings';
+import { notificationRoute, type NotificationRoute } from '@/lib/notificationRoutes';
 import {
   AlertTriangleIcon,
   BellIcon,
@@ -28,7 +29,8 @@ interface NotificationDrawerProps {
   notifications: NotificationItem[];
   unreadCount: number;
   onRefresh: () => Promise<void>;
-  onNavigateTab?: (tab: string) => void;
+  /** Opens the notification's page (and section); see lib/notificationRoutes. */
+  onNavigate?: (route: NotificationRoute) => void;
 }
 
 const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; tabTarget: string; tone: string }> = {
@@ -38,6 +40,7 @@ const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; tabT
   DOCUMENT: { label: 'Document', icon: <FileTextIcon className="h-3.5 w-3.5" />, tabTarget: 'documents', tone: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
   WARNING: { label: 'Warning', icon: <AlertTriangleIcon className="h-3.5 w-3.5" />, tabTarget: 'warnings', tone: 'bg-orange-500/10 text-orange-400 border-orange-500/30' },
   HR_ALERT: { label: 'Compliance', icon: <SirenIcon className="h-3.5 w-3.5" />, tabTarget: 'live', tone: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
+  PAYROLL: { label: 'Payroll', icon: <PinIcon className="h-3.5 w-3.5" />, tabTarget: 'payroll', tone: 'bg-sky-500/10 text-sky-400 border-sky-500/30' },
 };
 
 const SEVERITY_BADGE: Record<string, { label: string; tone: string }> = {
@@ -52,7 +55,7 @@ export function NotificationDrawer({
   notifications,
   unreadCount,
   onRefresh,
-  onNavigateTab,
+  onNavigate,
 }: NotificationDrawerProps) {
   const [filter, setFilter] = useState<'ALL' | 'UNREAD' | 'LEAVE' | 'CORRECTION' | 'DOCUMENT' | 'ABSENCE'>('ALL');
   const [actionBusy, setActionBusy] = useState<string | null>(null);
@@ -87,9 +90,8 @@ export function NotificationDrawer({
       } catch (_) {}
     }
 
-    const meta = CATEGORY_META[n.category];
-    if (meta && onNavigateTab) {
-      onNavigateTab(meta.tabTarget);
+    if (onNavigate) {
+      onNavigate(notificationRoute(n));
       onClose();
     }
   };

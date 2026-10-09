@@ -32,7 +32,7 @@ function whenText(days: number): string {
   return `in ${days} day${days === 1 ? '' : 's'}`;
 }
 
-export function HrAlertsPanel() {
+export function HrAlertsPanel({ focusSignal }: { focusSignal?: number } = {}) {
   const [data, setData] = useState<HrAlerts | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -103,11 +103,19 @@ export function HrAlertsPanel() {
     }
   };
 
+  // Arriving from an HR-alert notification: bring this card into view.
+  useEffect(() => {
+    if (focusSignal === undefined) return;
+    const t = setTimeout(() => document.getElementById('hr-alerts')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    return () => clearTimeout(t);
+  }, [focusSignal]);
+
   const note = data
     ? `${data.summary.total} open${data.summary.overdue ? ` · ${data.summary.overdue} overdue` : ''}`
     : undefined;
 
   return (
+    <div id="hr-alerts" className="scroll-mt-4">
     <Panel title="Advanced HR" note={note}>
       {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 
@@ -200,5 +208,6 @@ export function HrAlertsPanel() {
         </div>
       )}
     </Panel>
+    </div>
   );
 }

@@ -25,6 +25,7 @@ import { WorkstationsPanel } from '@/components/WorkstationsPanel';
 import { useDashboard } from '@/hooks/useDashboard';
 import { api, clearKey, getKey, notifyKeyChanged, subscribeToKey } from '@/lib/api';
 import { notifyDesktop } from '@/lib/desktopNotify';
+import { notificationRoute, type FocusTarget, type NotificationRoute } from '@/lib/notificationRoutes';
 import type { AdminEmployee, AttendanceCorrection, EmployeeDay, EnrollmentCode, NotificationItem } from '@/lib/types';
 
 type DashboardTab = 'overview' | 'workstations' | 'leave' | 'disciplinary' | 'documents' | 'complaints' | 'workforce' | 'payroll' | 'ota';
@@ -41,6 +42,20 @@ export default function DashboardPage() {
   const [notificationDrawerOpen, setNotificationDrawerOpen] = useState<boolean>(false);
   const [toastNotification, setToastNotification] = useState<NotificationItem | null>(null);
   const [pendingComplaintsCount, setPendingComplaintsCount] = useState<number>(0);
+  // A section to open on arrival from a notification; the nonce re-triggers
+  // it when the same section is asked for twice.
+  const [focus, setFocus] = useState<{ target: FocusTarget; nonce: number } | null>(null);
+
+  const navigateTo = useCallback((route: NotificationRoute) => {
+    setActiveTab(route.tab);
+    setFocus(route.focus ? { target: route.focus, nonce: Date.now() } : null);
+  }, []);
+
+  // Opening a notification from the toast or the desktop marks it read and goes to its page.
+  const openNotification = useCallback((n: NotificationItem) => {
+    if (!n.read) api.markNotificationRead(n.id).catch(() => {});
+    navigateTo(notificationRoute(n));
+  }, [navigateTo]);
 
   // The admin key lives in sessionStorage
   const unlocked = useSyncExternalStore(subscribeToKey, () => Boolean(getKey()), () => false);
@@ -65,13 +80,13 @@ export default function DashboardPage() {
       if (notifiedUpTo.current !== null) {
         for (const n of list) {
           if (!n.read && Number(n.createdAt) > notifiedUpTo.current) {
-            notifyDesktop(n, () => setNotificationDrawerOpen(true));
+            notifyDesktop(n, () => openNotification(n));
           }
         }
       }
       notifiedUpTo.current = Math.max(notifiedUpTo.current ?? 0, newest);
     } catch (_) {}
-  }, []);
+  }, [openNotification]);
 
   const loadComplaintsCount = useCallback(async () => {
     try {
@@ -81,7 +96,7 @@ export default function DashboardPage() {
   }, []);
 
   const handleIncomingNotification = useCallback((n: NotificationItem) => {
-    notifyDesktop(n, () => setNotificationDrawerOpen(true));
+    notifyDesktop(n, () => openNotification(n));
     setToastNotification(n);
     setNotifications((prev) => [n, ...prev.filter((item) => item.id !== n.id)]);
     setUnreadNotificationsCount((c) => c + 1);
@@ -90,7 +105,7 @@ export default function DashboardPage() {
     setTimeout(() => {
       setToastNotification((curr) => (curr?.id === n.id ? null : curr));
     }, 7000);
-  }, []);
+  }, [openNotification]);
 
   const { summary, employees, connection, error, refresh } = useDashboard(
     unlocked,
@@ -399,6 +414,7 @@ export default function DashboardPage() {
                     corrections={corrections}
                     onDecideCorrection={decideCorrection}
                     onRefreshCorrections={loadCorrections}
+                    openCorrectionsSignal={focus?.target === 'corrections' ? focus.nonce : undefined}
                     onExportCsv={exportCsv}
                     onSelectEmployee={(emp, open) => {
                       setDrawerOpen(open ?? null);
@@ -408,7 +424,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="flex min-w-0 flex-col gap-6">
-                  <HrAlertsPanel />
+                  <HrAlertsPanel focusSignal={focus?.target === 'hr-alerts' ? focus.nonce : undefined} />
                   <ActivityFeed movements={summary.recentMovements} />
                 </div>
               </div>
@@ -553,13 +569,7 @@ export default function DashboardPage() {
         notifications={notifications}
         unreadCount={unreadNotificationsCount}
         onRefresh={loadNotifications}
-        onNavigateTab={(tab) => {
-          if (tab === 'leave') setActiveTab('leave');
-          else if (tab === 'history') setActiveTab('overview');
-          else if (tab === 'warnings') setActiveTab('disciplinary');
-          else if (tab === 'documents') setActiveTab('documents');
-          else setActiveTab('overview');
-        }}
+        onNavigate={navigateTo}
       />
 
       {/* Single-Use Enrollment Code Modal (Always in front of drawers) */}
@@ -598,7 +608,7 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setNotificationDrawerOpen(true);
+                  openNotification(toastNotification);
                   setToastNotification(null);
                 }}
                 className="rounded-xl bg-accent-gradient hover:brightness-110 px-3 py-1.5 text-xs font-bold text-on-accent shadow-accent transition cursor-pointer"

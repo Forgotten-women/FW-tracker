@@ -49,6 +49,8 @@ interface UnifiedWorkforcePanelProps {
     adjustmentMinutes?: number,
   ) => Promise<void>;
   onRefreshCorrections: () => Promise<void>;
+  /** Changes when a notification asks for the corrections list to open. */
+  openCorrectionsSignal?: number;
   onExportCsv: (from: string, to: string) => Promise<void>;
   /** `open` asks the drawer for a tab/date, e.g. the History tab on a past date. */
   onSelectEmployee: (employee: EmployeeDay, open?: DrawerOpenOptions) => void;
@@ -60,6 +62,7 @@ export function UnifiedWorkforcePanel({
   corrections,
   onDecideCorrection,
   onRefreshCorrections,
+  openCorrectionsSignal,
   onExportCsv,
   onSelectEmployee,
 }: UnifiedWorkforcePanelProps) {
@@ -78,6 +81,17 @@ export function UnifiedWorkforcePanel({
 
   // Collapsible corrections drawer
   const [showCorrections, setShowCorrections] = useState(false);
+  // Arriving from a dispute notification: open the corrections list and bring it into view.
+  const [handledSignal, setHandledSignal] = useState<number | undefined>(undefined);
+  if (openCorrectionsSignal !== undefined && openCorrectionsSignal !== handledSignal) {
+    setHandledSignal(openCorrectionsSignal);
+    setShowCorrections(true);
+  }
+  useEffect(() => {
+    if (openCorrectionsSignal === undefined) return;
+    const t = setTimeout(() => document.getElementById('attendance-corrections')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    return () => clearTimeout(t);
+  }, [openCorrectionsSignal]);
   const pendingCorrections = useMemo(
     () => corrections.filter((c) => c.status === 'PENDING'),
     [corrections],
@@ -258,11 +272,13 @@ export function UnifiedWorkforcePanel({
 
       {/* Collapsible Corrections Panel */}
       {showCorrections && pendingCorrections.length > 0 && (
-        <AttendanceCorrectionsPanel
-          corrections={corrections}
-          onDecide={onDecideCorrection}
-          onRefresh={onRefreshCorrections}
-        />
+        <div id="attendance-corrections" className="scroll-mt-4">
+          <AttendanceCorrectionsPanel
+            corrections={corrections}
+            onDecide={onDecideCorrection}
+            onRefresh={onRefreshCorrections}
+          />
+        </div>
       )}
 
       {/* 3. MASTER WORKFORCE CONTROL BAR */}
