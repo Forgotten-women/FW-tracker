@@ -446,3 +446,29 @@ test('with no confirmed monitoring period the engine refuses to evaluate', async
     config.latenessMonitoringPeriod = original;
   }
 });
+
+test('a pending referral whose late days were corrected afterwards is closed automatically, and a genuine new one can follow', async () => {
+  const emp = await makeEmployee('emp_reconcile');
+  for (const d of LATE_DAYS) await lateDay(emp, d);
+  const r = await W.evaluateLateness(emp, REVIEW_DATE);
+  assert.equal(r.triggered, true);
+
+  // HR adds manual time covering 2 Sep's lateness: that day is no longer late.
+  await db.prepare(`INSERT INTO attendance_deficit_ledger (id, employee_id, date_key, entry_type, minutes_delta,
+      balance_after, whole_days_after, carry_forward_after, description, created_at, created_by)
+    VALUES ('def_rec_1', ?, '2026-09-02', 'HR_ADJUSTMENT', -25, 0, 0, 0, 'HR Manual Entry: arrived on time', ?, 'test')`).run(emp, T.now());
+  await A.recomputeDay(emp, '2026-09-02', T.wallClockToEpoch('2026-09-02', '23:59'));
+
+  const closed = await W.reconcileLatenessTriggers();
+  assert.deepEqual(closed.map(c => [c.triggerId, c.was, c.now]), [[r.triggerId, 4, 3]]);
+  const t = await db.prepare('SELECT status, reviewed_by, review_notes FROM warning_triggers WHERE id = ?').get(r.triggerId);
+  assert.equal(t.status, 'CORRECTED');
+  assert.equal(t.reviewed_by, 'system:reconcile');
+  assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM formal_warnings WHERE employee_id = ?').get(emp).then(x => Number(x.n)), 0);
+
+  // Late again on 8 Sep: four genuine late days, a new referral is raised.
+  await lateDay(emp, '2026-09-08');
+  const again = await W.evaluateLateness(emp, REVIEW_DATE);
+  assert.equal(again.triggered, true);
+  assert.notEqual(again.triggerId, r.triggerId);
+});

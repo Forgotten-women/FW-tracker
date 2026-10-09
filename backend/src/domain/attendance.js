@@ -1111,6 +1111,11 @@ const selectLateDates = db.prepare(`
  * spec 9.3 is explicit that an automatic alert and a formal warning are
  * different things, because a late record may later be corrected or authorised.
  */
+/** Late occurrences for an employee between two dates (inclusive). */
+async function countLateOccurrences(employeeId, from, to) {
+  return Number((await countLateInRange.get(employeeId, from, to)).c) || 0;
+}
+
 async function latenessStatus(employeeId, dateKey = T.dateKey()) {
   const window = monitoringPeriod(dateKey);
 
@@ -1401,7 +1406,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
 module.exports = {
   deriveDay, recomputeDay, present,
   startBreak, endBreak, closeStaleBreaks, clockOut, selfClockOutRefusal, resumeDay, buildDayView,
-  balanceFor, balanceAsOf, postDeficit, adjustBalance,
+  balanceFor, balanceAsOf, postDeficit, adjustBalance, countLateOccurrences,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,
 };

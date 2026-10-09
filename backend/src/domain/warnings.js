@@ -97,10 +97,14 @@ async function refreshStanding(employeeId) {
 // Triggers
 // ---------------------------------------------------------------------------
 
+// A referral closed automatically because its occurrences were corrected away
+// (reconcileLatenessTriggers) doesn't block a genuine new one at the same count.
+const RECONCILE_ACTOR = 'system:reconcile';
 const selectTriggerForOccurrence = db.prepare(`
   SELECT * FROM warning_triggers
   WHERE employee_id = ? AND rule_id = ? AND occurrence_count = ?
     AND related_dates = ?
+    AND NOT (status = 'CORRECTED' AND reviewed_by = '${RECONCILE_ACTOR}')
 `);
 
 const insertTrigger = db.prepare(`
@@ -172,8 +176,47 @@ async function evaluateLateness(employeeId, dateKey = T.dateKey(), nowMs = T.now
   };
 }
 
+/**
+ * Closes pending lateness referrals that are no longer true.
+ *
+ * A trigger records the late count at the moment it was raised. When a day is
+ * corrected afterwards (HR manual time covering the lateness, approved leave,
+ * HR records), the month may no longer have that many late occurrences, and
+ * the referral would sit in HR's queue for a warning nobody earned. Such a
+ * trigger is closed as CORRECTED, attributed and audited, never deleted.
+ */
+async function reconcileLatenessTriggers(nowMs = T.now()) {
+  const pending = await db.prepare(`
+    SELECT * FROM warning_triggers WHERE status = 'PENDING_REVIEW' AND rule_id = 'wr_lateness'
+  `).all();
+  const closed = [];
+  for (const t of pending) {
+    const [from, to] = String(t.related_dates || '').split('..');
+    if (!from || !to) continue;
+    const count = Number((await A.countLateOccurrences(t.employee_id, from, to)) || 0);
+    if (count >= Number(t.occurrence_count)) continue;
+    const notes = `Closed automatically: ${count} late occurrence${count === 1 ? '' : 's'} in ${from} to ${to} now, `
+      + `not ${t.occurrence_count}. The attendance records were corrected after this referral was raised.`;
+    await tx(async () => {
+      await db.prepare(`
+        UPDATE warning_triggers SET status = 'CORRECTED', reviewed_by = ?, reviewed_at = ?, review_notes = ?
+        WHERE id = ? AND status = 'PENDING_REVIEW'
+      `).run(RECONCILE_ACTOR, nowMs, notes, t.id);
+      await audit({
+        actor: RECONCILE_ACTOR, action: 'WARNING_TRIGGER_REVIEWED', targetType: 'trigger', targetId: t.id,
+        before: { status: 'PENDING_REVIEW', occurrences: t.occurrence_count },
+        after: { status: 'CORRECTED', occurrences: count }, note: notes,
+      });
+    });
+    closed.push({ triggerId: t.id, employeeId: t.employee_id, was: Number(t.occurrence_count), now: count });
+  }
+  return closed;
+}
+
 /** Evaluates every active employee. Called by the maintenance tick. */
 async function evaluateAll(dateKey = T.dateKey(), nowMs = T.now()) {
+  // Stale referrals first, so a corrected month doesn't keep a false one open.
+  await reconcileLatenessTriggers(nowMs);
   const employees = await db.prepare('SELECT id FROM employees WHERE active = 1').all();
   const raised = [];
   for (const e of employees) {
@@ -800,7 +843,7 @@ async function employeeWarningView(employeeId, dateKey = T.dateKey()) {
 
 module.exports = {
   standingFor, refreshStanding,
-  evaluateLateness, evaluateAll,
+  evaluateLateness, evaluateAll, reconcileLatenessTriggers,
   reviewTrigger, issueFormalWarning, withdrawWarning, acknowledgeWarning,
   expireWarnings, addMonths,
   recordSuspectedAbsence, reviewAbsence, scanDailyAbsences, selfReportAbsence, listAbsences,
