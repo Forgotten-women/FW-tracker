@@ -36,6 +36,7 @@ const FILTER_LABEL: Record<HeroFilter, string> = {
   ON_BREAK: 'On break',
   LATE: 'Late / deficit',
   AWAY: 'Away / out',
+  ON_LEAVE: 'On leave',
 };
 
 interface UnifiedWorkforcePanelProps {
@@ -193,9 +194,11 @@ export function UnifiedWorkforcePanel({
   ).length;
   const awayCount = allTodayEmployees.filter(
     (e) =>
-      e.status === 'AWAY' ||
-      e.status === 'GRACE_PERIOD' ||
-      e.status === 'NOT_CHECKED_IN',
+      e.status !== 'ON_LEAVE' &&
+      !e.onLeave &&
+      (e.status === 'AWAY' ||
+        e.status === 'GRACE_PERIOD' ||
+        e.status === 'NOT_CHECKED_IN'),
   ).length;
 
   // Filtered employees for today
@@ -221,11 +224,14 @@ export function UnifiedWorkforcePanel({
       }
       if (statusFilter === 'ON_BREAK') return e.onBreak;
       if (statusFilter === 'LATE') return (e.lateMinutes ?? 0) > 0 || e.isLate;
+      if (statusFilter === 'ON_LEAVE') return e.status === 'ON_LEAVE' || e.onLeave;
       if (statusFilter === 'AWAY') {
         return (
-          e.status === 'AWAY' ||
-          e.status === 'GRACE_PERIOD' ||
-          e.status === 'NOT_CHECKED_IN'
+          e.status !== 'ON_LEAVE' &&
+          !e.onLeave &&
+          (e.status === 'AWAY' ||
+            e.status === 'GRACE_PERIOD' ||
+            e.status === 'NOT_CHECKED_IN')
         );
       }
       return true;
@@ -260,6 +266,7 @@ export function UnifiedWorkforcePanel({
         onBreak={breakCount}
         late={lateCount}
         away={awayCount}
+        onLeave={summary.onLeave?.length || 0}
         pendingCorrections={pendingCorrections.length}
         activeFilter={statusFilter}
         onFilter={(f) => {
@@ -588,12 +595,17 @@ export function UnifiedWorkforcePanel({
                             <CoffeeIcon />
                             <span>On Break</span>
                           </span>
+                        ) : e.status === 'ON_LEAVE' ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 px-2.5 py-0.5 text-[10px] font-bold text-indigo-200 shadow-sm shadow-indigo-500/15">
+                            <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                            <span>On Leave</span>
+                          </span>
                         ) : (
                           <Badge tone={meta.tone} dot size="sm">
                             {meta.label}
                           </Badge>
                         )}
-                        {isLate && (
+                        {isLate && e.status !== 'ON_LEAVE' && (
                           <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
                             +{e.lateMinutes ?? 0}m late
                           </span>
@@ -739,12 +751,17 @@ export function UnifiedWorkforcePanel({
                               <CoffeeIcon />
                               <span>On Break</span>
                             </span>
+                          ) : e.status === 'ON_LEAVE' ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 px-2.5 py-0.5 text-[10px] font-bold text-indigo-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                              <span>On Leave</span>
+                            </span>
                           ) : (
                             <Badge tone={meta.tone} dot size="sm">
                               {meta.label}
                             </Badge>
                           )}
-                          {isLate && (
+                          {isLate && e.status !== 'ON_LEAVE' && (
                             <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
                               LATE
                             </span>

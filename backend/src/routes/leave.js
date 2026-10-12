@@ -254,30 +254,40 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
 
   res.json({
     status: 'SUCCESS',
-    requests: rows.map(r => ({
-      id: r.id,
-      employeeId: r.employee_id,
-      employeeName: r.employee_name,
-      employeeNumber: r.employee_number || null,
-      employeeRole: r.employee_role,
-      type: r.type_name,
-      leaveTypeId: r.leave_type_id,
-      from: r.start_date,
-      to: r.end_date,
-      days: r.total_days,
-      status: r.status,
-      reason: r.reason,
-      notes: r.decision_notes,
-      isPaid: r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1),
-      defaultIsPaid: r.type_is_paid === 1,
-      shortfallDays: r.shortfall_days || 0,
-      reducesEntitlement: !!r.reduces_entitlement,
-      requiresEvidence: !!r.requires_evidence,
-      submittedAt: T.displayTime(r.submitted_at),
-      submittedAtMs: r.submitted_at,
-      decidedAt: r.decided_at ? T.displayTime(r.decided_at) : null,
-      decidedBy: r.decided_by,
-    })),
+    requests: rows.map(r => {
+      const isHrManual = r.source === 'HR_MANUAL' ||
+        r.id?.startsWith('lr_hrwb_') ||
+        r.id?.startsWith('lr_hr_') ||
+        r.reason?.toLowerCase().includes('hr record') ||
+        r.reason?.toLowerCase().includes('recorded by hr');
+
+      return {
+        id: r.id,
+        employeeId: r.employee_id,
+        employeeName: r.employee_name,
+        employeeNumber: r.employee_number || null,
+        employeeRole: r.employee_role,
+        type: r.type_name,
+        leaveTypeId: r.leave_type_id,
+        from: r.start_date,
+        to: r.end_date,
+        days: r.total_days,
+        status: r.status,
+        reason: r.reason,
+        notes: r.decision_notes,
+        isPaid: r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1),
+        defaultIsPaid: r.type_is_paid === 1,
+        shortfallDays: r.shortfall_days || 0,
+        reducesEntitlement: !!r.reduces_entitlement,
+        requiresEvidence: !!r.requires_evidence,
+        source: isHrManual ? 'HR_MANUAL' : 'EMPLOYEE_REQUEST',
+        sourceLabel: isHrManual ? 'HR Added' : 'Requested & Approved',
+        submittedAt: T.displayTime(r.submitted_at),
+        submittedAtMs: r.submitted_at,
+        decidedAt: r.decided_at ? T.displayTime(r.decided_at) : null,
+        decidedBy: r.decided_by,
+      };
+    }),
   });
 });
 
@@ -305,11 +315,12 @@ router.get('/balances', requireUserOrAdminKey('leave.read'), async (req, res) =>
 
 router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) => {
   const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
-  const from = String(req.query.from || T.dateKey(T.now() - 30 * 24 * 60 * 60 * 1000));
-  const to = String(req.query.to || T.dateKey(T.now() + 60 * 24 * 60 * 60 * 1000));
+  const currentYear = new Date().getFullYear();
+  const from = String(req.query.from || `${currentYear - 1}-01-01`);
+  const to = String(req.query.to || `${currentYear + 1}-12-31`);
 
   const rows = (await db.prepare(`
-    SELECT r.*, e.name AS employee_name, e.employee_number, t.name AS type_name
+    SELECT r.*, e.name AS employee_name, e.employee_number, e.role AS employee_role, t.name AS type_name
     FROM leave_requests r
     JOIN employees e ON e.id = r.employee_id
     JOIN leave_types t ON t.id = r.leave_type_id
@@ -324,16 +335,30 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) =>
     status: 'SUCCESS',
     from,
     to,
-    leaves: rows.map(r => ({
-      id: r.id,
-      employeeId: r.employee_id,
-      employeeName: r.employee_name,
-      employeeNumber: r.employee_number || null,
-      type: r.type_name,
-      from: r.start_date,
-      to: r.end_date,
-      days: r.total_days,
-    })),
+    leaves: rows.map(r => {
+      const isHrManual = r.source === 'HR_MANUAL' ||
+        r.id?.startsWith('lr_hrwb_') ||
+        r.id?.startsWith('lr_hr_') ||
+        r.reason?.toLowerCase().includes('hr record') ||
+        r.reason?.toLowerCase().includes('recorded by hr');
+
+      return {
+        id: r.id,
+        employeeId: r.employee_id,
+        employeeName: r.employee_name,
+        employeeNumber: r.employee_number || null,
+        employeeRole: r.employee_role,
+        type: r.type_name,
+        leaveTypeId: r.leave_type_id,
+        from: r.start_date,
+        to: r.end_date,
+        days: r.total_days,
+        reason: r.reason,
+        isPaid: r.is_paid,
+        source: isHrManual ? 'HR_MANUAL' : 'EMPLOYEE_REQUEST',
+        sourceLabel: isHrManual ? 'HR Added' : 'Requested & Approved',
+      };
+    }),
     bankHolidays,
   });
 });
@@ -402,6 +427,7 @@ router.post('/employee/:employeeId/request',
         endDate: b.endDate || b.startDate,
         dayPortion: b.dayPortion || 'FULL_DAY',
         reason: b.reason || 'Recorded by HR',
+        source: 'HR_MANUAL',
       });
       let out;
       try {

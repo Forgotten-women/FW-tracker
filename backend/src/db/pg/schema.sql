@@ -558,6 +558,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   evidence_document_id TEXT,
   status TEXT NOT NULL DEFAULT 'PENDING_MANAGER',
   is_paid BIGINT DEFAULT NULL,
+  source TEXT DEFAULT 'EMPLOYEE_REQUEST',
   submitted_at BIGINT NOT NULL,
   decided_at BIGINT,
   cancelled_at BIGINT,

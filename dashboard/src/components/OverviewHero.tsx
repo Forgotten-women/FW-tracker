@@ -3,7 +3,7 @@
 import { useId } from 'react';
 import type { DashboardSummary } from '@/lib/types';
 
-export type HeroFilter = 'ALL' | 'IN_OFFICE' | 'WORKSTATION' | 'ON_BREAK' | 'LATE' | 'AWAY';
+export type HeroFilter = 'ALL' | 'IN_OFFICE' | 'WORKSTATION' | 'ON_BREAK' | 'ON_LEAVE' | 'LATE' | 'AWAY';
 
 interface Props {
   summary: DashboardSummary;
@@ -11,6 +11,7 @@ interface Props {
   inOffice: number;
   laptopsActive: number;
   onBreak: number;
+  onLeave?: number;
   late: number;
   away: number;
   pendingCorrections: number;
@@ -38,6 +39,7 @@ const Icon = {
   office: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1m-1 4h1m4-4h1m-1 4h1M10 21v-4h4v4',
   laptop: 'M4 6a2 2 0 012-2h12a2 2 0 012 2v9H4V6zm-2 12h20',
   coffee: 'M17 8h1a4 4 0 010 8h-1M3 8h14v9a4 4 0 01-4 4H7a4 4 0 01-4-4V8zm3-6v2m4-2v2m4-2v2',
+  leave: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
   clock: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
   away: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1',
 };
@@ -48,6 +50,7 @@ export function OverviewHero({
   inOffice,
   laptopsActive,
   onBreak,
+  onLeave = 0,
   late,
   away,
   pendingCorrections,
@@ -74,6 +77,7 @@ export function OverviewHero({
     { filter: 'IN_OFFICE', label: 'In office', value: inOffice, hint: 'Presence verified', icon: Icon.office, from: '#34d399', to: '#059669' },
     { filter: 'WORKSTATION', label: 'Laptops active', value: laptopsActive, hint: 'Typing / working', icon: Icon.laptop, from: '#22d3ee', to: '#0891b2' },
     { filter: 'ON_BREAK', label: 'On break', value: onBreak, hint: 'Authorised pause', icon: Icon.coffee, from: '#fbbf24', to: '#f59e0b' },
+    { filter: 'ON_LEAVE', label: 'On leave', value: onLeave, hint: 'Approved coverage', icon: Icon.leave, from: '#a78bfa', to: '#7c3aed' },
     { filter: 'LATE', label: 'Late / deficit', value: late, hint: 'Policy flagged', icon: Icon.clock, from: '#fb7185', to: '#e11d48' },
     { filter: 'AWAY', label: 'Away / out', value: away, hint: 'Not in office', icon: Icon.away, from: '#94a3b8', to: '#64748b' },
   ];

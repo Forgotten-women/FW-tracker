@@ -692,7 +692,7 @@ async function previewRequest({
   };
 }
 
-async function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion = 'FULL_DAY', reason = null, evidenceDocumentId = null }) {
+async function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion = 'FULL_DAY', reason = null, evidenceDocumentId = null, source = 'EMPLOYEE_REQUEST' }) {
   const preview = await previewRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion });
   if (!preview.ok) throw new Error(preview.error);
 
@@ -717,10 +717,10 @@ async function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayP
     await db.prepare(`
       INSERT INTO leave_requests
         (id, employee_id, leave_type_id, start_date, end_date, day_portion,
-         total_days, reason, evidence_document_id, status, submitted_at, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?, 'PENDING_HR', ?, ?)
+         total_days, reason, evidence_document_id, status, submitted_at, created_at, source)
+      VALUES (?,?,?,?,?,?,?,?,?, 'PENDING_HR', ?, ?, ?)
     `).run(id, employeeId, leaveTypeId, startDate, endDate, dayPortion,
-           preview.requestedDays, reason, evidenceDocumentId, nowMs, nowMs);
+           preview.requestedDays, reason, evidenceDocumentId, nowMs, nowMs, source);
 
     // Confirmed route: HR only, so there is exactly one step and a request is
     // never stuck waiting on a manager who is not set up as a user.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import type {
   AbsenceRecord,
@@ -76,6 +76,22 @@ export function LeaveManagementPanel() {
   const [adjustDays, setAdjustDays] = useState<number>(1);
   const [adjustReason, setAdjustReason] = useState('');
   const [adjustDate, setAdjustDate] = useState('');
+
+  // Record Leave Modal (HR Direct Entry)
+  const [showRecordLeaveModal, setShowRecordLeaveModal] = useState(false);
+  const [recordEmployeeId, setRecordEmployeeId] = useState('');
+  const [recordLeaveTypeId, setRecordLeaveTypeId] = useState('annual');
+  const [recordStartDate, setRecordStartDate] = useState('');
+  const [recordEndDate, setRecordEndDate] = useState('');
+  const [recordReason, setRecordReason] = useState('');
+  const [recordIsPaid, setRecordIsPaid] = useState(true);
+  const [recordSubmitting, setRecordSubmitting] = useState(false);
+  const [recordError, setRecordError] = useState<string | null>(null);
+
+  // Team Calendar Monthly Breakdown State
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string>('');
+  const [calendarViewMode, setCalendarViewMode] = useState<'EMPLOYEES' | 'CARDS'>('EMPLOYEES');
+  const [calendarSearch, setCalendarSearch] = useState<string>('');
 
   // Carry Forward Review Modal
   const [carryModalEmployee, setCarryModalEmployee] = useState<ApproachingAnniversaryEmployee | null>(null);
@@ -261,6 +277,37 @@ export function LeaveManagementPanel() {
     }
   };
 
+  const handleRecordLeave = async () => {
+    if (!recordEmployeeId) {
+      alert('Please select an employee.');
+      return;
+    }
+    if (!recordStartDate) {
+      alert('Please choose a start date.');
+      return;
+    }
+
+    setRecordSubmitting(true);
+    setRecordError(null);
+    try {
+      await api.recordEmployeeLeave(recordEmployeeId, {
+        leaveTypeId: recordLeaveTypeId,
+        startDate: recordStartDate,
+        endDate: recordEndDate || recordStartDate,
+        reason: recordReason.trim() || 'Recorded by HR',
+        isPaid: recordIsPaid,
+      });
+      setShowRecordLeaveModal(false);
+      setRecordEmployeeId('');
+      setRecordReason('');
+      await refresh();
+    } catch (err: unknown) {
+      setRecordError(err instanceof Error ? err.message : 'Failed to record leave.');
+    } finally {
+      setRecordSubmitting(false);
+    }
+  };
+
   const handleReviewAbsence = async () => {
     if (!selectedAbsence || !absenceAction) return;
     if (!absenceNotes.trim()) {
@@ -393,6 +440,146 @@ export function LeaveManagementPanel() {
   const onLeaveToday = calendarLeaves.filter(
     (l) => l.from <= todayStr && l.to >= todayStr,
   );
+
+  // Group calendar leaves into Monthly Buckets
+  const monthBuckets = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        monthKey: string;
+        label: string;
+        year: number;
+        leaves: TeamCalendarLeave[];
+        employees: Map<
+          string,
+          {
+            employeeId: string;
+            employeeName: string;
+            employeeNumber?: string | null;
+            employeeRole?: string | null;
+            totalDays: number;
+            leaves: TeamCalendarLeave[];
+          }
+        >;
+        totalDays: number;
+      }
+    >();
+
+    for (const l of calendarLeaves) {
+      const mKey = l.from.slice(0, 7);
+      if (!map.has(mKey)) {
+        const [y, m] = mKey.split('-');
+        const dateObj = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
+        const label = dateObj.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+        map.set(mKey, {
+          monthKey: mKey,
+          label,
+          year: parseInt(y, 10),
+          leaves: [],
+          employees: new Map(),
+          totalDays: 0,
+        });
+      }
+      const bucket = map.get(mKey)!;
+      bucket.leaves.push(l);
+      const leaveDays = Number(l.days) || 1;
+      bucket.totalDays += leaveDays;
+
+      if (!bucket.employees.has(l.employeeId)) {
+        bucket.employees.set(l.employeeId, {
+          employeeId: l.employeeId,
+          employeeName: l.employeeName,
+          employeeNumber: l.employeeNumber,
+          employeeRole: l.employeeRole,
+          totalDays: 0,
+          leaves: [],
+        });
+      }
+      const emp = bucket.employees.get(l.employeeId)!;
+      emp.totalDays += leaveDays;
+      emp.leaves.push(l);
+    }
+
+    // Sort descending by monthKey (e.g. 2026-10, 2026-09...)
+    return Array.from(map.values()).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+  }, [calendarLeaves]);
+
+  const currentMonthKey = todayStr.slice(0, 7);
+  // Default to user selection, or current month if it has leaves, or first available month
+  const activeMonthKey =
+    selectedMonthKey ||
+    (monthBuckets.find((b) => b.monthKey === currentMonthKey)?.monthKey ??
+      monthBuckets[0]?.monthKey ??
+      'ALL');
+
+  const activeMonthBucket = useMemo(() => {
+    if (activeMonthKey === 'ALL') return null;
+    return monthBuckets.find((b) => b.monthKey === activeMonthKey) || null;
+  }, [monthBuckets, activeMonthKey]);
+
+  // List of employees who took leaves in the active month
+  const activeMonthEmployees = useMemo(() => {
+    if (!activeMonthBucket) {
+      // If 'ALL' months is selected
+      const map = new Map<
+        string,
+        {
+          employeeId: string;
+          employeeName: string;
+          employeeNumber?: string | null;
+          employeeRole?: string | null;
+          totalDays: number;
+          leaves: TeamCalendarLeave[];
+        }
+      >();
+      for (const l of calendarLeaves) {
+        if (!map.has(l.employeeId)) {
+          map.set(l.employeeId, {
+            employeeId: l.employeeId,
+            employeeName: l.employeeName,
+            employeeNumber: l.employeeNumber,
+            employeeRole: l.employeeRole,
+            totalDays: 0,
+            leaves: [],
+          });
+        }
+        const emp = map.get(l.employeeId)!;
+        emp.totalDays += Number(l.days) || 1;
+        emp.leaves.push(l);
+      }
+      return Array.from(map.values());
+    }
+    return Array.from(activeMonthBucket.employees.values());
+  }, [activeMonthBucket, calendarLeaves]);
+
+  const filteredActiveMonthEmployees = useMemo(() => {
+    if (!calendarSearch.trim()) return activeMonthEmployees;
+    const q = calendarSearch.toLowerCase();
+    return activeMonthEmployees.filter(
+      (e) =>
+        e.employeeName.toLowerCase().includes(q) ||
+        (e.employeeNumber && e.employeeNumber.toLowerCase().includes(q)) ||
+        (e.employeeRole && e.employeeRole.toLowerCase().includes(q)),
+    );
+  }, [activeMonthEmployees, calendarSearch]);
+
+  const activeMonthLeaves = useMemo(() => {
+    if (!activeMonthBucket) return calendarLeaves;
+    return activeMonthBucket.leaves;
+  }, [activeMonthBucket, calendarLeaves]);
+
+  const filteredActiveMonthLeaves = useMemo(() => {
+    if (!calendarSearch.trim()) return activeMonthLeaves;
+    const q = calendarSearch.toLowerCase();
+    return activeMonthLeaves.filter(
+      (l) =>
+        l.employeeName.toLowerCase().includes(q) ||
+        (l.employeeNumber && l.employeeNumber.toLowerCase().includes(q)) ||
+        (l.employeeRole && l.employeeRole.toLowerCase().includes(q)) ||
+        l.type.toLowerCase().includes(q) ||
+        (l.reason && l.reason.toLowerCase().includes(q)),
+    );
+  }, [activeMonthLeaves, calendarSearch]);
 
   const filteredBalances = balances.filter((b) => {
     if (!search.trim()) return true;
@@ -550,8 +737,21 @@ export function LeaveManagementPanel() {
           </Button>
           <Button
             variant="primary"
+            onClick={() => {
+              setRecordStartDate(todayStr);
+              setRecordEndDate(todayStr);
+              setRecordReason('');
+              setRecordError(null);
+              setShowRecordLeaveModal(true);
+            }}
+            className="py-1 px-3 text-xs bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30"
+          >
+            + Record Leave
+          </Button>
+          <Button
+            variant="ghost"
             onClick={() => setShowAdjustModal(true)}
-            className="py-1 px-3 text-xs"
+            className="py-1 px-3 text-xs border border-white/10"
           >
             + Adjust Balance
           </Button>
@@ -854,26 +1054,325 @@ export function LeaveManagementPanel() {
             </div>
           )}
 
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">
-              Scheduled and active approved leaves across the workforce.
-            </span>
-            <Badge tone="brand">{calendarLeaves.length} Approved Bookings</Badge>
+          {/* Monthly Breakdown Controls & Header */}
+          <div className="rounded-2xl border border-line bg-surface/80 p-4 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-text">
+                    Monthly Breakdown
+                  </h3>
+                  <Badge tone="brand">
+                    {activeMonthBucket ? activeMonthBucket.label : 'All Months'}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-xs text-muted">
+                  Showing only employees who have taken leaves in this period. Each month card filters the roster.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Search in Month */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={calendarSearch}
+                    onChange={(e) => setCalendarSearch(e.target.value)}
+                    placeholder="Search employee, ID, role..."
+                    className="w-48 sm:w-56 rounded-xl border border-line bg-raised px-3 py-1.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                  />
+                  {calendarSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setCalendarSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-text cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                {/* View Mode Toggle */}
+                <div className="flex items-center rounded-xl border border-line bg-raised p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setCalendarViewMode('EMPLOYEES')}
+                    className={`rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${
+                      calendarViewMode === 'EMPLOYEES'
+                        ? 'bg-brand text-on-accent shadow-sm'
+                        : 'text-muted hover:text-text'
+                    }`}
+                  >
+                    By Employee ({filteredActiveMonthEmployees.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCalendarViewMode('CARDS')}
+                    className={`rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${
+                      calendarViewMode === 'CARDS'
+                        ? 'bg-brand text-on-accent shadow-sm'
+                        : 'text-muted hover:text-text'
+                    }`}
+                  >
+                    All Bookings ({filteredActiveMonthLeaves.length})
+                  </button>
+                </div>
+
+                {/* + Record Leave Button */}
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setRecordStartDate(todayStr);
+                    setRecordEndDate(todayStr);
+                    setRecordReason('');
+                    setRecordError(null);
+                    setShowRecordLeaveModal(true);
+                  }}
+                  className="py-1 px-3 text-xs bg-indigo-600 hover:bg-indigo-500 text-white"
+                >
+                  + Record Leave
+                </Button>
+              </div>
+            </div>
+
+            {/* Month Buttons / Cards Grid */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 no-scrollbar">
+              {/* All Months button */}
+              <button
+                type="button"
+                onClick={() => setSelectedMonthKey('ALL')}
+                className={`shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer ${
+                  activeMonthKey === 'ALL'
+                    ? 'border-indigo-500 bg-gradient-to-br from-indigo-950/50 to-surface ring-2 ring-indigo-500/40 shadow-md'
+                    : 'border-line bg-surface hover:bg-raised hover:border-white/20'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-xs text-text">All Months</span>
+                  <span className="rounded bg-white/10 px-1.5 py-0.2 text-[9px] font-mono text-dim">
+                    {calendarLeaves.length}
+                  </span>
+                </div>
+                <div className="mt-1 text-[11px] text-muted">
+                  Full calendar overview
+                </div>
+              </button>
+
+              {/* Month Cards */}
+              {monthBuckets.map((b) => {
+                const isSelected = activeMonthKey === b.monthKey;
+                const isCurrent = b.monthKey === currentMonthKey;
+
+                return (
+                  <button
+                    key={b.monthKey}
+                    type="button"
+                    onClick={() => setSelectedMonthKey(b.monthKey)}
+                    className={`shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer min-w-[140px] ${
+                      isSelected
+                        ? 'border-indigo-500 bg-gradient-to-br from-indigo-950/60 to-surface ring-2 ring-indigo-500/50 shadow-md shadow-indigo-500/10'
+                        : 'border-line bg-surface hover:bg-raised hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className={`font-bold text-xs ${isSelected ? 'text-indigo-200' : 'text-text'}`}>
+                        {b.label}
+                      </span>
+                      {isCurrent && (
+                        <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 text-[8px] font-bold">
+                          Current
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                      <span className="text-muted font-medium">
+                        {b.employees.size} {b.employees.size === 1 ? 'person' : 'people'}
+                      </span>
+                      <span className="font-mono font-bold text-indigo-400">
+                        {b.totalDays}d
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
+          {/* Leave Content for the selected month */}
           {calendarLeaves.length === 0 ? (
             <Empty>No scheduled leaves found in the calendar range.</Empty>
+          ) : filteredActiveMonthEmployees.length === 0 ? (
+            <div className="rounded-2xl border border-line bg-surface p-8 text-center">
+              <p className="font-semibold text-text">No employees on leave found for this filter</p>
+              <p className="mt-1 text-xs text-muted">
+                Try selecting a different month card above, or clear your search query.
+              </p>
+            </div>
+          ) : calendarViewMode === 'EMPLOYEES' ? (
+            /* EMPLOYEES VIEW: Grouped by Person who took leave in this month */
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {filteredActiveMonthEmployees.map((emp) => {
+                const isEmpOnLeaveToday = emp.leaves.some(
+                  (l) => l.from <= todayStr && l.to >= todayStr,
+                );
+                const initials = emp.employeeName
+                  .split(' ')
+                  .map((n) => n[0])
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase();
+
+                return (
+                  <div
+                    key={emp.employeeId}
+                    className={`rounded-2xl border p-4 transition-all ${
+                      isEmpOnLeaveToday
+                        ? 'border-indigo-500/40 bg-gradient-to-br from-indigo-950/20 to-surface ring-1 ring-indigo-500/30 shadow-md'
+                        : 'border-line bg-surface hover:bg-raised hover:border-white/20'
+                    }`}
+                  >
+                    {/* Employee Profile Header */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-gradient font-extrabold text-xs text-on-accent shadow-accent">
+                          {initials}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="font-bold text-sm text-text truncate">
+                              {emp.employeeName}
+                            </h4>
+                            {emp.employeeNumber && (
+                              <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                                {emp.employeeNumber}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted truncate mt-0.5">
+                            {emp.employeeRole || 'Employee'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Header Badge */}
+                      {isEmpOnLeaveToday ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/20 border border-indigo-500/40 px-2 py-0.5 text-[10px] font-bold text-indigo-300 shadow-sm animate-pulse">
+                          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                          <span>On Leave Today</span>
+                        </span>
+                      ) : (
+                        <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-0.5 text-[11px] font-mono font-bold text-text">
+                          {emp.totalDays}d leave
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Employee's Leaves in this Month */}
+                    <div className="mt-3 space-y-2 pt-3 border-t border-line">
+                      <div className="text-[10px] uppercase font-bold text-dim tracking-wider">
+                        Leave Bookings ({emp.leaves.length})
+                      </div>
+                      {emp.leaves.map((l) => {
+                        const isLeaveToday = l.from <= todayStr && l.to >= todayStr;
+                        const isHrManual =
+                          l.source === 'HR_MANUAL' ||
+                          l.sourceLabel === 'HR Added' ||
+                          l.id?.startsWith('lr_hrwb_') ||
+                          l.id?.startsWith('lr_hr_');
+
+                        return (
+                          <div
+                            key={l.id}
+                            className={`rounded-xl border p-2.5 text-xs transition-colors ${
+                              isLeaveToday
+                                ? 'border-indigo-500/30 bg-indigo-500/10'
+                                : 'border-line/70 bg-raised/50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-text truncate">
+                                {l.type}
+                              </span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {l.isPaid === 1 ? (
+                                  <span className="text-[10px] font-semibold text-emerald-400">
+                                    Paid
+                                  </span>
+                                ) : l.isPaid === 0 ? (
+                                  <span className="text-[10px] font-semibold text-amber-400">
+                                    Unpaid
+                                  </span>
+                                ) : null}
+                                <span className="font-mono font-bold text-brand bg-brand-dim/30 px-1.5 py-0.2 rounded text-[11px]">
+                                  {l.days}d
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-1 flex items-center justify-between text-[11px] font-mono text-dim">
+                              <span>
+                                {l.from === l.to ? l.from : `${l.from} → ${l.to}`}
+                              </span>
+                              {isLeaveToday && (
+                                <span className="text-[9px] font-bold text-indigo-400">
+                                  ● Active Today
+                                </span>
+                              )}
+                            </div>
+
+                            {/* SOURCE BADGE: HR Manual vs Requested & Approved */}
+                            <div className="mt-2 flex items-center justify-between gap-1 flex-wrap pt-1.5 border-t border-white/5">
+                              {isHrManual ? (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[10px] font-bold text-purple-300"
+                                  title="This leave was manually recorded by HR"
+                                >
+                                  <ShieldCheckIcon className="h-3 w-3 text-purple-400" />
+                                  <span>HR Added Leave</span>
+                                </span>
+                              ) : (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300"
+                                  title="This leave was requested by employee and approved"
+                                >
+                                  <CheckIcon className="h-3 w-3 text-emerald-400" />
+                                  <span>Requested & Approved</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Reason / HR Notes */}
+                            {l.reason && (
+                              <div className="mt-1.5 rounded-lg bg-surface/70 border border-white/5 p-1.5 text-[10px] text-muted leading-tight">
+                                <span className="font-semibold text-dim">Note: </span>
+                                <span>{l.reason}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
+            /* CARDS VIEW: Individual Booking Cards */
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-              {calendarLeaves.map((l) => {
+              {filteredActiveMonthLeaves.map((l) => {
                 const isTodayActive = l.from <= todayStr && l.to >= todayStr;
+                const isHrManual =
+                  l.source === 'HR_MANUAL' ||
+                  l.sourceLabel === 'HR Added' ||
+                  l.id?.startsWith('lr_hrwb_') ||
+                  l.id?.startsWith('lr_hr_');
 
                 return (
                   <div
                     key={l.id}
                     className={`rounded-xl border p-3.5 transition-all ${
                       isTodayActive
-                        ? 'border-brand/40 bg-brand-dim/20'
+                        ? 'border-indigo-500/40 bg-indigo-950/20 shadow-md ring-1 ring-indigo-500/30'
                         : 'border-line bg-surface hover:bg-raised'
                     }`}
                   >
@@ -890,12 +1389,42 @@ export function LeaveManagementPanel() {
                         {isTodayActive ? 'Away Today' : `${l.days}d`}
                       </Badge>
                     </div>
-                    <div className="mt-1 text-xs text-brand font-medium">{l.type}</div>
+
+                    <div className="mt-1 flex items-center justify-between text-xs">
+                      <span className="text-brand font-medium">{l.type}</span>
+                      {l.isPaid === 1 ? (
+                        <span className="text-[10px] text-emerald-400 font-semibold">Paid</span>
+                      ) : l.isPaid === 0 ? (
+                        <span className="text-[10px] text-amber-400 font-semibold">Unpaid</span>
+                      ) : null}
+                    </div>
+
                     <div className="mt-2 flex items-center justify-between text-[11px] font-mono text-dim">
                       <span>{l.from}</span>
                       <span>&rarr;</span>
                       <span>{l.to}</span>
                     </div>
+
+                    {/* SOURCE BADGE */}
+                    <div className="mt-2.5 flex items-center justify-between gap-1 flex-wrap pt-2 border-t border-line">
+                      {isHrManual ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[10px] font-bold text-purple-300">
+                          <ShieldCheckIcon className="h-3 w-3 text-purple-400" />
+                          <span>HR Added Leave</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                          <CheckIcon className="h-3 w-3 text-emerald-400" />
+                          <span>Requested & Approved</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {l.reason && (
+                      <div className="mt-1.5 rounded-lg bg-raised/50 border border-white/5 p-1.5 text-[10px] text-muted truncate">
+                        <span className="text-dim font-medium">Note: </span>{l.reason}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2025,6 +2554,151 @@ export function LeaveManagementPanel() {
               </Button>
               <Button variant="primary" onClick={handleAdjustBalance} disabled={submitting}>
                 {submitting ? 'Applying…' : 'Apply Adjustment'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Leave Modal (HR Direct Entry) */}
+      {showRecordLeaveModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
+          <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div>
+                <h2 className="text-base font-bold text-text">
+                  Record Employee Leave (HR Entry)
+                </h2>
+                <p className="mt-0.5 text-xs text-muted">
+                  Directly record and approve leave. Stamped as <strong>HR Added</strong> and immediately reflected on the calendar.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRecordLeaveModal(false)}
+                className="text-muted hover:text-text text-sm font-bold cursor-pointer"
+              >
+                <XIcon className="h-4 w-4" />
+              </button>
+            </div>
+
+            {recordError && (
+              <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+                <strong>Error:</strong> {recordError}
+              </div>
+            )}
+
+            <div className="my-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1">
+                  Select Employee <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  value={recordEmployeeId}
+                  onChange={(e) => setRecordEmployeeId(e.target.value)}
+                  className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                >
+                  <option value="">-- Choose Employee --</option>
+                  {balances.map((b) => (
+                    <option key={b.employeeId} value={b.employeeId}>
+                      {b.employeeNumber ? `[${b.employeeNumber}] ` : ''}{b.employeeName} ({b.role}) - Available: {b.balance.available}d
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1">
+                  Leave Type <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  value={recordLeaveTypeId}
+                  onChange={(e) => setRecordLeaveTypeId(e.target.value)}
+                  className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                >
+                  <option value="annual">Paid annual leave (Annual Entitlement)</option>
+                  <option value="sick">Sick leave</option>
+                  <option value="authorised">Authorised absence</option>
+                  <option value="unpaid">Unpaid leave</option>
+                  <option value="compassionate">Compassionate leave</option>
+                  <option value="emergency">Emergency leave</option>
+                  <option value="wfh">Work from home</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1">
+                    Start Date <span className="text-rose-400">*</span>
+                  </label>
+                  <Input
+                    type="date"
+                    value={recordStartDate}
+                    onChange={(e) => {
+                      setRecordStartDate(e.target.value);
+                      if (!recordEndDate || recordEndDate < e.target.value) {
+                        setRecordEndDate(e.target.value);
+                      }
+                    }}
+                    className="w-full text-xs py-1.5"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1">
+                    End Date <span className="text-rose-400">*</span>
+                  </label>
+                  <Input
+                    type="date"
+                    value={recordEndDate}
+                    onChange={(e) => setRecordEndDate(e.target.value)}
+                    className="w-full text-xs py-1.5"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 rounded-xl border border-line bg-raised p-3">
+                <input
+                  type="checkbox"
+                  id="recordIsPaidCheckbox"
+                  checked={recordIsPaid}
+                  onChange={(e) => setRecordIsPaid(e.target.checked)}
+                  className="h-4 w-4 rounded border-line text-indigo-600 focus:ring-indigo-500"
+                />
+                <label htmlFor="recordIsPaidCheckbox" className="text-xs font-semibold text-text cursor-pointer">
+                  Paid Leave (Counts as paid salary for this duration)
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1">
+                  Reason / Notes for Audit Trail
+                </label>
+                <textarea
+                  value={recordReason}
+                  onChange={(e) => setRecordReason(e.target.value)}
+                  placeholder="e.g. Leave recorded directly by HR / Approved personal day / Travel leave..."
+                  rows={3}
+                  className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-line pt-3">
+              <Button
+                onClick={() => setShowRecordLeaveModal(false)}
+                disabled={recordSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleRecordLeave}
+                disabled={recordSubmitting}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white"
+              >
+                {recordSubmitting ? 'Recording…' : 'Record & Approve Leave'}
               </Button>
             </div>
           </div>

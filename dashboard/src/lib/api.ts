@@ -533,6 +533,27 @@ export const api = {
       '/api/leave/balances',
     ),
 
+  recordEmployeeLeave: (
+    employeeId: string,
+    data: {
+      leaveTypeId: string;
+      startDate: string;
+      endDate?: string;
+      dayPortion?: string;
+      reason?: string;
+      isPaid?: boolean;
+      overdraftReason?: string;
+      notes?: string;
+    },
+  ) =>
+    request<{ status: string; requestId: string; message?: string }>(
+      `/api/leave/employee/${encodeURIComponent(employeeId)}/request`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
   teamLeaveCalendar: (from?: string, to?: string) =>
     request<{ status: string; from: string; to: string; leaves: TeamCalendarLeave[]; bankHolidays?: BankHolidayItem[] }>(
       `/api/leave/calendar${from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : ''}`,

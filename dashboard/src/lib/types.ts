@@ -383,6 +383,8 @@ export interface LeaveRequestItem {
   decidedBy?: string | null;
   balance?: LeaveBalanceDetails | null;
   blocked?: string | null;
+  source?: 'HR_MANUAL' | 'EMPLOYEE_REQUEST';
+  sourceLabel?: string;
 }
 
 export interface EmployeeLeaveOverview {
@@ -399,9 +401,15 @@ export interface TeamCalendarLeave {
   employeeName: string;
   employeeNumber?: string | null;
   type: string;
+  leaveTypeId?: string;
   from: string;
   to: string;
   days: number;
+  reason?: string | null;
+  isPaid?: number | null;
+  employeeRole?: string | null;
+  source?: 'HR_MANUAL' | 'EMPLOYEE_REQUEST';
+  sourceLabel?: string;
 }
 
 export interface BankHolidayItem {

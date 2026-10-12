@@ -228,6 +228,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   evidence_document_id TEXT REFERENCES employee_documents(id) ON DELETE SET NULL,
   -- DRAFT | PENDING_MANAGER | PENDING_HR | APPROVED | REJECTED | CANCELLED
   status        TEXT NOT NULL DEFAULT 'PENDING_MANAGER',
+  source        TEXT DEFAULT 'EMPLOYEE_REQUEST',
   submitted_at  INTEGER NOT NULL,
   decided_at    INTEGER,
   cancelled_at  INTEGER,
