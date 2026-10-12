@@ -88,7 +88,8 @@ export function LeaveManagementPanel() {
   const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
-  // Team Calendar Monthly Breakdown State
+  // Team Calendar Breakdown State (Year -> Month hierarchy)
+  const [selectedYear, setSelectedYear] = useState<number | 'ALL' | null>(null);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>('');
   const [calendarViewMode, setCalendarViewMode] = useState<'EMPLOYEES' | 'CARDS'>('EMPLOYEES');
   const [calendarSearch, setCalendarSearch] = useState<string>('');
@@ -504,82 +505,190 @@ export function LeaveManagementPanel() {
     return Array.from(map.values()).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
   }, [calendarLeaves]);
 
-  const currentMonthKey = todayStr.slice(0, 7);
-  // Default to user selection, or current month if it has leaves, or first available month
-  const activeMonthKey =
-    selectedMonthKey ||
-    (monthBuckets.find((b) => b.monthKey === currentMonthKey)?.monthKey ??
-      monthBuckets[0]?.monthKey ??
-      'ALL');
+  const currentYearNum = new Date().getFullYear(); // e.g. 2026
+  const currentMonthKey = todayStr.slice(0, 7); // e.g. "2026-10"
 
-  const activeMonthBucket = useMemo(() => {
-    if (activeMonthKey === 'ALL') return null;
-    return monthBuckets.find((b) => b.monthKey === activeMonthKey) || null;
-  }, [monthBuckets, activeMonthKey]);
+  // Derive Years from Month Buckets
+  const yearBuckets = useMemo(() => {
+    const map = new Map<
+      number,
+      {
+        year: number;
+        leaves: TeamCalendarLeave[];
+        employees: Map<
+          string,
+          {
+            employeeId: string;
+            employeeName: string;
+            employeeNumber?: string | null;
+            employeeRole?: string | null;
+            totalDays: number;
+            leaves: TeamCalendarLeave[];
+          }
+        >;
+        totalDays: number;
+        monthsCount: number;
+      }
+    >();
 
-  // List of employees who took leaves in the active month
-  const activeMonthEmployees = useMemo(() => {
-    if (!activeMonthBucket) {
-      // If 'ALL' months is selected
-      const map = new Map<
-        string,
-        {
-          employeeId: string;
-          employeeName: string;
-          employeeNumber?: string | null;
-          employeeRole?: string | null;
-          totalDays: number;
-          leaves: TeamCalendarLeave[];
-        }
-      >();
-      for (const l of calendarLeaves) {
-        if (!map.has(l.employeeId)) {
-          map.set(l.employeeId, {
-            employeeId: l.employeeId,
-            employeeName: l.employeeName,
-            employeeNumber: l.employeeNumber,
-            employeeRole: l.employeeRole,
+    for (const b of monthBuckets) {
+      if (!map.has(b.year)) {
+        map.set(b.year, {
+          year: b.year,
+          leaves: [],
+          employees: new Map(),
+          totalDays: 0,
+          monthsCount: 0,
+        });
+      }
+      const yBucket = map.get(b.year)!;
+      yBucket.monthsCount += 1;
+      yBucket.totalDays += b.totalDays;
+      yBucket.leaves.push(...b.leaves);
+      for (const [empId, empData] of b.employees.entries()) {
+        if (!yBucket.employees.has(empId)) {
+          yBucket.employees.set(empId, {
+            employeeId: empData.employeeId,
+            employeeName: empData.employeeName,
+            employeeNumber: empData.employeeNumber,
+            employeeRole: empData.employeeRole,
             totalDays: 0,
             leaves: [],
           });
         }
-        const emp = map.get(l.employeeId)!;
-        emp.totalDays += Number(l.days) || 1;
-        emp.leaves.push(l);
+        const existingEmp = yBucket.employees.get(empId)!;
+        existingEmp.totalDays += empData.totalDays;
+        existingEmp.leaves.push(...empData.leaves);
       }
-      return Array.from(map.values());
     }
-    return Array.from(activeMonthBucket.employees.values());
-  }, [activeMonthBucket, calendarLeaves]);
+
+    return Array.from(map.values()).sort((a, b) => b.year - a.year);
+  }, [monthBuckets]);
+
+  // Active year: user selected year or current year if present or first available year
+  const activeYear: number | 'ALL' = useMemo(() => {
+    if (selectedYear !== null) return selectedYear;
+    if (yearBuckets.some((y) => y.year === currentYearNum)) return currentYearNum;
+    return yearBuckets[0]?.year ?? 'ALL';
+  }, [selectedYear, yearBuckets, currentYearNum]);
+
+  // Month buckets visible under the active year
+  const visibleMonthBuckets = useMemo(() => {
+    if (activeYear === 'ALL') return monthBuckets;
+    return monthBuckets.filter((b) => b.year === activeYear);
+  }, [monthBuckets, activeYear]);
+
+  // Active month: if user selected a month that exists in visibleMonthBuckets, use it.
+  // Otherwise if current month is in visibleMonthBuckets, use current month.
+  // Otherwise default to the first available month in the year (or 'ALL')
+  const activeMonthKey = useMemo(() => {
+    if (selectedMonthKey) {
+      if (selectedMonthKey === 'ALL' || selectedMonthKey === `ALL_${activeYear}`) return selectedMonthKey;
+      if (visibleMonthBuckets.some((b) => b.monthKey === selectedMonthKey)) return selectedMonthKey;
+    }
+    const currentMonthInYear = visibleMonthBuckets.find((b) => b.monthKey === currentMonthKey);
+    if (currentMonthInYear) return currentMonthInYear.monthKey;
+    return visibleMonthBuckets[0]?.monthKey || 'ALL';
+  }, [selectedMonthKey, visibleMonthBuckets, currentMonthKey, activeYear]);
+
+  const activeMonthBucket = useMemo(() => {
+    if (activeMonthKey === 'ALL' || activeMonthKey.startsWith('ALL_')) return null;
+    return monthBuckets.find((b) => b.monthKey === activeMonthKey) || null;
+  }, [monthBuckets, activeMonthKey]);
+
+  // Year summary info
+  const activeYearBucket = useMemo(() => {
+    if (activeYear === 'ALL') return null;
+    return yearBuckets.find((y) => y.year === activeYear) || null;
+  }, [yearBuckets, activeYear]);
+
+  // List of employees who took leaves in the active month or active year
+  const activeMonthEmployees = useMemo(() => {
+    if (activeMonthBucket) {
+      return Array.from(activeMonthBucket.employees.values());
+    }
+    // If viewing all months of a specific year
+    if (activeYearBucket) {
+      return Array.from(activeYearBucket.employees.values());
+    }
+    // If viewing ALL years, ALL months
+    const map = new Map<
+      string,
+      {
+        employeeId: string;
+        employeeName: string;
+        employeeNumber?: string | null;
+        employeeRole?: string | null;
+        totalDays: number;
+        leaves: TeamCalendarLeave[];
+      }
+    >();
+    for (const l of calendarLeaves) {
+      if (!map.has(l.employeeId)) {
+        map.set(l.employeeId, {
+          employeeId: l.employeeId,
+          employeeName: l.employeeName,
+          employeeNumber: l.employeeNumber,
+          employeeRole: l.employeeRole,
+          totalDays: 0,
+          leaves: [],
+        });
+      }
+      const emp = map.get(l.employeeId)!;
+      emp.totalDays += Number(l.days) || 1;
+      emp.leaves.push(l);
+    }
+    return Array.from(map.values());
+  }, [activeMonthBucket, activeYearBucket, calendarLeaves]);
 
   const filteredActiveMonthEmployees = useMemo(() => {
-    if (!calendarSearch.trim()) return activeMonthEmployees;
-    const q = calendarSearch.toLowerCase();
-    return activeMonthEmployees.filter(
-      (e) =>
-        e.employeeName.toLowerCase().includes(q) ||
-        (e.employeeNumber && e.employeeNumber.toLowerCase().includes(q)) ||
-        (e.employeeRole && e.employeeRole.toLowerCase().includes(q)),
-    );
-  }, [activeMonthEmployees, calendarSearch]);
+    let list = activeMonthEmployees;
+    if (calendarSearch.trim()) {
+      const q = calendarSearch.toLowerCase();
+      list = activeMonthEmployees.filter(
+        (e) =>
+          e.employeeName.toLowerCase().includes(q) ||
+          (e.employeeNumber && e.employeeNumber.toLowerCase().includes(q)) ||
+          (e.employeeRole && e.employeeRole.toLowerCase().includes(q)),
+      );
+    }
+    // Always surface employees who are on leave today at the top of the list
+    return [...list].sort((a, b) => {
+      const aOnLeave = a.leaves.some((l) => l.from <= todayStr && l.to >= todayStr);
+      const bOnLeave = b.leaves.some((l) => l.from <= todayStr && l.to >= todayStr);
+      if (aOnLeave && !bOnLeave) return -1;
+      if (!aOnLeave && bOnLeave) return 1;
+      return b.totalDays - a.totalDays || a.employeeName.localeCompare(b.employeeName);
+    });
+  }, [activeMonthEmployees, calendarSearch, todayStr]);
 
   const activeMonthLeaves = useMemo(() => {
-    if (!activeMonthBucket) return calendarLeaves;
-    return activeMonthBucket.leaves;
-  }, [activeMonthBucket, calendarLeaves]);
+    if (activeMonthBucket) return activeMonthBucket.leaves;
+    if (activeYearBucket) return activeYearBucket.leaves;
+    return calendarLeaves;
+  }, [activeMonthBucket, activeYearBucket, calendarLeaves]);
 
   const filteredActiveMonthLeaves = useMemo(() => {
-    if (!calendarSearch.trim()) return activeMonthLeaves;
-    const q = calendarSearch.toLowerCase();
-    return activeMonthLeaves.filter(
-      (l) =>
-        l.employeeName.toLowerCase().includes(q) ||
-        (l.employeeNumber && l.employeeNumber.toLowerCase().includes(q)) ||
-        (l.employeeRole && l.employeeRole.toLowerCase().includes(q)) ||
-        l.type.toLowerCase().includes(q) ||
-        (l.reason && l.reason.toLowerCase().includes(q)),
-    );
-  }, [activeMonthLeaves, calendarSearch]);
+    let list = activeMonthLeaves;
+    if (calendarSearch.trim()) {
+      const q = calendarSearch.toLowerCase();
+      list = activeMonthLeaves.filter(
+        (l) =>
+          l.employeeName.toLowerCase().includes(q) ||
+          (l.employeeNumber && l.employeeNumber.toLowerCase().includes(q)) ||
+          (l.employeeRole && l.employeeRole.toLowerCase().includes(q)) ||
+          l.type.toLowerCase().includes(q) ||
+          (l.reason && l.reason.toLowerCase().includes(q)),
+      );
+    }
+    return [...list].sort((a, b) => {
+      const aToday = a.from <= todayStr && a.to >= todayStr;
+      const bToday = b.from <= todayStr && b.to >= todayStr;
+      if (aToday && !bToday) return -1;
+      if (!aToday && bToday) return 1;
+      return b.from.localeCompare(a.from);
+    });
+  }, [activeMonthLeaves, calendarSearch, todayStr]);
 
   const filteredBalances = balances.filter((b) => {
     if (!search.trim()) return true;
@@ -694,7 +803,11 @@ export function LeaveManagementPanel() {
           </Button>
           <Button
             variant={activeTab === 'calendar' ? 'primary' : 'ghost'}
-            onClick={() => setActiveTab('calendar')}
+            onClick={() => {
+              setActiveTab('calendar');
+              if (selectedYear === null) setSelectedYear(currentYearNum);
+              if (!selectedMonthKey) setSelectedMonthKey(currentMonthKey);
+            }}
             className="py-1 px-3 text-xs"
           >
             Team Calendar ({calendarLeaves.length})
@@ -802,12 +915,19 @@ export function LeaveManagementPanel() {
         </div>
 
         <div
-          onClick={() => setActiveTab('calendar')}
+          onClick={() => {
+            setActiveTab('calendar');
+            setSelectedYear(currentYearNum);
+            setSelectedMonthKey(currentMonthKey);
+            setCalendarSearch('');
+            setCalendarViewMode('EMPLOYEES');
+          }}
           className={`cursor-pointer rounded-xl border p-3.5 transition-all ${
             activeTab === 'calendar'
               ? 'border-brand bg-brand-dim/30 ring-1 ring-brand'
               : 'border-line bg-surface hover:bg-raised'
           }`}
+          title="Click to open Leave Calendar for today"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-text">On Leave Today</span>
@@ -1014,65 +1134,70 @@ export function LeaveManagementPanel() {
       {/* Tab 2: Team Holiday Calendar & Coverage View (Spec 15.3) */}
       {activeTab === 'calendar' && (
         <div className="space-y-4">
-          {/* Designated Bank Holidays in Range */}
-          {calendarBankHolidays.length > 0 && (
-            <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/30 to-surface/80 p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-bold text-indigo-300">
-                    Designated Public Holidays in Calendar Range
+          {/* Active Leaves Today Highlight Banner */}
+          {onLeaveToday.length > 0 && (
+            <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/30 via-surface/90 to-surface/80 p-3.5 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400/50" />
+                  <span className="text-xs font-extrabold text-emerald-300 tracking-wide uppercase">
+                    On Leave Today ({onLeaveToday.length})
                   </span>
-                  <span className="rounded bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold text-indigo-300 border border-indigo-500/30">
-                    Paid Non-Working Day
-                  </span>
-                  <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30">
-                    0 Annual Leave Deduction
-                  </span>
-                </div>
-                <Button
-                  variant="ghost"
-                  onClick={() => setActiveTab('holidays')}
-                  className="py-1 px-2.5 text-xs text-indigo-300 hover:text-indigo-200"
-                >
-                  Manage Annual Bank Holidays &rarr;
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
-                {calendarBankHolidays.map((bh) => (
-                  <div key={bh.id} className="rounded-xl bg-surface/90 border border-indigo-500/20 p-3 shadow-sm hover:border-indigo-500/40 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-mono font-bold text-indigo-400">{bh.date}</span>
-                      <span className="text-[10px] text-emerald-400 font-semibold">Paid Off</span>
-                    </div>
-                    <div className="text-xs font-bold text-text truncate mt-1">{bh.name}</div>
-                    <div className="text-[10px] text-dim mt-1">
-                      {bh.weekday || 'Designated Bank Holiday'}
-                    </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {onLeaveToday.map((l) => (
+                      <span
+                        key={l.id}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-surface/90 border border-emerald-500/30 px-2.5 py-1 text-xs text-text font-bold shadow-sm"
+                      >
+                        <span>{l.employeeName}</span>
+                        {l.employeeNumber && (
+                          <span className="font-mono text-[10px] text-emerald-300 font-semibold">
+                            [{l.employeeNumber}]
+                          </span>
+                        )}
+                        <span className="rounded bg-emerald-500/20 px-1 py-0.2 text-[9px] font-mono text-emerald-300">
+                          {l.type}
+                        </span>
+                      </span>
+                    ))}
                   </div>
-                ))}
+                </div>
+                <div className="text-[11px] text-muted font-medium">
+                  {todayStr} · Active Approved Leave Coverage
+                </div>
               </div>
             </div>
           )}
 
-          {/* Monthly Breakdown Controls & Header */}
+          {/* Annual & Monthly Breakdown Controls & Header */}
           <div className="rounded-2xl border border-line bg-surface/80 p-4 space-y-4">
+            {/* Top Bar: Title, Search, View Mode, Record Leave */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-base font-bold text-text">
-                    Monthly Breakdown
+                    Annual & Monthly Breakdown
                   </h3>
                   <Badge tone="brand">
-                    {activeMonthBucket ? activeMonthBucket.label : 'All Months'}
+                    {activeMonthBucket
+                      ? activeMonthBucket.label
+                      : activeYear !== 'ALL'
+                      ? `Full Year ${activeYear}`
+                      : 'All Years & Months'}
                   </Badge>
+                  {activeYear !== 'ALL' && (
+                    <span className="rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 text-[10px] font-bold">
+                      Year {activeYear}
+                    </span>
+                  )}
                 </div>
                 <p className="mt-0.5 text-xs text-muted">
-                  Showing only employees who have taken leaves in this period. Each month card filters the roster.
+                  Step 1: Select a Year &rarr; Step 2: Select a Month to inspect employees who took leaves.
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                {/* Search in Month */}
+                {/* Search in Month / Year */}
                 <div className="relative">
                   <input
                     type="text"
@@ -1135,66 +1260,170 @@ export function LeaveManagementPanel() {
               </div>
             </div>
 
-            {/* Month Buttons / Cards Grid */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 no-scrollbar">
-              {/* All Months button */}
-              <button
-                type="button"
-                onClick={() => setSelectedMonthKey('ALL')}
-                className={`shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer ${
-                  activeMonthKey === 'ALL'
-                    ? 'border-indigo-500 bg-gradient-to-br from-indigo-950/50 to-surface ring-2 ring-indigo-500/40 shadow-md'
-                    : 'border-line bg-surface hover:bg-raised hover:border-white/20'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold text-xs text-text">All Months</span>
-                  <span className="rounded bg-white/10 px-1.5 py-0.2 text-[9px] font-mono text-dim">
-                    {calendarLeaves.length}
-                  </span>
-                </div>
-                <div className="mt-1 text-[11px] text-muted">
-                  Full calendar overview
-                </div>
-              </button>
+            {/* TIER 1: YEAR SELECTOR TABS */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-b border-line py-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-dim">
+                  Select Year:
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap rounded-xl border border-line bg-raised p-1">
+                  {yearBuckets.map((y) => {
+                    const isYearActive = activeYear === y.year;
+                    const isCurrentYear = y.year === currentYearNum;
 
-              {/* Month Cards */}
-              {monthBuckets.map((b) => {
-                const isSelected = activeMonthKey === b.monthKey;
-                const isCurrent = b.monthKey === currentMonthKey;
+                    return (
+                      <button
+                        key={y.year}
+                        type="button"
+                        onClick={() => {
+                          setSelectedYear(y.year);
+                          // Default to current month if in this year, or first available month
+                          const matchingMonth = monthBuckets.find(
+                            (m) => m.year === y.year && m.monthKey === currentMonthKey,
+                          );
+                          const firstMonth =
+                            matchingMonth?.monthKey ||
+                            monthBuckets.find((m) => m.year === y.year)?.monthKey ||
+                            `ALL_${y.year}`;
+                          setSelectedMonthKey(firstMonth);
+                        }}
+                        className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
+                          isYearActive
+                            ? 'bg-accent-gradient text-on-accent shadow-accent'
+                            : 'text-muted hover:text-text hover:bg-white/5'
+                        }`}
+                      >
+                        <span>{y.year}</span>
+                        <span
+                          className={`rounded px-1.5 py-0.2 text-[10px] font-mono ${
+                            isYearActive ? 'bg-black/25 text-white' : 'bg-white/5 text-dim'
+                          }`}
+                        >
+                          {y.totalDays}d
+                        </span>
+                        {isCurrentYear && (
+                          <span
+                            className="h-2 w-2 rounded-full bg-emerald-400 shadow-sm animate-pulse"
+                            title="Current Year"
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
 
-                return (
                   <button
-                    key={b.monthKey}
                     type="button"
-                    onClick={() => setSelectedMonthKey(b.monthKey)}
-                    className={`shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer min-w-[140px] ${
-                      isSelected
-                        ? 'border-indigo-500 bg-gradient-to-br from-indigo-950/60 to-surface ring-2 ring-indigo-500/50 shadow-md shadow-indigo-500/10'
-                        : 'border-line bg-surface hover:bg-raised hover:border-white/20'
+                    onClick={() => {
+                      setSelectedYear('ALL');
+                      setSelectedMonthKey('ALL');
+                    }}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
+                      activeYear === 'ALL'
+                        ? 'bg-accent-gradient text-on-accent shadow-accent'
+                        : 'text-muted hover:text-text hover:bg-white/5'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span className={`font-bold text-xs ${isSelected ? 'text-indigo-200' : 'text-text'}`}>
-                        {b.label}
-                      </span>
-                      {isCurrent && (
-                        <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 text-[8px] font-bold">
-                          Current
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-1.5 flex items-center justify-between text-[11px]">
-                      <span className="text-muted font-medium">
-                        {b.employees.size} {b.employees.size === 1 ? 'person' : 'people'}
-                      </span>
-                      <span className="font-mono font-bold text-indigo-400">
-                        {b.totalDays}d
-                      </span>
-                    </div>
+                    All Years
                   </button>
-                );
-              })}
+                </div>
+              </div>
+
+              {/* Year Stats Indicator */}
+              <div className="text-xs text-muted flex items-center gap-2">
+                {activeYearBucket ? (
+                  <span>
+                    Year <strong className="text-text">{activeYear}</strong>:{' '}
+                    <strong className="font-mono text-indigo-300">{activeYearBucket.totalDays}d leave</strong> taken by{' '}
+                    <strong className="text-text">{activeYearBucket.employees.size} employees</strong> across{' '}
+                    <strong className="text-text">{activeYearBucket.monthsCount} months</strong>
+                  </span>
+                ) : (
+                  <span>
+                    Total Across All Years:{' '}
+                    <strong className="font-mono text-indigo-300">
+                      {calendarLeaves.reduce((acc, c) => acc + (Number(c.days) || 1), 0)}d
+                    </strong>{' '}
+                    across <strong className="text-text">{calendarLeaves.length} bookings</strong>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* TIER 2: MONTH CARDS FOR SELECTED YEAR */}
+            <div>
+              <div className="mb-2 flex items-center justify-between text-[11px] text-muted">
+                <span>
+                  Months in <strong className="text-text">{activeYear === 'ALL' ? 'All Years' : activeYear}</strong> ({visibleMonthBuckets.length} months with leave activity):
+                </span>
+                <span className="text-[10px] text-dim">
+                  Click a month card to view employee breakdown
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 no-scrollbar">
+                {/* All Months for Year Button */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedMonthKey(activeYear === 'ALL' ? 'ALL' : `ALL_${activeYear}`)
+                  }
+                  className={`shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer ${
+                    activeMonthKey === 'ALL' || activeMonthKey === `ALL_${activeYear}`
+                      ? 'border-indigo-500 bg-gradient-to-br from-indigo-950/60 to-surface ring-2 ring-indigo-500/50 shadow-md shadow-indigo-500/10'
+                      : 'border-line bg-surface hover:bg-raised hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-xs text-text">
+                      {activeYear === 'ALL' ? 'All Records' : `Full ${activeYear}`}
+                    </span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.2 text-[9px] font-mono text-dim">
+                      {activeMonthLeaves.length}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted">
+                    {activeMonthEmployees.length} employees on leave
+                  </div>
+                </button>
+
+                {/* Month Cards for Selected Year */}
+                {visibleMonthBuckets.map((b) => {
+                  const isSelected = activeMonthKey === b.monthKey;
+                  const isCurrent = b.monthKey === currentMonthKey;
+
+                  return (
+                    <button
+                      key={b.monthKey}
+                      type="button"
+                      onClick={() => setSelectedMonthKey(b.monthKey)}
+                      className={`shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition-all cursor-pointer min-w-[140px] ${
+                        isSelected
+                          ? 'border-indigo-500 bg-gradient-to-br from-indigo-950/60 to-surface ring-2 ring-indigo-500/50 shadow-md shadow-indigo-500/10'
+                          : 'border-line bg-surface hover:bg-raised hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className={`font-bold text-xs ${isSelected ? 'text-indigo-200' : 'text-text'}`}>
+                          {b.label}
+                        </span>
+                        {isCurrent && (
+                          <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 text-[8px] font-bold">
+                            Current
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                        <span className="text-muted font-medium">
+                          {b.employees.size} {b.employees.size === 1 ? 'person' : 'people'}
+                        </span>
+                        <span className="font-mono font-bold text-indigo-400">
+                          {b.totalDays}d
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
