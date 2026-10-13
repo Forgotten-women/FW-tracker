@@ -55,16 +55,25 @@ async function entitlementFor(employeeId, onDate = T.dateKey()) {
   if (partTime) return partTime;
   const row = await selectEntitlement.get(employeeId, onDate);
   const val = Number(row?.holiday_entitlement_days);
-  if (!(val > 0)) return config.leave.annualEntitlementDays;
-  // HR records the 10 probation days in this field. Once probation is over the
-  // employee is on the full annual entitlement (20), so a figure no larger than
-  // the probation allowance is read as that allowance, not as a yearly one.
-  // (The probation months themselves earn at the probation rate either way;
-  // see accrualTarget.)
-  if (val <= config.leave.probationEntitlementDays && await probationWindow(employeeId)) {
+  const window = await probationWindow(employeeId);
+  const onProbation = Boolean(window && onDate >= window.from && onDate < window.to);
+
+  // While on probation, the employee's total allowance is the probation entitlement (10 days).
+  if (onProbation) {
+    return (val > 0 && val <= config.leave.probationEntitlementDays)
+      ? val
+      : config.leave.probationEntitlementDays;
+  }
+
+  // Once probation is over the employee is on the full annual entitlement (20).
+  // A figure no larger than the probation allowance recorded at hire is read
+  // as the probation allowance, so we return the full annual entitlement (20).
+  if (val <= config.leave.probationEntitlementDays && window && onDate >= window.to) {
     return config.leave.annualEntitlementDays;
   }
-  return val;
+
+  if (val > 0) return val;
+  return config.leave.annualEntitlementDays;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +251,7 @@ async function finaliseYear(employeeId, yearsOfService, startDate, { actor = 'sy
   const yearEnd = addMonths(startDate, (yearsOfService + 1) * 12);
   const leaveYear = `${yearStart}/${yearsOfService}`;
 
-  const entitlement = await entitlementFor(employeeId, startDate);
+  const entitlement = await entitlementFor(employeeId, yearEnd);
   const already = (await selectAccrued.get(employeeId, leaveYear)).days;
   const delta = (await accrualTarget(employeeId, yearStart, 12, entitlement)) - already;
   if (delta < 0.005) return { finalised: false, upToDate: true };
@@ -1041,7 +1050,7 @@ async function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateK
 // month has accrued, so the rollover's top-up to the full year is counted.
 async function carryForwardAvailable(employeeId, year, effectiveDate) {
   const raw = await balanceRaw(employeeId, year, effectiveDate);
-  const fullYear = await accrualTarget(employeeId, year.yearStart, 12, await entitlementFor(employeeId, effectiveDate));
+  const fullYear = await accrualTarget(employeeId, year.yearStart, 12, await entitlementFor(employeeId, year.yearEnd || effectiveDate));
   const accruedSoFar = Number((await selectAccrued.get(employeeId, year.leaveYear))?.days) || 0;
   return Math.round(Math.max(0, raw.availableDays + Math.max(0, fullYear - accruedSoFar)) * 100) / 100;
 }

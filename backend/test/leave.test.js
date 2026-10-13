@@ -477,7 +477,9 @@ test('probation earns 10 / 6 = 1.67 a month even when the record says 10', async
   await db.prepare('UPDATE employment_records SET probation_start_date = NULL WHERE id = ?').run('er_prob10_b');
 
   await L.accrue(emp, '2026-10-05');                       // 15 Aug, 15 Sep completed
-  assert.equal((await L.balanceFor(emp, '2026-10-05')).accruedDays, 3.33);
+  const duringProb = await L.balanceFor(emp, '2026-10-05');
+  assert.equal(duringProb.accruedDays, 3.33);
+  assert.equal(duringProb.annualEntitlementDays, 10, 'during probation entitlement is 10, not the full 20');
 
   await L.accrue(emp, '2027-01-15');                       // all 6 probation months
   const atEnd = await L.balanceFor(emp, '2027-01-15');
