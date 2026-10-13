@@ -200,21 +200,36 @@ export function LeaveManagementPanel() {
     };
   }, [historyFilter]);
 
-  const handleDecision = async () => {
-    if (!selectedRequest || !decisionAction) return;
+  const openReviewModal = (r: LeaveRequestItem) => {
+    setSelectedRequest(r);
+    const initialPaid = r.isPaid ?? r.defaultIsPaid ?? (r.leaveTypeId !== 'unpaid');
+    setDecisionIsPaid(initialPaid);
+    setDecisionNotes('');
+    const available = r.balance?.availableDays ?? r.balance?.available ?? 0;
+    const reqDays = r.days || 0;
+    const shortfall = Math.max(0, Math.round((reqDays - available) * 100) / 100);
+    setOverdraftReason(
+      shortfall > 0 && initialPaid
+        ? `Approved in advance of monthly accrual (Shortfall: ${shortfall}d).`
+        : '',
+    );
+  };
 
-    if (decisionAction === 'REJECTED' && !decisionNotes.trim()) {
-      alert('A rejection reason is required for the employee.');
+  const handleDecision = async (action: 'APPROVED' | 'REJECTED') => {
+    if (!selectedRequest) return;
+
+    if (action === 'REJECTED' && !decisionNotes.trim()) {
+      alert('A rejection reason note is required for the employee.');
       return;
     }
 
-    const available = selectedRequest.balance?.availableDays ?? 0;
+    const available = selectedRequest.balance?.availableDays ?? selectedRequest.balance?.available ?? 0;
     const reqDays = selectedRequest.days || 0;
     const calculatedShortfall = Math.max(0, Math.round((reqDays - available) * 100) / 100);
     const hasShortfall = decisionIsPaid && (calculatedShortfall > 0);
 
     if (
-      decisionAction === 'APPROVED' &&
+      action === 'APPROVED' &&
       decisionIsPaid &&
       hasShortfall &&
       !overdraftReason.trim()
@@ -225,12 +240,18 @@ export function LeaveManagementPanel() {
 
     setSubmitting(true);
     try {
+      const finalNotes =
+        decisionNotes.trim() ||
+        (action === 'APPROVED'
+          ? (decisionIsPaid ? 'Approved as paid leave by HR.' : 'Approved as unpaid leave by HR.')
+          : '');
+
       await api.decideLeaveRequest(
         selectedRequest.id,
-        decisionAction,
-        decisionNotes.trim(),
+        action,
+        finalNotes,
         overdraftReason.trim() || undefined,
-        decisionAction === 'APPROVED' ? decisionIsPaid : undefined,
+        action === 'APPROVED' ? decisionIsPaid : undefined,
       );
       setSelectedRequest(null);
       setDecisionAction(null);
@@ -1032,10 +1053,16 @@ export function LeaveManagementPanel() {
                       r.exceedsBalance || (r.shortfallDays && r.shortfallDays > 0);
 
                     return (
-                      <tr key={r.id} className="hover:bg-white/[0.02]">
+                      <tr
+                        key={r.id}
+                        onClick={() => openReviewModal(r)}
+                        className="hover:bg-white/[0.03] cursor-pointer transition-colors group"
+                      >
                         <td className="px-3 py-3 align-top">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-semibold text-text">{r.employeeName}</span>
+                            <span className="font-semibold text-text group-hover:text-brand transition-colors">
+                              {r.employeeName}
+                            </span>
                             {r.employeeNumber && (
                               <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
                                 {r.employeeNumber}
@@ -1044,7 +1071,7 @@ export function LeaveManagementPanel() {
                           </div>
                           <div className="text-[11px] text-muted">{r.employeeRole ?? ''}</div>
                           {r.reason && (
-                            <div className="mt-1 text-[11px] text-dim max-w-[200px] truncate">
+                            <div className="mt-1 text-[11px] text-dim max-w-[200px] truncate" title={r.reason}>
                               &quot;{r.reason}&quot;
                             </div>
                           )}
@@ -1098,37 +1125,17 @@ export function LeaveManagementPanel() {
                         </td>
                         <td className="px-3 py-3 align-top text-dim text-[11px]">{r.submittedAt}</td>
                         <td className="px-3 py-3 align-top text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <Button
-                              variant="primary"
-                              onClick={() => {
-                                setSelectedRequest(r);
-                                setDecisionAction('APPROVED');
-                                const initialPaid = r.isPaid ?? r.defaultIsPaid ?? (r.leaveTypeId !== 'unpaid');
-                                setDecisionIsPaid(initialPaid);
-                                setDecisionNotes(initialPaid ? 'Approved as paid leave by HR.' : 'Approved as unpaid leave by HR.');
-                                setOverdraftReason(
-                                  hasShortfall && initialPaid
-                                    ? `Approved in advance of monthly accrual (Shortfall: ${r.shortfallDays}d).`
-                                    : '',
-                                );
-                              }}
-                              className="py-1 px-2.5 text-[11px]"
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              onClick={() => {
-                                setSelectedRequest(r);
-                                setDecisionAction('REJECTED');
-                                setDecisionNotes('');
-                                setOverdraftReason('');
-                              }}
-                              className="py-1 px-2.5 text-[11px] text-danger hover:bg-danger-dim"
-                            >
-                              Reject
-                            </Button>
-                          </div>
+                          <Button
+                            variant="primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openReviewModal(r);
+                            }}
+                            className="py-1 px-3 text-[11px] font-semibold inline-flex items-center gap-1.5 shadow-sm"
+                          >
+                            <FileTextIcon className="h-3 w-3" />
+                            <span>Review</span>
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -2555,39 +2562,226 @@ export function LeaveManagementPanel() {
         </div>
       )}
 
-      {/* Decision Modal (Approve / Reject) */}
-      {selectedRequest && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
-          <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-6">
-            <h2 className="text-base font-bold text-text">
-              {decisionAction === 'APPROVED'
-                ? `Approve Leave Request: ${selectedRequest.employeeName}`
-                : `Reject Leave Request: ${selectedRequest.employeeName}`}
-            </h2>
-            <p className="mt-1 text-xs text-muted">
-              {selectedRequest.type} · {selectedRequest.from} &rarr; {selectedRequest.to} ({selectedRequest.days} working days)
-            </p>
+      {/* Leave Request Review & Decision Modal */}
+      {selectedRequest && (() => {
+        const empOverview = balances.find((b) => b.employeeId === selectedRequest.employeeId);
+        const bal = selectedRequest.balance || empOverview?.balance;
+        const reqDays = selectedRequest.days || 0;
+        const currentAvailable = bal?.availableDays ?? bal?.available ?? 0;
+        const currentAccrued = bal?.accruedDays ?? bal?.accrued ?? 0;
+        const currentTaken = bal?.takenDays ?? bal?.taken ?? 0;
+        const currentEntitlement = bal?.annualEntitlementDays ?? bal?.annualEntitlement ?? (bal?.blocked ? '—' : 20);
+        const calculatedShortfall = Math.max(0, Math.round((reqDays - currentAvailable) * 100) / 100);
+        const hasShortfall = decisionIsPaid && (calculatedShortfall > 0);
+        const projectedAvailable = Math.round((currentAvailable - (decisionIsPaid ? reqDays : 0)) * 100) / 100;
+        const initials = selectedRequest.employeeName
+          .split(' ')
+          .map((n) => n[0])
+          .slice(0, 2)
+          .join('')
+          .toUpperCase() || 'EMP';
 
-            {/* Leave Payment Type Configuration (HR Decision) */}
-            {decisionAction === 'APPROVED' && (
-              <div className="my-3.5 rounded-xl border border-line bg-raised/40 p-3.5">
-                <div className="flex items-center justify-between mb-2">
+        return (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+            <div className="w-full max-w-2xl rounded-2xl border border-line bg-surface shadow-2xl p-6 my-auto max-h-[90vh] overflow-y-auto space-y-4">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3 pb-3 border-b border-line">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center text-brand">
+                    <FileTextIcon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-bold text-text">Review Leave Request</h2>
+                      <Badge tone="warn">Pending HR Decision</Badge>
+                    </div>
+                    <p className="text-xs text-muted mt-0.5">
+                      Submitted on {selectedRequest.submittedAt}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRequest(null)}
+                  disabled={submitting}
+                  className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-raised transition-colors"
+                  aria-label="Close modal"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Employee Profile Section */}
+              <div className="rounded-xl border border-line bg-raised/40 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-brand/30 to-indigo-500/20 border border-brand/40 flex items-center justify-center font-bold text-sm text-text shrink-0">
+                    {initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-text">{selectedRequest.employeeName}</span>
+                      {selectedRequest.employeeNumber && (
+                        <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                          {selectedRequest.employeeNumber}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted truncate">
+                      {selectedRequest.employeeRole || empOverview?.role || 'Staff Member'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3 pt-3 border-t border-line/60 text-xs">
+                  <div>
+                    <span className="text-[10px] text-muted block uppercase tracking-wider">Joining Date</span>
+                    <span className="font-semibold text-text">{bal?.officialJoiningDate || 'On file'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted block uppercase tracking-wider">Leave Cycle</span>
+                    <span className="font-semibold text-text font-mono text-[11px]">
+                      {bal?.cycleStartDate || bal?.holidayYear?.from || '—'} &rarr; {bal?.cycleEndDate || bal?.holidayYear?.to || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted block uppercase tracking-wider">Cycle Renews</span>
+                    <span className="font-semibold text-text">{bal?.nextRenewalDate || bal?.renewalDate || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted block uppercase tracking-wider">Completed Service</span>
+                    <span className="font-semibold text-text">{bal?.holidayYear?.monthsCompleted ?? 0} month(s)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Request Details Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-line bg-raised/30 p-3">
+                  <span className="text-[10px] text-muted block uppercase tracking-wider mb-1">Leave Type</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-text">{selectedRequest.type}</span>
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                      selectedRequest.defaultIsPaid
+                        ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/40'
+                        : 'bg-amber-950/40 text-amber-400 border-amber-800/40'
+                    }`}>
+                      {selectedRequest.defaultIsPaid ? 'Paid' : 'Unpaid'}
+                    </span>
+                  </div>
+                  {selectedRequest.requiresEvidence && (
+                    <div className="text-[10px] text-warn mt-1 font-medium">Evidence Required</div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-line bg-raised/30 p-3">
+                  <span className="text-[10px] text-muted block uppercase tracking-wider mb-1">Date Range</span>
+                  <div className="text-xs font-bold font-mono text-text">
+                    {selectedRequest.from} &rarr; {selectedRequest.to}
+                  </div>
+                  <div className="text-[11px] text-muted mt-0.5">
+                    Single / continuous absence
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-line bg-raised/30 p-3">
+                  <span className="text-[10px] text-muted block uppercase tracking-wider mb-1">Duration</span>
+                  <div className="text-base font-extrabold text-brand">
+                    {selectedRequest.days} day(s)
+                  </div>
+                  <div className="text-[11px] text-muted">
+                    Working days requested
+                  </div>
+                </div>
+              </div>
+
+              {/* Full Reason Card (Prominently Styled) */}
+              <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/20 via-surface to-raised/30 p-3.5">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-300 mb-1.5">
+                  <FileTextIcon className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Employee Stated Reason</span>
+                </div>
+                {selectedRequest.reason ? (
+                  <p className="text-xs font-medium text-text leading-relaxed bg-black/30 p-3 rounded-lg border border-indigo-500/20 whitespace-pre-wrap">
+                    &ldquo;{selectedRequest.reason}&rdquo;
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted italic bg-black/20 p-2.5 rounded-lg border border-line">
+                    No specific reason provided by the employee.
+                  </p>
+                )}
+                {selectedRequest.notes && (
+                  <div className="mt-2 text-[11px] text-muted">
+                    <strong className="text-text">Additional Notes:</strong> {selectedRequest.notes}
+                  </div>
+                )}
+              </div>
+
+              {/* Leave Balance Snapshot & Impact */}
+              <div className="rounded-xl border border-line bg-raised/20 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-text uppercase tracking-wider">Leave Balance & Impact Analysis</span>
+                  <span className="text-[11px] text-muted font-mono">
+                    Annual Cycle Balance
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="p-2 rounded-lg bg-surface border border-line">
+                    <span className="text-[10px] text-muted block">Entitlement</span>
+                    <span className="text-xs font-bold text-text">{currentEntitlement}d</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-surface border border-line">
+                    <span className="text-[10px] text-muted block">Accrued</span>
+                    <span className="text-xs font-bold text-emerald-400">{currentAccrued}d</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-surface border border-line">
+                    <span className="text-[10px] text-muted block">Taken</span>
+                    <span className="text-xs font-bold text-muted">{currentTaken}d</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-surface border border-line">
+                    <span className="text-[10px] text-muted block">Available Now</span>
+                    <span className={`text-xs font-bold ${currentAvailable < 0 ? 'text-danger' : 'text-text'}`}>
+                      {currentAvailable}d
+                    </span>
+                  </div>
+                </div>
+
+                {/* Impact Calculation */}
+                {hasShortfall ? (
+                  <div className="rounded-lg bg-amber-950/40 border border-amber-500/40 p-2.5 text-xs text-amber-200">
+                    <div className="font-semibold flex items-center gap-1.5 text-amber-300">
+                      <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span>Shortfall Warning: Exceeds accrued balance by {calculatedShortfall} day(s)</span>
+                    </div>
+                    <div className="mt-1 text-[11px] text-amber-200/80 leading-relaxed">
+                      Employee has {currentAvailable}d available, but requested {reqDays}d. Approving as Paid Leave requires an overdraft justification below.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg bg-emerald-950/30 border border-emerald-500/30 p-2.5 text-xs text-emerald-300 flex items-center gap-2">
+                    <CheckIcon className="h-4 w-4 shrink-0 text-emerald-400" />
+                    <span>
+                      Within accrued balance. If approved as Paid Leave, remaining available balance will be{' '}
+                      <strong>{projectedAvailable}d</strong>.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Leave Payment Type Configuration */}
+              <div className="rounded-xl border border-line bg-raised/40 p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-text">
-                    Leave Payment Type
+                    Leave Payment Type Decision
                   </label>
                   <span className="text-[10px] text-muted font-mono">
-                    Type Default: {selectedRequest.defaultIsPaid ? 'Paid' : 'Unpaid'}
+                    Default: {selectedRequest.defaultIsPaid ? 'Paid' : 'Unpaid'}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setDecisionIsPaid(true);
-                      if (decisionNotes === 'Approved as unpaid leave by HR.') {
-                        setDecisionNotes('Approved as paid leave by HR.');
-                      }
-                    }}
+                    onClick={() => setDecisionIsPaid(true)}
                     className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
                       decisionIsPaid
                         ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300 ring-1 ring-emerald-500/40'
@@ -2601,18 +2795,13 @@ export function LeaveManagementPanel() {
                     </div>
                     <div>
                       <div className="text-xs font-bold text-text">Paid Leave</div>
-                      <div className="text-[10px] text-muted">Compensated time off</div>
+                      <div className="text-[10px] text-muted">Compensated time off (deducts leave balance)</div>
                     </div>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setDecisionIsPaid(false);
-                      if (decisionNotes === 'Approved as paid leave by HR.') {
-                        setDecisionNotes('Approved as unpaid leave by HR.');
-                      }
-                    }}
+                    onClick={() => setDecisionIsPaid(false)}
                     className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
                       !decisionIsPaid
                         ? 'border-amber-500/60 bg-amber-950/40 text-amber-300 ring-1 ring-amber-500/40'
@@ -2626,98 +2815,74 @@ export function LeaveManagementPanel() {
                     </div>
                     <div>
                       <div className="text-xs font-bold text-text">Unpaid Leave</div>
-                      <div className="text-[10px] text-muted">Deducted in payroll</div>
+                      <div className="text-[10px] text-muted">Deducted from payroll (preserves leave balance)</div>
                     </div>
                   </button>
                 </div>
 
-                <div className="mt-2.5 text-[11px] leading-relaxed">
-                  {decisionIsPaid ? (
-                    <span className="text-emerald-400">
-                      ✓ <strong>Paid Leave</strong>: Deducted from accrued annual leave ({selectedRequest.days} day(s)). Full salary is maintained without deduction.
-                    </span>
-                  ) : (
-                    <span className="text-amber-400">
-                      ⚠ <strong>Unpaid Leave</strong>: Deducted from pay/salary ({selectedRequest.days} day(s) salary deduction in monthly payroll). Does <em>not</em> deduct from accrued leave balance.
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Overdraft Alert & Justification (Spec 15.2) */}
-            {decisionAction === 'APPROVED' &&
-              decisionIsPaid &&
-              (selectedRequest.balance?.availableDays !== undefined
-                ? (selectedRequest.days > selectedRequest.balance.availableDays)
-                : selectedRequest.exceedsBalance) && (
-                <div className="my-4 rounded-lg bg-warn-dim/30 border border-warn/40 p-3 text-xs">
-                  <div className="font-semibold text-warn">
-                    <AlertTriangleIcon className="inline-block h-3.5 w-3.5" /> Shortfall Warning: Exceeds Accrued Entitlement by {
-                      selectedRequest.balance?.availableDays !== undefined
-                        ? Math.max(0, Math.round((selectedRequest.days - selectedRequest.balance.availableDays) * 100) / 100)
-                        : (selectedRequest.shortfallDays ?? 'unknown')
-                    } day(s)
-                  </div>
-                  <div className="text-muted mt-0.5">
-                    This request exceeds what the employee has accrued so far this holiday year. Approving as Paid Leave requires an explicit HR overdraft reason.
-                  </div>
-                  <div className="mt-3">
-                    <label className="block text-xs font-semibold text-text mb-1">
+                {/* Overdraft justification if paid and has shortfall */}
+                {decisionIsPaid && hasShortfall && (
+                  <div className="mt-2.5 pt-2.5 border-t border-line/60">
+                    <label className="block text-xs font-semibold text-warn mb-1">
                       Overdraft Approval Justification (Required)
                     </label>
                     <textarea
                       value={overdraftReason}
                       onChange={(e) => setOverdraftReason(e.target.value)}
-                      placeholder="e.g. Authorized to borrow against future accrual in upcoming quarter..."
+                      placeholder="e.g. Authorized by HR to borrow against upcoming month's accrual..."
                       rows={2}
-                      className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                      className="w-full rounded-lg border border-warn/40 bg-raised p-2 text-xs text-text placeholder-dim focus:border-warn focus:outline-none"
                     />
                   </div>
+                )}
+              </div>
+
+              {/* Decision Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1">
+                  HR Decision Notes / Audit Trail <span className="text-muted font-normal">(Required if rejecting, optional if approving)</span>
+                </label>
+                <textarea
+                  value={decisionNotes}
+                  onChange={(e) => setDecisionNotes(e.target.value)}
+                  placeholder="Explain rationale for employee and audit record..."
+                  rows={2}
+                  className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                />
+              </div>
+
+              {/* Actions Footer */}
+              <div className="flex items-center justify-between gap-3 pt-3 border-t border-line">
+                <Button
+                  onClick={() => setSelectedRequest(null)}
+                  disabled={submitting}
+                  className="text-xs"
+                >
+                  Cancel
+                </Button>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={() => handleDecision('REJECTED')}
+                    disabled={submitting}
+                    className="py-1.5 px-3 text-xs bg-danger text-white hover:bg-danger/90 font-semibold"
+                  >
+                    Reject Request
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => handleDecision('APPROVED')}
+                    disabled={submitting}
+                    className="py-1.5 px-4 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white"
+                  >
+                    {submitting ? 'Processing…' : 'Approve Request'}
+                  </Button>
                 </div>
-              )}
-
-            <div className="my-4">
-              <label className="block text-xs font-semibold text-text mb-1">
-                Decision Notes {decisionAction === 'REJECTED' ? '(Required - explain rejection)' : '(Optional)'}
-              </label>
-              <textarea
-                value={decisionNotes}
-                onChange={(e) => setDecisionNotes(e.target.value)}
-                placeholder="Explain the rationale for the employee and audit log..."
-                rows={3}
-                className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                onClick={() => {
-                  setSelectedRequest(null);
-                  setDecisionAction(null);
-                }}
-                disabled={submitting}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant={decisionAction === 'REJECTED' ? 'ghost' : 'primary'}
-                onClick={handleDecision}
-                disabled={submitting}
-                className={
-                  decisionAction === 'REJECTED' ? 'bg-danger text-white hover:bg-danger/90' : ''
-                }
-              >
-                {submitting
-                  ? 'Submitting…'
-                  : decisionAction === 'APPROVED'
-                  ? 'Confirm Approval'
-                  : 'Confirm Rejection'}
-              </Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Manual Leave Adjustment Modal (Spec 13.5) */}
       {showAdjustModal && (
