@@ -837,12 +837,13 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
       }
 
       if (reducesEntitlement && preview.ok && preview.requiresOverdraftApproval) {
+        const approver = resolvedUser ? resolvedUser.id : String(actor || 'admin');
         await db.prepare(`
           INSERT INTO leave_overdraft_approvals
             (id, request_id, employee_id, shortfall_days, approved_by, approved_at, reason)
           VALUES (?,?,?,?,?,?,?)
         `).run('lov_' + crypto.randomBytes(8).toString('hex'), requestId, req.employee_id,
-               preview.shortfallDays, resolvedUser ? resolvedUser.id : null, nowMs,
+               preview.shortfallDays, approver, nowMs,
                String(overdraftReason).trim());
       }
     }

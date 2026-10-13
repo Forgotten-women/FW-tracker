@@ -435,7 +435,10 @@ router.post('/employee/:employeeId/request',
           requestId: created.id,
           decision: 'APPROVED',
           notes: b.notes || b.reason || 'Recorded by HR',
-          overdraftReason: b.overdraftReason || null,
+          overdraftReason: (b.overdraftReason && String(b.overdraftReason).trim())
+            || (b.reason && String(b.reason).trim())
+            || (b.notes && String(b.notes).trim())
+            || 'Approved by HR during direct manual entry',
           isPaid: b.isPaid !== undefined ? (b.isPaid === true || b.isPaid === 1 || b.isPaid === 'true') : null,
           actor,
         });

@@ -85,6 +85,7 @@ export function LeaveManagementPanel() {
   const [recordEndDate, setRecordEndDate] = useState('');
   const [recordReason, setRecordReason] = useState('');
   const [recordIsPaid, setRecordIsPaid] = useState(true);
+  const [recordOverdraftReason, setRecordOverdraftReason] = useState('');
   const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
@@ -291,16 +292,23 @@ export function LeaveManagementPanel() {
     setRecordSubmitting(true);
     setRecordError(null);
     try {
+      const effectiveOverdraftReason =
+        recordOverdraftReason.trim() ||
+        recordReason.trim() ||
+        'Approved by HR during direct manual entry';
+
       await api.recordEmployeeLeave(recordEmployeeId, {
         leaveTypeId: recordLeaveTypeId,
         startDate: recordStartDate,
         endDate: recordEndDate || recordStartDate,
         reason: recordReason.trim() || 'Recorded by HR',
         isPaid: recordIsPaid,
+        overdraftReason: effectiveOverdraftReason,
       });
       setShowRecordLeaveModal(false);
       setRecordEmployeeId('');
       setRecordReason('');
+      setRecordOverdraftReason('');
       await refresh();
     } catch (err: unknown) {
       setRecordError(err instanceof Error ? err.message : 'Failed to record leave.');
@@ -854,6 +862,7 @@ export function LeaveManagementPanel() {
               setRecordStartDate(todayStr);
               setRecordEndDate(todayStr);
               setRecordReason('');
+              setRecordOverdraftReason('');
               setRecordError(null);
               setShowRecordLeaveModal(true);
             }}
@@ -1250,6 +1259,7 @@ export function LeaveManagementPanel() {
                     setRecordStartDate(todayStr);
                     setRecordEndDate(todayStr);
                     setRecordReason('');
+                    setRecordOverdraftReason('');
                     setRecordError(null);
                     setShowRecordLeaveModal(true);
                   }}
@@ -2817,102 +2827,193 @@ export function LeaveManagementPanel() {
               </div>
             )}
 
-            <div className="my-4 space-y-3.5 text-xs">
-              <div>
-                <label className="block text-xs font-semibold text-text mb-1">
-                  Select Employee <span className="text-rose-400">*</span>
-                </label>
-                <select
-                  value={recordEmployeeId}
-                  onChange={(e) => setRecordEmployeeId(e.target.value)}
-                  className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
-                >
-                  <option value="">-- Choose Employee --</option>
-                  {balances.map((b) => (
-                    <option key={b.employeeId} value={b.employeeId}>
-                      {b.employeeNumber ? `[${b.employeeNumber}] ` : ''}{b.employeeName} ({b.role}) - Available: {b.balance.available}d
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {(() => {
+              const selectedEmp = balances.find((b) => b.employeeId === recordEmployeeId);
+              let reqDays = 1;
+              if (recordStartDate) {
+                const s = new Date(recordStartDate);
+                const e = new Date(recordEndDate || recordStartDate);
+                if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && e >= s) {
+                  let cnt = 0;
+                  const c = new Date(s);
+                  while (c <= e) {
+                    const d = c.getDay();
+                    if (d !== 0 && d !== 6) cnt++;
+                    c.setDate(c.getDate() + 1);
+                  }
+                  reqDays = Math.max(1, cnt);
+                }
+              }
+              const avail = selectedEmp?.balance?.available ?? 0;
+              const hasShortfall = recordIsPaid && selectedEmp && (reqDays > avail);
+              const shortfall = hasShortfall ? Math.max(0, Math.round((reqDays - avail) * 100) / 100) : 0;
 
-              <div>
-                <label className="block text-xs font-semibold text-text mb-1">
-                  Leave Type <span className="text-rose-400">*</span>
-                </label>
-                <select
-                  value={recordLeaveTypeId}
-                  onChange={(e) => setRecordLeaveTypeId(e.target.value)}
-                  className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
-                >
-                  <option value="annual">Paid annual leave (Annual Entitlement)</option>
-                  <option value="sick">Sick leave</option>
-                  <option value="authorised">Authorised absence</option>
-                  <option value="unpaid">Unpaid leave</option>
-                  <option value="compassionate">Compassionate leave</option>
-                  <option value="emergency">Emergency leave</option>
-                  <option value="wfh">Work from home</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
+              return (
+                <div className="my-4 space-y-3.5 text-xs">
+                  <div>
+                    <label className="block text-xs font-semibold text-text mb-1">
+                      Select Employee <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={recordEmployeeId}
+                      onChange={(e) => setRecordEmployeeId(e.target.value)}
+                      className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                    >
+                      <option value="">-- Choose Employee --</option>
+                      {balances.map((b) => {
+                        const bAvail = b.balance.available;
+                        const availStr = bAvail > 0 ? `+${bAvail}d` : `${bAvail}d`;
+                        return (
+                          <option key={b.employeeId} value={b.employeeId}>
+                            {b.employeeNumber ? `[${b.employeeNumber}] ` : ''}{b.employeeName} ({b.role}) — Available: {availStr}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-text mb-1">
-                    Start Date <span className="text-rose-400">*</span>
-                  </label>
-                  <Input
-                    type="date"
-                    value={recordStartDate}
-                    onChange={(e) => {
-                      setRecordStartDate(e.target.value);
-                      if (!recordEndDate || recordEndDate < e.target.value) {
-                        setRecordEndDate(e.target.value);
-                      }
-                    }}
-                    className="w-full text-xs py-1.5"
-                  />
+                  {/* Live Balance Summary Card */}
+                  {selectedEmp && (
+                    <div className="rounded-xl border border-line bg-raised/50 p-2.5 grid grid-cols-4 gap-2 text-center">
+                      <div>
+                        <div className="text-[10px] text-muted font-medium">Entitlement</div>
+                        <div className="text-xs font-bold text-text font-mono">
+                          {selectedEmp.balance.annualEntitlement}d
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted font-medium">Accrued to Date</div>
+                        <div className="text-xs font-bold text-text font-mono">
+                          {selectedEmp.balance.accrued}d
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted font-medium">Taken / Used</div>
+                        <div className="text-xs font-bold text-text font-mono">
+                          {selectedEmp.balance.taken}d
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted font-medium">Available Balance</div>
+                        <div
+                          className={`text-xs font-extrabold font-mono ${
+                            selectedEmp.balance.available < 0 ? 'text-rose-400' : 'text-emerald-400'
+                          }`}
+                        >
+                          {selectedEmp.balance.available > 0
+                            ? `+${selectedEmp.balance.available}d`
+                            : `${selectedEmp.balance.available}d`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-text mb-1">
+                      Leave Type <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={recordLeaveTypeId}
+                      onChange={(e) => setRecordLeaveTypeId(e.target.value)}
+                      className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                    >
+                      <option value="annual">Paid annual leave (Annual Entitlement)</option>
+                      <option value="sick">Sick leave</option>
+                      <option value="authorised">Authorised absence</option>
+                      <option value="unpaid">Unpaid leave</option>
+                      <option value="compassionate">Compassionate leave</option>
+                      <option value="emergency">Emergency leave</option>
+                      <option value="wfh">Work from home</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-text mb-1">
+                        Start Date <span className="text-rose-400">*</span>
+                      </label>
+                      <Input
+                        type="date"
+                        value={recordStartDate}
+                        onChange={(e) => {
+                          setRecordStartDate(e.target.value);
+                          if (!recordEndDate || recordEndDate < e.target.value) {
+                            setRecordEndDate(e.target.value);
+                          }
+                        }}
+                        className="w-full text-xs py-1.5"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-text mb-1">
+                        End Date <span className="text-rose-400">*</span>
+                      </label>
+                      <Input
+                        type="date"
+                        value={recordEndDate}
+                        onChange={(e) => setRecordEndDate(e.target.value)}
+                        className="w-full text-xs py-1.5"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 rounded-xl border border-line bg-raised p-3">
+                    <input
+                      type="checkbox"
+                      id="recordIsPaidCheckbox"
+                      checked={recordIsPaid}
+                      onChange={(e) => setRecordIsPaid(e.target.checked)}
+                      className="h-4 w-4 rounded border-line text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <label htmlFor="recordIsPaidCheckbox" className="text-xs font-semibold text-text cursor-pointer">
+                      Paid Leave (Counts as paid salary for this duration)
+                    </label>
+                  </div>
+
+                  {/* Overdraft Alert & Justification (Spec 15.2) */}
+                  {hasShortfall && (
+                    <div className="rounded-xl border border-amber-500/40 bg-amber-950/25 p-3 space-y-2">
+                      <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                        <AlertTriangleIcon className="h-4 w-4 shrink-0 text-amber-400" />
+                        <span>
+                          Overdraft Authorization: Exceeds accrued balance by {shortfall} day(s)
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted leading-relaxed">
+                        Company policy allows HR to approve paid leave in advance of monthly accrual. An explicit reason for allowing the overdraft will be permanently logged in the audit trail.
+                      </p>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-text mb-1">
+                          Overdraft Justification for Audit Trail (Optional — defaults to audit note below):
+                        </label>
+                        <input
+                          type="text"
+                          value={recordOverdraftReason}
+                          onChange={(e) => setRecordOverdraftReason(e.target.value)}
+                          placeholder="e.g. Approved in advance of upcoming monthly accrual..."
+                          className="w-full rounded-lg border border-amber-500/40 bg-raised px-2.5 py-1.5 text-xs text-text placeholder-dim focus:border-amber-400 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-text mb-1">
+                      Reason / Notes for Audit Trail
+                    </label>
+                    <textarea
+                      value={recordReason}
+                      onChange={(e) => setRecordReason(e.target.value)}
+                      placeholder="e.g. Leave recorded directly by HR / Approved personal day / Travel leave..."
+                      rows={3}
+                      className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                    />
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-text mb-1">
-                    End Date <span className="text-rose-400">*</span>
-                  </label>
-                  <Input
-                    type="date"
-                    value={recordEndDate}
-                    onChange={(e) => setRecordEndDate(e.target.value)}
-                    className="w-full text-xs py-1.5"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 rounded-xl border border-line bg-raised p-3">
-                <input
-                  type="checkbox"
-                  id="recordIsPaidCheckbox"
-                  checked={recordIsPaid}
-                  onChange={(e) => setRecordIsPaid(e.target.checked)}
-                  className="h-4 w-4 rounded border-line text-indigo-600 focus:ring-indigo-500"
-                />
-                <label htmlFor="recordIsPaidCheckbox" className="text-xs font-semibold text-text cursor-pointer">
-                  Paid Leave (Counts as paid salary for this duration)
-                </label>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-text mb-1">
-                  Reason / Notes for Audit Trail
-                </label>
-                <textarea
-                  value={recordReason}
-                  onChange={(e) => setRecordReason(e.target.value)}
-                  placeholder="e.g. Leave recorded directly by HR / Approved personal day / Travel leave..."
-                  rows={3}
-                  className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
-                />
-              </div>
-            </div>
+              );
+            })()}
 
             <div className="flex justify-end gap-2 border-t border-line pt-3">
               <Button
