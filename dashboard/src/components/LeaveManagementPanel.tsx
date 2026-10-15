@@ -200,11 +200,12 @@ export function LeaveManagementPanel() {
     };
   }, [historyFilter]);
 
-  const openReviewModal = (r: LeaveRequestItem) => {
+  const openReviewModal = (r: LeaveRequestItem, action: 'APPROVED' | 'REJECTED' | null = null) => {
     setSelectedRequest(r);
+    setDecisionAction(action);
     const initialPaid = r.isPaid ?? r.defaultIsPaid ?? (r.leaveTypeId !== 'unpaid');
     setDecisionIsPaid(initialPaid);
-    setDecisionNotes('');
+    setDecisionNotes(action === 'APPROVED' ? (initialPaid ? 'Approved as paid leave by HR.' : 'Approved as unpaid leave by HR.') : '');
     const available = r.balance?.availableDays ?? r.balance?.available ?? 0;
     const reqDays = r.days || 0;
     const shortfall = Math.max(0, Math.round((reqDays - available) * 100) / 100);
@@ -1056,7 +1057,8 @@ export function LeaveManagementPanel() {
                       <tr
                         key={r.id}
                         onClick={() => openReviewModal(r)}
-                        className="hover:bg-white/[0.03] cursor-pointer transition-colors group"
+                        className="hover:bg-white/[0.04] cursor-pointer transition-colors group select-none"
+                        title="Click to view full employee leave details, reason & remaining balance"
                       >
                         <td className="px-3 py-3 align-top">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -1071,8 +1073,16 @@ export function LeaveManagementPanel() {
                           </div>
                           <div className="text-[11px] text-muted">{r.employeeRole ?? ''}</div>
                           {r.reason && (
-                            <div className="mt-1 text-[11px] text-dim max-w-[200px] truncate" title={r.reason}>
-                              &quot;{r.reason}&quot;
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openReviewModal(r);
+                              }}
+                              className="mt-1 text-[11px] text-indigo-300 font-medium bg-indigo-950/50 border border-indigo-500/30 px-2 py-0.5 rounded-md max-w-[280px] truncate inline-flex items-center gap-1 group-hover:border-indigo-400/60 hover:bg-indigo-900/60 transition-colors cursor-pointer shadow-sm"
+                              title={`Reason: "${r.reason}" — Click to open full details`}
+                            >
+                              <span className="text-indigo-400 text-[10px] font-bold">Reason:</span>
+                              <span className="truncate">&ldquo;{r.reason}&rdquo;</span>
                             </div>
                           )}
                         </td>
@@ -1124,18 +1134,34 @@ export function LeaveManagementPanel() {
                           )}
                         </td>
                         <td className="px-3 py-3 align-top text-dim text-[11px]">{r.submittedAt}</td>
-                        <td className="px-3 py-3 align-top text-right">
-                          <Button
-                            variant="primary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openReviewModal(r);
-                            }}
-                            className="py-1 px-3 text-[11px] font-semibold inline-flex items-center gap-1.5 shadow-sm"
-                          >
-                            <FileTextIcon className="h-3 w-3" />
-                            <span>Review</span>
-                          </Button>
+                        <td className="px-3 py-3 align-top text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              onClick={() => openReviewModal(r)}
+                              className="py-1 px-2.5 text-[11px] font-semibold text-brand hover:text-white hover:bg-brand/20 border border-brand/40 shadow-sm inline-flex items-center gap-1"
+                              title="Open full leave request review window with remaining leaves and reason"
+                            >
+                              <FileTextIcon className="h-3 w-3" />
+                              <span>Review</span>
+                            </Button>
+                            <Button
+                              variant="primary"
+                              onClick={() => openReviewModal(r, 'APPROVED')}
+                              className="py-1 px-3 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm inline-flex items-center gap-1"
+                              title="Review details & approve this request"
+                            >
+                              <CheckIcon className="h-3 w-3" />
+                              <span>Approve</span>
+                            </Button>
+                            <Button
+                              onClick={() => openReviewModal(r, 'REJECTED')}
+                              className="py-1 px-2.5 text-[11px] font-semibold text-rose-300 hover:text-white hover:bg-rose-950/60 border border-rose-500/30 inline-flex items-center gap-1"
+                              title="Review details & reject this request"
+                            >
+                              <XIcon className="h-3 w-3" />
+                              <span>Reject</span>
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2570,10 +2596,12 @@ export function LeaveManagementPanel() {
         const currentAvailable = bal?.availableDays ?? bal?.available ?? 0;
         const currentAccrued = bal?.accruedDays ?? bal?.accrued ?? 0;
         const currentTaken = bal?.takenDays ?? bal?.taken ?? 0;
+        const entitlementNumber = bal?.annualEntitlementDays ?? bal?.annualEntitlement ?? (bal?.blocked ? 0 : 20);
         const currentEntitlement = bal?.annualEntitlementDays ?? bal?.annualEntitlement ?? (bal?.blocked ? '—' : 20);
         const calculatedShortfall = Math.max(0, Math.round((reqDays - currentAvailable) * 100) / 100);
         const hasShortfall = decisionIsPaid && (calculatedShortfall > 0);
         const projectedAvailable = Math.round((currentAvailable - (decisionIsPaid ? reqDays : 0)) * 100) / 100;
+        const unaccruedRemainder = Math.max(0, Math.round((entitlementNumber - currentAccrued) * 100) / 100);
         const initials = selectedRequest.employeeName
           .split(' ')
           .map((n) => n[0])
@@ -2582,21 +2610,29 @@ export function LeaveManagementPanel() {
           .toUpperCase() || 'EMP';
 
         return (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
-            <div className="w-full max-w-2xl rounded-2xl border border-line bg-surface shadow-2xl p-6 my-auto max-h-[90vh] overflow-y-auto space-y-4">
-              {/* Header */}
-              <div className="flex items-start justify-between gap-3 pb-3 border-b border-line">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center text-brand">
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 sm:p-6 backdrop-blur-md overflow-y-auto">
+            <div className="relative w-full max-w-3xl rounded-3xl border border-white/10 bg-surface shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] p-6 sm:p-8 my-auto max-h-[92vh] overflow-y-auto space-y-5 text-text">
+              {/* Top ambient glow */}
+              <div className="absolute -top-24 -right-24 w-72 h-72 bg-brand/10 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Modal Header */}
+              <div className="flex items-start justify-between gap-3 pb-4 border-b border-line">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-11 h-11 rounded-2xl bg-brand/15 border border-brand/30 flex items-center justify-center text-brand shadow-sm">
                     <FileTextIcon className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-base font-bold text-text">Review Leave Request</h2>
-                      <Badge tone="warn">Pending HR Decision</Badge>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h2 className="text-base sm:text-lg font-bold text-text">
+                        Employee Leave Request & Standing
+                      </h2>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        Pending HR Decision
+                      </span>
                     </div>
-                    <p className="text-xs text-muted mt-0.5">
-                      Submitted on {selectedRequest.submittedAt}
+                    <p className="text-xs text-muted mt-0.5 font-mono">
+                      Request #{selectedRequest.id.slice(0, 8)} • Submitted on {selectedRequest.submittedAt}
                     </p>
                   </div>
                 </div>
@@ -2604,60 +2640,101 @@ export function LeaveManagementPanel() {
                   type="button"
                   onClick={() => setSelectedRequest(null)}
                   disabled={submitting}
-                  className="p-1.5 rounded-lg text-muted hover:text-text hover:bg-raised transition-colors"
-                  aria-label="Close modal"
+                  className="p-2 rounded-xl text-muted hover:text-text hover:bg-raised transition-colors"
+                  aria-label="Close review modal"
+                  title="Close modal"
                 >
-                  <XIcon className="w-4 h-4" />
+                  <XIcon className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Employee Profile Section */}
-              <div className="rounded-xl border border-line bg-raised/40 p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-brand/30 to-indigo-500/20 border border-brand/40 flex items-center justify-center font-bold text-sm text-text shrink-0">
+              {/* Employee Dossier Banner */}
+              <div className="rounded-2xl border border-line bg-raised/50 p-4 sm:p-5 shadow-sm">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-brand to-indigo-600 flex items-center justify-center font-extrabold text-base text-white shadow-md shrink-0">
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold text-text">{selectedRequest.employeeName}</span>
+                      <span className="text-base font-bold text-text">{selectedRequest.employeeName}</span>
                       {selectedRequest.employeeNumber && (
-                        <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
+                        <span className="rounded-md bg-indigo-500/20 px-2 py-0.5 text-[11px] font-mono font-bold text-indigo-300 border border-indigo-500/30">
                           {selectedRequest.employeeNumber}
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-muted truncate">
+                    <div className="text-xs text-muted truncate mt-0.5">
                       {selectedRequest.employeeRole || empOverview?.role || 'Staff Member'}
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3 pt-3 border-t border-line/60 text-xs">
-                  <div>
-                    <span className="text-[10px] text-muted block uppercase tracking-wider">Joining Date</span>
-                    <span className="font-semibold text-text">{bal?.officialJoiningDate || 'On file'}</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-line/60 text-xs">
+                  <div className="p-2 rounded-lg bg-surface/50 border border-line/40">
+                    <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold">Joining Date</span>
+                    <span className="font-semibold text-text mt-0.5 block">{bal?.officialJoiningDate || 'On file'}</span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-muted block uppercase tracking-wider">Leave Cycle</span>
-                    <span className="font-semibold text-text font-mono text-[11px]">
+                  <div className="p-2 rounded-lg bg-surface/50 border border-line/40">
+                    <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold">Leave Cycle</span>
+                    <span className="font-semibold text-text font-mono text-[11px] mt-0.5 block truncate">
                       {bal?.cycleStartDate || bal?.holidayYear?.from || '—'} &rarr; {bal?.cycleEndDate || bal?.holidayYear?.to || '—'}
                     </span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-muted block uppercase tracking-wider">Cycle Renews</span>
-                    <span className="font-semibold text-text">{bal?.nextRenewalDate || bal?.renewalDate || '—'}</span>
+                  <div className="p-2 rounded-lg bg-surface/50 border border-line/40">
+                    <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold">Cycle Renews</span>
+                    <span className="font-semibold text-text mt-0.5 block">{bal?.nextRenewalDate || bal?.renewalDate || '—'}</span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-muted block uppercase tracking-wider">Completed Service</span>
-                    <span className="font-semibold text-text">{bal?.holidayYear?.monthsCompleted ?? 0} month(s)</span>
+                  <div className="p-2 rounded-lg bg-surface/50 border border-line/40">
+                    <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold">Service Completed</span>
+                    <span className="font-semibold text-text mt-0.5 block">{bal?.holidayYear?.monthsCompleted ?? 0} month(s) (1.67d/mo)</span>
                   </div>
+                </div>
+              </div>
+
+              {/* Stated Reason for Leave (Prominent Hero Card) */}
+              <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-purple-950/20 to-surface p-4 sm:p-5 shadow-lg relative overflow-hidden">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1 rounded-lg bg-indigo-500/20 text-indigo-300">
+                      <FileTextIcon className="w-4 h-4" />
+                    </span>
+                    <span className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                      Reason For Leave Request
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-indigo-300 bg-indigo-950/60 px-2.5 py-0.5 rounded-full border border-indigo-500/30">
+                    Employee Submission
+                  </span>
+                </div>
+
+                <div className="rounded-xl bg-black/40 border border-indigo-500/20 p-4 mt-2">
+                  {selectedRequest.reason ? (
+                    <div className="flex items-start gap-2">
+                      <span className="text-2xl font-serif text-indigo-400 select-none leading-none">&ldquo;</span>
+                      <p className="text-sm sm:text-base font-semibold text-white tracking-wide leading-relaxed">
+                        {selectedRequest.reason}
+                      </p>
+                      <span className="text-2xl font-serif text-indigo-400 select-none leading-none">&rdquo;</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted italic">
+                      No specific reason was provided by the employee for this leave request.
+                    </p>
+                  )}
+
+                  {selectedRequest.notes && (
+                    <div className="mt-3 pt-2.5 border-t border-indigo-500/20 text-xs text-indigo-200/90 flex items-start gap-1.5">
+                      <span className="font-bold text-indigo-300 shrink-0">Additional Notes:</span>
+                      <span className="text-text">{selectedRequest.notes}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Request Details Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="rounded-xl border border-line bg-raised/30 p-3">
-                  <span className="text-[10px] text-muted block uppercase tracking-wider mb-1">Leave Type</span>
+                <div className="rounded-xl border border-line bg-raised/40 p-3.5">
+                  <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold mb-1">Leave Category</span>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-bold text-text">{selectedRequest.type}</span>
                     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
@@ -2665,7 +2742,7 @@ export function LeaveManagementPanel() {
                         ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/40'
                         : 'bg-amber-950/40 text-amber-400 border-amber-800/40'
                     }`}>
-                      {selectedRequest.defaultIsPaid ? 'Paid' : 'Unpaid'}
+                      {selectedRequest.defaultIsPaid ? 'Paid Allowance' : 'Unpaid'}
                     </span>
                   </div>
                   {selectedRequest.requiresEvidence && (
@@ -2673,116 +2750,166 @@ export function LeaveManagementPanel() {
                   )}
                 </div>
 
-                <div className="rounded-xl border border-line bg-raised/30 p-3">
-                  <span className="text-[10px] text-muted block uppercase tracking-wider mb-1">Date Range</span>
+                <div className="rounded-xl border border-line bg-raised/40 p-3.5">
+                  <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold mb-1">Requested Dates</span>
                   <div className="text-xs font-bold font-mono text-text">
                     {selectedRequest.from} &rarr; {selectedRequest.to}
                   </div>
                   <div className="text-[11px] text-muted mt-0.5">
-                    Single / continuous absence
+                    Continuous absence
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-line bg-raised/30 p-3">
-                  <span className="text-[10px] text-muted block uppercase tracking-wider mb-1">Duration</span>
+                <div className="rounded-xl border border-line bg-raised/40 p-3.5">
+                  <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold mb-1">Duration</span>
                   <div className="text-base font-extrabold text-brand">
-                    {selectedRequest.days} day(s)
+                    {selectedRequest.days} Working Day(s)
                   </div>
                   <div className="text-[11px] text-muted">
-                    Working days requested
+                    Excludes standard off days
                   </div>
                 </div>
               </div>
 
-              {/* Full Reason Card (Prominently Styled) */}
-              <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/20 via-surface to-raised/30 p-3.5">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-300 mb-1.5">
-                  <FileTextIcon className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Employee Stated Reason</span>
-                </div>
-                {selectedRequest.reason ? (
-                  <p className="text-xs font-medium text-text leading-relaxed bg-black/30 p-3 rounded-lg border border-indigo-500/20 whitespace-pre-wrap">
-                    &ldquo;{selectedRequest.reason}&rdquo;
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted italic bg-black/20 p-2.5 rounded-lg border border-line">
-                    No specific reason provided by the employee.
-                  </p>
-                )}
-                {selectedRequest.notes && (
-                  <div className="mt-2 text-[11px] text-muted">
-                    <strong className="text-text">Additional Notes:</strong> {selectedRequest.notes}
-                  </div>
-                )}
-              </div>
-
-              {/* Leave Balance Snapshot & Impact */}
-              <div className="rounded-xl border border-line bg-raised/20 p-3.5 space-y-3">
+              {/* Person's Remaining Leaves & Accrual Balance Impact */}
+              <div className="rounded-2xl border border-line bg-raised/30 p-4 sm:p-5 space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-text uppercase tracking-wider">Leave Balance & Impact Analysis</span>
+                  <div className="flex items-center gap-2">
+                    <span className="p-1 rounded-lg bg-emerald-500/20 text-emerald-400">
+                      <ShieldCheckIcon className="w-4 h-4" />
+                    </span>
+                    <span className="text-xs font-bold text-text uppercase tracking-wider">
+                      Employee Allowance & Remaining Leaves Breakdown
+                    </span>
+                  </div>
                   <span className="text-[11px] text-muted font-mono">
-                    Annual Cycle Balance
+                    Yearly Entitlement: {currentEntitlement}d
                   </span>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2 text-center">
-                  <div className="p-2 rounded-lg bg-surface border border-line">
-                    <span className="text-[10px] text-muted block">Entitlement</span>
-                    <span className="text-xs font-bold text-text">{currentEntitlement}d</span>
+                {/* 4 Stat Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                  <div className="p-2.5 rounded-xl bg-surface border border-line">
+                    <span className="text-[10px] text-muted uppercase block font-semibold">Annual Entitlement</span>
+                    <span className="text-sm font-bold text-text mt-0.5 block">{currentEntitlement}d</span>
                   </div>
-                  <div className="p-2 rounded-lg bg-surface border border-line">
-                    <span className="text-[10px] text-muted block">Accrued</span>
-                    <span className="text-xs font-bold text-emerald-400">{currentAccrued}d</span>
+                  <div className="p-2.5 rounded-xl bg-surface border border-line">
+                    <span className="text-[10px] text-muted uppercase block font-semibold">Accrued To Date</span>
+                    <span className="text-sm font-bold text-emerald-400 mt-0.5 block">{currentAccrued}d</span>
                   </div>
-                  <div className="p-2 rounded-lg bg-surface border border-line">
-                    <span className="text-[10px] text-muted block">Taken</span>
-                    <span className="text-xs font-bold text-muted">{currentTaken}d</span>
+                  <div className="p-2.5 rounded-xl bg-surface border border-line">
+                    <span className="text-[10px] text-muted uppercase block font-semibold">Already Taken</span>
+                    <span className="text-sm font-bold text-muted mt-0.5 block">{currentTaken}d</span>
                   </div>
-                  <div className="p-2 rounded-lg bg-surface border border-line">
-                    <span className="text-[10px] text-muted block">Available Now</span>
-                    <span className={`text-xs font-bold ${currentAvailable < 0 ? 'text-danger' : 'text-text'}`}>
+                  <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 shadow-sm">
+                    <span className="text-[10px] text-emerald-400 uppercase block font-bold">Remaining Leaves</span>
+                    <span className={`text-sm font-extrabold mt-0.5 block ${currentAvailable < 0 ? 'text-danger' : 'text-emerald-300'}`}>
                       {currentAvailable}d
                     </span>
                   </div>
                 </div>
 
-                {/* Impact Calculation */}
-                {hasShortfall ? (
-                  <div className="rounded-lg bg-amber-950/40 border border-amber-500/40 p-2.5 text-xs text-amber-200">
-                    <div className="font-semibold flex items-center gap-1.5 text-amber-300">
-                      <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-                      <span>Shortfall Warning: Exceeds accrued balance by {calculatedShortfall} day(s)</span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-amber-200/80 leading-relaxed">
-                      Employee has {currentAvailable}d available, but requested {reqDays}d. Approving as Paid Leave requires an overdraft justification below.
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-lg bg-emerald-950/30 border border-emerald-500/30 p-2.5 text-xs text-emerald-300 flex items-center gap-2">
-                    <CheckIcon className="h-4 w-4 shrink-0 text-emerald-400" />
-                    <span>
-                      Within accrued balance. If approved as Paid Leave, remaining available balance will be{' '}
-                      <strong>{projectedAvailable}d</strong>.
+                {/* Calculation Equation Card */}
+                <div className="rounded-xl border border-line bg-surface/70 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-semibold text-muted">
+                    <span className="uppercase tracking-wider text-[11px]">Leave Balance Impact Equation</span>
+                    <span className="font-mono text-[11px] text-text font-medium">
+                      {decisionIsPaid ? 'Paid Deduction Applied' : 'Unpaid (No Balance Deduction)'}
                     </span>
                   </div>
-                )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-center text-center">
+                    <div className="p-2.5 rounded-xl bg-raised border border-line">
+                      <span className="text-[10px] text-muted uppercase block font-semibold">Current Remaining Leaves</span>
+                      <span className="text-base font-extrabold text-emerald-400">{currentAvailable}d</span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-raised border border-line">
+                      <span className="text-[10px] text-muted uppercase block font-semibold">
+                        {decisionIsPaid ? 'Requested Leave' : 'Requested (Unpaid)'}
+                      </span>
+                      <span className="text-base font-extrabold text-brand">
+                        {decisionIsPaid ? `− ${reqDays}d` : '0d (Unpaid)'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-brand/10 border border-brand/30 shadow-sm">
+                      <span className="text-[10px] text-brand uppercase block font-bold">Remaining Leaves After Approval</span>
+                      <span className="text-lg font-black text-brand">
+                        {projectedAvailable}d
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Segmented Progress Bar */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex justify-between text-[10px] text-muted font-medium">
+                      <span>Taken ({currentTaken}d)</span>
+                      <span>This Request ({decisionIsPaid ? reqDays : 0}d)</span>
+                      <span className="text-emerald-400 font-semibold">Remaining ({projectedAvailable}d)</span>
+                      <span>Unaccrued ({unaccruedRemainder}d)</span>
+                    </div>
+                    <div className="h-2.5 w-full rounded-full bg-raised overflow-hidden flex border border-line/60">
+                      <div
+                        style={{ width: `${Math.min(100, (currentTaken / Math.max(1, entitlementNumber)) * 100)}%` }}
+                        className="bg-slate-500 transition-all"
+                        title={`Taken: ${currentTaken}d`}
+                      />
+                      {decisionIsPaid && (
+                        <div
+                          style={{ width: `${Math.min(100, (reqDays / Math.max(1, entitlementNumber)) * 100)}%` }}
+                          className="bg-indigo-500 transition-all"
+                          title={`This Request: ${reqDays}d`}
+                        />
+                      )}
+                      <div
+                        style={{ width: `${Math.min(100, (Math.max(0, projectedAvailable) / Math.max(1, entitlementNumber)) * 100)}%` }}
+                        className="bg-emerald-500 transition-all"
+                        title={`Remaining Leaves: ${projectedAvailable}d`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Status Banner */}
+                  {hasShortfall ? (
+                    <div className="rounded-xl bg-amber-950/40 border border-amber-500/40 p-3 text-xs text-amber-200 flex items-start gap-2.5">
+                      <AlertTriangleIcon className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-amber-300">
+                          Shortfall Warning: Exceeds Accrued Balance by {calculatedShortfall} day(s)
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-amber-200/90 leading-relaxed">
+                          Employee has {currentAvailable}d remaining leaves, but requested {reqDays}d. Approving as Paid Leave requires an overdraft justification below.
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-emerald-950/30 border border-emerald-500/30 p-3 text-xs text-emerald-300 flex items-center gap-2.5">
+                      <CheckIcon className="h-4 w-4 shrink-0 text-emerald-400" />
+                      <div>
+                        <span className="font-bold">Within Accrued Balance: </span>
+                        <span>
+                          Request of {reqDays}d is fully covered by accrued leave. After approval, the employee will retain <strong>{projectedAvailable}d</strong> in remaining leaves.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Leave Payment Type Configuration */}
-              <div className="rounded-xl border border-line bg-raised/40 p-3.5 space-y-2.5">
+              {/* Leave Payment Type Decision */}
+              <div className="rounded-2xl border border-line bg-raised/40 p-4 sm:p-5 space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-text">
-                    Leave Payment Type Decision
+                  <label className="text-xs font-bold text-text uppercase tracking-wider">
+                    Payment Type Decision
                   </label>
                   <span className="text-[10px] text-muted font-mono">
-                    Default: {selectedRequest.defaultIsPaid ? 'Paid' : 'Unpaid'}
+                    System Default: {selectedRequest.defaultIsPaid ? 'Paid' : 'Unpaid'}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setDecisionIsPaid(true)}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
+                    className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
                       decisionIsPaid
                         ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300 ring-1 ring-emerald-500/40'
                         : 'border-line bg-surface text-muted hover:border-line-hover'
@@ -2795,14 +2922,14 @@ export function LeaveManagementPanel() {
                     </div>
                     <div>
                       <div className="text-xs font-bold text-text">Paid Leave</div>
-                      <div className="text-[10px] text-muted">Compensated time off (deducts leave balance)</div>
+                      <div className="text-[11px] text-muted">Deducts {reqDays}d from remaining leaves; regular salary maintained</div>
                     </div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setDecisionIsPaid(false)}
-                    className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-all ${
+                    className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
                       !decisionIsPaid
                         ? 'border-amber-500/60 bg-amber-950/40 text-amber-300 ring-1 ring-amber-500/40'
                         : 'border-line bg-surface text-muted hover:border-line-hover'
@@ -2815,15 +2942,15 @@ export function LeaveManagementPanel() {
                     </div>
                     <div>
                       <div className="text-xs font-bold text-text">Unpaid Leave</div>
-                      <div className="text-[10px] text-muted">Deducted from payroll (preserves leave balance)</div>
+                      <div className="text-[11px] text-muted">Preserves remaining leaves ({currentAvailable}d); payroll salary deduction applied</div>
                     </div>
                   </button>
                 </div>
 
                 {/* Overdraft justification if paid and has shortfall */}
                 {decisionIsPaid && hasShortfall && (
-                  <div className="mt-2.5 pt-2.5 border-t border-line/60">
-                    <label className="block text-xs font-semibold text-warn mb-1">
+                  <div className="mt-3 pt-3 border-t border-line/60">
+                    <label className="block text-xs font-bold text-warn mb-1">
                       Overdraft Approval Justification (Required)
                     </label>
                     <textarea
@@ -2831,7 +2958,7 @@ export function LeaveManagementPanel() {
                       onChange={(e) => setOverdraftReason(e.target.value)}
                       placeholder="e.g. Authorized by HR to borrow against upcoming month's accrual..."
                       rows={2}
-                      className="w-full rounded-lg border border-warn/40 bg-raised p-2 text-xs text-text placeholder-dim focus:border-warn focus:outline-none"
+                      className="w-full rounded-xl border border-warn/40 bg-surface p-2.5 text-xs text-text placeholder-dim focus:border-warn focus:outline-none"
                     />
                   </div>
                 )}
@@ -2839,43 +2966,51 @@ export function LeaveManagementPanel() {
 
               {/* Decision Notes */}
               <div>
-                <label className="block text-xs font-semibold text-text mb-1">
-                  HR Decision Notes / Audit Trail <span className="text-muted font-normal">(Required if rejecting, optional if approving)</span>
+                <label className="block text-xs font-bold text-text mb-1 uppercase tracking-wider">
+                  HR Decision Notes / Audit Trail <span className="text-muted font-normal normal-case">(Required if rejecting, optional if approving)</span>
                 </label>
                 <textarea
                   value={decisionNotes}
                   onChange={(e) => setDecisionNotes(e.target.value)}
                   placeholder="Explain rationale for employee and audit record..."
                   rows={2}
-                  className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
+                  className="w-full rounded-xl border border-line bg-surface p-3 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
                 />
               </div>
 
               {/* Actions Footer */}
-              <div className="flex items-center justify-between gap-3 pt-3 border-t border-line">
+              <div className="flex items-center justify-between gap-3 pt-4 border-t border-line">
                 <Button
                   onClick={() => setSelectedRequest(null)}
                   disabled={submitting}
-                  className="text-xs"
+                  className="text-xs px-4 py-2"
                 >
-                  Cancel
+                  Cancel / Close
                 </Button>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
                   <Button
                     onClick={() => handleDecision('REJECTED')}
                     disabled={submitting}
-                    className="py-1.5 px-3 text-xs bg-danger text-white hover:bg-danger/90 font-semibold"
+                    className="py-2 px-4 text-xs bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl inline-flex items-center gap-1.5 shadow-sm"
                   >
-                    Reject Request
+                    <XIcon className="h-3.5 w-3.5" />
+                    <span>Reject Request</span>
                   </Button>
                   <Button
                     variant="primary"
                     onClick={() => handleDecision('APPROVED')}
                     disabled={submitting}
-                    className="py-1.5 px-4 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white"
+                    className="py-2 px-5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl inline-flex items-center gap-1.5 shadow-md"
                   >
-                    {submitting ? 'Processing…' : 'Approve Request'}
+                    <CheckIcon className="h-4 w-4" />
+                    <span>
+                      {submitting
+                        ? 'Processing…'
+                        : decisionIsPaid
+                          ? `Approve (${reqDays}d Paid)`
+                          : `Approve (${reqDays}d Unpaid)`}
+                    </span>
                   </Button>
                 </div>
               </div>
