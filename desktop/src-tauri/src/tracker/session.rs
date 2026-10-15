@@ -47,10 +47,26 @@ pub fn poll_is_locked() -> bool {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub fn poll_is_locked() -> bool {
+    use std::process::Command;
+
+    // Fast check via ioreg & plutil: returns "true" when the macOS screen is locked
+    if let Ok(out) = Command::new("sh")
+        .args(["-c", "/usr/sbin/ioreg -n Root -d1 -a 2>/dev/null | /usr/bin/plutil -extract 'IOConsoleUsers.0.CGSSessionScreenIsLocked' raw - 2>/dev/null"])
+        .output()
+    {
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+        return s == "true" || s == "1";
+    }
+    false
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn poll_is_locked() -> bool {
     false
 }
+
 
 pub fn set_screen_locked(locked: bool) {
     let prev = IS_LOCKED.swap(locked, Ordering::SeqCst);

@@ -517,9 +517,22 @@ fn main() {
             client::set_agent_version(app.package_info().version.to_string());
             single_instance::start_listener(single_instance_listener, app_handle.clone());
 
-            // On macOS: always show window on launch! On Windows: show if not enrolled
+            // On macOS: disable App Nap, hold idle-sleep power assertion, and show window on launch
             #[cfg(target_os = "macos")]
             {
+                // Explicitly disable App Nap in user defaults for this bundle ID
+                let _ = std::process::Command::new("defaults")
+                    .args(["write", "com.rethink.officetracker.desktop", "NSAppSleepDisabled", "-bool", "YES"])
+                    .output();
+
+                // Prevent the system from idle-sleeping while the tracker is running (-i).
+                // Screen display can still turn off to save battery, but the CPU and network
+                // stay awake so heartbeats never freeze. -w <pid> ties it to this process lifetime.
+                let pid = std::process::id();
+                let _ = std::process::Command::new("/usr/bin/caffeinate")
+                    .args(["-i", "-w", &pid.to_string()])
+                    .spawn();
+
                 if let Some(window) = app.get_window("main") {
                     let _ = window.show();
                     let _ = window.center();

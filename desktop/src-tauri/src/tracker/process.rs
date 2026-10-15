@@ -72,7 +72,14 @@ pub fn get_foreground_window_info() -> Option<(String, String)> {
 
 #[cfg(target_os = "macos")]
 pub fn get_foreground_window_info() -> Option<(String, String)> {
-    use std::process::Command;
+    // If the screen is locked, the WindowServer / GUI session is detached.
+    // Querying System Events while locked can hang indefinitely.
+    if crate::tracker::session::poll_is_locked() {
+        return None;
+    }
+
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
 
     let apple_script = r#"tell application "System Events"
         set frontApp to first application process whose frontmost is true
@@ -84,15 +91,42 @@ pub fn get_foreground_window_info() -> Option<(String, String)> {
         return appName & ":::" & winTitle
     end tell"#;
 
-    if let Ok(output) = Command::new("osascript").args(["-e", apple_script]).output() {
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if let Some((app, title)) = text.split_once(":::") {
-            return Some((app.trim().to_lowercase(), title.trim().to_string()));
-        } else if !text.is_empty() {
-            return Some((text.to_lowercase(), String::new()));
+    let mut child = Command::new("osascript")
+        .args(["-e", apple_script])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let start = Instant::now();
+    let timeout = Duration::from_millis(1500);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                let output = child.wait_with_output().ok()?;
+                let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if let Some((app, title)) = text.split_once(":::") {
+                    return Some((app.trim().to_lowercase(), title.trim().to_string()));
+                } else if !text.is_empty() {
+                    return Some((text.to_lowercase(), String::new()));
+                }
+                return None;
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                return None;
+            }
         }
     }
-    None
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]

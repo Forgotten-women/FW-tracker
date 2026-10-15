@@ -26,21 +26,53 @@ pub fn get_idle_seconds() -> u64 {
 
 #[cfg(target_os = "macos")]
 pub fn get_idle_seconds() -> u64 {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
 
-    if let Ok(output) = Command::new("ioreg").args(["-c", "IOHIDSystem"]).output() {
-        let text = String::from_utf8_lossy(&output.stdout);
-        for line in text.lines() {
-            if line.contains("HIDIdleTime") {
-                if let Some(val_str) = line.split('=').nth(1) {
-                    if let Ok(nanos) = val_str.trim().parse::<u64>() {
-                        return nanos / 1_000_000_000;
+    let mut child = match Command::new("ioreg")
+        .args(["-c", "IOHIDSystem"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+
+    let start = Instant::now();
+    let timeout = Duration::from_millis(1500);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                if let Ok(output) = child.wait_with_output() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    for line in text.lines() {
+                        if line.contains("HIDIdleTime") {
+                            if let Some(val_str) = line.split('=').nth(1) {
+                                if let Ok(nanos) = val_str.trim().parse::<u64>() {
+                                    return nanos / 1_000_000_000;
+                                }
+                            }
+                        }
                     }
                 }
+                return 0;
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return 0;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                return 0;
             }
         }
     }
-    0
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]

@@ -154,6 +154,20 @@ function getIdleSeconds() {
   return 0;
 }
 
+function getLockState() {
+  if (process.platform === 'darwin') {
+    try {
+      const out = execSync("/usr/sbin/ioreg -n Root -d1 -a 2>/dev/null | /usr/bin/plutil -extract 'IOConsoleUsers.0.CGSSessionScreenIsLocked' raw - 2>/dev/null", { timeout: 1500 }).toString().trim().toLowerCase();
+      const isLocked = out === 'true' || out === '1';
+      return { isLocked, lockDuration: 0 };
+    } catch (_) {
+      return { isLocked: false, lockDuration: 0 };
+    }
+  }
+  return { isLocked: false, lockDuration: 0 };
+}
+
+
 // Matches the MAC on the BSSID line of `netsh wlan show interfaces`, whatever
 // the label around it. Windows 10 prints "BSSID : <mac>"; Windows 11 prints
 // "AP BSSID : <mac>". Matching on the label meant Windows 11 reported no access
@@ -503,14 +517,17 @@ function getActiveWindowInfo() {
     }
   } else if (process.platform === 'darwin') {
     try {
+      if (getLockState().isLocked) {
+        return 'Desktop Active';
+      }
       const scriptPath = path.join(__dirname, 'get-window.sh');
       if (fs.existsSync(scriptPath)) {
-        const out = execSync(`bash "${scriptPath}"`, { timeout: 3000 }).toString().trim();
+        const out = execSync(`bash "${scriptPath}"`, { timeout: 2000 }).toString().trim();
         const parsed = JSON.parse(out);
         return parseActiveApplication(parsed.process, parsed.title);
       }
       const appleScript = 'tell application "System Events" to get name of first application process whose frontmost is true';
-      const proc = execSync(`osascript -e '${appleScript}' 2>/dev/null`, { timeout: 2000 }).toString().trim();
+      const proc = execSync(`osascript -e '${appleScript}' 2>/dev/null`, { timeout: 1500 }).toString().trim();
       return parseActiveApplication(proc, '');
     } catch (_) {
       return 'Desktop Active';
@@ -957,6 +974,19 @@ async function startAgent() {
 
   console.log('[Office Tracker Desktop] High-Precision 1-Second Monitoring Active (Heartbeat sync every 60s)...');
   ensureAutoStart();
+
+  if (process.platform === 'darwin') {
+    try {
+      exec('defaults write com.officetracker.desktop NSAppSleepDisabled -bool YES', () => {});
+      const caff = spawn('/usr/bin/caffeinate', ['-i', '-w', String(process.pid)], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      caff.unref();
+      console.log('[Office Tracker Desktop] macOS App Nap disabled & caffeinate power assertion held.');
+    } catch (_) {}
+  }
+
 
   let liveStreamActive = false;
   let isSendingFrame = false;
