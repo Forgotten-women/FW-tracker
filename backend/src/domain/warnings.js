@@ -816,6 +816,7 @@ async function employeeWarningView(employeeId, dateKey = T.dateKey()) {
       activeWarnings: standing.activeWarnings,
       highestLevel: standing.highestLevel,
       highestLevelLabel: standing.highestLevel ? levelLabel(standing.highestLevel) : null,
+      nextLevel: standing.nextLevel || null,
       nextLevelIfConfirmed: standing.nextLevel ? levelLabel(standing.nextLevel) : null,
       sequenceExhausted: standing.sequenceExhausted,
     },

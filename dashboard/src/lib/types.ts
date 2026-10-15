@@ -303,6 +303,7 @@ export interface WarningBoardEmployee {
   pendingReview: boolean;
   activeWarnings: number;
   highestLevel: string | null;
+  nextLevel?: string | null;
   nextLevelIfConfirmed: string | null;
   sequenceExhausted: boolean;
   lateness?: EmployeeLatenessStatus | null;

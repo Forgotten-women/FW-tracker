@@ -63,6 +63,7 @@ router.get('/board', requireUserOrAdminKey('warning.read'), async (req, res) => 
       pendingReview: view.pendingReview,
       activeWarnings: view.standing.activeWarnings,
       highestLevel: view.standing.highestLevelLabel,
+      nextLevel: view.standing.nextLevel || null,
       nextLevelIfConfirmed: view.standing.nextLevelIfConfirmed,
       sequenceExhausted: view.standing.sequenceExhausted,
       lateness: view.lateness.resolved ? view.lateness : null,
@@ -201,11 +202,22 @@ router.get('/employee/:employeeId',
 router.post('/employee/:employeeId/issue',
   requireUserOrAdminKey('warning.issue'), requireEmployeeAccess(),
   async (req, res) => {
-    const { level, warningType, explanation } = req.body || {};
+    let { level, warningType, explanation } = req.body || {};
     if (!explanation || !String(explanation).trim()) {
       return res.status(400).json({ status: 'ERROR', message: 'An explanation the employee will see is required.' });
     }
     const { config } = require('../config');
+
+    // Normalize common aliases like 'INFORMAL', 'Informal Notice', etc.
+    const rawLevel = String(level || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+    if (rawLevel === 'INFORMAL' || rawLevel === 'INFORMAL_NOTICE' || rawLevel === 'INFORMAL_ATTENDANCE_NOTICE') {
+      level = 'INFORMAL_NOTICE';
+    } else if (rawLevel === 'FIRST' || rawLevel === 'FIRST_WRITTEN') {
+      level = 'FIRST_WRITTEN';
+    } else if (rawLevel === 'FINAL' || rawLevel === 'FINAL_WRITTEN') {
+      level = 'FINAL_WRITTEN';
+    }
+
     if (!config.warningEscalationSequence.includes(level)) {
       return res.status(400).json({
         status: 'ERROR',

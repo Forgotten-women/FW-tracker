@@ -87,9 +87,19 @@ export function WarningBoard() {
   // Direct Issue Warning Modal
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [issueEmployeeId, setIssueEmployeeId] = useState('');
-  const [issueLevel, setIssueLevel] = useState('INFORMAL');
+  const [issueLevel, setIssueLevel] = useState('INFORMAL_NOTICE');
   const [issueType, setIssueType] = useState('LATENESS');
   const [issueExplanation, setIssueExplanation] = useState('');
+
+  const resolveWarningLevel = (emp: WarningBoardEmployee): string => {
+    if (emp.nextLevel) {
+      return emp.nextLevel === 'INFORMAL' ? 'INFORMAL_NOTICE' : emp.nextLevel;
+    }
+    const label = (emp.nextLevelIfConfirmed || '').toLowerCase();
+    if (label.includes('final')) return 'FINAL_WRITTEN';
+    if (label.includes('first')) return 'FIRST_WRITTEN';
+    return 'INFORMAL_NOTICE';
+  };
 
   // Withdraw Warning Modal
   const [selectedWithdrawWarning, setSelectedWithdrawWarning] = useState<FormalWarningItem | null>(null);
@@ -657,7 +667,7 @@ export function WarningBoard() {
                           <Button
                             onClick={() => {
                               setIssueEmployeeId(emp.employeeId);
-                              setIssueLevel(emp.nextLevelIfConfirmed ?? 'INFORMAL');
+                              setIssueLevel(resolveWarningLevel(emp));
                               setShowIssueModal(true);
                             }}
                             className="py-1 px-2.5 text-[11px]"
@@ -1180,7 +1190,7 @@ export function WarningBoard() {
                     onChange={(e) => setIssueLevel(e.target.value)}
                     className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
                   >
-                    <option value="INFORMAL">Informal Notice</option>
+                    <option value="INFORMAL_NOTICE">Informal Notice</option>
                     <option value="FIRST_WRITTEN">First Written</option>
                     <option value="FINAL_WRITTEN">Final Written</option>
                   </select>
@@ -1536,7 +1546,7 @@ export function WarningBoard() {
                     setSelectedLatenessEmp(null);
                     setLatenessData(null);
                     setIssueEmployeeId(emp.employeeId);
-                    setIssueLevel(emp.nextLevelIfConfirmed ?? 'INFORMAL');
+                    setIssueLevel(resolveWarningLevel(emp));
                     setIssueType('LATENESS');
                     setIssueExplanation(
                       `Accumulated ${emp.lateOccurrences ?? 0} late arrivals in the current monitoring period exceeding the allowed policy threshold of ${emp.allowed ?? 3}.`
