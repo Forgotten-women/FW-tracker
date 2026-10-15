@@ -55,25 +55,16 @@ async function entitlementFor(employeeId, onDate = T.dateKey()) {
   if (partTime) return partTime;
   const row = await selectEntitlement.get(employeeId, onDate);
   const val = Number(row?.holiday_entitlement_days);
-  const window = await probationWindow(employeeId);
-  const onProbation = Boolean(window && onDate >= window.from && onDate < window.to);
-
-  // While on probation, the employee's total allowance is the probation entitlement (10 days).
-  if (onProbation) {
-    return (val > 0 && val <= config.leave.probationEntitlementDays)
-      ? val
-      : config.leave.probationEntitlementDays;
-  }
-
-  // Once probation is over the employee is on the full annual entitlement (20).
-  // A figure no larger than the probation allowance recorded at hire is read
-  // as the probation allowance, so we return the full annual entitlement (20).
-  if (val <= config.leave.probationEntitlementDays && window && onDate >= window.to) {
+  if (!(val > 0)) return config.leave.annualEntitlementDays;
+  // HR records the 10 probation days in this field. Once probation is over the
+  // employee is on the full annual entitlement (20), so a figure no larger than
+  // the probation allowance is read as that allowance, not as a yearly one.
+  // (The probation months themselves earn at the probation rate either way;
+  // see accrualTarget.)
+  if (val <= config.leave.probationEntitlementDays && await probationWindow(employeeId)) {
     return config.leave.annualEntitlementDays;
   }
-
-  if (val > 0) return val;
-  return config.leave.annualEntitlementDays;
+  return val;
 }
 
 // ---------------------------------------------------------------------------
