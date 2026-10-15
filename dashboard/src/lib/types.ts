@@ -264,6 +264,33 @@ export interface FormalWarningItem {
   outcome: string | null;
 }
 
+export interface LateOccurrenceDetail {
+  index: number;
+  date: string;
+  lateMinutes: number;
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+  firstClockIn: string | null;
+  firstClockInMs: number | null;
+  lastClockOut: string | null;
+  workedMinutes: number;
+  exceedsThreshold: boolean;
+}
+
+export interface EmployeeLatenessStatus {
+  resolved: boolean;
+  periodType?: string;
+  periodFrom?: string;
+  periodTo?: string;
+  allowed?: number;
+  count?: number;
+  remaining?: number;
+  thresholdReached?: boolean;
+  level?: 'OK' | 'APPROACHING' | 'AT_LIMIT' | 'THRESHOLD_REACHED' | string;
+  message?: string;
+  occurrences?: LateOccurrenceDetail[];
+}
+
 export interface WarningBoardEmployee {
   employeeId: string;
   employeeName: string;
@@ -278,6 +305,7 @@ export interface WarningBoardEmployee {
   highestLevel: string | null;
   nextLevelIfConfirmed: string | null;
   sequenceExhausted: boolean;
+  lateness?: EmployeeLatenessStatus | null;
 }
 
 export interface WarningBoardSummary {

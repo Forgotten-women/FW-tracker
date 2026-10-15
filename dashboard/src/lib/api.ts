@@ -43,6 +43,7 @@ import type {
   StarterCalculation,
   TeamCalendarLeave,
   WarningBoardSummary,
+  EmployeeLatenessStatus,
   WarningTrigger,
   WorkstationItem,
   ProcessAnomalyItem,
@@ -410,6 +411,19 @@ export const api = {
   warningBoard: (date?: string) =>
     request<WarningBoardSummary>(
       `/api/warnings/board${date ? `?date=${encodeURIComponent(date)}` : ''}`,
+    ),
+
+  employeeWarningView: (employeeId: string, date?: string) =>
+    request<{
+      status: string;
+      band: 'GREEN' | 'AMBER' | 'RED' | 'UNKNOWN';
+      bandLabel: string;
+      lateness: EmployeeLatenessStatus;
+      standing: any;
+      pendingReview: boolean;
+      warnings: FormalWarningItem[];
+    }>(
+      `/api/warnings/employee/${encodeURIComponent(employeeId)}${date ? `?date=${encodeURIComponent(date)}` : ''}`,
     ),
 
   warningTriggers: (status = 'PENDING_REVIEW') =>

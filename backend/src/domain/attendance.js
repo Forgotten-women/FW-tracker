@@ -1099,9 +1099,10 @@ const countLateInRange = db.prepare(`
 `);
 
 const selectLateDates = db.prepare(`
-  SELECT date_key, late_minutes FROM attendance_daily_summary
+  SELECT date_key, late_minutes, scheduled_start, scheduled_end, first_clock_in, last_clock_out, worked_minutes
+  FROM attendance_daily_summary
   WHERE employee_id = ? AND is_late_occurrence = 1 AND date_key >= ? AND date_key <= ?
-  ORDER BY date_key
+  ORDER BY date_key ASC
 `);
 
 /**
@@ -1164,7 +1165,18 @@ async function latenessStatus(employeeId, dateKey = T.dateKey()) {
     thresholdReached,
     level,
     message,
-    occurrences: occurrences.map(o => ({ date: o.date_key, lateMinutes: o.late_minutes })),
+    occurrences: occurrences.map((o, idx) => ({
+      index: idx + 1,
+      date: o.date_key,
+      lateMinutes: Number(o.late_minutes) || 0,
+      scheduledStart: o.scheduled_start || null,
+      scheduledEnd: o.scheduled_end || null,
+      firstClockIn: o.first_clock_in ? T.displayTime(o.first_clock_in) : null,
+      firstClockInMs: o.first_clock_in || null,
+      lastClockOut: o.last_clock_out ? T.displayTime(o.last_clock_out) : null,
+      workedMinutes: Number(o.worked_minutes) || 0,
+      exceedsThreshold: (idx + 1) > allowed,
+    })),
   };
 }
 

@@ -65,6 +65,7 @@ router.get('/board', requireUserOrAdminKey('warning.read'), async (req, res) => 
       highestLevel: view.standing.highestLevelLabel,
       nextLevelIfConfirmed: view.standing.nextLevelIfConfirmed,
       sequenceExhausted: view.standing.sequenceExhausted,
+      lateness: view.lateness.resolved ? view.lateness : null,
     };
   }));
 
@@ -191,7 +192,8 @@ router.post('/triggers/:id/review',
 router.get('/employee/:employeeId',
   requireUserOrAdminKey('warning.read'), requireEmployeeAccess(),
   async (req, res) => {
-    res.json({ status: 'SUCCESS', ...await W.employeeWarningView(req.params.employeeId) });
+    const dateKey = String(req.query.date || T.dateKey());
+    res.json({ status: 'SUCCESS', ...await W.employeeWarningView(req.params.employeeId, dateKey) });
   });
 
 // Issue a warning directly, without a trigger. Spec 3.3 allows HR to issue

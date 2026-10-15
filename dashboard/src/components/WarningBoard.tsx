@@ -8,9 +8,47 @@ import type {
   WarningBoardEmployee,
   WarningBoardSummary,
   WarningTrigger,
+  EmployeeLatenessStatus,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
-import { CheckIcon, PaperclipIcon, SearchIcon, SirenIcon, ThermometerIcon } from './icons';
+import {
+  AlertTriangleIcon,
+  CalendarIcon,
+  CheckIcon,
+  ClockIcon,
+  InfoIcon,
+  PaperclipIcon,
+  SearchIcon,
+  SirenIcon,
+  ThermometerIcon,
+  XIcon,
+} from './icons';
+
+function formatLateMinutes(mins: number) {
+  if (!mins || mins <= 0) return '0m';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h > 0) {
+    return `${h}h ${m > 0 ? `${m}m` : ''}`.trim();
+  }
+  return `${m}m`;
+}
+
+function formatFullDate(dateStr: string) {
+  try {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(Date.UTC(y, m - 1, d));
+    return date.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+  } catch {
+    return dateStr;
+  }
+}
 
 export function WarningBoard() {
   const [board, setBoard] = useState<WarningBoardSummary | null>(null);
@@ -56,6 +94,31 @@ export function WarningBoard() {
   // Withdraw Warning Modal
   const [selectedWithdrawWarning, setSelectedWithdrawWarning] = useState<FormalWarningItem | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
+
+  // Lateness Breakdown & Dates Modal
+  const [selectedLatenessEmp, setSelectedLatenessEmp] = useState<WarningBoardEmployee | null>(null);
+  const [latenessLoading, setLatenessLoading] = useState(false);
+  const [latenessData, setLatenessData] = useState<EmployeeLatenessStatus | null>(null);
+
+  const handleOpenLateness = async (emp: WarningBoardEmployee) => {
+    setSelectedLatenessEmp(emp);
+    if (emp.lateness) {
+      setLatenessData(emp.lateness);
+    } else {
+      setLatenessData(null);
+    }
+    setLatenessLoading(!emp.lateness);
+    try {
+      const res = await api.employeeWarningView(emp.employeeId);
+      if (res?.lateness) {
+        setLatenessData(res.lateness);
+      }
+    } catch (e) {
+      console.error('Failed to load employee lateness details', e);
+    } finally {
+      setLatenessLoading(false);
+    }
+  };
 
   // The Pending Triggers card jumps to the review queue and flashes it.
   const triggerQueueRef = useRef<HTMLDivElement>(null);
@@ -533,15 +596,30 @@ export function WarningBoard() {
                     return (
                       <tr key={emp.employeeId} className="hover:bg-white/[0.02]">
                         <td className="px-3 py-3 align-middle">
-                          <div className="font-semibold text-text">{emp.employeeName}</div>
+                          <div
+                            className="font-semibold text-text hover:text-brand cursor-pointer inline-flex items-center gap-1 transition-colors"
+                            onClick={() => handleOpenLateness(emp)}
+                            title="Click to view lateness breakdown and dates"
+                          >
+                            <span>{emp.employeeName}</span>
+                          </div>
                           <div className="text-[11px] text-muted">{emp.role}</div>
                         </td>
-                        <td className="px-3 py-3 align-middle">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-sm text-text">
-                              {emp.lateOccurrences !== null ? emp.lateOccurrences : 0}
+                        <td
+                          className="px-3 py-3 align-middle cursor-pointer group hover:bg-white/[0.04] transition-colors rounded-lg select-none"
+                          onClick={() => handleOpenLateness(emp)}
+                          title="Click to view all late dates, arrival times & minutes late"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-sm text-text group-hover:text-brand transition-colors">
+                                {emp.lateOccurrences !== null ? emp.lateOccurrences : 0}
+                              </span>
+                              <span className="text-dim">/ {emp.allowed ?? 3} allowed</span>
+                            </div>
+                            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-raised border border-line text-muted group-hover:border-brand/40 group-hover:text-brand transition-colors font-medium">
+                              <ClockIcon className="w-2.5 h-2.5" /> Breakdown
                             </span>
-                            <span className="text-dim">/ {emp.allowed ?? 3} allowed</span>
                           </div>
                           {emp.pendingReview && (
                             <span className="mt-0.5 inline-block text-[10px] font-bold text-warn">
@@ -1193,6 +1271,283 @@ export function WarningBoard() {
               >
                 {submitting ? 'Withdrawing…' : 'Confirm Withdrawal'}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lateness Breakdown & Dates Popup Modal */}
+      {selectedLatenessEmp && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 backdrop-blur-xs p-4 sm:p-6 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-2xl border border-line bg-surface p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 pb-4 border-b border-line">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center text-brand shrink-0">
+                  <ClockIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-bold text-text">
+                      {selectedLatenessEmp.employeeName}
+                    </h2>
+                    <Badge
+                      tone={
+                        selectedLatenessEmp.band === 'GREEN'
+                          ? 'brand'
+                          : selectedLatenessEmp.band === 'AMBER'
+                          ? 'warn'
+                          : 'danger'
+                      }
+                    >
+                      {selectedLatenessEmp.bandLabel}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted mt-0.5">
+                    {selectedLatenessEmp.role}
+                    {selectedLatenessEmp.employeeNumber ? ` · ID: ${selectedLatenessEmp.employeeNumber}` : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedLatenessEmp(null);
+                  setLatenessData(null);
+                }}
+                className="text-muted hover:text-text p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors"
+                title="Close"
+              >
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-4">
+              <div className="rounded-xl border border-line bg-raised/50 p-3">
+                <div className="text-[11px] font-semibold text-muted">Lateness Standing</div>
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span
+                    className={`text-xl font-black ${
+                      (selectedLatenessEmp.lateOccurrences ?? 0) > (selectedLatenessEmp.allowed ?? 3)
+                        ? 'text-danger'
+                        : (selectedLatenessEmp.lateOccurrences ?? 0) > 0
+                        ? 'text-warn'
+                        : 'text-text'
+                    }`}
+                  >
+                    {selectedLatenessEmp.lateOccurrences ?? 0}
+                  </span>
+                  <span className="text-xs text-dim">/ {selectedLatenessEmp.allowed ?? 3} allowed</span>
+                </div>
+                <div className="mt-1 text-[10px] text-muted font-medium">
+                  {(selectedLatenessEmp.lateOccurrences ?? 0) > (selectedLatenessEmp.allowed ?? 3) ? (
+                    <span className="text-danger font-semibold">Exceeds Allowance</span>
+                  ) : (selectedLatenessEmp.lateOccurrences ?? 0) === (selectedLatenessEmp.allowed ?? 3) ? (
+                    <span className="text-warn font-semibold">At Allowance Limit</span>
+                  ) : (
+                    <span className="text-muted">
+                      {Math.max(0, (selectedLatenessEmp.allowed ?? 3) - (selectedLatenessEmp.lateOccurrences ?? 0))} remaining
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-line bg-raised/50 p-3">
+                <div className="text-[11px] font-semibold text-muted">Total Time Late</div>
+                <div className="mt-1 text-xl font-black text-text">
+                  {formatLateMinutes(
+                    (latenessData?.occurrences || []).reduce((acc, o) => acc + (o.lateMinutes || 0), 0)
+                  )}
+                </div>
+                <div className="mt-1 text-[10px] text-muted">
+                  Across {latenessData?.occurrences?.length ?? selectedLatenessEmp.lateOccurrences ?? 0} event{(latenessData?.occurrences?.length ?? selectedLatenessEmp.lateOccurrences ?? 0) === 1 ? '' : 's'}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-line bg-raised/50 p-3">
+                <div className="text-[11px] font-semibold text-muted">Monitoring Period</div>
+                <div className="mt-1 text-xs font-bold text-text truncate">
+                  {latenessData?.periodFrom && latenessData?.periodTo
+                    ? `${latenessData.periodFrom.slice(5)} to ${latenessData.periodTo.slice(5)}`
+                    : 'Current Month'}
+                </div>
+                <div className="mt-1 text-[10px] text-muted">
+                  {latenessData?.periodType || 'Monthly'} cycle
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-line bg-raised/50 p-3">
+                <div className="text-[11px] font-semibold text-muted">Triage Status</div>
+                <div className="mt-1 text-xs font-bold truncate">
+                  {selectedLatenessEmp.pendingReview ? (
+                    <span className="text-warn flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-warn animate-pulse" />
+                      Pending HR Review
+                    </span>
+                  ) : (selectedLatenessEmp.lateOccurrences ?? 0) > (selectedLatenessEmp.allowed ?? 3) ? (
+                    <span className="text-danger">Referred to HR</span>
+                  ) : (
+                    <span className="text-brand">Within Policy</span>
+                  )}
+                </div>
+                <div className="mt-1 text-[10px] text-muted truncate">
+                  Next: {selectedLatenessEmp.nextLevelIfConfirmed || 'None'}
+                </div>
+              </div>
+            </div>
+
+            {/* Policy Info / Referral Banner */}
+            {(selectedLatenessEmp.lateOccurrences ?? 0) > (selectedLatenessEmp.allowed ?? 3) && (
+              <div className="mb-4 rounded-xl border border-danger/30 bg-danger-dim/20 p-3 text-xs flex items-start gap-2.5">
+                <AlertTriangleIcon className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold text-danger">Disciplinary Policy Threshold Exceeded</div>
+                  <div className="text-muted text-[11px] mt-0.5 leading-relaxed">
+                    This employee has logged {selectedLatenessEmp.lateOccurrences} late arrivals (company policy allows {selectedLatenessEmp.allowed ?? 3} per cycle).
+                    Occurrences 4 and above automatically escalate to HR triage for formal review.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Occurrences List Header */}
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted">
+                Late Occurrences Breakdown ({latenessData?.occurrences?.length ?? 0})
+              </h3>
+              <span className="text-[11px] text-dim">
+                Threshold: &gt; {selectedLatenessEmp.allowed ?? 3} allowed
+              </span>
+            </div>
+
+            {/* Table of Occurrences */}
+            {latenessLoading && !latenessData ? (
+              <div className="py-8 text-center text-xs text-muted">
+                <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-brand border-t-transparent mb-2" />
+                <p>Loading lateness history…</p>
+              </div>
+            ) : !latenessData?.occurrences || latenessData.occurrences.length === 0 ? (
+              <div className="rounded-xl border border-line bg-raised/30 p-8 text-center">
+                <ClockIcon className="mx-auto h-8 w-8 text-dim mb-2" />
+                <p className="text-xs font-semibold text-text">No Late Occurrences Recorded</p>
+                <p className="text-[11px] text-muted mt-1">
+                  This employee has had 0 late clock-ins during this monitoring period.
+                </p>
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto rounded-xl border border-line bg-raised/30">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-surface/95 backdrop-blur-xs border-b border-line text-[11px] text-muted">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">#</th>
+                      <th className="px-3 py-2 font-semibold">Date</th>
+                      <th className="px-3 py-2 font-semibold">Shift Start</th>
+                      <th className="px-3 py-2 font-semibold">First Clock-In</th>
+                      <th className="px-3 py-2 font-semibold">Minutes Late</th>
+                      <th className="px-3 py-2 font-semibold">Worked</th>
+                      <th className="px-3 py-2 font-semibold text-right">Policy Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line/60">
+                    {latenessData.occurrences.map((occ) => {
+                      const isOver = occ.exceedsThreshold || occ.index > (selectedLatenessEmp.allowed ?? 3);
+                      return (
+                        <tr
+                          key={occ.date + occ.index}
+                          className={`hover:bg-white/[0.02] transition-colors ${
+                            isOver ? 'bg-danger-dim/10' : ''
+                          }`}
+                        >
+                          <td className="px-3 py-2.5 font-bold text-dim align-middle">
+                            #{occ.index}
+                          </td>
+                          <td className="px-3 py-2.5 align-middle">
+                            <div className="font-semibold text-text">
+                              {formatFullDate(occ.date)}
+                            </div>
+                            <div className="text-[10px] text-dim">{occ.date}</div>
+                          </td>
+                          <td className="px-3 py-2.5 text-muted align-middle">
+                            {occ.scheduledStart || '09:00'}
+                          </td>
+                          <td className="px-3 py-2.5 align-middle">
+                            <span className="font-semibold text-text">
+                              {occ.firstClockIn || '—'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                isOver
+                                  ? 'bg-danger/15 text-danger border border-danger/30'
+                                  : 'bg-warn/15 text-warn border border-warn/30'
+                              }`}
+                            >
+                              +{occ.lateMinutes}m late
+                              {occ.lateMinutes >= 60 ? ` (${formatLateMinutes(occ.lateMinutes)})` : ''}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-muted align-middle">
+                            {occ.workedMinutes > 0 ? formatLateMinutes(occ.workedMinutes) : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right align-middle">
+                            {isOver ? (
+                              <span className="inline-block text-[10px] font-bold text-danger bg-danger/10 px-2 py-0.5 rounded border border-danger/25">
+                                Referral Triggered
+                              </span>
+                            ) : (
+                              <span className="inline-block text-[10px] font-semibold text-dim bg-raised px-2 py-0.5 rounded border border-line">
+                                Allowed ({occ.index} of {selectedLatenessEmp.allowed ?? 3})
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="mt-5 pt-4 border-t border-line flex items-center justify-between">
+              <div className="text-[11px] text-muted">
+                {selectedLatenessEmp.activeWarnings > 0 ? (
+                  <span className="text-danger font-semibold">
+                    {selectedLatenessEmp.activeWarnings} active formal warning(s) on file
+                  </span>
+                ) : (
+                  <span>No active formal warnings on file</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => {
+                    setSelectedLatenessEmp(null);
+                    setLatenessData(null);
+                  }}
+                >
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const emp = selectedLatenessEmp;
+                    setSelectedLatenessEmp(null);
+                    setLatenessData(null);
+                    setIssueEmployeeId(emp.employeeId);
+                    setIssueLevel(emp.nextLevelIfConfirmed ?? 'INFORMAL');
+                    setIssueType('LATENESS');
+                    setIssueExplanation(
+                      `Accumulated ${emp.lateOccurrences ?? 0} late arrivals in the current monitoring period exceeding the allowed policy threshold of ${emp.allowed ?? 3}.`
+                    );
+                    setShowIssueModal(true);
+                  }}
+                  className="bg-brand text-white"
+                >
+                  Issue Formal Warning
+                </Button>
+              </div>
             </div>
           </div>
         </div>
