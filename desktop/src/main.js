@@ -185,6 +185,9 @@ const checkoutBtn = document.getElementById('checkout-btn');
 const undoCheckoutWrap = document.getElementById('undo-checkout-wrap');
 const undoTimerNum = document.getElementById('undo-timer-num');
 const undoCheckoutBtn = document.getElementById('undo-checkout-btn');
+const undoBreakWrap = document.getElementById('undo-break-wrap');
+const undoBreakNum = document.getElementById('undo-break-num');
+const undoBreakBtn = document.getElementById('undo-break-btn');
 const shiftTargetCard = document.getElementById('shift-target-card');
 const shiftWorkedValue = document.getElementById('shift-worked-value');
 const shiftProgressFill = document.getElementById('shift-progress-fill');
@@ -201,6 +204,8 @@ const statusFeedback = document.getElementById('status-feedback');
 let feedbackTimeout = null;
 let isTogglingBreak = false;
 let checkoutCountdownTimer = null;
+let breakStartTimer = null;
+let breakSecondsLeft = 5;
 let checkoutSecondsLeft = 5;
 let consecutiveErrors = 0;
 
@@ -332,6 +337,33 @@ function dayExtraSeconds() {
     extra = Math.min(extra, Math.max(0, Math.floor((dayView.shiftEndAt - dayView.asOf) / 1000)));
   }
   return Math.min(extra, 15 * 60);
+}
+
+// A new day before the server has answered: nothing from yesterday (worked
+// time, "Shift ended", check-in) stays on screen, and the buttons wait.
+function renderFreshDay() {
+  dayView = null;
+  dayAsOf = 0;
+  creditCounting = false;
+  currentActiveSecs = 0;
+  if (activeTimer) activeTimer.textContent = formatHMS(0);
+  if (shiftWorkedValue) shiftWorkedValue.innerHTML = '0h 0m <span class="shift-pct">(0%)</span>';
+  const ring = document.getElementById('shift-ring');
+  if (ring) { ring.style.strokeDashoffset = '263.89'; ring.classList.remove('completed'); }
+  const ringPct = document.getElementById('shift-ring-pct');
+  if (ringPct) ringPct.textContent = '--';
+  if (shiftProgressFill) { shiftProgressFill.style.width = '4%'; shiftProgressFill.className = 'shift-progress-fill'; }
+  if (shiftRemText) shiftRemText.innerHTML = '';
+  if (creditNote) { creditNote.textContent = ''; creditNote.classList.add('hidden'); }
+  if (checkinText) checkinText.textContent = '--:--';
+  if (statusBanner) statusBanner.className = 'status-banner syncing';
+  if (statusText) statusText.textContent = 'New day · Connecting to server…';
+  if (breakToggleBtn && !isTogglingBreak) {
+    breakToggleBtn.textContent = 'Take break';
+    breakToggleBtn.disabled = true;
+    breakToggleBtn.classList.add('disabled');
+  }
+  updateCheckoutButton();
 }
 
 function renderDay() {
@@ -527,7 +559,15 @@ async function refreshStatus() {
       enrollSection.classList.add('hidden');
       statusSection.classList.remove('hidden');
 
-      if (data.latest && data.latest.today) {
+      // A response from an earlier day (the laptop slept overnight, or was
+      // clocked out last night) is never shown: the new day starts fresh and
+      // waits for the server, which the agent contacts at once on waking.
+      const latestDate = (data.latest && data.latest.today)
+        ? (data.latest.today.dateKey || (data.latest.today.day && data.latest.today.day.dateKey) || '')
+        : '';
+      const latestIsToday = !latestDate || latestDate === getTodayDateKey();
+
+      if (data.latest && data.latest.today && latestIsToday) {
         // The shared day view, if the server sent one for today. A new one is
         // recognised by its asOf; the local clock then measures time since.
         const dv = data.latest.today.day || null;
@@ -610,6 +650,7 @@ async function refreshStatus() {
         }
 
         if (dayView) renderDay();
+        updateCheckoutButton();
 
         const serverOnBreak = Boolean(data.latest && data.latest.today && data.latest.today.onBreak);
         const isBreakUsed = Boolean(data.latest && data.latest.today && data.latest.today.breakAlreadyTaken);
@@ -757,7 +798,9 @@ async function refreshStatus() {
         // If we already have today's confirmed active status cached, keep showing it instead of glitching to "Connecting..."
         const cachedDate = localStorage.getItem(CACHE_KEY_DATE);
         const cachedStatusText = localStorage.getItem('ot_last_status_text');
-        if (cachedDate === todayDateStr && cachedStatusText) {
+        if (data.latest && !latestIsToday) {
+          renderFreshDay();
+        } else if (cachedDate === getTodayDateKey() && cachedStatusText) {
           const cachedStatusClass = localStorage.getItem('ot_last_status_class');
           if (statusBanner && cachedStatusClass) statusBanner.className = cachedStatusClass;
           if (statusText) statusText.textContent = plainText(cachedStatusText);
@@ -815,6 +858,7 @@ timerInterval = setInterval(() => {
     currentActiveSecs = 0;
     lastSyncedServerSecs = -1;
     lastSyncedDateKey = '';
+    renderFreshDay();
     refreshStatus();
     return;
   }
@@ -929,15 +973,52 @@ if (closeBtn) {
 }
 
 if (breakToggleBtn) {
-  breakToggleBtn.addEventListener('click', async (e) => {
+  breakToggleBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    if (isTogglingBreak || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
-    
+    if (isTogglingBreak || breakStartTimer || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
+    // Starting a break waits 5 seconds so a mis-click can be undone; ending one is immediate.
+    if (isOnBreakState) applyBreak(false);
+    else startBreakCountdown();
+  });
+}
+
+function startBreakCountdown() {
+  breakSecondsLeft = 5;
+  if (undoBreakNum) undoBreakNum.textContent = '5';
+  if (undoBreakWrap) undoBreakWrap.classList.remove('hidden');
+  breakStartTimer = setInterval(() => {
+    breakSecondsLeft--;
+    if (undoBreakNum) undoBreakNum.textContent = String(breakSecondsLeft);
+    if (breakSecondsLeft > 0) return;
+    cancelBreakCountdown();
+    // The shift may have ended, or a break started from the phone, while counting down.
+    if (isOnBreakState || breakToggleBtn.disabled || breakToggleBtn.classList.contains('disabled')) return;
+    applyBreak(true);
+  }, 1000);
+}
+
+function cancelBreakCountdown() {
+  if (breakStartTimer) {
+    clearInterval(breakStartTimer);
+    breakStartTimer = null;
+  }
+  if (undoBreakWrap) undoBreakWrap.classList.add('hidden');
+}
+
+if (undoBreakBtn) {
+  undoBreakBtn.addEventListener('click', () => {
+    cancelBreakCountdown();
+    showFeedback('Break cancelled. Your shift continues.', false);
+  });
+}
+
+async function applyBreak(targetIsBreak) {
+  if (!breakToggleBtn || isTogglingBreak) return;
+  {
     isTogglingBreak = true;
     breakToggleBtn.disabled = true;
     breakToggleBtn.classList.add('disabled');
 
-    const targetIsBreak = !isOnBreakState;
     if (targetIsBreak) {
       isOnBreakState = true;
       breakStartedAtMs = Date.now();
@@ -985,7 +1066,7 @@ if (breakToggleBtn) {
       isTogglingBreak = false;
       await refreshStatus();
     }
-  });
+  }
 }
 
 // Resume button on the fullscreen lock screen
@@ -1049,9 +1130,83 @@ window.addEventListener('blur', () => {
   }
 });
 
+// The shift's scheduled end as "7:00 PM", from the day view.
+function shiftEndLabel() {
+  if (!dayView || !dayView.shiftEndAt) return null;
+  return new Date(dayView.shiftEndAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+// End shift becomes Resume shift while a mistaken end can be undone
+// (day.canResume: the employee ended it themselves and it is still the shift).
+function updateCheckoutButton() {
+  if (!checkoutBtn || checkoutCountdownTimer) return;
+  const resume = Boolean(dayView && dayView.canResume);
+  checkoutBtn.classList.toggle('resume', resume);
+  checkoutBtn.textContent = resume ? 'Resume shift' : 'End shift';
+  // Not before the server has sent today's day, not before the shift has run
+  // an hour, not before arriving (the server refuses those: people pressed End
+  // shift on arriving), and not once the day is over.
+  const firstHourEndsAt = dayView && dayView.shiftStartAt ? dayView.shiftStartAt + 60 * 60 * 1000 : 0;
+  let blocked = '';
+  if (!resume) {
+    if (!dayView) blocked = 'Waiting for today from the server';
+    else if (dayView.checkedOut) blocked = 'Your shift has ended';
+    else if (firstHourEndsAt && Date.now() < firstHourEndsAt) {
+      blocked = `End shift is available from ${new Date(firstHourEndsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    } else if (!dayView.checkInAt) blocked = "You haven't been recorded as arrived today";
+  }
+  checkoutBtn.disabled = Boolean(blocked);
+  checkoutBtn.classList.toggle('disabled', Boolean(blocked));
+  checkoutBtn.title = blocked;
+}
+
+async function resumeShift() {
+  checkoutBtn.disabled = true;
+  try {
+    if (isTauri && tauriInvoke) {
+      await tauriInvoke('resume_shift');
+    } else {
+      const res = await fetch('/api/resume', { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'Could not resume the shift');
+    }
+    showFeedback('Shift resumed. Time is counted again from now.', false);
+    refreshStatus();
+  } catch (err) {
+    showFeedback((err && err.message) || 'Could not resume the shift. Please try again.');
+  } finally {
+    checkoutBtn.disabled = false;
+  }
+}
+
+const endConfirmPanel = document.getElementById('end-confirm-panel');
+const endConfirmText = document.getElementById('end-confirm-text');
+document.getElementById('end-confirm-cancel')?.addEventListener('click', () => endConfirmPanel?.classList.add('hidden'));
+document.getElementById('end-confirm-ok')?.addEventListener('click', () => {
+  endConfirmPanel?.classList.add('hidden');
+  startCheckoutCountdown();
+});
+
 if (checkoutBtn) {
   checkoutBtn.addEventListener('click', () => {
     if (checkoutCountdownTimer) return;
+    if (dayView && dayView.canResume) { resumeShift(); return; }
+    // Ending before the scheduled end asks first.
+    if (dayView && dayView.shiftEndAt && Date.now() < dayView.shiftEndAt && endConfirmPanel) {
+      const end = shiftEndLabel();
+      if (endConfirmText) {
+        endConfirmText.textContent = `Your shift ends at ${end}. If you end it now, no more time is counted today `
+          + '(you can resume it later today if this was a mistake).';
+      }
+      endConfirmPanel.classList.remove('hidden');
+      return;
+    }
+    startCheckoutCountdown();
+  });
+}
+
+function startCheckoutCountdown() {
+  if (!checkoutBtn || checkoutCountdownTimer) return;
+  {
     checkoutSecondsLeft = 5;
     if (undoTimerNum) undoTimerNum.textContent = '5';
     if (undoCheckoutWrap) undoCheckoutWrap.classList.remove('hidden');
@@ -1076,14 +1231,17 @@ if (checkoutBtn) {
           showFeedback('Shift checked out.', false);
           refreshStatus();
         } catch (err) {
-          showFeedback('Checkout failed. Please try again.');
+          // The server explains a refusal (e.g. too early in the shift).
+          const msg = typeof err === 'string' ? err : (err && err.message);
+          showFeedback(msg || 'Checkout failed. Please try again.');
         } finally {
           checkoutBtn.disabled = false;
           checkoutBtn.classList.remove('disabled');
+          updateCheckoutButton();
         }
       }
     }, 1000);
-  });
+  }
 }
 
 if (undoCheckoutBtn) {

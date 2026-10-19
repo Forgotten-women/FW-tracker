@@ -261,6 +261,16 @@ async fn checkout_shift(state: State<'_, AppState>) -> Result<serde_json::Value,
     }
 }
 
+/// "Resume shift": undoes a mistaken End shift the same day.
+#[tauri::command]
+async fn resume_shift(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    client::send_resume(&cfg).await
+}
+
 /// Tray "Exit". The agent can be closed -- it's the employee's machine -- but
 /// the stop is put on the record first so HR sees a gap with a reason, not
 /// silently missing data. It starts again at the next sign-in (autostart.rs).
@@ -540,7 +550,8 @@ fn main() {
             set_manual_break,
             toggle_manual_break,
             connect_office_wifi,
-            checkout_shift
+            checkout_shift,
+            resume_shift
         ])
         .setup(move |app| {
             let app_handle = app.handle();
@@ -864,8 +875,21 @@ fn main() {
                         let resp = state.latest_response.lock().unwrap();
                         resp.as_ref().and_then(|r| r.outside_working_hours).unwrap_or(false)
                     };
-                    let samples_per_heartbeat = if outside_hours { 60 } else { 6 };
-                    if sample_count >= samples_per_heartbeat {
+                    // A new day starts fresh as soon as the server answers, so
+                    // don't wait for the outside-hours cadence then: after a
+                    // wake from sleep (a long gap since the last tick) send at
+                    // once, and while the last answer is from an earlier day
+                    // (yesterday's clock-out left the cadence at 10 minutes)
+                    // send every minute. The widget shows nothing from an
+                    // earlier day meanwhile.
+                    let today_key = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    let stale_day = {
+                        let resp = state.latest_response.lock().unwrap();
+                        resp.as_ref().map(|r| r.today.date_key != today_key).unwrap_or(false)
+                    };
+                    let woke = elapsed_secs > 120;
+                    let samples_per_heartbeat = if outside_hours && !stale_day { 60 } else { 6 };
+                    if sample_count >= samples_per_heartbeat || woke {
                         sample_count = 0;
                         let local_ip = tracker::network::get_local_ip();
                         let ssid = tracker::network::get_connected_ssid();

@@ -154,6 +154,14 @@
           <button id="checkout-btn" class="action-btn checkout-btn">End shift</button>
         </div>
 
+        <!-- Undo break (replaces the buttons while counting down) -->
+        <div id="undo-break-wrap" class="undo-checkout-wrap undo-break-wrap hidden">
+          <div class="undo-content">
+            <span>Starting break in <strong id="undo-break-num">5</strong>s…</span>
+            <button id="undo-break-btn" class="undo-btn">Undo</button>
+          </div>
+        </div>
+
         <!-- Undo checkout (replaces the buttons while counting down) -->
         <div id="undo-checkout-wrap" class="undo-checkout-wrap hidden">
           <div class="undo-content">
@@ -166,6 +174,19 @@
       <!-- Messages float above the actions instead of pushing the layout -->
       <div id="status-feedback" class="toast hidden" role="alert"></div>
     </section>
+  </div>
+
+  <!-- Ending the shift before its scheduled end asks first: since 1.0.58 End
+       shift ends the working day (nothing more is counted until resumed). -->
+  <div id="end-confirm-panel" class="dev-panel hidden" role="dialog" aria-modal="true" aria-labelledby="end-confirm-title">
+    <div class="dev-card">
+      <div id="end-confirm-title" class="dev-title">End your shift now?</div>
+      <p id="end-confirm-text" class="dev-text">Your shift hasn't finished yet. After ending it, no more time is counted today.</p>
+      <div class="dev-actions">
+        <button id="end-confirm-cancel" class="action-btn">Keep working</button>
+        <button id="end-confirm-ok" class="action-btn checkout-btn">End shift</button>
+      </div>
+    </div>
   </div>
 
   <!-- Developer options. Deliberately undiscoverable: opened by clicking the

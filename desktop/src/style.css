@@ -672,6 +672,7 @@ input:focus {
 }
 
 .status-section:has(#undo-checkout-wrap:not(.hidden)) .action-row { display: none; }
+.status-section:has(#undo-break-wrap:not(.hidden)) .action-row { display: none; }
 
 .action-btn {
   flex: 1;
@@ -783,6 +784,14 @@ input:focus {
 .undo-btn:hover { background: #dc2626; }
 .undo-btn:active { transform: scale(0.96); }
 
+.undo-break-wrap {
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.4);
+}
+.undo-break-wrap .undo-content { color: var(--amber); }
+.undo-break-wrap .undo-btn { background: #d97706; }
+.undo-break-wrap .undo-btn:hover { background: #b45309; }
+
 /* ------------------------------------------------------------------ toast */
 
 .toast {
@@ -800,6 +809,13 @@ input:focus {
   border: 1px solid var(--border-strong);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   animation: fadeIn 0.2s ease-out;
+}
+
+/* "Resume shift": the End shift button after a mistaken end (main.js). */
+.checkout-btn.resume {
+  color: var(--teal);
+  border-color: rgba(45, 212, 191, 0.4);
+  background: rgba(45, 212, 191, 0.08);
 }
 
 /* Developer options (hidden; see index.html) */
