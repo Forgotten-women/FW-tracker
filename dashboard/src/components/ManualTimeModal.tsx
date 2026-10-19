@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { api } from '@/lib/api';
-import { CoffeeIcon, PlusIcon, TimerIcon, XIcon } from './icons';
+import { CalendarIcon, CoffeeIcon, PlusIcon, TimerIcon, XIcon } from './icons';
 
 interface ManualTimeModalProps {
   isOpen: boolean;
@@ -21,7 +21,7 @@ export function ManualTimeModal({
   defaultDate = new Date().toISOString().slice(0, 10),
   onSuccess,
 }: ManualTimeModalProps) {
-  const [mode, setMode] = useState<'TIME' | 'BREAK'>('TIME');
+  const [mode, setMode] = useState<'TIME' | 'BREAK' | 'PERIOD_CREDIT'>('TIME');
   const [employeeId, setEmployeeId] = useState(defaultEmployeeId || (employees[0]?.id || ''));
   const [dateKey, setDateKey] = useState(defaultDate);
   const [minutes, setMinutes] = useState('15');
@@ -29,6 +29,12 @@ export function ManualTimeModal({
   const [useBreakWindow, setUseBreakWindow] = useState(false);
   const [breakStartTime, setBreakStartTime] = useState('13:00');
   const [breakEndTime, setBreakEndTime] = useState('13:30');
+  const [periodStartDate, setPeriodStartDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [periodEndDate, setPeriodEndDate] = useState(() => defaultDate);
+  const [periodCreditMinutes, setPeriodCreditMinutes] = useState('60');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +66,7 @@ export function ManualTimeModal({
           return;
         }
         await api.addManualAttendanceTime(empTarget, numMins, reason.trim(), dateKey);
-      } else {
+      } else if (mode === 'BREAK') {
         if (useBreakWindow) {
           if (!breakStartTime || !breakEndTime) {
             setError('Please provide both break start and end times.');
@@ -88,6 +94,30 @@ export function ManualTimeModal({
             reason: reason.trim(),
           });
         }
+      } else {
+        const numCreditMins = parseInt(periodCreditMinutes, 10);
+        if (isNaN(numCreditMins) || numCreditMins <= 0) {
+          setError('Credit minutes must be a positive number.');
+          setLoading(false);
+          return;
+        }
+        if (!periodStartDate || !periodEndDate) {
+          setError('Please provide both period start and end dates.');
+          setLoading(false);
+          return;
+        }
+        if (periodStartDate > periodEndDate) {
+          setError('Period start date must be before or equal to end date.');
+          setLoading(false);
+          return;
+        }
+        await api.addPeriodAdjustment({
+          employeeId: empTarget,
+          periodStart: periodStartDate,
+          periodEnd: periodEndDate,
+          creditMinutes: numCreditMins,
+          reason: reason.trim(),
+        });
       }
 
       setLoading(false);
@@ -101,50 +131,58 @@ export function ManualTimeModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-md rounded-2xl border border-indigo-500/30 bg-slate-900/95 p-6 shadow-2xl shadow-indigo-950/50">
+      <div className="w-full max-w-lg rounded-2xl border border-indigo-500/30 bg-slate-900/95 p-6 shadow-2xl shadow-indigo-950/50">
         <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-3">
           <div className="flex items-center gap-2">
             {mode === 'TIME' ? (
               <TimerIcon className="h-5 w-5 text-indigo-400 shrink-0" />
-            ) : (
+            ) : mode === 'BREAK' ? (
               <CoffeeIcon className="h-5 w-5 text-amber-400 shrink-0" />
+            ) : (
+              <CalendarIcon className="h-5 w-5 text-emerald-400 shrink-0" />
             )}
             <div>
               <h3 className="text-sm font-extrabold text-white">
-                {mode === 'TIME' ? 'HR Manual Time Adjustment' : 'HR Manual Break Entry'}
+                {mode === 'TIME'
+                  ? 'HR Daily Time Adjustment'
+                  : mode === 'BREAK'
+                  ? 'HR Manual Break Entry'
+                  : 'HR Period Extra Time Credit'}
               </h3>
               <p className="text-[11px] text-slate-400">
                 {mode === 'TIME'
-                  ? 'Directly credit or adjust worked minutes for an employee'
-                  : 'Manually record an authorized employee break for today or past days'}
+                  ? 'Directly credit or adjust worked minutes for an employee on a single day'
+                  : mode === 'BREAK'
+                  ? 'Manually record an authorized employee break for today or past days'
+                  : 'Add extra time credit (regardless of date) to adjust monthly deficit / surplus'}
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition cursor-pointer"
           >
             <XIcon className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Tab Switcher: Worked Time vs Manual Break */}
-        <div className="flex gap-2 p-1 bg-slate-950/90 rounded-xl border border-white/10 mb-4 text-xs font-bold">
+        {/* Tab Switcher: Worked Time vs Manual Break vs Period Credit */}
+        <div className="flex gap-1.5 p-1 bg-slate-950/90 rounded-xl border border-white/10 mb-4 text-xs font-bold">
           <button
             type="button"
             onClick={() => {
               setMode('TIME');
               setError(null);
             }}
-            className={`flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer ${
               mode === 'TIME'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/40'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <TimerIcon className="h-3.5 w-3.5" />
-            <span>Time Adjustment</span>
+            <span>Daily Time</span>
           </button>
           <button
             type="button"
@@ -152,14 +190,29 @@ export function ManualTimeModal({
               setMode('BREAK');
               setError(null);
             }}
-            className={`flex-1 py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer ${
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer ${
               mode === 'BREAK'
                 ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <CoffeeIcon className="h-3.5 w-3.5" />
-            <span>Manual Break</span>
+            <span>Daily Break</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('PERIOD_CREDIT');
+              setError(null);
+            }}
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              mode === 'PERIOD_CREDIT'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/40'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <CalendarIcon className="h-3.5 w-3.5" />
+            <span>Period Extra Time</span>
           </button>
         </div>
 
@@ -182,20 +235,85 @@ export function ManualTimeModal({
             </select>
           </div>
 
-          {/* Date Picker */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-              DATE
-            </label>
-            <input
-              type="date"
-              value={dateKey}
-              onChange={(e) => setDateKey(e.target.value)}
-              className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
+          {/* Date / Period Selection */}
+          {mode === 'PERIOD_CREDIT' ? (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  PERIOD START
+                </label>
+                <input
+                  type="date"
+                  value={periodStartDate}
+                  onChange={(e) => setPeriodStartDate(e.target.value)}
+                  className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  PERIOD END
+                </label>
+                <input
+                  type="date"
+                  value={periodEndDate}
+                  onChange={(e) => setPeriodEndDate(e.target.value)}
+                  className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                DATE
+              </label>
+              <input
+                type="date"
+                value={dateKey}
+                onChange={(e) => setDateKey(e.target.value)}
+                className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
+          )}
 
-          {mode === 'TIME' ? (
+          {mode === 'PERIOD_CREDIT' ? (
+            /* Mode PERIOD_CREDIT: Bulk/Period Extra Time Credit */
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-semibold text-slate-300">
+                  EXTRA TIME CREDIT (MINUTES)
+                </label>
+                <span className="text-[10px] text-emerald-400 font-mono">
+                  {parseInt(periodCreditMinutes, 10) > 0
+                    ? `${(parseInt(periodCreditMinutes, 10) / 60).toFixed(1)} hrs`
+                    : ''}
+                </span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                value={periodCreditMinutes}
+                onChange={(e) => setPeriodCreditMinutes(e.target.value)}
+                placeholder="e.g. 60"
+                className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs font-mono font-bold text-emerald-400 focus:border-emerald-500 focus:outline-none"
+              />
+              <div className="flex items-center gap-1.5 mt-2">
+                <span className="text-[10px] text-slate-400">Quick set:</span>
+                {['30', '60', '120', '240', '480'].map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() => setPeriodCreditMinutes(mins)}
+                    className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-300 hover:bg-emerald-600 hover:text-white transition cursor-pointer"
+                  >
+                    +{mins === '30' ? '30m' : `${parseInt(mins) / 60}h`}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-2 bg-slate-950/60 p-2 rounded-lg border border-white/5">
+                ℹ️ Directly reduces the employee&apos;s monthly gross deficit. Any credit exceeding total shortfall becomes surplus extra time / overtime in reports.
+              </p>
+            </div>
+          ) : mode === 'TIME' ? (
             /* Mode TIME: Minutes to Add/Deduct */
             <div>
               <label className="block text-[11px] font-semibold text-slate-300 mb-1">
@@ -275,7 +393,9 @@ export function ManualTimeModal({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder={
-                mode === 'TIME'
+                mode === 'PERIOD_CREDIT'
+                  ? 'e.g. Approved project extra hours / monthly deficit waiver agreed with management.'
+                  : mode === 'TIME'
                   ? 'e.g. Employee arrived at 11:09 AM; Wi-Fi connection recorded at 11:20 AM.'
                   : 'e.g. Authorized medical/lunch break or personal errand approved by manager.'
               }
@@ -293,28 +413,34 @@ export function ManualTimeModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition"
+              className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className={`rounded-xl px-4 py-2 text-xs font-bold transition shadow-lg disabled:opacity-50 flex items-center gap-1.5 ${
+              className={`rounded-xl px-4 py-2 text-xs font-bold transition shadow-lg disabled:opacity-50 flex items-center gap-1.5 cursor-pointer ${
                 mode === 'TIME'
                   ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/40'
-                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-950/40'
+                  : mode === 'BREAK'
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-950/40'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/40'
               }`}
             >
               {loading ? (
                 'Applying...'
               ) : mode === 'TIME' ? (
                 <>
-                  <PlusIcon className="h-3.5 w-3.5" /> Credit Manual Time
+                  <PlusIcon className="h-3.5 w-3.5" /> Credit Daily Time
+                </>
+              ) : mode === 'BREAK' ? (
+                <>
+                  <CoffeeIcon className="h-3.5 w-3.5" /> Record Break Entry
                 </>
               ) : (
                 <>
-                  <CoffeeIcon className="h-3.5 w-3.5" /> Record Break Entry
+                  <PlusIcon className="h-3.5 w-3.5" /> Apply Period Extra Time
                 </>
               )}
             </button>

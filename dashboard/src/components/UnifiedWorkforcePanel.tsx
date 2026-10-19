@@ -15,7 +15,8 @@ import { formatHM } from '@/lib/dayView';
 import { Badge, Button, Empty, STATUS_META } from '@/components/primitives';
 import { AttendanceCorrectionsPanel } from '@/components/panels';
 import { OverviewHero, type HeroFilter } from '@/components/OverviewHero';
-import { XIcon } from '@/components/icons';
+import { DownloadIcon, XIcon } from '@/components/icons';
+import { ExportReportModal } from '@/components/ExportReportModal';
 import type { DrawerOpenOptions } from '@/components/EmployeeDetailDrawer';
 
 const LaptopIcon = ({ className = 'h-3 w-3' }: { className?: string }) => (
@@ -70,6 +71,7 @@ export function UnifiedWorkforcePanel({
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<HeroFilter>('ALL');
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   // Workstation and app telemetry cache
   const [workstations, setWorkstations] = useState<WorkstationItem[]>([]);
@@ -379,6 +381,16 @@ export function UnifiedWorkforcePanel({
                 </button>
               )}
             </div>
+
+            {/* Full Attendance & Deficit Report Button */}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setExportModalOpen(true)}
+              icon={<DownloadIcon className="h-3.5 w-3.5" />}
+            >
+              Export Report
+            </Button>
 
             {/* CSV Export Button */}
             <Button
@@ -840,6 +852,15 @@ export function UnifiedWorkforcePanel({
             </table>
           </div>
         </div>
+      )}
+
+      {/* Export Workforce Report Modal */}
+      {exportModalOpen && (
+        <ExportReportModal
+          isOpen={exportModalOpen}
+          onClose={() => setExportModalOpen(false)}
+          employees={employees}
+        />
       )}
     </div>
   );

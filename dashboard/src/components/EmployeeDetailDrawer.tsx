@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import type { EmployeeDay, WorkstationItem, AppUsageItem, ScreenshotItem, EmployeeScreenshotsResponse, ShiftPattern } from '../lib/types';
 import { Badge, Button } from './primitives';
 import { ManualTimeModal } from './ManualTimeModal';
+import { ExportReportModal } from './ExportReportModal';
 import { LiveScreenViewer } from './LiveScreenViewer';
 import { EmployeeHistory } from './history/EmployeeHistory';
 import { useHistoryStore } from './history/historyStore';
@@ -190,6 +191,7 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
   const [loadingTelemetry, setLoadingTelemetry] = useState(false);
   const [generatingPairing, setGeneratingPairing] = useState(false);
   const [isManualTimeModalOpen, setIsManualTimeModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   // HR "Resume shift": reopen today's day after any clock-out.
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeCredit, setResumeCredit] = useState(true);
@@ -701,6 +703,17 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   >
                     <TimerIcon className="h-3.5 w-3.5 shrink-0" />
                     <span>Add Manual Time</span>
+                  </button>
+
+                  {/* Export Report for this employee */}
+                  <button
+                    type="button"
+                    onClick={() => setIsExportModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/40 text-violet-200 border border-violet-500/30 px-3.5 py-1.5 text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95 shadow-sm"
+                    title="Export Attendance, Deficit & Employment Records (Excel/CSV)"
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span>Export Report</span>
                   </button>
 
                   {/* HR Resume Shift: reopen today's day after any clock-out */}
@@ -2250,6 +2263,16 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
           }
         }}
       />
+
+      {/* Export Report Modal */}
+      {isExportModalOpen && (
+        <ExportReportModal
+          isOpen={isExportModalOpen}
+          onClose={() => setIsExportModalOpen(false)}
+          employees={[{ id: employee.employeeId, name: employee.employeeName }]}
+          defaultEmployeeId={employee.employeeId}
+        />
+      )}
     </div>
   );
 }

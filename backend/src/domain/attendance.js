@@ -1051,6 +1051,63 @@ async function adjustBalance({ employeeId, dateKey, minutes, reason, actor }) {
   return entry;
 }
 
+/**
+ * Adds an overall / bulk period attendance credit (Spec Section 13 & 14).
+ * Adjusts the employee's running deficit ledger, records the period adjustment row,
+ * and attributes the entry.
+ */
+async function addPeriodAdjustment({ employeeId, periodStart, periodEnd, minutes, reason, actor }) {
+  if (!employeeId) throw new Error('employeeId is required.');
+  if (!minutes || isNaN(Number(minutes)) || Number(minutes) <= 0) {
+    throw new Error('Credit minutes must be a positive integer.');
+  }
+  if (!reason || !String(reason).trim()) {
+    throw new Error('A reason is required.');
+  }
+  const nowMs = T.now();
+  const id = 'padj_' + crypto.randomBytes(8).toString('hex');
+  const creditMins = parseInt(minutes, 10);
+
+  await tx(async () => {
+    await db.prepare(`
+      INSERT INTO attendance_period_adjustments
+        (id, employee_id, period_start, period_end, credit_minutes, reason, created_at, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, employeeId, periodStart || T.dateKey(nowMs), periodEnd || T.dateKey(nowMs), creditMins, String(reason).trim(), nowMs, actor || 'HR');
+
+    // Reduce deficit balance in ledger
+    await adjustBalance({
+      employeeId,
+      dateKey: periodEnd || T.dateKey(nowMs),
+      minutes: -creditMins,
+      reason: `Bulk Period Credit: ${String(reason).trim()}`,
+      actor: actor || 'HR',
+    });
+
+    await audit({
+      actor: actor || 'HR',
+      action: 'ATTENDANCE_PERIOD_ADJUSTMENT',
+      targetType: 'employee',
+      targetId: employeeId,
+      after: { creditMinutes: creditMins, periodStart, periodEnd, reason: String(reason).trim() },
+    });
+  });
+
+  try { require('./payroll').invalidatePayrollCache(); } catch (_) {}
+  return { id, employeeId, creditMinutes: creditMins, balance: await balanceFor(employeeId) };
+}
+
+async function listPeriodAdjustments(employeeId, periodStart = null, periodEnd = null) {
+  let query = 'SELECT * FROM attendance_period_adjustments WHERE employee_id = ?';
+  const params = [employeeId];
+  if (periodStart && periodEnd) {
+    query += ' AND NOT (period_end < ? OR period_start > ?)';
+    params.push(periodStart, periodEnd);
+  }
+  query += ' ORDER BY created_at DESC';
+  return await db.prepare(query).all(...params);
+}
+
 // ---------------------------------------------------------------------------
 // Lateness occurrences (spec 9.1, 9.6)
 // ---------------------------------------------------------------------------
@@ -1422,6 +1479,7 @@ module.exports = {
   deriveDay, recomputeDay, present,
   startBreak, endBreak, closeStaleBreaks, clockOut, selfClockOutRefusal, resumeDay, buildDayView,
   balanceFor, balanceAsOf, postDeficit, adjustBalance, countLateOccurrences,
+  addPeriodAdjustment, listPeriodAdjustments,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,
 };

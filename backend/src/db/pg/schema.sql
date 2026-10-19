@@ -1669,3 +1669,18 @@ CREATE TABLE IF NOT EXISTS workstation_idle_spans (
 );
 CREATE INDEX IF NOT EXISTS idx_idle_spans_emp_day ON workstation_idle_spans (employee_id, date_key);
 CREATE INDEX IF NOT EXISTS idx_idle_spans_dev_day ON workstation_idle_spans (device_id, date_key, end_at);
+
+-- Migration 035: Bulk / Period Attendance Adjustments & Extra Time Credits
+CREATE TABLE IF NOT EXISTS attendance_period_adjustments (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  credit_minutes INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  created_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_period_adj_emp ON attendance_period_adjustments(employee_id);
+CREATE INDEX IF NOT EXISTS idx_period_adj_dates ON attendance_period_adjustments(period_start, period_end);
+

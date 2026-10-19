@@ -1257,6 +1257,68 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  downloadReport: async (params: {
+    from?: string;
+    to?: string;
+    employeeId?: string;
+    workStatus?: string;
+    format?: 'xlsx' | 'csv';
+  }): Promise<DownloadedFile> => {
+    const qs = new URLSearchParams();
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+    if (params.employeeId) qs.set('employeeId', params.employeeId);
+    if (params.workStatus) qs.set('workStatus', params.workStatus);
+    if (params.format) qs.set('format', params.format);
+    const fallbackName = `workforce_report_${params.from || ''}_${params.to || ''}.${params.format === 'csv' ? 'csv' : 'xlsx'}`;
+    return download(`/api/reports/export?${qs.toString()}`, fallbackName);
+  },
+
+  previewReport: (params: {
+    from?: string;
+    to?: string;
+    employeeId?: string;
+    workStatus?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+    if (params.employeeId) qs.set('employeeId', params.employeeId);
+    if (params.workStatus) qs.set('workStatus', params.workStatus);
+    return request<{
+      status: string;
+      meta: any;
+      overallSummary: any[];
+      employees: any[];
+    }>(`/api/reports/preview?${qs.toString()}`);
+  },
+
+  addPeriodAdjustment: (data: {
+    employeeId: string;
+    periodStart: string;
+    periodEnd: string;
+    creditMinutes: number;
+    reason: string;
+  }) =>
+    request<{
+      status: string;
+      message: string;
+      adjustment: any;
+    }>('/api/reports/period-adjustment', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getPeriodAdjustments: (employeeId: string, periodStart?: string, periodEnd?: string) => {
+    const qs = new URLSearchParams();
+    if (periodStart) qs.set('periodStart', periodStart);
+    if (periodEnd) qs.set('periodEnd', periodEnd);
+    return request<{
+      status: string;
+      adjustments: any[];
+    }>(`/api/reports/period-adjustments/${encodeURIComponent(employeeId)}?${qs.toString()}`);
+  },
 };
 
 
