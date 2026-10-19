@@ -205,18 +205,107 @@ router.put('/:id', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// PUT /api/shifts/assign/:employeeId - Assign shift and work mode to an employee
+// GET /api/shifts/assign/:employeeId - Get current assignment for an employee
 // ---------------------------------------------------------------------------
-router.put('/assign/:employeeId', async (req, res) => {
+router.get('/assign/:employeeId', async (req, res) => {
   const { employeeId } = req.params;
-  const { workingPatternId, workMode, remoteAllowed } = req.body;
+  const nowMs = T.now();
+  const dateKey = T.dateKey(nowMs);
 
-  const emp = await db.prepare('SELECT id, name, work_mode, remote_allowed FROM employees WHERE id = ?').get(employeeId);
+  const emp = await db.prepare('SELECT id, name, work_mode, remote_allowed, overtime_counted FROM employees WHERE id = ?').get(employeeId);
   if (!emp) {
     return res.status(404).json({ status: 'ERROR', message: 'Employee not found.' });
   }
 
-  if (workingPatternId) {
+  const resolved = await schedule.resolve(employeeId, dateKey);
+  res.json({
+    status: 'SUCCESS',
+    employee: {
+      id: emp.id,
+      name: emp.name,
+      workMode: emp.work_mode || 'IN_OFFICE',
+      remoteAllowed: Boolean(emp.remote_allowed),
+      overtimeCounted: Boolean(emp.overtime_counted === 1 || emp.overtime_counted === true || emp.overtime_counted === '1'),
+      schedule: {
+        patternId: resolved.patternId,
+        patternName: resolved.patternName,
+        startTime: resolved.startTime,
+        endTime: resolved.endTime,
+        graceMinutes: resolved.graceMinutes,
+        permittedBreakMinutes: resolved.permittedBreakMinutes,
+        dayEquivalentMinutes: resolved.dayEquivalentMinutes,
+        workingDays: resolved.workingDays || 'mon,tue,wed,thu,fri',
+        overtimeCounted: Boolean(resolved.overtimeCounted),
+      },
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/shifts/assign/:employeeId - Assign shift (preset or custom) & work mode & overtime policy
+// ---------------------------------------------------------------------------
+router.put('/assign/:employeeId', async (req, res) => {
+  const { employeeId } = req.params;
+  const { workingPatternId, customShift, workMode, remoteAllowed, overtimeCounted } = req.body;
+
+  // Ensure column exists
+  await db.prepare('ALTER TABLE employees ADD COLUMN IF NOT EXISTS overtime_counted BIGINT NOT NULL DEFAULT 0').run().catch(() => {});
+
+  const emp = await db.prepare('SELECT id, name, work_mode, remote_allowed, overtime_counted FROM employees WHERE id = ?').get(employeeId);
+  if (!emp) {
+    return res.status(404).json({ status: 'ERROR', message: 'Employee not found.' });
+  }
+
+  let targetPatternId = workingPatternId;
+
+  // Handle custom manual shift time & break time
+  if (customShift && typeof customShift === 'object') {
+    const {
+      startTime = '11:00',
+      endTime = '19:00',
+      permittedBreakMinutes = 30,
+      workingDays = 'mon,tue,wed,thu,fri',
+      graceMinutes = 10,
+    } = customShift;
+
+    if (!TIME_RE.test(String(startTime)) || !TIME_RE.test(String(endTime))) {
+      return res.status(400).json({ status: 'ERROR', message: 'Custom shift startTime and endTime must be in HH:MM format.' });
+    }
+
+    const [sh, sm] = String(startTime).split(':').map(Number);
+    const [eh, em] = String(endTime).split(':').map(Number);
+    let shiftDuration = (eh * 60 + em) - (sh * 60 + sm);
+    if (shiftDuration <= 0) shiftDuration += 24 * 60; // Cross-midnight shift support
+
+    const breakMins = parseInt(permittedBreakMinutes, 10) || 30;
+    const grace = graceMinutes !== undefined ? parseInt(graceMinutes, 10) : 10;
+    const days = String(workingDays).toLowerCase().trim() || 'mon,tue,wed,thu,fri';
+    const dayEquiv = shiftDuration; // Total shift duration target
+
+    const customId = `wp_custom_${employeeId}`;
+    const customName = `Custom (${startTime} - ${endTime}, ${breakMins}m break)`;
+    const nowMs = T.now();
+
+    const existingCustom = await db.prepare('SELECT id FROM working_patterns WHERE id = ?').get(customId);
+    if (existingCustom) {
+      await db.prepare(`
+        UPDATE working_patterns
+        SET name = ?, start_time = ?, end_time = ?, working_days = ?,
+            permitted_break_minutes = ?, day_equivalent_minutes = ?, grace_minutes = ?, active = 1
+        WHERE id = ?
+      `).run(customName, String(startTime).trim(), String(endTime).trim(), days, breakMins, dayEquiv, grace, customId);
+    } else {
+      await db.prepare(`
+        INSERT INTO working_patterns (
+          id, name, working_days, start_time, end_time,
+          permitted_break_minutes, day_equivalent_minutes, grace_minutes,
+          is_default, active, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?)
+      `).run(customId, customName, days, String(startTime).trim(), String(endTime).trim(), breakMins, dayEquiv, grace, nowMs);
+    }
+
+    targetPatternId = customId;
+  } else if (workingPatternId) {
     const wp = await db.prepare('SELECT id FROM working_patterns WHERE id = ?').get(workingPatternId);
     if (!wp) {
       return res.status(400).json({ status: 'ERROR', message: 'Invalid working pattern ID.' });
@@ -231,16 +320,24 @@ router.put('/assign/:employeeId', async (req, res) => {
   const nowMs = T.now();
 
   try {
+    const newWorkMode = workMode || emp.work_mode || 'IN_OFFICE';
+    const newRemoteAllowed = remoteAllowed !== undefined
+      ? (remoteAllowed ? 1 : 0)
+      : (newWorkMode === 'REMOTE' || newWorkMode === 'HYBRID' ? 1 : (emp.remote_allowed || 0));
+    const newOvertimeCounted = overtimeCounted !== undefined
+      ? (overtimeCounted ? 1 : 0)
+      : (emp.overtime_counted !== undefined ? Number(emp.overtime_counted) : 0);
+
     await tx(async () => {
       // 1. Update working_pattern_id on active employment record
-      if (workingPatternId !== undefined) {
+      if (targetPatternId !== undefined) {
         const activeRecord = await db.prepare(
           'SELECT id FROM employment_records WHERE employee_id = ? AND effective_to IS NULL ORDER BY effective_from DESC LIMIT 1'
         ).get(employeeId);
 
         if (activeRecord) {
           await db.prepare('UPDATE employment_records SET working_pattern_id = ? WHERE id = ?')
-            .run(workingPatternId || null, activeRecord.id);
+            .run(targetPatternId || null, activeRecord.id);
         } else {
           // If no active employment record exists, create one with default settings
           const newErId = `er_${crypto.randomUUID().slice(0, 8)}`;
@@ -248,41 +345,51 @@ router.put('/assign/:employeeId', async (req, res) => {
             INSERT INTO employment_records (
               id, employee_id, job_title, working_pattern_id, start_date, effective_from, created_at, created_by
             ) VALUES (?, ?, 'Team Member', ?, ?, ?, ?, ?)
-          `).run(newErId, employeeId, workingPatternId || null, T.dateKey(nowMs), T.dateKey(nowMs), nowMs, 'HR');
+          `).run(newErId, employeeId, targetPatternId || null, T.dateKey(nowMs), T.dateKey(nowMs), nowMs, 'HR');
         }
       }
 
-      // 2. Update work_mode and remote_allowed on employees
-      const newWorkMode = workMode || emp.work_mode || 'IN_OFFICE';
-      const newRemoteAllowed = remoteAllowed !== undefined ? (remoteAllowed ? 1 : 0) : (newWorkMode === 'REMOTE' || newWorkMode === 'HYBRID' ? 1 : (emp.remote_allowed || 0));
-
+      // 2. Update work_mode, remote_allowed, and overtime_counted on employees
       await db.prepare(`
         UPDATE employees
         SET work_mode = ?,
             remote_allowed = ?,
+            overtime_counted = ?,
             updated_at = ?
         WHERE id = ?
-      `).run(newWorkMode, newRemoteAllowed, nowMs, employeeId);
+      `).run(newWorkMode, newRemoteAllowed, newOvertimeCounted, nowMs, employeeId);
 
       await audit({
         actor: req.auth.user ? req.auth.user.username : 'HR',
         action: 'EMPLOYEE_SHIFT_ASSIGNED',
         targetType: 'employee',
         targetId: employeeId,
-        after: { workingPatternId, workMode: newWorkMode, remoteAllowed: newRemoteAllowed },
+        after: {
+          workingPatternId: targetPatternId,
+          workMode: newWorkMode,
+          remoteAllowed: newRemoteAllowed,
+          overtimeCounted: newOvertimeCounted,
+          customShift: customShift || null,
+        },
       });
     });
 
-    // Re-resolve new schedule
+    // Invalidate cached default pattern and derive fresh schedule
+    schedule.invalidate();
     const resolved = await schedule.resolve(employeeId, T.dateKey(nowMs));
+
+    // Recompute today's attendance so changes take effect immediately
+    const attendance = require('../domain/attendance');
+    await attendance.recomputeDay(employeeId, T.dateKey(nowMs), nowMs).catch(() => {});
 
     res.json({
       status: 'SUCCESS',
-      message: 'Employee shift and work mode updated successfully.',
+      message: 'Employee shift, work mode, and overtime tracking settings updated successfully.',
       employee: {
         id: employeeId,
-        workMode: workMode || emp.work_mode,
-        remoteAllowed: remoteAllowed !== undefined ? !!remoteAllowed : !!emp.remote_allowed,
+        workMode: newWorkMode,
+        remoteAllowed: Boolean(newRemoteAllowed),
+        overtimeCounted: Boolean(newOvertimeCounted),
         schedule: {
           patternId: resolved.patternId,
           patternName: resolved.patternName,
@@ -292,6 +399,7 @@ router.put('/assign/:employeeId', async (req, res) => {
           permittedBreakMinutes: resolved.permittedBreakMinutes,
           dayEquivalentMinutes: resolved.dayEquivalentMinutes,
           workingDays: resolved.workingDays || 'mon,tue,wed,thu,fri',
+          overtimeCounted: Boolean(resolved.overtimeCounted),
         },
       },
     });
@@ -301,4 +409,116 @@ router.put('/assign/:employeeId', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// POST /api/shifts/manual-break - HR manually adds a break record for an employee
+// ---------------------------------------------------------------------------
+router.post('/manual-break', async (req, res) => {
+  const {
+    employeeId,
+    dateKey = T.dateKey(),
+    breakMinutes,
+    startTime,
+    endTime,
+    reason = 'HR manual break entry',
+    permittedMinutes,
+  } = req.body;
+
+  if (!employeeId) {
+    return res.status(400).json({ status: 'ERROR', message: 'employeeId is required.' });
+  }
+
+  const emp = await db.prepare('SELECT id, name FROM employees WHERE id = ?').get(employeeId);
+  if (!emp) {
+    return res.status(404).json({ status: 'ERROR', message: 'Employee not found.' });
+  }
+
+  const nowMs = T.now();
+  const sched = await schedule.resolve(employeeId, dateKey);
+  const permitted = permittedMinutes ? parseInt(permittedMinutes, 10) : (sched.permittedBreakMinutes || 30);
+
+  let startedAtMs;
+  let endedAtMs;
+  let actualMinutes;
+
+  if (startTime && endTime) {
+    if (!TIME_RE.test(String(startTime)) || !TIME_RE.test(String(endTime))) {
+      return res.status(400).json({ status: 'ERROR', message: 'startTime and endTime must be in HH:MM format.' });
+    }
+    startedAtMs = T.wallClockToEpoch(dateKey, String(startTime));
+    endedAtMs = T.wallClockToEpoch(dateKey, String(endTime));
+    if (endedAtMs <= startedAtMs) {
+      return res.status(400).json({ status: 'ERROR', message: 'endTime must be after startTime.' });
+    }
+    actualMinutes = Math.max(1, Math.round((endedAtMs - startedAtMs) / 60000));
+  } else {
+    actualMinutes = parseInt(breakMinutes, 10);
+    if (isNaN(actualMinutes) || actualMinutes <= 0) {
+      return res.status(400).json({ status: 'ERROR', message: 'breakMinutes must be a positive integer.' });
+    }
+    // Place mid-shift or current time
+    endedAtMs = dateKey === T.dateKey(nowMs) ? nowMs : T.wallClockToEpoch(dateKey, '14:30');
+    startedAtMs = endedAtMs - (actualMinutes * 60000);
+  }
+
+  const excessMinutes = Math.max(0, actualMinutes - permitted);
+  const breakId = `brk_hr_${crypto.randomUUID().slice(0, 8)}`;
+
+  try {
+    await db.prepare(`
+      INSERT INTO break_records (
+        id, employee_id, date_key, started_at, ended_at, permitted_minutes,
+        actual_minutes, excess_minutes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      breakId,
+      employeeId,
+      dateKey,
+      startedAtMs,
+      endedAtMs,
+      permitted,
+      actualMinutes,
+      excessMinutes,
+      nowMs
+    );
+
+    await audit({
+      actor: req.auth.user ? req.auth.user.username : 'HR',
+      action: 'HR_MANUAL_BREAK_ADDED',
+      targetType: 'break_record',
+      targetId: breakId,
+      details: {
+        employeeId,
+        dateKey,
+        actualMinutes,
+        permittedMinutes: permitted,
+        excessMinutes,
+        reason: String(reason).trim(),
+      },
+    });
+
+    const attendance = require('../domain/attendance');
+    await attendance.recomputeDay(employeeId, dateKey, nowMs);
+
+    res.json({
+      status: 'SUCCESS',
+      message: `Manual break of ${actualMinutes} minutes recorded for ${emp.name} on ${dateKey}.`,
+      breakRecord: {
+        id: breakId,
+        employeeId,
+        dateKey,
+        startedAt: startedAtMs,
+        endedAt: endedAtMs,
+        actualMinutes,
+        permittedMinutes: permitted,
+        excessMinutes,
+        reason,
+      },
+    });
+  } catch (err) {
+    console.error('[shifts/manual-break] Error:', err);
+    res.status(500).json({ status: 'ERROR', message: 'Failed to record manual break entry.' });
+  }
+});
+
 module.exports = router;
+

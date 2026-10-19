@@ -186,6 +186,45 @@
     </div>
   </div>
 
+  <!-- Undismissable Break Lock Screen (active while employee is on break) -->
+  <div id="break-lock-screen" class="break-lock-screen hidden" role="dialog" aria-modal="true" aria-labelledby="lock-title">
+    <div class="break-lock-card">
+      <div class="break-lock-badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
+          <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
+          <line x1="6" y1="1" x2="6" y2="4" />
+          <line x1="10" y1="1" x2="10" y2="4" />
+          <line x1="14" y1="1" x2="14" y2="4" />
+        </svg>
+      </div>
+
+      <h1 id="lock-title" class="lock-title">Workstation Paused</h1>
+      <div class="lock-subtitle">You are currently taking a break</div>
+
+      <div class="lock-timer-box" id="lock-timer-box">
+        <div class="lock-timer-label">Break Elapsed</div>
+        <div class="lock-timer-val" id="lock-break-timer">00:00</div>
+        <div class="lock-allowance-pill" id="lock-break-allowance">
+          <span>⏱️</span> <span id="lock-allowance-text">30m permitted daily break</span>
+        </div>
+      </div>
+
+      <div class="lock-policy-note">
+        Workstation tracking and tasks are paused while on break. This lock screen is undismissable to ensure accurate break and work records. Click below to resume working.
+      </div>
+
+      <div class="lock-actions">
+        <button id="lock-resume-btn" class="lock-resume-btn">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+          <span>Resume Shift & Back to Work</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="main.js"></script>
 </body>
 </html>

@@ -386,6 +386,9 @@ CREATE TABLE IF NOT EXISTS employees (
   employment_status TEXT NOT NULL DEFAULT 'Active',
   office_id TEXT,
   department_id TEXT,
+  work_mode TEXT NOT NULL DEFAULT 'IN_OFFICE',
+  remote_allowed BIGINT NOT NULL DEFAULT 0,
+  overtime_counted BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 

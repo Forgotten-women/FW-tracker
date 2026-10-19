@@ -825,6 +825,10 @@ function startMiniAppServer(port = MINI_APP_PORT) {
 
     // POST /api/dismiss-overlay
     if (parsedUrl.pathname === '/api/dismiss-overlay' && req.method === 'POST') {
+      if (isManualBreak || isOnBreak || currentWorkstationStatus === 'ON_BREAK') {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ status: 'ERROR', message: 'Workstation is locked during breaks. Resume your break first.' }));
+      }
       isOverlayOpen = false;
       lastDismissedAt = Date.now();
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1390,6 +1394,11 @@ async function startAgent() {
         if (!isOverlayOpen) {
           launchIdleOverlayWindow(MINI_APP_PORT);
         }
+      }
+
+      // If user is currently on break, keep fullscreen overlay window open & undismissable
+      if ((isManualBreak || isOnBreak || currentWorkstationStatus === 'ON_BREAK') && !isOverlayOpen) {
+        launchIdleOverlayWindow(MINI_APP_PORT);
       }
     }
 

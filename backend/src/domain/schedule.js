@@ -56,7 +56,8 @@ function invalidate() {
   defaultPatternCache = null;
 }
 
-const selectEmployeeOffice = db.prepare('SELECT office_id FROM employees WHERE id = ?');
+const selectEmployeeDetails = db.prepare('SELECT office_id, overtime_counted FROM employees WHERE id = ?');
+const selectEmployeeOffice = selectEmployeeDetails;
 
 const selectCalendarDay = db.prepare(
   'SELECT * FROM calendar_days WHERE office_id = ? AND date = ?'
@@ -115,6 +116,10 @@ async function resolve(employeeId, dateKey = T.dateKey()) {
   let isWorkingDay = workingDays.includes(day);
   let nonWorkingReason = isWorkingDay ? null : 'Rest day';
 
+  const empDetails = await selectEmployeeDetails.get(employeeId);
+  const officeId = row?.office_id || empDetails?.office_id || null;
+  const overtimeCounted = Boolean(empDetails?.overtime_counted === 1 || empDetails?.overtime_counted === true || empDetails?.overtime_counted === '1');
+
   // 1. Designated Bank / Public Holidays (Organisation-wide policy: 5 approved days)
   const bankHoliday = await holidays.isBankHoliday(dateKey);
   if (bankHoliday && bankHoliday.isActive) {
@@ -134,7 +139,8 @@ async function resolve(employeeId, dateKey = T.dateKey()) {
       permittedBreakMinutes,
       dayEquivalentMinutes,
       graceMinutes,
-      officeId: row?.office_id || null,
+      officeId,
+      overtimeCounted,
       scheduledStartAt: T.wallClockToEpoch(dateKey, startTime),
       scheduledEndAt: T.wallClockToEpoch(dateKey, endTime),
       latestOnTimeAt: T.wallClockToEpoch(dateKey, startTime) + graceMinutes * 60000 + 59999,
@@ -144,7 +150,6 @@ async function resolve(employeeId, dateKey = T.dateKey()) {
 
   // Office calendar. Spec 16: an employee must not lose annual leave for a day
   // configured as a paid office closure.
-  const officeId = row?.office_id || (await selectEmployeeOffice.get(employeeId))?.office_id;
   let calendarEntry = null;
   if (officeId) {
     calendarEntry = await selectCalendarDay.get(officeId, dateKey) || null;
@@ -170,6 +175,7 @@ async function resolve(employeeId, dateKey = T.dateKey()) {
     graceMinutes,
     workingDays: pattern?.working_days || 'mon,tue,wed,thu,fri',
     officeId: officeId || null,
+    overtimeCounted,
 
     // Absolute instants, so callers never re-derive them and risk disagreeing.
     scheduledStartAt: T.wallClockToEpoch(dateKey, startTime),
@@ -185,7 +191,7 @@ async function workingDaysBetween(employeeId, fromKey, toKey) {
   const [empPatternRow, defaultPattern, empOffice] = await Promise.all([
     selectEmploymentPattern.get(employeeId, toKey, fromKey),
     getDefaultPattern(),
-    selectEmployeeOffice.get(employeeId),
+    selectEmployeeDetails.get(employeeId),
   ]);
 
   const pattern = (empPatternRow && empPatternRow.id) ? empPatternRow : defaultPattern;

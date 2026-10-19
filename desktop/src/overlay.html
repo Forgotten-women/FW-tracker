@@ -453,12 +453,30 @@
     btnStartBreak.addEventListener('click', () => triggerBreak(false));
     btnResumeWork.addEventListener('click', resumeWork);
 
-    // Keyboard dismiss on Enter or Space
+    // Keyboard dismiss on Enter or Space for prompt; block dismissal keys on break
     window.addEventListener('keydown', (e) => {
       if (currentPhase === 'PROMPT') {
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
           dismissPrompt();
         }
+      } else if (currentPhase === 'BREAK') {
+        if (e.key === 'Escape' || e.key === 'Tab' || e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    }, true);
+
+    window.addEventListener('blur', () => {
+      if (currentPhase === 'BREAK') {
+        setTimeout(() => window.focus(), 50);
+      }
+    });
+
+    window.addEventListener('beforeunload', (e) => {
+      if (currentPhase === 'BREAK') {
+        e.preventDefault();
+        e.returnValue = 'Break is active. You must resume your shift before leaving.';
       }
     });
 

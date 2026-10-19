@@ -289,6 +289,21 @@ pub async fn run_break_sync(app: AppHandle) {
         if let Some(resp) = updated {
             let _ = app.emit_all("heartbeat-updated", resp);
         }
+
+        if let Some(window) = app.get_window("main") {
+            if state.on_break {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_fullscreen(true);
+                let _ = window.set_always_on_top(true);
+                let _ = window.set_focus();
+            } else {
+                let _ = window.set_fullscreen(false);
+                let _ = window.set_always_on_top(false);
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 360.0, height: 460.0 }));
+                let _ = window.center();
+            }
+        }
     }
 }
 

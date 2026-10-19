@@ -1199,12 +1199,37 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  getEmployeeShiftAssignment: (employeeId: string) =>
+    request<{
+      status: string;
+      employee: {
+        id: string;
+        name: string;
+        workMode: 'IN_OFFICE' | 'REMOTE' | 'HYBRID';
+        remoteAllowed: boolean;
+        overtimeCounted: boolean;
+        schedule: {
+          patternId: string;
+          patternName: string;
+          startTime: string;
+          endTime: string;
+          graceMinutes: number;
+          permittedBreakMinutes: number;
+          dayEquivalentMinutes: number;
+          workingDays: string;
+          overtimeCounted: boolean;
+        };
+      };
+    }>(`/api/shifts/assign/${encodeURIComponent(employeeId)}`),
+
   assignEmployeeShift: (
     employeeId: string,
     data: {
       workingPatternId?: string | null;
+      customShift?: import('./types').CustomShiftInput;
       workMode?: 'IN_OFFICE' | 'REMOTE' | 'HYBRID';
       remoteAllowed?: boolean;
+      overtimeCounted?: boolean;
     }
   ) =>
     request<{
@@ -1214,10 +1239,22 @@ export const api = {
         id: string;
         workMode: 'IN_OFFICE' | 'REMOTE' | 'HYBRID';
         remoteAllowed: boolean;
+        overtimeCounted: boolean;
         schedule: any;
       };
     }>(`/api/shifts/assign/${encodeURIComponent(employeeId)}`, {
       method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  addManualBreak: (data: import('./types').ManualBreakInput) =>
+    request<{
+      status: string;
+      message: string;
+      record: any;
+      dayView: any;
+    }>('/api/shifts/manual-break', {
+      method: 'POST',
       body: JSON.stringify(data),
     }),
 };

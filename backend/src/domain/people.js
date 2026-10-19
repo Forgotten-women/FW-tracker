@@ -395,6 +395,7 @@ async function profile(employeeId, { permissions = new Set(), includeSensitive =
     active: !!emp.active,
     workMode: emp.work_mode || 'IN_OFFICE',
     remoteAllowed: !!emp.remote_allowed,
+    overtimeCounted: Boolean(emp.overtime_counted === 1 || emp.overtime_counted === true || emp.overtime_counted === '1'),
 
     employment: er ? {
       jobTitle: er.job_title,
@@ -542,6 +543,7 @@ async function myEmployeeProfile(employeeId) {
     active: !!emp.active,
     workMode: emp.work_mode || 'IN_OFFICE',
     remoteAllowed: !!emp.remote_allowed,
+    overtimeCounted: Boolean(emp.overtime_counted === 1 || emp.overtime_counted === true || emp.overtime_counted === '1'),
     employment: er ? {
       jobTitle: er.job_title,
       employmentType: er.employment_type,
@@ -590,7 +592,7 @@ async function myEmployeeProfile(employeeId) {
 }
 
 /**
- * Generates the next sequential permanent Employee ID (e.g. FW001, FW002, FW003...).
+ * Generates the next sequential permanent Employee ID in PK format (e.g. PK001, PK002, PK022, PK023...).
  * Queries all historical employees (including inactive and former employees).
  * IDs are permanent and never reused.
  */
@@ -599,7 +601,7 @@ async function nextEmployeeNumber() {
   let maxNum = 0;
   for (const r of rows) {
     if (r.employee_number) {
-      const match = /^FW(\d+)$/i.exec(String(r.employee_number).trim());
+      const match = /^PK(\d+)$/i.exec(String(r.employee_number).trim());
       if (match) {
         const n = parseInt(match[1], 10);
         if (Number.isFinite(n) && n > maxNum) {
@@ -608,7 +610,7 @@ async function nextEmployeeNumber() {
       }
     }
   }
-  return 'FW' + String(maxNum + 1).padStart(3, '0');
+  return 'PK' + String(maxNum + 1).padStart(3, '0');
 }
 
 /**

@@ -172,7 +172,7 @@ async fn developer_unpair(state: State<'_, AppState>) -> Result<serde_json::Valu
 }
 
 #[tauri::command]
-async fn set_manual_break(on_break: bool, state: State<'_, AppState>) -> Result<bool, String> {
+async fn set_manual_break(on_break: bool, state: State<'_, AppState>, app: tauri::AppHandle) -> Result<bool, String> {
     let cfg = state.config.lock().unwrap().clone();
     let target = on_break;
 
@@ -188,6 +188,12 @@ async fn set_manual_break(on_break: bool, state: State<'_, AppState>) -> Result<
                         r.today.on_break = false;
                         r.today.break_already_taken = true;
                     }
+                }
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.set_fullscreen(false);
+                    let _ = window.set_always_on_top(false);
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 360.0, height: 460.0 }));
+                    let _ = window.center();
                 }
                 return Ok(false);
             }
@@ -206,13 +212,28 @@ async fn set_manual_break(on_break: bool, state: State<'_, AppState>) -> Result<
         }
     }
 
+    if let Some(window) = app.get_window("main") {
+        if target {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_fullscreen(true);
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_focus();
+        } else {
+            let _ = window.set_fullscreen(false);
+            let _ = window.set_always_on_top(false);
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 360.0, height: 460.0 }));
+            let _ = window.center();
+        }
+    }
+
     Ok(target)
 }
 
 #[tauri::command]
-async fn toggle_manual_break(state: State<'_, AppState>) -> Result<bool, String> {
+async fn toggle_manual_break(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<bool, String> {
     let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
-    set_manual_break(!is_break, state).await
+    set_manual_break(!is_break, state, app).await
 }
 
 #[tauri::command]
@@ -962,6 +983,15 @@ fn main() {
         })
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
+                if IS_MANUAL_BREAK.load(Ordering::SeqCst) {
+                    let _ = event.window().show();
+                    let _ = event.window().unminimize();
+                    let _ = event.window().set_fullscreen(true);
+                    let _ = event.window().set_always_on_top(true);
+                    let _ = event.window().set_focus();
+                    api.prevent_close();
+                    return;
+                }
                 let _ = event.window().hide();
                 api.prevent_close();
             }

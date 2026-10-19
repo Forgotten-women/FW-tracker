@@ -373,10 +373,17 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     }
   };
 
-  // Shift & Remote Work Configuration State (HR Only)
+  // Shift, Remote Work & Overtime Configuration State (HR Only)
   const [availableShifts, setAvailableShifts] = useState<ShiftPattern[]>([]);
   const [employeeProfile, setEmployeeProfile] = useState<any>(null);
+  const [shiftSelectionMode, setShiftSelectionMode] = useState<'PRESET' | 'CUSTOM'>('PRESET');
   const [selectedShiftId, setSelectedShiftId] = useState<string>('wp_default');
+  const [customStartTime, setCustomStartTime] = useState<string>('11:00');
+  const [customEndTime, setCustomEndTime] = useState<string>('19:00');
+  const [customBreakMinutes, setCustomBreakMinutes] = useState<number>(30);
+  const [customGraceMinutes, setCustomGraceMinutes] = useState<number>(10);
+  const [customWorkingDays, setCustomWorkingDays] = useState<string>('mon,tue,wed,thu,fri');
+  const [overtimeCounted, setOvertimeCounted] = useState<boolean>(false);
   const [selectedWorkMode, setSelectedWorkMode] = useState<'IN_OFFICE' | 'REMOTE' | 'HYBRID'>('IN_OFFICE');
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [savingShift, setSavingShift] = useState(false);
@@ -386,18 +393,44 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
   const loadShiftData = useCallback(async (empId: string) => {
     setShiftsLoading(true);
     try {
-      const [shiftsRes, profileRes] = await Promise.all([
+      const [shiftsRes, profileRes, assignRes] = await Promise.all([
         api.fetchShifts().catch(() => null),
         api.getEmployeeProfile(empId).catch(() => null),
+        api.getEmployeeShiftAssignment(empId).catch(() => null),
       ]);
       if (shiftsRes?.shifts) {
         setAvailableShifts(shiftsRes.shifts);
       }
-      if (profileRes?.profile) {
-        setEmployeeProfile(profileRes.profile);
-        setSelectedWorkMode(profileRes.profile.workMode || 'IN_OFFICE');
-        const patId = profileRes.profile.schedule?.patternId;
-        setSelectedShiftId(patId || 'wp_default');
+      const assign = assignRes?.employee;
+      const prof = profileRes?.profile;
+      if (assign || prof) {
+        setEmployeeProfile(prof || assign);
+        setSelectedWorkMode(assign?.workMode || prof?.workMode || 'IN_OFFICE');
+        const isOt = assign?.overtimeCounted !== undefined
+          ? assign.overtimeCounted
+          : Boolean(prof?.overtimeCounted);
+        setOvertimeCounted(isOt);
+
+        const schedule = assign?.schedule || prof?.schedule;
+        const patId = schedule?.patternId;
+        if (patId && patId.startsWith('wp_custom_')) {
+          setShiftSelectionMode('CUSTOM');
+          if (schedule.startTime) setCustomStartTime(schedule.startTime);
+          if (schedule.endTime) setCustomEndTime(schedule.endTime);
+          if (schedule.permittedBreakMinutes !== undefined) setCustomBreakMinutes(schedule.permittedBreakMinutes);
+          if (schedule.graceMinutes !== undefined) setCustomGraceMinutes(schedule.graceMinutes);
+          if (schedule.workingDays) setCustomWorkingDays(schedule.workingDays);
+        } else {
+          setShiftSelectionMode('PRESET');
+          setSelectedShiftId(patId || 'wp_default');
+          if (schedule) {
+            if (schedule.startTime) setCustomStartTime(schedule.startTime);
+            if (schedule.endTime) setCustomEndTime(schedule.endTime);
+            if (schedule.permittedBreakMinutes !== undefined) setCustomBreakMinutes(schedule.permittedBreakMinutes);
+            if (schedule.graceMinutes !== undefined) setCustomGraceMinutes(schedule.graceMinutes);
+            if (schedule.workingDays) setCustomWorkingDays(schedule.workingDays);
+          }
+        }
       }
     } finally {
       setShiftsLoading(false);
@@ -410,12 +443,26 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
     setShiftSuccessMsg(null);
     setShiftErrorMsg(null);
     try {
-      await api.assignEmployeeShift(employee.employeeId, {
-        workingPatternId: selectedShiftId,
+      const payload: any = {
         workMode: selectedWorkMode,
         remoteAllowed: selectedWorkMode === 'REMOTE' || selectedWorkMode === 'HYBRID',
-      });
-      setShiftSuccessMsg('Shift working hours and remote work mode updated successfully by HR!');
+        overtimeCounted,
+      };
+
+      if (shiftSelectionMode === 'CUSTOM') {
+        payload.customShift = {
+          startTime: customStartTime,
+          endTime: customEndTime,
+          permittedBreakMinutes: Number(customBreakMinutes) || 30,
+          graceMinutes: Number(customGraceMinutes) || 10,
+          workingDays: customWorkingDays || 'mon,tue,wed,thu,fri',
+        };
+      } else {
+        payload.workingPatternId = selectedShiftId;
+      }
+
+      await api.assignEmployeeShift(employee.employeeId, payload);
+      setShiftSuccessMsg('Shift hours, custom break allowance and overtime policy updated successfully by HR!');
       setTimeout(() => setShiftSuccessMsg(null), 5000);
       await loadShiftData(employee.employeeId);
       if (onRefresh) onRefresh();
@@ -1759,54 +1806,254 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                     </div>
                   </div>
 
-                  {/* 2. Shift Pattern Dropdown */}
+                  {/* 2. Shift Mode Switcher: Preset Template vs Custom / Manual Hours */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                      Assigned Shift Template
+                    <label className="block text-xs font-bold text-slate-300 mb-2">
+                      Shift Schedule Configuration
                     </label>
-                    <select
-                      value={selectedShiftId}
-                      onChange={(e) => setSelectedShiftId(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer font-medium"
-                    >
-                      {availableShifts.map((shift) => (
-                        <option key={shift.id} value={shift.id}>
-                          {shift.name} ({shift.startTime} – {shift.endTime}) {shift.isDefault ? '[Org Default]' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Defines the daily required working hours, arrival grace period, and absence thresholds.
-                    </p>
-                  </div>
+                    <div className="flex gap-2 p-1 bg-slate-950/80 rounded-xl border border-white/10 mb-3">
+                      <button
+                        type="button"
+                        onClick={() => setShiftSelectionMode('PRESET')}
+                        className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          shiftSelectionMode === 'PRESET'
+                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Preset Template
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShiftSelectionMode('CUSTOM')}
+                        className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          shiftSelectionMode === 'CUSTOM'
+                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Manual / Custom Shift & Breaks
+                      </button>
+                    </div>
 
-                  {/* 3. Shift Details Card */}
-                  {(() => {
-                    const currentShift = availableShifts.find((s) => s.id === selectedShiftId) || availableShifts[0];
-                    if (!currentShift) return null;
-                    return (
-                      <div className="p-4 rounded-xl bg-slate-900/70 border border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    {shiftSelectionMode === 'PRESET' ? (
+                      <div className="space-y-3">
                         <div>
-                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Start Time</span>
-                          <span className="font-mono font-bold text-white text-sm">{currentShift.startTime}</span>
+                          <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                            Assigned Shift Template
+                          </label>
+                          <select
+                            value={selectedShiftId}
+                            onChange={(e) => setSelectedShiftId(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer font-medium"
+                          >
+                            {availableShifts.map((shift) => (
+                              <option key={shift.id} value={shift.id}>
+                                {shift.name} ({shift.startTime} – {shift.endTime}) {shift.isDefault ? '[Org Default]' : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Defines the daily required working hours, arrival grace period, and absence thresholds.
+                          </p>
                         </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">End Time</span>
-                          <span className="font-mono font-bold text-white text-sm">{currentShift.endTime}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Grace Window</span>
-                          <span className="font-mono font-bold text-amber-400 text-sm">{currentShift.graceMinutes} mins</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Daily Target</span>
-                          <span className="font-mono font-bold text-emerald-400 text-sm">
-                            {Math.floor(currentShift.dayEquivalentMinutes / 60)}h {currentShift.dayEquivalentMinutes % 60}m
+
+                        {/* Shift Details Card */}
+                        {(() => {
+                          const currentShift = availableShifts.find((s) => s.id === selectedShiftId) || availableShifts[0];
+                          if (!currentShift) return null;
+                          return (
+                            <div className="p-4 rounded-xl bg-slate-900/70 border border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                              <div>
+                                <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Start Time</span>
+                                <span className="font-mono font-bold text-white text-sm">{currentShift.startTime}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">End Time</span>
+                                <span className="font-mono font-bold text-white text-sm">{currentShift.endTime}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Permitted Break</span>
+                                <span className="font-mono font-bold text-amber-300 text-sm">{currentShift.permittedBreakMinutes} mins</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Daily Target</span>
+                                <span className="font-mono font-bold text-emerald-400 text-sm">
+                                  {Math.floor(currentShift.dayEquivalentMinutes / 60)}h {currentShift.dayEquivalentMinutes % 60}m
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      /* Custom / Manual Shift Form */
+                      <div className="p-4 rounded-xl bg-slate-900/80 border border-amber-500/30 space-y-4">
+                        <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <ClockIcon className="h-4 w-4 text-amber-400" /> Custom Shift Hours & Break Policy
+                          </span>
+                          <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-mono border border-amber-500/30">
+                            Custom Policy
                           </span>
                         </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1">
+                              Shift Start Time
+                            </label>
+                            <input
+                              type="time"
+                              value={customStartTime}
+                              onChange={(e) => setCustomStartTime(e.target.value)}
+                              className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1">
+                              Shift End Time
+                            </label>
+                            <input
+                              type="time"
+                              value={customEndTime}
+                              onChange={(e) => setCustomEndTime(e.target.value)}
+                              className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1">
+                              Permitted Break Allowance (Minutes)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="180"
+                              value={customBreakMinutes}
+                              onChange={(e) => setCustomBreakMinutes(Number(e.target.value))}
+                              placeholder="e.g. 30, 45, 60"
+                              className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs font-mono font-bold text-amber-300 focus:border-amber-500 focus:outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              Allowance for tea/lunch. Excess break time is deducted from worked hours.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1">
+                              Arrival Grace Window (Minutes)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="60"
+                              value={customGraceMinutes}
+                              onChange={(e) => setCustomGraceMinutes(Number(e.target.value))}
+                              placeholder="e.g. 10"
+                              className="w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              Buffer window before marking arrival as late.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Working Days Selector */}
+                        <div>
+                          <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                            Scheduled Working Days
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              { key: 'mon', label: 'Mon' },
+                              { key: 'tue', label: 'Tue' },
+                              { key: 'wed', label: 'Wed' },
+                              { key: 'thu', label: 'Thu' },
+                              { key: 'fri', label: 'Fri' },
+                              { key: 'sat', label: 'Sat' },
+                              { key: 'sun', label: 'Sun' },
+                            ].map((day) => {
+                              const activeDays = (customWorkingDays || '').toLowerCase().split(',').map((s) => s.trim());
+                              const isSelected = activeDays.includes(day.key);
+                              return (
+                                <button
+                                  key={day.key}
+                                  type="button"
+                                  onClick={() => {
+                                    let next: string[];
+                                    if (isSelected) {
+                                      next = activeDays.filter((d) => d !== day.key);
+                                    } else {
+                                      next = [...activeDays, day.key];
+                                    }
+                                    setCustomWorkingDays(next.join(','));
+                                  }}
+                                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer border ${
+                                    isSelected
+                                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                                      : 'bg-slate-950 text-slate-500 border-white/5 hover:text-slate-300'
+                                  }`}
+                                >
+                                  {day.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
-                    );
-                  })()}
+                    )}
+                  </div>
+
+                  {/* 3. Individual Overtime Counting Policy Card */}
+                  <div className="p-4.5 rounded-xl bg-slate-900/80 border border-white/10 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <h5 className="text-xs font-bold text-white flex items-center gap-2">
+                          <TimerIcon className="h-4 w-4 text-emerald-400" /> Overtime Counting Policy
+                        </h5>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Configure whether extra hours past shift end are counted towards compensable overtime for this employee.
+                        </p>
+                      </div>
+
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={overtimeCounted}
+                          onChange={(e) => setOvertimeCounted(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 shadow-inner" />
+                        <span className="ml-2 text-xs font-bold">
+                          {overtimeCounted ? (
+                            <span className="text-emerald-400 font-bold">Overtime Enabled</span>
+                          ) : (
+                            <span className="text-slate-500">Excluded</span>
+                          )}
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-slate-950/60 border border-white/5 text-[11px] text-slate-300 leading-relaxed">
+                      {overtimeCounted ? (
+                        <div className="flex items-start gap-2 text-emerald-300">
+                          <CheckCircleIcon className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
+                          <span>
+                            <strong>Overtime Counted:</strong> Working past scheduled shift hours is credited to daily additional minutes and counted towards overtime payroll for {employee.employeeName}.
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2 text-slate-400">
+                          <span className="h-2 w-2 rounded-full bg-slate-500 shrink-0 mt-1.5" />
+                          <span>
+                            <strong>Standard Shift Only:</strong> Hours worked past shift end are recorded in presence logs for audit and visibility, but will <em>not</em> be credited as compensable overtime.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   {/* 4. Save Button */}
                   <div className="pt-2 flex justify-end">

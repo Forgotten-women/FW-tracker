@@ -210,6 +210,14 @@ const breakProgressBar = document.getElementById('break-progress-bar');
 const breakCountdownFooter = document.getElementById('break-countdown-footer');
 const breakPermittedPill = document.getElementById('break-permitted-pill');
 
+// Fullscreen Undismissable Break Lock Elements
+const breakLockScreen = document.getElementById('break-lock-screen');
+const lockBreakTimer = document.getElementById('lock-break-timer');
+const lockBreakAllowance = document.getElementById('lock-break-allowance');
+const lockAllowanceText = document.getElementById('lock-allowance-text');
+const lockTimerBox = document.getElementById('lock-timer-box');
+const lockResumeBtn = document.getElementById('lock-resume-btn');
+
 let isOnBreakState = false;
 // Whether the server is crediting this laptop's time right now. The timer only
 // ticks while it is: ticking through time the server never credits (outside
@@ -433,7 +441,7 @@ function updateShiftTargetDisplay(activeSecs, shiftTargetMins = currentShiftTarg
 
 function updateBreakCountdown() {
   if (isTogglingBreak) return;
-  if (!isOnBreakState || !breakStartedAtMs || !breakCountdownTimer) return;
+  if (!isOnBreakState || !breakStartedAtMs) return;
   const elapsedSecs = Math.max(0, Math.floor((Date.now() - breakStartedAtMs) / 1000));
   const totalPermittedSecs = breakPermittedMins * 60;
   const remainingSecs = totalPermittedSecs - elapsedSecs;
@@ -443,10 +451,22 @@ function updateBreakCountdown() {
     breakProgressBar.style.width = `${pct}%`;
   }
 
+  // Update lock screen elapsed timer
+  if (lockBreakTimer) {
+    lockBreakTimer.textContent = formatMS(elapsedSecs);
+  }
+
   if (remainingSecs > 0) {
     const formatted = formatMS(remainingSecs);
-    breakCountdownTimer.textContent = formatted;
-    breakToggleBtn.textContent = `Resume work (${Math.ceil(remainingSecs / 60)}m left)`;
+    if (breakCountdownTimer) breakCountdownTimer.textContent = formatted;
+    if (breakToggleBtn) breakToggleBtn.textContent = `Resume work (${Math.ceil(remainingSecs / 60)}m left)`;
+
+    if (lockBreakAllowance) lockBreakAllowance.className = 'lock-allowance-pill';
+    if (lockTimerBox) lockTimerBox.className = 'lock-timer-box';
+    if (lockAllowanceText) {
+      const remMins = Math.ceil(remainingSecs / 60);
+      lockAllowanceText.textContent = `${remMins}m of ${breakPermittedMins}m permitted allowance remaining`;
+    }
 
     if (remainingSecs <= 300) {
       if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap warning';
@@ -465,8 +485,9 @@ function updateBreakCountdown() {
     }
   } else {
     const overdueSecs = Math.abs(remainingSecs);
-    breakCountdownTimer.textContent = `+${formatMS(overdueSecs)} over`;
-    breakToggleBtn.textContent = 'Resume work (overdue)';
+    const overdueMins = Math.ceil(overdueSecs / 60);
+    if (breakCountdownTimer) breakCountdownTimer.textContent = `+${formatMS(overdueSecs)} over`;
+    if (breakToggleBtn) breakToggleBtn.textContent = 'Resume work (overdue)';
     if (breakCountdownWrap) breakCountdownWrap.className = 'break-countdown-wrap overdue';
     if (breakProgressBar) {
       breakProgressBar.style.width = '100%';
@@ -475,6 +496,12 @@ function updateBreakCountdown() {
     if (breakCountdownFooter) {
       breakCountdownFooter.textContent = 'Break exceeded: extra time counts toward your deficit.';
       breakCountdownFooter.style.color = '#f87171';
+    }
+
+    if (lockBreakAllowance) lockBreakAllowance.className = 'lock-allowance-pill excess';
+    if (lockTimerBox) lockTimerBox.className = 'lock-timer-box excess';
+    if (lockAllowanceText) {
+      lockAllowanceText.textContent = `⚠️ Over Allowance: +${overdueMins}m excess deducted`;
     }
   }
 }
@@ -603,6 +630,17 @@ async function refreshStatus() {
           if (breakCountdownWrap) {
             breakCountdownWrap.classList.remove('hidden');
           }
+          if (breakLockScreen) {
+            breakLockScreen.classList.remove('hidden');
+          }
+          if (minimizeBtn) minimizeBtn.style.visibility = 'hidden';
+          if (closeBtn) closeBtn.style.visibility = 'hidden';
+          const win = getTauriWindow();
+          if (win) {
+            if (typeof win.setFullscreen === 'function') win.setFullscreen(true).catch(() => {});
+            if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true).catch(() => {});
+            if (typeof win.setFocus === 'function') win.setFocus().catch(() => {});
+          }
           if (!isTogglingBreak) {
             updateBreakCountdown();
             if (statusBanner) statusBanner.className = 'status-banner away';
@@ -618,6 +656,11 @@ async function refreshStatus() {
           if (breakCountdownWrap) {
             breakCountdownWrap.classList.add('hidden');
           }
+          if (breakLockScreen) {
+            breakLockScreen.classList.add('hidden');
+          }
+          if (minimizeBtn) minimizeBtn.style.visibility = 'visible';
+          if (closeBtn) closeBtn.style.visibility = 'visible';
 
           if (isBreakUsed) {
             if (data.latest.workstationStatus === 'AWAY') {
@@ -853,6 +896,7 @@ if (enrollBtn) {
 
 if (minimizeBtn) {
   minimizeBtn.addEventListener('click', () => {
+    if (isOnBreakState) return;
     const win = getTauriWindow();
     if (win && typeof win.minimize === 'function') {
       win.minimize();
@@ -864,6 +908,7 @@ if (minimizeBtn) {
 
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {
+    if (isOnBreakState) return;
     const win = getTauriWindow();
     if (win && typeof win.hide === 'function') {
       win.hide();
@@ -887,17 +932,35 @@ if (breakToggleBtn) {
       isOnBreakState = true;
       breakStartedAtMs = Date.now();
       if (breakCountdownWrap) breakCountdownWrap.classList.remove('hidden');
+      if (breakLockScreen) breakLockScreen.classList.remove('hidden');
+      if (minimizeBtn) minimizeBtn.style.visibility = 'hidden';
+      if (closeBtn) closeBtn.style.visibility = 'hidden';
       if (statusBanner) statusBanner.className = 'status-banner away';
       if (statusText) statusText.textContent = 'On break';
       breakToggleBtn.textContent = 'Starting break…';
+      const win = getTauriWindow();
+      if (win) {
+        if (typeof win.setFullscreen === 'function') win.setFullscreen(true).catch(() => {});
+        if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true).catch(() => {});
+        if (typeof win.setFocus === 'function') win.setFocus().catch(() => {});
+      }
       updateBreakCountdown();
     } else {
       isOnBreakState = false;
       breakStartedAtMs = null;
       if (breakCountdownWrap) breakCountdownWrap.classList.add('hidden');
+      if (breakLockScreen) breakLockScreen.classList.add('hidden');
+      if (minimizeBtn) minimizeBtn.style.visibility = 'visible';
+      if (closeBtn) closeBtn.style.visibility = 'visible';
       if (statusBanner) statusBanner.className = 'status-banner';
       if (statusText) statusText.textContent = 'Active · In office';
       breakToggleBtn.textContent = 'Break taken';
+      const win = getTauriWindow();
+      if (win) {
+        if (typeof win.setFullscreen === 'function') win.setFullscreen(false).catch(() => {});
+        if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(false).catch(() => {});
+        if (typeof win.center === 'function') win.center().catch(() => {});
+      }
     }
 
     try {
@@ -914,6 +977,67 @@ if (breakToggleBtn) {
     }
   });
 }
+
+// Resume button on the fullscreen lock screen
+if (lockResumeBtn) {
+  lockResumeBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (isTogglingBreak) return;
+    isTogglingBreak = true;
+    lockResumeBtn.disabled = true;
+    lockResumeBtn.style.opacity = '0.6';
+
+    try {
+      await callBackend('set_manual_break', { onBreak: false });
+      isOnBreakState = false;
+      breakStartedAtMs = null;
+      if (breakLockScreen) breakLockScreen.classList.add('hidden');
+      if (breakCountdownWrap) breakCountdownWrap.classList.add('hidden');
+      if (minimizeBtn) minimizeBtn.style.visibility = 'visible';
+      if (closeBtn) closeBtn.style.visibility = 'visible';
+      if (statusBanner) statusBanner.className = 'status-banner';
+      if (statusText) statusText.textContent = 'Active · In office';
+      const win = getTauriWindow();
+      if (win) {
+        if (typeof win.setFullscreen === 'function') await win.setFullscreen(false).catch(() => {});
+        if (typeof win.setAlwaysOnTop === 'function') await win.setAlwaysOnTop(false).catch(() => {});
+        if (typeof win.center === 'function') await win.center().catch(() => {});
+      }
+    } catch (err) {
+      console.error('Resume break failed:', err);
+      const errMsg = (typeof err === 'string' ? err : (err && err.message) || '').toLowerCase();
+      if (!errMsg.includes('no break') && !errMsg.includes('not_on_break')) {
+        showFeedback(typeof err === 'string' ? err : (err && err.message) || 'Could not resume break.');
+      }
+    } finally {
+      isTogglingBreak = false;
+      lockResumeBtn.disabled = false;
+      lockResumeBtn.style.opacity = '1';
+      await refreshStatus();
+    }
+  });
+}
+
+// Undismissable lock screen enforcement: block Escape, Tab, Alt hotkeys while on break
+window.addEventListener('keydown', (e) => {
+  if (isOnBreakState) {
+    if (e.key === 'Escape' || e.key === 'Tab' || e.altKey || e.key === 'F4') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+}, true);
+
+// Refocus window if user tries to click away while on break
+window.addEventListener('blur', () => {
+  if (isOnBreakState) {
+    setTimeout(() => {
+      window.focus();
+      const win = getTauriWindow();
+      if (win && typeof win.setFocus === 'function') win.setFocus().catch(() => {});
+    }, 40);
+  }
+});
 
 if (checkoutBtn) {
   checkoutBtn.addEventListener('click', () => {

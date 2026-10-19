@@ -47,6 +47,8 @@ export interface DayView {
   progressPercent: number;
   remainingMinutes: number;
   overtimeMinutes: number;
+  overtimeCounted?: boolean;
+  countedOvertimeMinutes?: number;
   onBreak: boolean;
   onLeave: boolean;
   isWorkingDay: boolean;
@@ -94,6 +96,9 @@ export interface EmployeeDay {
   day?: DayView;
   checkedOut?: boolean;
   onLeave?: boolean;
+  overtimeMinutes?: number;
+  overtimeCounted?: boolean;
+  countedOvertimeMinutes?: number;
 }
 
 export interface Movement {
@@ -162,6 +167,7 @@ export interface AdminEmployee {
   dailyRate?: number | null;
   startDate?: string | null;
   appTrackingEnabled?: boolean;
+  overtimeCounted?: boolean;
 }
 
 export interface EnrollmentCode {
@@ -1415,6 +1421,24 @@ export interface ShiftPattern {
   isDefault: boolean;
   active: boolean;
   createdAt: number;
+}
+
+export interface CustomShiftInput {
+  startTime: string;
+  endTime: string;
+  permittedBreakMinutes?: number;
+  graceMinutes?: number;
+  workingDays?: string;
+}
+
+export interface ManualBreakInput {
+  employeeId: string;
+  dateKey?: string;
+  breakMinutes?: number;
+  startTime?: string;
+  endTime?: string;
+  reason: string;
+  permittedMinutes?: number;
 }
 
 

@@ -467,6 +467,7 @@ function buildDayView({
     progressPercent,
     remainingMinutes,
     overtimeMinutes,
+    overtimeCounted: Boolean(s.overtimeCounted),
     onBreak,
     onLeave: Boolean(onLeave),
     isWorkingDay: Boolean(s.isWorkingDay),
@@ -764,6 +765,8 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     recoveredLateMinutes,
     netLateMinutes,
     overtimeMinutes,
+    overtimeCounted: Boolean(s.overtimeCounted),
+    countedOvertimeMinutes: s.overtimeCounted ? overtimeMinutes : 0,
     totalBreakMinutesTaken,
     isLateOccurrence,
     excessBreakMinutes,
@@ -1285,7 +1288,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
   const dailyWorkedMinutes = todayDay.workedMinutes || 0;
   const dailyProgressMinutes = view ? view.progressMinutes : dailyWorkedMinutes;
   const dailyShortMinutes = view ? view.remainingMinutes : Math.max(0, dailyRequiredMinutes - dailyWorkedMinutes);
-  const dailyAdditionalMinutes = view ? view.overtimeMinutes : Math.max(0, dailyWorkedMinutes - dailyRequiredMinutes);
+  const dailyAdditionalMinutes = view ? view.overtimeMinutes : (sched.overtimeCounted ? Math.max(0, dailyWorkedMinutes - dailyRequiredMinutes) : 0);
   const dailyRecoveredMinutes = todayDay.recoveredLateMinutes || 0;
 
   // --- Week calculation (Monday through Sunday) ---
