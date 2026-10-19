@@ -24,8 +24,9 @@ router.get('/export', requireUserOrAdminKey('attendance.read'), async (req, res)
       departmentId: departmentId || null,
     });
 
-    const isSingle = Boolean(employeeId && reportData.employees.length === 1);
-    const empNum = isSingle ? reportData.employees[0].employee.employeeNumber : 'all';
+    const isSingle = Boolean(employeeId && reportData.employees && reportData.employees.length === 1);
+    const empObj = reportData.employees?.[0]?.employee;
+    const empNum = (isSingle && empObj) ? (empObj.employeeNumber || empObj.id) : 'all';
     const filenameBase = `attendance-report-${empNum}-${reportData.meta.startDate}_${reportData.meta.endDate}`;
 
     await audit({

@@ -11,6 +11,7 @@ const PR = require('./payroll');
 const T = require('../util/time');
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 function formatMins(mins) {
   if (!mins || mins <= 0) return '0m';
@@ -40,7 +41,7 @@ function getDaysInRange(startDate, endDate) {
 
 /**
  * Aggregates all workforce attendance, schedule, leave, and payroll data
- * for the requested date window.
+ * for the requested date window using high-performance batch queries.
  */
 async function generateReportData({ from, to, employeeId = null, workStatus = null, departmentId = null }) {
   const nowMs = T.now();
@@ -49,11 +50,13 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
   const dateList = getDaysInRange(startDate, endDate);
 
   // 1. Fetch targeted employees
-  let empQuery = 'SELECT * FROM employees WHERE active = 1';
+  let empQuery = 'SELECT * FROM employees WHERE 1=1';
   const empParams = [];
   if (employeeId) {
     empQuery += ' AND id = ?';
     empParams.push(employeeId);
+  } else {
+    empQuery += ' AND active = 1';
   }
   if (workStatus) {
     empQuery += ' AND work_mode = ?';
@@ -66,34 +69,102 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
   empQuery += ' ORDER BY employee_number ASC NULLS LAST, name ASC';
   const employees = await db.prepare(empQuery).all(...empParams);
 
-  // 2. Fetch approved leave requests overlapping this window
-  const leaveRows = await db.prepare(`
-    SELECT * FROM leave_requests
-    WHERE status = 'APPROVED'
-      AND start_date <= ? AND end_date >= ?
-  `).all(endDate, startDate);
+  if (!employees || employees.length === 0) {
+    return {
+      meta: {
+        generatedAt: T.displayTime(nowMs),
+        generatedAtMs: nowMs,
+        startDate,
+        endDate,
+        formattedPeriod: `${formatDateDisplay(startDate)} – ${formatDateDisplay(endDate)}`,
+        totalEmployees: 0,
+      },
+      employees: [],
+    };
+  }
 
-  const leaveByEmpDate = {};
+  // 2. Run all queries in ONE parallel batch
+  const [patterns, empRecords, summaries, attDays, calendarDays, leaveRows, periodAdjs, salaryRows, leaveBalances] = await Promise.all([
+    db.prepare('SELECT * FROM working_patterns').all(),
+    employeeId
+      ? db.prepare('SELECT * FROM employment_records WHERE employee_id = ?').all(employeeId)
+      : db.prepare('SELECT * FROM employment_records').all(),
+    employeeId
+      ? db.prepare('SELECT * FROM attendance_daily_summary WHERE employee_id = ? AND date_key >= ? AND date_key <= ?').all(employeeId, startDate, endDate)
+      : db.prepare('SELECT * FROM attendance_daily_summary WHERE date_key >= ? AND date_key <= ?').all(startDate, endDate),
+    employeeId
+      ? db.prepare('SELECT * FROM attendance_days WHERE employee_id = ? AND date_key >= ? AND date_key <= ?').all(employeeId, startDate, endDate)
+      : db.prepare('SELECT * FROM attendance_days WHERE date_key >= ? AND date_key <= ?').all(startDate, endDate),
+    db.prepare('SELECT * FROM calendar_days WHERE date >= ? AND date <= ?').all(startDate, endDate),
+    employeeId
+      ? db.prepare(`
+          SELECT lr.*, lt.name AS type_name, lt.is_paid AS type_is_paid
+          FROM leave_requests lr
+          LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+          WHERE lr.employee_id = ? AND lr.status = 'APPROVED'
+            AND lr.start_date <= ? AND lr.end_date >= ?
+        `).all(employeeId, endDate, startDate)
+      : db.prepare(`
+          SELECT lr.*, lt.name AS type_name, lt.is_paid AS type_is_paid
+          FROM leave_requests lr
+          LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
+          WHERE lr.status = 'APPROVED'
+            AND lr.start_date <= ? AND lr.end_date >= ?
+        `).all(endDate, startDate),
+    employeeId
+      ? db.prepare('SELECT * FROM attendance_period_adjustments WHERE employee_id = ? AND period_start <= ? AND period_end >= ?').all(employeeId, endDate, startDate)
+      : db.prepare('SELECT * FROM attendance_period_adjustments WHERE period_start <= ? AND period_end >= ?').all(endDate, startDate),
+    employeeId
+      ? db.prepare('SELECT * FROM salary_history WHERE employee_id = ? ORDER BY effective_from DESC').all(employeeId)
+      : db.prepare('SELECT * FROM salary_history ORDER BY effective_from DESC').all(),
+    employeeId
+      ? db.prepare('SELECT * FROM leave_balances WHERE employee_id = ?').all(employeeId).catch(() => [])
+      : db.prepare('SELECT * FROM leave_balances').all().catch(() => []),
+  ]);
+
+  // Fast map lookups
+  const defaultPattern = patterns.find(p => p.is_default === 1) || patterns[0] || {};
+  const patternById = new Map(patterns.map(p => [p.id, p]));
+  const empRecordByEmp = new Map(empRecords.map(r => [r.employee_id, r]));
+  const summaryMap = new Map(summaries.map(s => [`${s.employee_id}_${s.date_key}`, s]));
+  const dayMap = new Map(attDays.map(d => [`${d.employee_id}_${d.date_key}`, d]));
+  const holidayMap = new Map(calendarDays.map(c => [c.date, c]));
+  const salaryByEmp = new Map(salaryRows.map(s => [s.employee_id, s]));
+  const leaveBalByEmp = new Map(leaveBalances.map(b => [b.employee_id, b]));
+
+  const leaveByEmpDate = new Map();
   for (const lr of leaveRows) {
     const lDays = getDaysInRange(
       lr.start_date < startDate ? startDate : lr.start_date,
       lr.end_date > endDate ? endDate : lr.end_date
     );
     for (const d of lDays) {
-      if (!leaveByEmpDate[lr.employee_id]) leaveByEmpDate[lr.employee_id] = {};
-      leaveByEmpDate[lr.employee_id][d] = lr;
+      leaveByEmpDate.set(`${lr.employee_id}_${d}`, lr);
     }
   }
 
-  // 3. Process each employee
+  const periodAdjByEmp = new Map();
+  for (const pa of periodAdjs) {
+    const arr = periodAdjByEmp.get(pa.employee_id) || [];
+    arr.push(pa);
+    periodAdjByEmp.set(pa.employee_id, arr);
+  }
+
+  // 3. Process each employee (in-memory)
   const employeeReports = [];
 
   for (const emp of employees) {
     const empId = emp.id;
-    const empSched = await schedule.resolve(empId, endDate);
-    const empSalary = await PR.salaryAt(empId, endDate).catch(() => null);
-    const periodAdjustments = await attendance.listPeriodAdjustments(empId, startDate, endDate);
-    const totalPeriodCreditMins = periodAdjustments.reduce((sum, a) => sum + (a.credit_minutes || 0), 0);
+    const er = empRecordByEmp.get(empId);
+    const pat = (er?.working_pattern_id && patternById.get(er.working_pattern_id)) || defaultPattern;
+    const workingDaysSet = new Set((pat.working_days || 'mon,tue,wed,thu,fri').toLowerCase().split(',').map(s => s.trim()));
+    const startTime = pat.start_time || '11:00';
+    const endTime = pat.end_time || '19:00';
+    const permittedBreakMinutes = Number(pat.permitted_break_minutes) || 30;
+    const dayEquivalentMinutes = Number(pat.day_equivalent_minutes) || 480;
+
+    const empAdjs = periodAdjByEmp.get(empId) || [];
+    const totalPeriodCreditMins = empAdjs.reduce((s, a) => s + (Number(a.credit_minutes) || 0), 0);
 
     const dailyRows = [];
     let expectedWorkingDays = 0;
@@ -120,27 +191,49 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     for (const dKey of dateList) {
       const dt = new Date(dKey + 'T00:00:00Z');
       const dayName = DAY_NAMES[dt.getUTCDay()];
-      const daySched = await schedule.resolve(empId, dKey);
-      const isWorkDay = daySched.isWorkingDay;
+      const dayKeyShort = DAY_KEYS[dt.getUTCDay()];
 
-      // Check leave for this day
-      const leaveForDay = leaveByEmpDate[empId] && leaveByEmpDate[empId][dKey];
+      const isHoliday = holidayMap.has(dKey);
+      const isWorkDay = !isHoliday && workingDaysSet.has(dayKeyShort);
 
-      // Derive daily attendance figures
-      const derived = await attendance.deriveDay(empId, dKey, nowMs).catch(() => ({}));
-      const workedMins = Number(derived.workedMinutes) || 0;
-      const firstIn = derived.firstInAt ? T.displayTime(derived.firstInAt) : null;
-      const lastOut = derived.lastSeenAt ? T.displayTime(derived.lastSeenAt) : null;
-      const totalBreaksMins = (derived.breaks || []).reduce((sum, b) => sum + (b.actualMinutes || 0), 0);
-      const allowedBreakMins = daySched.permittedBreakMinutes || 30;
-      const excessBreakMins = Number(derived.excessBreakMinutes) || 0;
-      const lateMins = Number(derived.lateMinutes) || 0;
-      const earlyMins = Number(derived.earlyDepartureMinutes) || 0;
-      const dailyDeficitMins = Number(derived.dailyDeficitMinutes) || 0;
-      const dailyCreditMins = Math.abs(Number(derived.approvedAdjustmentMinutes) || 0);
-      const dailyNetShortfall = Math.max(0, dailyDeficitMins - dailyCreditMins);
+      const leaveForDay = leaveByEmpDate.get(`${empId}_${dKey}`);
+      const summary = summaryMap.get(`${empId}_${dKey}`);
+      const rawDay = dayMap.get(`${empId}_${dKey}`);
 
-      // Determine Work Status & Daily Status Label
+      let workedMins = 0;
+      let firstIn = null;
+      let lastOut = null;
+      let totalBreaksMins = 0;
+      let excessBreakMins = 0;
+      let lateMins = 0;
+      let earlyMins = 0;
+      let dailyDeficitMins = 0;
+      let dailyCreditMins = 0;
+
+      if (summary) {
+        workedMins = Number(summary.worked_minutes) || 0;
+        firstIn = summary.first_clock_in ? T.displayTime(Number(summary.first_clock_in)) : null;
+        lastOut = summary.last_clock_out ? T.displayTime(Number(summary.last_clock_out)) : null;
+        totalBreaksMins = Number(summary.break_minutes) || 0;
+        excessBreakMins = Number(summary.excess_break_minutes) || 0;
+        lateMins = Number(summary.late_minutes) || 0;
+        earlyMins = Number(summary.early_departure_minutes) || 0;
+        dailyDeficitMins = Number(summary.daily_deficit_minutes) || 0;
+        dailyCreditMins = Math.abs(Number(summary.approved_adjustment_minutes) || 0);
+      } else if (rawDay) {
+        workedMins = Number(rawDay.total_minutes) || 0;
+        firstIn = rawDay.first_in_at ? T.displayTime(Number(rawDay.first_in_at)) : null;
+        lastOut = rawDay.last_active_at ? T.displayTime(Number(rawDay.last_active_at)) : null;
+        dailyCreditMins = Math.abs(Number(rawDay.adjustment_minutes) || 0);
+        if (isWorkDay && !leaveForDay) {
+          dailyDeficitMins = Math.max(0, dayEquivalentMinutes - workedMins);
+        }
+      } else {
+        if (isWorkDay && !leaveForDay) {
+          dailyDeficitMins = dayEquivalentMinutes;
+        }
+      }
+
       let workStatusLabel = emp.work_mode || 'Office';
       if (workStatusLabel === 'IN_OFFICE') workStatusLabel = 'Office';
       if (workStatusLabel === 'REMOTE') workStatusLabel = 'Remote';
@@ -151,10 +244,10 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
 
       if (!isWorkDay) {
         scheduledDaysOff++;
-        dailyStatus = daySched.nonWorkingReason || 'Scheduled Day Off';
+        dailyStatus = isHoliday ? 'Public Holiday' : 'Scheduled Day Off';
         workStatusLabel = 'Rest Day';
       } else if (leaveForDay) {
-        const lType = String(leaveForDay.type || '').toUpperCase();
+        const lType = String(leaveForDay.type_name || leaveForDay.type || '').toUpperCase();
         if (lType.includes('SICK')) {
           dailyStatus = 'Sick Leave';
           sickLeaveDaysCount++;
@@ -167,7 +260,7 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         } else {
           dailyStatus = 'Paid Leave';
           paidLeaveDaysCount++;
-          payrollMins = daySched.dayEquivalentMinutes || 480;
+          payrollMins = dayEquivalentMinutes;
         }
         workStatusLabel = 'Leave';
       } else {
@@ -175,14 +268,13 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         if (workStatusLabel === 'WFH') wfhDaysCount++;
         if (workStatusLabel === 'Remote') remoteDaysCount++;
 
-        if (workedMins >= (daySched.dayEquivalentMinutes || 450)) {
+        if (workedMins >= dayEquivalentMinutes - 15) {
           dailyStatus = 'Complete Day';
           completeWorkingDays++;
         } else if (workedMins > 0) {
           dailyStatus = lateMins > 0 ? 'Late / Incomplete' : 'Incomplete Day';
           incompleteWorkingDays++;
         } else {
-          // 0 minutes worked on a regular working day
           dailyStatus = 'Unauthorised Absence';
           unauthorisedAbsenceDaysCount++;
           missingDays++;
@@ -197,12 +289,14 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
       grossShortfallMinutes += dailyDeficitMins;
       totalDailyApprovedCredit += dailyCreditMins;
 
+      const dailyNetShortfall = Math.max(0, dailyDeficitMins - dailyCreditMins);
+
       dailyRows.push({
         dateKey: dKey,
         dateFormatted: formatDateDisplay(dKey),
         dayName,
         workStatus: workStatusLabel,
-        scheduledShift: isWorkDay ? `${daySched.startTime} - ${daySched.endTime}` : '—',
+        scheduledShift: isWorkDay ? `${startTime} - ${endTime}` : '—',
         payrollHoursFormatted: formatMins(payrollMins),
         payrollMinutes: payrollMins,
         regularHoursFormatted: formatMins(workedMins),
@@ -211,8 +305,8 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         checkOut: lastOut || '--:--',
         breakDurationFormatted: totalBreaksMins > 0 ? `${totalBreaksMins}m` : '0m',
         breakMinutes: totalBreaksMins,
-        allowedBreakFormatted: `${allowedBreakMins}m`,
-        allowedBreakMinutes: allowedBreakMins,
+        allowedBreakFormatted: `${permittedBreakMinutes}m`,
+        allowedBreakMinutes: permittedBreakMinutes,
         dailyStatus,
         grossShortfallFormatted: dailyDeficitMins > 0 ? `${dailyDeficitMins}m` : '0m',
         grossShortfallMinutes: dailyDeficitMins,
@@ -220,6 +314,7 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         creditMinutes: dailyCreditMins,
         netShortfallFormatted: dailyNetShortfall > 0 ? `${dailyNetShortfall}m` : '0m',
         netShortfallMinutes: dailyNetShortfall,
+        notes: '',
       });
     }
 
@@ -229,18 +324,19 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     const surplusCreditMinutes = Math.max(0, totalApprovedCreditMinutes - grossShortfallMinutes);
 
     // Leave Summary
-    const leaveBal = await leave.balanceFor(empId, endDate).catch(() => null);
-    const annualLeaveOpening = leaveBal ? Number(leaveBal.annualEntitlementDays || 20) : 20;
-    const annualLeaveClosing = leaveBal ? Number(leaveBal.availableDays || 0) : 0;
+    const leaveBal = leaveBalByEmp.get(empId);
+    const annualLeaveOpening = leaveBal ? Number(leaveBal.annual_entitlement_days || 20) : 20;
+    const annualLeaveClosing = leaveBal ? Number(leaveBal.available_days || 0) : 0;
     const annualLeaveUsed = Math.max(0, paidLeaveDaysCount);
 
     // Payroll Summary
-    const monthlyWage = empSalary && !empSalary.blocked ? Number(empSalary.monthly) : 0;
-    const dailyWageRate = empSalary && !empSalary.blocked ? Number(empSalary.daily) : (monthlyWage / 22);
-    const currency = empSalary?.currency || 'PKR';
+    const sal = salaryByEmp.get(empId);
+    const monthlyWage = sal ? Number(sal.amount) : (Number(emp.base_salary) || 0);
+    const dailyWageRate = sal?.daily_rate ? Number(sal.daily_rate) : Math.round(monthlyWage * 12 / 260);
+    const currency = sal?.currency || emp.currency || 'PKR';
 
     // Shortfall deduction: net deficit converted to day fraction
-    const deficitDaysEquivalent = (netShortfallMinutes / (empSched.dayEquivalentMinutes || 480));
+    const deficitDaysEquivalent = (netShortfallMinutes / (dayEquivalentMinutes || 480));
     const attendanceDeduction = Math.round(deficitDaysEquivalent * dailyWageRate);
     const unpaidLeaveDeduction = Math.round(unpaidLeaveDaysCount * dailyWageRate);
     const finalPayrollAmount = Math.max(0, Math.round(monthlyWage - attendanceDeduction - unpaidLeaveDeduction));
@@ -249,14 +345,14 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
       employee: {
         id: emp.id,
         name: emp.name,
-        employeeNumber: emp.employee_number || 'N/A',
+        employeeNumber: emp.employee_number || emp.id,
         role: emp.role || 'Team Member',
         workStatus: emp.work_mode || 'IN_OFFICE',
         departmentId: emp.department_id || null,
-        scheduleSummary: `${empSched.startTime} - ${empSched.endTime}`,
-        permittedBreakMinutes: empSched.permittedBreakMinutes || 30,
-        dayEquivalentMinutes: empSched.dayEquivalentMinutes || 480,
-        overtimeCounted: Boolean(emp.overtime_counted),
+        scheduleSummary: `${startTime} - ${endTime}`,
+        permittedBreakMinutes,
+        dayEquivalentMinutes,
+        overtimeCounted: Boolean(emp.overtime_counted === 1 || emp.overtime_counted === true || emp.overtime_counted === '1'),
       },
       period: {
         startDate,
@@ -312,7 +408,7 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         finalPayrollAmount,
       },
       dailyRecords: dailyRows,
-      periodAdjustments,
+      periodAdjustments: empAdjs,
     });
   }
 
