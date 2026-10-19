@@ -342,8 +342,12 @@ pub async fn send_heartbeat(cfg: &AppConfig, payload: HeartbeatPayload) -> Resul
     let client = crate::net::http();
     let url = format!("{}/api/desktop/heartbeat", cfg.server_url.trim_end_matches('/'));
 
+    // A heartbeat that takes longer than this has failed: the tracker queues
+    // it (same event id, so a late arrival is recognised as a repeat) and
+    // carries on sampling, instead of waiting on a dead connection.
     let res = client
         .post(&url)
+        .timeout(std::time::Duration::from_secs(25))
         .header("Authorization", format!("Bearer {}", cfg.token))
         .json(&payload)
         .send()

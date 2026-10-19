@@ -724,6 +724,16 @@ async function refreshStatus() {
           }
         }
 
+        // The numbers above are the server's last answer. If the server hasn't
+        // answered for 3+ minutes, say so instead of showing a frozen "Active":
+        // time keeps being recorded on this laptop and is sent when it reconnects.
+        const lastSyncAt = Number(data.lastSyncAt) || 0;
+        if (lastSyncAt > 0 && Date.now() - lastSyncAt > 3 * 60 * 1000 && !data.latest.outsideWorkingHours) {
+          const since = new Date(lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          if (statusBanner) statusBanner.className = 'status-banner syncing';
+          if (statusText) statusText.textContent = `Not syncing since ${since} · retrying`;
+        }
+
         if (data.latest.inOffice) {
           if (networkText) networkText.textContent = 'On office Wi-Fi · Verified';
           if (wifiConnectBtn) wifiConnectBtn.classList.add('hidden');

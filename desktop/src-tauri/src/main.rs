@@ -29,6 +29,14 @@ static IS_MANUAL_BREAK: AtomicBool = AtomicBool::new(false);
 // widget shows server-credited time plus this, so it never runs ahead of what
 // the server will actually record and then snaps back.
 static PENDING_ACTIVE_SECONDS: AtomicU64 = AtomicU64::new(0);
+/// Unix ms of the last heartbeat the server answered (0 = none yet), so the
+/// widget can say when it isn't syncing instead of showing a frozen "Active".
+static LAST_SYNC_OK_AT: AtomicU64 = AtomicU64::new(0);
+
+fn mark_synced() {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    LAST_SYNC_OK_AT.store(now, Ordering::SeqCst);
+}
 
 const CAPTURE_SCRIPT: &str = include_str!("../../capture-screen.ps1");
 
@@ -137,6 +145,7 @@ async fn get_app_status(state: State<'_, AppState>) -> Result<serde_json::Value,
         "lockState": lock_state,
         "idleSeconds": idle_secs,
         "pendingActiveSeconds": PENDING_ACTIVE_SECONDS.load(Ordering::SeqCst),
+        "lastSyncAt": LAST_SYNC_OK_AT.load(Ordering::SeqCst),
         "latest": resp,
     }))
 }
@@ -740,6 +749,7 @@ fn main() {
                         match client::send_heartbeat(&cfg, payload).await {
                             Ok(resp) => {
                                 first_run = false;
+                                mark_synced();
                                 live::on_heartbeat(&resp);
                                 *state.latest_response.lock().unwrap() = Some(resp.clone());
                                 let mut cfg_to_save = cfg.clone();
@@ -882,6 +892,7 @@ fn main() {
                         let payload_for_retry = payload.clone();
                         match client::send_heartbeat(&cfg, payload).await {
                             Ok(resp) => {
+                                mark_synced();
                                 accumulated_active = 0;
                                 accumulated_idle = 0;
                                 app_breakdown.clear();

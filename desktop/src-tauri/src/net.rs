@@ -121,6 +121,15 @@ async fn doh_lookup(host: &str) -> Result<Vec<IpAddr>, Box<dyn std::error::Error
 }
 
 /// The shared client for every backend request (cheap to clone).
+///
+/// Every request has an overall time limit. Without one, a request whose
+/// reply never came (a pooled connection silently dropped by the Wi-Fi or
+/// router while the screen slept over a break) waited forever, and the
+/// tracker loop that sent it - activity sampling included - stopped with it:
+/// the widget froze on its last numbers and the server saw no presence for an
+/// hour or more (Naveed, 19 Oct 2026: 1:26-2:59 PM). Idle pooled connections
+/// are dropped before a NAT is likely to have forgotten them, and keepalive
+/// probes notice a dead one.
 pub fn http() -> reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT
@@ -128,6 +137,9 @@ pub fn http() -> reqwest::Client {
             reqwest::Client::builder()
                 .dns_resolver(resolver().clone())
                 .connect_timeout(Duration::from_secs(15))
+                .timeout(Duration::from_secs(60))
+                .pool_idle_timeout(Duration::from_secs(45))
+                .tcp_keepalive(Duration::from_secs(20))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new())
         })
