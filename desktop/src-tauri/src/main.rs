@@ -78,6 +78,65 @@ async fn confirm_presence(state: State<'_, AppState>, app: tauri::AppHandle) -> 
     r
 }
 
+// The break lock screen fills the screen. Every switch between it and the
+// normal 360x460 widget goes through apply_break_window, because overlapping
+// calls broke it on macOS: leaving full screen there is a ~1 s animation, a
+// resize during it is lost, and a second full-screen call during it can flip
+// the window back. Arsalan, 20 Oct 2026: the break ended but the window stayed
+// full screen with the normal layout. Each request supersedes older ones.
+static BREAK_WINDOW_EPOCH: AtomicU64 = AtomicU64::new(0);
+static BREAK_WINDOW_EXITING: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn apply_break_window(app: &tauri::AppHandle, on_break: bool) {
+    let epoch = BREAK_WINDOW_EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(window) = app.get_window("main") else { return };
+        let current = || BREAK_WINDOW_EPOCH.load(Ordering::SeqCst) == epoch;
+        if on_break {
+            let _ = window.show();
+            let _ = window.unminimize();
+            if !window.is_fullscreen().unwrap_or(false) && !BREAK_WINDOW_EXITING.load(Ordering::SeqCst) {
+                let _ = window.set_fullscreen(true);
+            }
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_focus();
+            return;
+        }
+        let _ = window.set_always_on_top(false);
+        if !window.is_fullscreen().unwrap_or(false) && !BREAK_WINDOW_EXITING.load(Ordering::SeqCst) {
+            // Already the normal widget: nothing to undo (don't move it around).
+            return;
+        }
+        // Only one exit at a time: a second full-screen call during the
+        // animation would toggle the window back in.
+        if !BREAK_WINDOW_EXITING.swap(true, Ordering::SeqCst) {
+            let _ = window.set_fullscreen(false);
+        }
+        // Wait out the exit animation before sizing the widget back.
+        for _ in 0..30 {
+            if !window.is_fullscreen().unwrap_or(false) { break; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        if window.is_fullscreen().unwrap_or(false) {
+            // Still full screen (the exit was swallowed): ask once more.
+            let _ = window.set_fullscreen(false);
+            tokio::time::sleep(Duration::from_millis(1200)).await;
+        }
+        BREAK_WINDOW_EXITING.store(false, Ordering::SeqCst);
+        if !current() { return; }
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 360.0, height: 460.0 }));
+        let _ = window.center();
+    });
+}
+
+/// The widget asks for the window it needs (it no longer drives full screen itself).
+#[tauri::command]
+fn sync_break_window(on_break: bool, app: tauri::AppHandle) {
+    apply_break_window(&app, on_break);
+}
+
 fn mark_synced() {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     LAST_SYNC_OK_AT.store(now, Ordering::SeqCst);
@@ -250,12 +309,7 @@ async fn set_manual_break(on_break: bool, state: State<'_, AppState>, app: tauri
                         r.today.break_already_taken = true;
                     }
                 }
-                if let Some(window) = app.get_window("main") {
-                    let _ = window.set_fullscreen(false);
-                    let _ = window.set_always_on_top(false);
-                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 360.0, height: 460.0 }));
-                    let _ = window.center();
-                }
+                apply_break_window(&app, false);
                 return Ok(false);
             }
             return Err(err);
@@ -273,20 +327,7 @@ async fn set_manual_break(on_break: bool, state: State<'_, AppState>, app: tauri
         }
     }
 
-    if let Some(window) = app.get_window("main") {
-        if target {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_fullscreen(true);
-            let _ = window.set_always_on_top(true);
-            let _ = window.set_focus();
-        } else {
-            let _ = window.set_fullscreen(false);
-            let _ = window.set_always_on_top(false);
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 360.0, height: 460.0 }));
-            let _ = window.center();
-        }
-    }
+    apply_break_window(&app, target);
 
     Ok(target)
 }
@@ -601,6 +642,7 @@ fn main() {
             developer_unpair,
             set_manual_break,
             confirm_presence,
+            sync_break_window,
             toggle_manual_break,
             connect_office_wifi,
             checkout_shift,

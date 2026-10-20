@@ -538,9 +538,25 @@ function updateBreakCountdown() {
   }
 }
 
+// Full screen for the break lock is driven by the app (apply_break_window in
+// main.rs), never directly from here: overlapping full-screen calls left the
+// window stuck full screen on macOS after a break ended. The widget only asks
+// when the state it needs changes.
+let windowBreakState = null;
+function syncBreakWindow(onBreak) {
+  if (windowBreakState === onBreak) return;
+  windowBreakState = onBreak;
+  callBackend('sync_break_window', { onBreak }).catch(() => {});
+}
+// Bumped whenever a break starts or ends here: a status read that began before
+// that is stale (it would put the lock screen back after Resume).
+let breakEpoch = 0;
+
 async function refreshStatus() {
   try {
+    const epochAtStart = breakEpoch;
     const data = await callBackend('get_app_status');
+    if (epochAtStart !== breakEpoch || isTogglingBreak) return;
     try { renderPresencePrompt(data && data.presencePrompt); } catch (_) {}
 
     // Show version number wherever visible
@@ -677,12 +693,7 @@ async function refreshStatus() {
           }
           if (minimizeBtn) minimizeBtn.style.visibility = 'hidden';
           if (closeBtn) closeBtn.style.visibility = 'hidden';
-          const win = getTauriWindow();
-          if (win) {
-            if (typeof win.setFullscreen === 'function') win.setFullscreen(true).catch(() => {});
-            if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true).catch(() => {});
-            if (typeof win.setFocus === 'function') win.setFocus().catch(() => {});
-          }
+          syncBreakWindow(true);
           if (!isTogglingBreak) {
             updateBreakCountdown();
             if (statusBanner) statusBanner.className = 'status-banner away';
@@ -703,6 +714,7 @@ async function refreshStatus() {
           }
           if (minimizeBtn) minimizeBtn.style.visibility = 'visible';
           if (closeBtn) closeBtn.style.visibility = 'visible';
+          syncBreakWindow(false);
 
           if (isBreakUsed) {
             if (data.latest.workstationStatus === 'AWAY') {
@@ -1017,6 +1029,9 @@ async function applyBreak(targetIsBreak) {
   if (!breakToggleBtn || isTogglingBreak) return;
   {
     isTogglingBreak = true;
+    breakEpoch++;
+    // set_manual_break switches the window itself (apply_break_window).
+    windowBreakState = targetIsBreak;
     breakToggleBtn.disabled = true;
     breakToggleBtn.classList.add('disabled');
 
@@ -1030,12 +1045,6 @@ async function applyBreak(targetIsBreak) {
       if (statusBanner) statusBanner.className = 'status-banner away';
       if (statusText) statusText.textContent = 'On break';
       breakToggleBtn.textContent = 'Starting break…';
-      const win = getTauriWindow();
-      if (win) {
-        if (typeof win.setFullscreen === 'function') win.setFullscreen(true).catch(() => {});
-        if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true).catch(() => {});
-        if (typeof win.setFocus === 'function') win.setFocus().catch(() => {});
-      }
       updateBreakCountdown();
     } else {
       isOnBreakState = false;
@@ -1047,12 +1056,6 @@ async function applyBreak(targetIsBreak) {
       if (statusBanner) statusBanner.className = 'status-banner';
       if (statusText) statusText.textContent = 'Active · In office';
       breakToggleBtn.textContent = 'Break taken';
-      const win = getTauriWindow();
-      if (win) {
-        if (typeof win.setFullscreen === 'function') win.setFullscreen(false).catch(() => {});
-        if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(false).catch(() => {});
-        if (typeof win.center === 'function') win.center().catch(() => {});
-      }
     }
 
     try {
@@ -1076,10 +1079,13 @@ if (lockResumeBtn) {
     e.preventDefault();
     if (isTogglingBreak) return;
     isTogglingBreak = true;
+    breakEpoch++;
     lockResumeBtn.disabled = true;
     lockResumeBtn.style.opacity = '0.6';
 
     try {
+      // The app takes the window out of full screen (apply_break_window).
+      windowBreakState = false;
       await callBackend('set_manual_break', { onBreak: false });
       isOnBreakState = false;
       breakStartedAtMs = null;
@@ -1089,12 +1095,6 @@ if (lockResumeBtn) {
       if (closeBtn) closeBtn.style.visibility = 'visible';
       if (statusBanner) statusBanner.className = 'status-banner';
       if (statusText) statusText.textContent = 'Active · In office';
-      const win = getTauriWindow();
-      if (win) {
-        if (typeof win.setFullscreen === 'function') await win.setFullscreen(false).catch(() => {});
-        if (typeof win.setAlwaysOnTop === 'function') await win.setAlwaysOnTop(false).catch(() => {});
-        if (typeof win.center === 'function') await win.center().catch(() => {});
-      }
     } catch (err) {
       console.error('Resume break failed:', err);
       const errMsg = (typeof err === 'string' ? err : (err && err.message) || '').toLowerCase();
