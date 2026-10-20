@@ -660,9 +660,410 @@ async function renderPeriodZip({ periodId, employeeIds, maskBank }) {
   return { buffer: zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }), skipped };
 }
 
+/**
+ * Combined multi-tab Excel workbook containing:
+ * - Tab 1: "Payroll Summary" (Overall summary of all employees' invoices & payment details)
+ * - Tabs 2..N: "Employee Invoices" (Individual tab per employee formatted like a full salary invoice)
+ */
+async function renderPeriodCombinedExcel({ period, employeeIds, maskBank = false }) {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Forgotten Women Payroll System';
+  wb.created = new Date();
+
+  const brandNavy = '1E1B4B';
+  const brandIndigo = '4338CA';
+  const softHeaderBg = 'EEF2FF';
+  const zebraBg = 'F8FAFC';
+  const borderGrey = 'CBD5E1';
+  const darkEmerald = '065F46';
+
+  const statements = [];
+  const skipped = [];
+
+  for (const employeeId of employeeIds) {
+    try {
+      const st = await buildStatement({ periodId: period.id, employeeId, maskBank });
+      statements.push(st);
+    } catch (err) {
+      console.warn(`[invoice/combined-excel] Skipped ${employeeId}:`, err.message);
+      skipped.push({ employeeId, reason: err.message });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // SHEET 1: Main Payroll Summary
+  // -------------------------------------------------------------------------
+  const summarySheet = wb.addWorksheet('Payroll Summary', {
+    views: [{ showGridLines: true }],
+  });
+
+  // Banner
+  summarySheet.mergeCells('A1:Y1');
+  const titleCell = summarySheet.getCell('A1');
+  titleCell.value = 'FORGOTTEN WOMEN — WORKFORCE PAYROLL SUMMARY & INVOICE LEDGER';
+  titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brandNavy } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  summarySheet.getRow(1).height = 40;
+
+  // Metadata Row
+  summarySheet.mergeCells('A2:Y2');
+  const metaCell = summarySheet.getCell('A2');
+  const totalNet = statements.reduce((s, st) => s + (st.totals?.net || 0), 0);
+  const primaryCurrency = statements[0]?.currency || 'PKR';
+  metaCell.value = `Payroll Month: ${period.name} (${period.start_date} – ${period.end_date})  |  Total Workforce: ${statements.length} Employees  |  Total Net Payout: ${primaryCurrency} ${totalNet.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}  |  Status: ${period.status}`;
+  metaCell.font = { name: 'Calibri', size: 11, italic: true, color: { argb: 'FFFFFFFF' } };
+  metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brandIndigo } };
+  metaCell.alignment = { vertical: 'middle', horizontal: 'center' };
+  summarySheet.getRow(2).height = 24;
+
+  summarySheet.addRow([]); // Blank spacer
+
+  const summaryHeaders = [
+    'Sr.', 'Invoice Ref', 'Employee ID', 'Employee Name', 'Role / Job Title', 'Department',
+    'Work Mode', 'Currency', 'Base Salary', 'Additions', 'Overtime', 'Gross Earnings',
+    'Shortfall Ded.', 'Unpaid Leave Ded.', 'Adjustments', 'Total Deductions',
+    'Net Payable Salary', 'Scheduled Days', 'Present Days', 'Worked Hours', 'Shortfall Hours',
+    'Bank Name', 'Account Title', 'Account Number', 'IBAN'
+  ];
+
+  const headRow = summarySheet.addRow(summaryHeaders);
+  headRow.height = 28;
+  headRow.eachCell((cell) => {
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brandNavy } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = {
+      top: { style: 'thin', color: { argb: borderGrey } },
+      left: { style: 'thin', color: { argb: borderGrey } },
+      bottom: { style: 'medium', color: { argb: brandNavy } },
+      right: { style: 'thin', color: { argb: borderGrey } },
+    };
+  });
+
+  statements.forEach((st, idx) => {
+    const f = st.fields;
+    const t = st.totals;
+
+    const row = summarySheet.addRow([
+      idx + 1,
+      f.statement_reference,
+      f.employee_id,
+      f.employee_name,
+      f.job_title,
+      f.department,
+      f.working_arrangement,
+      st.currency,
+      t.monthlySalary,
+      t.additions,
+      t.overtime,
+      t.grossEarnings,
+      t.shortfall,
+      t.unpaidLeave,
+      t.adjustments,
+      t.totalDeductions,
+      t.net,
+      Number(f.scheduled_days) || 0,
+      Number(f.present_days) || 0,
+      f.worked_hours,
+      f.shortfall_hours,
+      f.bank_name,
+      f.account_title,
+      f.account_number,
+      f.iban,
+    ]);
+
+    row.height = 22;
+    const isEven = idx % 2 === 0;
+
+    row.eachCell((cell, colNum) => {
+      cell.font = { name: 'Calibri', size: 10 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isEven ? 'FFFFFFFF' : zebraBg } };
+      cell.border = {
+        top: { style: 'thin', color: { argb: borderGrey } },
+        left: { style: 'thin', color: { argb: borderGrey } },
+        bottom: { style: 'thin', color: { argb: borderGrey } },
+        right: { style: 'thin', color: { argb: borderGrey } },
+      };
+
+      if (colNum === 1 || colNum === 2 || colNum === 3 || colNum === 7 || colNum === 8 || (colNum >= 18 && colNum <= 21)) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (colNum >= 9 && colNum <= 17) {
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+        cell.numFmt = '#,##0.00';
+      } else {
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      }
+
+      // Highlight Net Pay in bold green
+      if (colNum === 17) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF065F46' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+      }
+    });
+  });
+
+  // Totals Row
+  const totalRow = summarySheet.addRow([
+    'TOTAL', '', '', '', '', '', '', '',
+    { formula: `SUM(I5:I${4 + statements.length})` },
+    { formula: `SUM(J5:J${4 + statements.length})` },
+    { formula: `SUM(K5:K${4 + statements.length})` },
+    { formula: `SUM(L5:L${4 + statements.length})` },
+    { formula: `SUM(M5:M${4 + statements.length})` },
+    { formula: `SUM(N5:N${4 + statements.length})` },
+    { formula: `SUM(O5:O${4 + statements.length})` },
+    { formula: `SUM(P5:P${4 + statements.length})` },
+    { formula: `SUM(Q5:Q${4 + statements.length})` },
+    '', '', '', '', '', '', '', ''
+  ]);
+  totalRow.height = 26;
+  totalRow.eachCell((cell, colNum) => {
+    cell.font = { name: 'Calibri', size: 10, bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: softHeaderBg } };
+    cell.border = {
+      top: { style: 'double', color: { argb: brandNavy } },
+      bottom: { style: 'double', color: { argb: brandNavy } },
+      left: { style: 'thin', color: { argb: borderGrey } },
+      right: { style: 'thin', color: { argb: borderGrey } },
+    };
+    if (colNum >= 9 && colNum <= 17) {
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      cell.numFmt = '#,##0.00';
+    } else {
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    }
+    if (colNum === 17) {
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF065F46' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFA7F3D0' } };
+    }
+  });
+
+  summarySheet.columns.forEach((col, idx) => {
+    const hLen = summaryHeaders[idx] ? summaryHeaders[idx].length : 12;
+    col.width = Math.max(hLen + 3, 13);
+  });
+  summarySheet.getColumn(2).width = 20; // Ref
+  summarySheet.getColumn(4).width = 24; // Name
+  summarySheet.getColumn(5).width = 24; // Role
+  summarySheet.getColumn(6).width = 18; // Dept
+  summarySheet.getColumn(17).width = 20; // Net
+  summarySheet.getColumn(25).width = 28; // IBAN
+
+  // -------------------------------------------------------------------------
+  // SHEETS 2..N: Individual Employee Invoice Sheets
+  // -------------------------------------------------------------------------
+  for (const st of statements) {
+    const f = st.fields;
+    const t = st.totals;
+
+    const rawName = `${f.employee_id || 'EMP'} - ${String(f.employee_name || 'Staff').split(' ')[0]}`.replace(/[\\/*?:[\]]/g, '');
+    const tabName = rawName.slice(0, 30);
+
+    const ws = wb.addWorksheet(tabName, {
+      views: [{ showGridLines: true }],
+    });
+
+    // 1. Title Banner
+    ws.mergeCells('A1:F1');
+    const bCell = ws.getCell('A1');
+    bCell.value = 'OFFICIAL SALARY INVOICE & EARNINGS STATEMENT';
+    bCell.font = { name: 'Calibri', size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+    bCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brandNavy } };
+    bCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    ws.getRow(1).height = 36;
+
+    // 2. Sub-Banner
+    ws.mergeCells('A2:F2');
+    const sCell = ws.getCell('A2');
+    sCell.value = `Statement Ref: ${f.statement_reference}  |  Month: ${f.payroll_month}  |  Pay Period: ${f.period_start} – ${f.period_end}  |  Issue Date: ${f.generated_date}`;
+    sCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FFFFFFFF' } };
+    sCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brandIndigo } };
+    sCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    ws.getRow(2).height = 22;
+
+    ws.addRow([]); // Blank spacer
+
+    // 3. Section Headers (Cards)
+    const cardHead = ws.addRow(['1. EMPLOYEE PROFILE', '', '', '2. PAYMENT & BANK DETAILS', '', '']);
+    cardHead.height = 24;
+    [1, 4].forEach(c => {
+      const cell = cardHead.getCell(c);
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: brandNavy } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: softHeaderBg } };
+    });
+
+    const infoGrid = [
+      ['Employee Name', f.employee_name, '', 'Bank Name', f.bank_name || '—', ''],
+      ['Employee ID', f.employee_id, '', 'Account Title', f.account_title || '—', ''],
+      ['Designation / Role', f.job_title, '', 'Account Number', f.account_number || '—', ''],
+      ['Department', f.department, '', 'IBAN', f.iban || '—', ''],
+      ['Working Arrangement', f.working_arrangement, '', 'Payment Currency', st.currency, ''],
+    ];
+
+    infoGrid.forEach(r => {
+      const row = ws.addRow(r);
+      row.height = 20;
+      row.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+      row.getCell(2).font = { name: 'Calibri', size: 10, bold: true };
+      row.getCell(4).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+      row.getCell(5).font = { name: 'Calibri', size: 10, bold: true };
+    });
+
+    ws.addRow([]); // Blank spacer
+
+    // 4. Attendance Summary Card
+    ws.mergeCells('A11:F11');
+    const attHead = ws.getCell('A11');
+    attHead.value = '3. ATTENDANCE & WORKING HOURS RECORD';
+    attHead.font = { name: 'Calibri', size: 11, bold: true, color: { argb: brandNavy } };
+    attHead.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: softHeaderBg } };
+    ws.getRow(11).height = 24;
+
+    const attRow1 = ws.addRow([
+      'Scheduled Working Days', f.scheduled_days,
+      'Paid Leave Days', f.paid_leave_days,
+      'Total Worked Hours', f.worked_hours
+    ]);
+    const attRow2 = ws.addRow([
+      'Present Working Days', f.present_days,
+      'Unpaid Leave Days', f.unpaid_leave_days,
+      'Attendance Shortfall', f.shortfall_hours
+    ]);
+    [attRow1, attRow2].forEach(r => {
+      r.height = 20;
+      [1, 3, 5].forEach(col => {
+        r.getCell(col).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+      });
+      [2, 4, 6].forEach(col => {
+        r.getCell(col).font = { name: 'Calibri', size: 10, bold: true };
+      });
+    });
+
+    ws.addRow([]); // Blank spacer
+
+    // 5. Earnings & Deductions Statement Table
+    ws.mergeCells('A15:F15');
+    const finHead = ws.getCell('A15');
+    finHead.value = '4. ITEMIZED SALARY & DEDUCTIONS STATEMENT';
+    finHead.font = { name: 'Calibri', size: 11, bold: true, color: { argb: brandNavy } };
+    finHead.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: softHeaderBg } };
+    ws.getRow(15).height = 24;
+
+    const tableHeaders = ['Line Item Description', 'Category', 'Basis / Detail', 'Gross Earnings', 'Deductions', 'Net Impact'];
+    const thRow = ws.addRow(tableHeaders);
+    thRow.height = 24;
+    thRow.eachCell(c => {
+      c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: brandNavy } };
+      c.alignment = { vertical: 'middle', horizontal: 'center' };
+      c.border = {
+        top: { style: 'thin', color: { argb: borderGrey } },
+        bottom: { style: 'medium', color: { argb: brandNavy } },
+        left: { style: 'thin', color: { argb: borderGrey } },
+        right: { style: 'thin', color: { argb: borderGrey } },
+      };
+    });
+
+    const statementLines = [
+      ['Monthly Base Salary', 'Base Earnings', 'Full Month Contractual Wage', t.monthlySalary, null, t.monthlySalary],
+      ['Additions, Bonus & Allowances', 'Addition', 'Approved HR Additions', t.additions > 0 ? t.additions : null, null, t.additions],
+      ['Approved Overtime Pay', 'Addition', 'Approved Extra Hours', t.overtime > 0 ? t.overtime : null, null, t.overtime],
+      ['TOTAL GROSS EARNINGS', '', '', t.grossEarnings, null, t.grossEarnings],
+      ['Attendance Shortfall Deduction', 'Deduction', `${f.shortfall_hours} Shortfall`, null, t.shortfall > 0 ? t.shortfall : null, -t.shortfall],
+      ['Unpaid Leave Deduction', 'Deduction', `${f.unpaid_leave_days} Unpaid Days`, null, t.unpaidLeave > 0 ? t.unpaidLeave : null, -t.unpaidLeave],
+      ['Other Adjustments & Deductions', 'Deduction', 'Manual & Misc Deductions', null, t.adjustments > 0 ? t.adjustments : null, -t.adjustments],
+      ['TOTAL DEDUCTIONS', '', '', null, t.totalDeductions, -t.totalDeductions],
+    ];
+
+    statementLines.forEach((l, idx) => {
+      const row = ws.addRow([l[0], l[1], l[2], l[3] ?? '—', l[4] ?? '—', l[5]]);
+      row.height = 22;
+      const isSubtotal = l[0].startsWith('TOTAL');
+
+      row.eachCell((c, colNum) => {
+        c.font = { name: 'Calibri', size: 10, bold: isSubtotal };
+        c.border = {
+          top: { style: isSubtotal ? 'medium' : 'thin', color: { argb: borderGrey } },
+          bottom: { style: isSubtotal ? 'medium' : 'thin', color: { argb: borderGrey } },
+          left: { style: 'thin', color: { argb: borderGrey } },
+          right: { style: 'thin', color: { argb: borderGrey } },
+        };
+        if (isSubtotal) {
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: softHeaderBg } };
+        } else {
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFFFFFFF' : zebraBg } };
+        }
+
+        if (colNum >= 4) {
+          c.alignment = { vertical: 'middle', horizontal: 'right' };
+          if (typeof c.value === 'number') c.numFmt = '#,##0.00';
+        } else if (colNum === 2 || colNum === 3) {
+          c.alignment = { vertical: 'middle', horizontal: 'center' };
+        } else {
+          c.alignment = { vertical: 'middle', horizontal: 'left' };
+        }
+      });
+    });
+
+    // NET SALARY ROW (Big Banner)
+    const netRow = ws.addRow([
+      'NET SALARY PAYABLE',
+      `Currency: ${st.currency}`,
+      'Bank Transfer Direct',
+      '',
+      '',
+      t.net
+    ]);
+    netRow.height = 32;
+    netRow.eachCell((c, colNum) => {
+      c.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: darkEmerald } };
+      c.border = {
+        top: { style: 'medium', color: { argb: darkEmerald } },
+        bottom: { style: 'medium', color: { argb: darkEmerald } },
+      };
+      if (colNum >= 4) {
+        c.alignment = { vertical: 'middle', horizontal: 'right' };
+        if (typeof c.value === 'number') c.numFmt = `${st.currency} #,##0.00`;
+      } else {
+        c.alignment = { vertical: 'middle', horizontal: 'left' };
+      }
+    });
+
+    ws.addRow([]); // Blank spacer
+
+    // 6. Approval Notes & Sign-off
+    const noteRow = ws.addRow(['Approval Note / HR Remarks:', f.payroll_note || 'Approved & Published by HR']);
+    noteRow.height = 20;
+    noteRow.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    noteRow.getCell(2).font = { name: 'Calibri', size: 10, italic: true };
+
+    const signRow = ws.addRow(['Prepared & Certified By:', f.prepared_by || 'HR Department', '', 'Verification:', 'Official Computer-Generated Document']);
+    signRow.height = 20;
+    signRow.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    signRow.getCell(2).font = { name: 'Calibri', size: 10, bold: true };
+    signRow.getCell(4).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF475569' } };
+    signRow.getCell(5).font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF15803D' } };
+
+    // Column widths
+    ws.columns = [
+      { width: 28 }, // Description
+      { width: 22 }, // Category
+      { width: 26 }, // Detail
+      { width: 20 }, // Earnings
+      { width: 20 }, // Deductions
+      { width: 22 }, // Net Impact
+    ];
+  }
+
+  return { workbook: wb, skipped };
+}
+
 module.exports = {
   FIELDS, REQUIRED_FIELDS, SETTING_KEYS, COMPANY_KEYS, InvoiceError,
   buildStatement, attendanceSummary, buildSnapshot, sealSnapshot, openSnapshot, categorise,
   uploadTemplate, inspectTemplate, activeTemplate, listTemplates, activeTemplateId,
-  renderDocx, renderPeriodZip, fill,
+  renderDocx, renderPeriodZip, renderPeriodCombinedExcel, fill,
 };

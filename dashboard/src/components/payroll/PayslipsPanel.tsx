@@ -277,6 +277,28 @@ export function PayslipsPanel({
   const [invoiceFor, setInvoiceFor] = useState<{ employeeId: string; name: string | null } | null>(null);
   const [zipping, setZipping] = useState(false);
   const [zipError, setZipError] = useState<InvoiceErrorView | null>(null);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const [excelError, setExcelError] = useState<InvoiceErrorView | null>(null);
+
+  const downloadExcel = async () => {
+    setDownloadingExcel(true);
+    setExcelError(null);
+    try {
+      const file = await api.payrollInvoicesExcel(periodId);
+      saveBlob(file);
+      const skipped = Number(file.headers.get('X-Invoices-Skipped') ?? 0);
+      if (skipped > 0) {
+        setNotice({
+          tone: 'danger',
+          text: `${skipped} invoice${skipped === 1 ? ' was' : 's were'} left out of the spreadsheet because ${skipped === 1 ? 'it' : 'they'} could not be generated. Open ${skipped === 1 ? 'it' : 'them'} one by one with View invoice to see why.`,
+        });
+      }
+    } catch (e) {
+      setExcelError(describeInvoiceError(e, 'excel'));
+    } finally {
+      setDownloadingExcel(false);
+    }
+  };
 
   const downloadZip = async () => {
     setZipping(true);
@@ -335,6 +357,18 @@ export function PayslipsPanel({
         <>
           <Button
             size="sm"
+            variant="primary"
+            onClick={downloadExcel}
+            disabled={downloadingExcel || !slips || slips.length === 0}
+            title="Combined spreadsheet with summary sheet and individual employee invoice tabs"
+            icon={downloadingExcel
+              ? <span className="block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              : <DownloadIcon className="h-3.5 w-3.5" />}
+          >
+            {downloadingExcel ? 'Generating sheet…' : 'Download Invoices (.xlsx)'}
+          </Button>
+          <Button
+            size="sm"
             variant="secondary"
             onClick={downloadZip}
             disabled={zipping || !slips || slips.length === 0}
@@ -343,7 +377,7 @@ export function PayslipsPanel({
               ? <span className="block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
               : <DownloadIcon className="h-3.5 w-3.5" />}
           >
-            {zipping ? 'Preparing zip…' : 'Download all (zip)'}
+            {zipping ? 'Preparing zip…' : 'Download zip'}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setReloadTick((t) => t + 1)} icon={<RefreshIcon className="h-3.5 w-3.5" />}>
             Refresh
@@ -378,6 +412,7 @@ export function PayslipsPanel({
           </div>
         )}
 
+        {excelError && <ErrorBox error={excelError} />}
         {zipError && <ErrorBox error={zipError} />}
 
         {loadError && (

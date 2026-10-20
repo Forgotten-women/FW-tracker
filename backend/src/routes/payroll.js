@@ -626,6 +626,46 @@ router.get('/periods/:id/invoices.zip', requirePermission('payroll.read'), async
   }
 });
 
+// Combined multi-tab Excel workbook of all published invoices for an approved period:
+// - Tab 1: Overall Summary (Summary of all employees)
+// - Tabs 2..N: Individual Employee Invoice sheets
+router.get('/periods/:id/invoices.xlsx', requirePermission('payroll.read'), async (req, res) => {
+  try {
+    const period = await db.prepare('SELECT id, name, status, start_date, end_date FROM payroll_periods WHERE id = ?').get(req.params.id);
+    if (!period) return res.status(404).json({ status: 'ERROR', message: 'No such payroll period.' });
+    if (!PR.FINAL_STATUSES.includes(period.status)) {
+      return res.status(409).json({
+        status: 'ERROR', code: 'NOT_FINAL', message: 'Invoices can be downloaded together once the month is approved.',
+      });
+    }
+    const visible = new Set(await rbac.accessibleEmployeeIds(req.auth));
+    const ids = (await db.prepare(
+      "SELECT DISTINCT employee_id FROM payslips WHERE period_id = ? AND status = 'PUBLISHED'"
+    ).all(period.id)).map(r => r.employee_id).filter(id => visible.has(id));
+
+    const { workbook, skipped } = await INV.renderPeriodCombinedExcel({
+      period,
+      employeeIds: ids,
+      maskBank: maskBankFor(req),
+    });
+
+    const safe = String(period.name).replace(/[^A-Za-z0-9 _-]/g, '').trim().replace(/\s+/g, '_');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="Payroll_Invoices_${safe}.xlsx"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (skipped && skipped.length) res.setHeader('X-Invoices-Skipped', String(skipped.length));
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('[payroll/invoices.xlsx] Error:', err);
+    sendError(res, err, 500);
+  }
+});
+
 router.get('/invoice-template', requirePermission('payroll.read'), async (req, res) => {
   try {
     res.json({

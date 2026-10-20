@@ -57,12 +57,13 @@ const NO_TEMPLATE_MESSAGE =
 /** A refused invoice or template call, worded for HR. */
 export function describeInvoiceError(
   err: unknown,
-  action: 'view' | 'docx' | 'zip' | 'upload' | 'template',
+  action: 'view' | 'docx' | 'zip' | 'excel' | 'upload' | 'template',
 ): InvoiceErrorView {
   const fallback = {
     view: 'The invoice could not be shown.',
     docx: 'The Word invoice could not be downloaded.',
     zip: 'The invoices could not be downloaded.',
+    excel: 'The invoices spreadsheet could not be downloaded.',
     upload: 'The template was not uploaded.',
     template: 'The template could not be loaded.',
   }[action];

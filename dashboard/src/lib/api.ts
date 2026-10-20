@@ -966,6 +966,10 @@ export const api = {
   payrollInvoicesZip: (periodId: string) =>
     download(`/api/payroll/periods/${encodeURIComponent(periodId)}/invoices.zip`, 'invoices.zip'),
 
+  /** Combined multi-tab Excel workbook containing all employee invoices and a summary sheet. */
+  payrollInvoicesExcel: (periodId: string) =>
+    download(`/api/payroll/periods/${encodeURIComponent(periodId)}/invoices.xlsx`, 'payroll_invoices.xlsx'),
+
   invoiceTemplate: () =>
     request<{ status: string } & InvoiceTemplateResponse>('/api/payroll/invoice-template'),
 
