@@ -1276,7 +1276,7 @@ function renderPresencePrompt(prompt) {
   const since = new Date(presencePrompt.since).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   if (presenceText) {
     presenceText.textContent = `No keyboard or mouse activity since ${since}. If you're here (a meeting, a call, reading), `
-      + 'confirm so this time isn\'t counted as idle.';
+      + 'click below or just move the mouse, so this time isn\'t counted as idle.';
   }
   presencePanel.classList.remove('hidden');
   tickPresenceCountdown();

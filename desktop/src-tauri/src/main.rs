@@ -35,13 +35,12 @@ static LAST_SYNC_OK_AT: AtomicU64 = AtomicU64::new(0);
 
 // "Are you there?": asked 10 minutes into a stretch without input (unlocked,
 // in working hours, not on break). Answered within the next 10 minutes, the
-// server counts the whole stretch as worked, not idle. 0 = no prompt open.
+// server counts the whole stretch as worked, not idle; so does coming back
+// (mouse or keyboard) while it is open. 0 = no prompt open.
 static PRESENCE_PROMPT_SINCE: AtomicU64 = AtomicU64::new(0);
 static PRESENCE_PROMPT_EXPIRES: AtomicU64 = AtomicU64::new(0);
 // The stretch last asked about (answered or expired), so it isn't asked twice.
 static PRESENCE_PROMPT_DONE_FOR: AtomicU64 = AtomicU64::new(0);
-// When input resumed while the prompt was open (0 = it hasn't).
-static PRESENCE_PROMPT_RESUMED_AT: AtomicU64 = AtomicU64::new(0);
 const PRESENCE_ASK_AFTER_SECS: u64 = 10 * 60;
 const PRESENCE_ANSWER_WITHIN_MS: u64 = 10 * 60 * 1000;
 
@@ -54,7 +53,6 @@ fn close_presence_prompt(app: &tauri::AppHandle) {
     if since != 0 {
         PRESENCE_PROMPT_DONE_FOR.store(since, Ordering::SeqCst);
     }
-    PRESENCE_PROMPT_RESUMED_AT.store(0, Ordering::SeqCst);
     if let Some(window) = app.get_window("main") {
         if !IS_MANUAL_BREAK.load(Ordering::SeqCst) {
             let _ = window.set_always_on_top(false);
@@ -883,15 +881,14 @@ fn main() {
                         };
                         let open_since = PRESENCE_PROMPT_SINCE.load(Ordering::SeqCst);
                         if open_since != 0 {
-                            // Close it once it expires, on a break or lock, outside hours,
-                            // or a minute after the person came back without answering.
-                            let resumed_at = PRESENCE_PROMPT_RESUMED_AT.load(Ordering::SeqCst);
-                            if idle_secs < 30 && resumed_at == 0 {
-                                PRESENCE_PROMPT_RESUMED_AT.store(now_ms, Ordering::SeqCst);
-                            }
-                            let ignored = resumed_at != 0 && now_ms.saturating_sub(resumed_at) > 60_000;
-                            if now_ms >= PRESENCE_PROMPT_EXPIRES.load(Ordering::SeqCst) || is_break || outside
-                                || lock_state != "UNLOCKED" || ignored {
+                            let expired = now_ms >= PRESENCE_PROMPT_EXPIRES.load(Ordering::SeqCst);
+                            if !expired && !is_break && !outside && lock_state == "UNLOCKED" && idle_secs < 30 {
+                                // Mouse moved or a key was pressed while the question was
+                                // open: the person is back, which answers it like
+                                // "Yes, I'm here" (the stretch up to now counts as worked).
+                                let _ = client::send_presence_confirm(&cfg, open_since, now_ms).await;
+                                close_presence_prompt(&app_handle);
+                            } else if expired || is_break || outside || lock_state != "UNLOCKED" {
                                 close_presence_prompt(&app_handle);
                             }
                         } else if !outside && !is_break && lock_state == "UNLOCKED" && idle_secs >= PRESENCE_ASK_AFTER_SECS {
@@ -900,7 +897,6 @@ fn main() {
                             // The same stretch (within a minute) is asked about once.
                             if stretch_start.abs_diff(done_for) > 60_000 {
                                 PRESENCE_PROMPT_EXPIRES.store(now_ms + PRESENCE_ANSWER_WITHIN_MS, Ordering::SeqCst);
-                                PRESENCE_PROMPT_RESUMED_AT.store(0, Ordering::SeqCst);
                                 PRESENCE_PROMPT_SINCE.store(stretch_start, Ordering::SeqCst);
                                 if let Some(window) = app_handle.get_window("main") {
                                     let _ = window.show();
