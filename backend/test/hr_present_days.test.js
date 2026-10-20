@@ -192,3 +192,24 @@ test('HR manual time that covers all the lateness: on time, not late; partly cov
   assert.equal(part.attendanceStatus, 'LATE');
   assert.equal(part.dailyDeficitMinutes, 10);
 });
+
+test('manual time cancels the day\'s deficit once: older shortfall is untouched', async () => {
+  const emp = await makeEmployee('emp_manual_once');
+  // Mon 14 Sep: out 13:00-14:40 (100 min gap). Tue 15 Sep: out 13:00-14:00 (60 min).
+  await hrDay(emp, '2026-09-14', [['11:00', '13:00'], ['14:40', '19:00']]);
+  await hrDay(emp, '2026-09-15', [['11:00', '13:00'], ['14:00', '19:00']]);
+  await A.recomputeDay(emp, '2026-09-14', at('09:00', '2026-09-16'));
+  await A.recomputeDay(emp, '2026-09-15', at('09:01', '2026-09-16'));
+  assert.equal((await A.balanceFor(emp, at('09:01', '2026-09-16'), false)).balanceMinutes, 160);
+
+  // HR adds 60 min of manual time on 15 Sep, the way the dashboard does.
+  await A.adjustBalance({ employeeId: emp, dateKey: '2026-09-15', minutes: -60, reason: 'HR Manual Entry: office Wi-Fi down', actor: 'test' });
+  await db.prepare(`INSERT INTO attendance_days (employee_id, date_key, adjustment_minutes, adjustment_note, derived_at)
+    VALUES (?, '2026-09-15', 60, 'Wi-Fi', ?) ON CONFLICT(employee_id, date_key) DO UPDATE SET adjustment_minutes = excluded.adjustment_minutes`).run(emp, T.now());
+  const d = await A.recomputeDay(emp, '2026-09-15', at('10:00', '2026-09-16'));
+  assert.equal(d.dailyDeficitMinutes, 0, 'the day shows no deficit');
+  assert.equal((await A.balanceFor(emp, at('10:00', '2026-09-16'), false)).balanceMinutes, 100, 'only 14 Sep remains: 160 - 60');
+  // Recomputing again changes nothing.
+  await A.recomputeDay(emp, '2026-09-15', at('11:00', '2026-09-16'));
+  assert.equal((await A.balanceFor(emp, at('11:00', '2026-09-16'), false)).balanceMinutes, 100);
+});

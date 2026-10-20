@@ -33,6 +33,53 @@ static PENDING_ACTIVE_SECONDS: AtomicU64 = AtomicU64::new(0);
 /// widget can say when it isn't syncing instead of showing a frozen "Active".
 static LAST_SYNC_OK_AT: AtomicU64 = AtomicU64::new(0);
 
+// "Are you there?": asked 10 minutes into a stretch without input (unlocked,
+// in working hours, not on break). Answered within the next 10 minutes, the
+// server counts the whole stretch as worked, not idle. 0 = no prompt open.
+static PRESENCE_PROMPT_SINCE: AtomicU64 = AtomicU64::new(0);
+static PRESENCE_PROMPT_EXPIRES: AtomicU64 = AtomicU64::new(0);
+// The stretch last asked about (answered or expired), so it isn't asked twice.
+static PRESENCE_PROMPT_DONE_FOR: AtomicU64 = AtomicU64::new(0);
+// When input resumed while the prompt was open (0 = it hasn't).
+static PRESENCE_PROMPT_RESUMED_AT: AtomicU64 = AtomicU64::new(0);
+const PRESENCE_ASK_AFTER_SECS: u64 = 10 * 60;
+const PRESENCE_ANSWER_WITHIN_MS: u64 = 10 * 60 * 1000;
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+fn close_presence_prompt(app: &tauri::AppHandle) {
+    let since = PRESENCE_PROMPT_SINCE.swap(0, Ordering::SeqCst);
+    if since != 0 {
+        PRESENCE_PROMPT_DONE_FOR.store(since, Ordering::SeqCst);
+    }
+    PRESENCE_PROMPT_RESUMED_AT.store(0, Ordering::SeqCst);
+    if let Some(window) = app.get_window("main") {
+        if !IS_MANUAL_BREAK.load(Ordering::SeqCst) {
+            let _ = window.set_always_on_top(false);
+        }
+    }
+}
+
+/// "Yes, I'm here": the stretch since the prompt's idle start is not idle.
+#[tauri::command]
+async fn confirm_presence(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let since = PRESENCE_PROMPT_SINCE.load(Ordering::SeqCst);
+    if since == 0 {
+        return Err("Nothing to confirm.".to_string());
+    }
+    let now = now_unix_ms();
+    if now > PRESENCE_PROMPT_EXPIRES.load(Ordering::SeqCst) {
+        close_presence_prompt(&app);
+        return Err("This question has expired.".to_string());
+    }
+    let cfg = state.config.lock().unwrap().clone();
+    let r = client::send_presence_confirm(&cfg, since, now).await;
+    close_presence_prompt(&app);
+    r
+}
+
 fn mark_synced() {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     LAST_SYNC_OK_AT.store(now, Ordering::SeqCst);
@@ -134,6 +181,12 @@ async fn get_app_status(state: State<'_, AppState>) -> Result<serde_json::Value,
     };
     let (lock_state, _) = tracker::session::get_lock_state();
     let idle_secs = tracker::idle::get_idle_seconds();
+    let prompt_since = PRESENCE_PROMPT_SINCE.load(Ordering::SeqCst);
+    let presence_prompt = if prompt_since == 0 {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!({ "since": prompt_since, "expiresAt": PRESENCE_PROMPT_EXPIRES.load(Ordering::SeqCst) })
+    };
 
     Ok(serde_json::json!({
         "enrolled": !cfg.token.is_empty(),
@@ -146,6 +199,7 @@ async fn get_app_status(state: State<'_, AppState>) -> Result<serde_json::Value,
         "idleSeconds": idle_secs,
         "pendingActiveSeconds": PENDING_ACTIVE_SECONDS.load(Ordering::SeqCst),
         "lastSyncAt": LAST_SYNC_OK_AT.load(Ordering::SeqCst),
+        "presencePrompt": presence_prompt,
         "latest": resp,
     }))
 }
@@ -548,6 +602,7 @@ fn main() {
             enroll_device,
             developer_unpair,
             set_manual_break,
+            confirm_presence,
             toggle_manual_break,
             connect_office_wifi,
             checkout_shift,
@@ -818,6 +873,45 @@ fn main() {
                     let (lock_state, lock_duration) = tracker::session::get_lock_state();
                     let bssid = tracker::network::get_connected_bssid();
                     let is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
+
+                    // "Are you there?" (see PRESENCE_PROMPT_SINCE).
+                    {
+                        let now_ms = now_unix_ms();
+                        let outside = {
+                            let resp = state.latest_response.lock().unwrap();
+                            resp.as_ref().and_then(|r| r.outside_working_hours).unwrap_or(true)
+                        };
+                        let open_since = PRESENCE_PROMPT_SINCE.load(Ordering::SeqCst);
+                        if open_since != 0 {
+                            // Close it once it expires, on a break or lock, outside hours,
+                            // or a minute after the person came back without answering.
+                            let resumed_at = PRESENCE_PROMPT_RESUMED_AT.load(Ordering::SeqCst);
+                            if idle_secs < 30 && resumed_at == 0 {
+                                PRESENCE_PROMPT_RESUMED_AT.store(now_ms, Ordering::SeqCst);
+                            }
+                            let ignored = resumed_at != 0 && now_ms.saturating_sub(resumed_at) > 60_000;
+                            if now_ms >= PRESENCE_PROMPT_EXPIRES.load(Ordering::SeqCst) || is_break || outside
+                                || lock_state != "UNLOCKED" || ignored {
+                                close_presence_prompt(&app_handle);
+                            }
+                        } else if !outside && !is_break && lock_state == "UNLOCKED" && idle_secs >= PRESENCE_ASK_AFTER_SECS {
+                            let stretch_start = now_ms.saturating_sub(idle_secs * 1000);
+                            let done_for = PRESENCE_PROMPT_DONE_FOR.load(Ordering::SeqCst);
+                            // The same stretch (within a minute) is asked about once.
+                            if stretch_start.abs_diff(done_for) > 60_000 {
+                                PRESENCE_PROMPT_EXPIRES.store(now_ms + PRESENCE_ANSWER_WITHIN_MS, Ordering::SeqCst);
+                                PRESENCE_PROMPT_RESUMED_AT.store(0, Ordering::SeqCst);
+                                PRESENCE_PROMPT_SINCE.store(stretch_start, Ordering::SeqCst);
+                                if let Some(window) = app_handle.get_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.unminimize();
+                                    let _ = window.set_always_on_top(true);
+                                    let _ = window.set_focus();
+                                }
+                                let _ = app_handle.emit_all("presence-check", serde_json::json!({ "since": stretch_start }));
+                            }
+                        }
+                    }
 
                     let app_tracking_allowed = {
                         let resp = state.latest_response.lock().unwrap();

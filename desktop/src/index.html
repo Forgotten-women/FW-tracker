@@ -189,6 +189,19 @@
     </div>
   </div>
 
+  <!-- "Are you there?": asked after 10 minutes without keyboard or mouse input.
+       Answered within 10 minutes, that time isn't counted as idle. -->
+  <div id="presence-panel" class="dev-panel hidden" role="dialog" aria-modal="true" aria-labelledby="presence-title">
+    <div class="dev-card">
+      <div id="presence-title" class="dev-title">Are you there?</div>
+      <p id="presence-text" class="dev-text">No keyboard or mouse activity for 10 minutes. If you're here (a meeting, a call, reading), confirm so this time isn't counted as idle.</p>
+      <p id="presence-countdown" class="dev-text"></p>
+      <div class="dev-actions">
+        <button id="presence-yes" class="action-btn">Yes, I'm here</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Developer options. Deliberately undiscoverable: opened by clicking the
        version badge 7 times within 3 seconds, and it still asks for UNPAIR. -->
   <div id="dev-panel" class="dev-panel hidden" role="dialog" aria-modal="true" aria-labelledby="dev-panel-title">

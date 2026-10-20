@@ -361,6 +361,27 @@ pub async fn send_heartbeat(cfg: &AppConfig, payload: HeartbeatPayload) -> Resul
     res.json::<HeartbeatResponse>().await.map_err(|e| e.to_string())
 }
 
+/// "Are you there?" answered: [from_ms, to_ms] was not idle.
+pub async fn send_presence_confirm(cfg: &AppConfig, from_ms: u64, to_ms: u64) -> Result<serde_json::Value, String> {
+    if cfg.token.is_empty() {
+        return Err("Not enrolled".to_string());
+    }
+    let url = format!("{}/api/desktop/presence-confirm", cfg.server_url.trim_end_matches('/'));
+    let res = crate::net::http()
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(20))
+        .header("Authorization", format!("Bearer {}", cfg.token))
+        .json(&serde_json::json!({ "from": from_ms, "to": to_ms }))
+        .send()
+        .await
+        .map_err(|e| crate::net::describe(&e))?;
+    if !res.status().is_success() {
+        let body: serde_json::Value = res.json().await.unwrap_or_default();
+        return Err(body["message"].as_str().unwrap_or("Could not confirm.").to_string());
+    }
+    res.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+}
+
 pub async fn report_anomaly(cfg: &AppConfig, process_name: &str, duration_secs: u64) -> Result<(), String> {
     if cfg.token.is_empty() {
         return Ok(());

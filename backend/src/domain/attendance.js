@@ -313,7 +313,7 @@ const selectApprovedAdjustment = db.prepare(`
 // ---------------------------------------------------------------------------
 
 const selectIdleSpans = db.prepare(`
-  SELECT start_at, end_at FROM workstation_idle_spans
+  SELECT start_at, end_at, kind FROM workstation_idle_spans
   WHERE employee_id = ? AND date_key = ? ORDER BY start_at
 `);
 const selectLaptopActive = db.prepare(`
@@ -401,9 +401,12 @@ function buildDayView({
   const B_all = mergeIntervals(breaks.map(b => [Number(b.started_at), b.ended_at ? Number(b.ended_at) : nowMs]));
   const B_ = winEnd > winStart ? subtractIntervals(clipIntervals(B_all, winStart, winEnd), prayer ? [prayer] : []) : [];
   // Idle inside the prayer hour is not idle either.
+  // Nor is a stretch the employee confirmed ("Are you there?" -> Yes: kind CONFIRMED).
+  const confirmed = mergeIntervals((idleSpans || []).filter(x => x.kind === 'CONFIRMED')
+    .map(x => [Number(x.start_at), Number(x.end_at)]));
   const I_raw = subtractIntervals(
-    mergeIntervals((idleSpans || []).map(x => [Number(x.start_at), Number(x.end_at)])),
-    prayer ? [prayer] : [],
+    mergeIntervals((idleSpans || []).filter(x => x.kind !== 'CONFIRMED').map(x => [Number(x.start_at), Number(x.end_at)])),
+    mergeIntervals([...(prayer ? [prayer] : []), ...confirmed]),
   );
   const I_ = subtractIntervals(intersectIntervals(I_raw, P_), B_);
 
@@ -606,6 +609,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     unauthorisedMissingMinutes: 0,
     approvedAdjustmentMinutes: 0,
     dailyDeficitMinutes: 0,
+    ledgerDeficitMinutes: 0,
     attendanceStatus: 'PENDING',
     leaveRequestId: leave ? leave.requestId : null,
     needsReview: [],
@@ -738,7 +742,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const netLateMinutes = Math.max(0, lateMinutes - recoveredLateMinutes);
   const isLateOccurrence = isLateArrival && netLateMinutes > 0;
 
-  // Deficit calculation:
+  // Deficit calculation: what the day shows, after HR's manual time.
   const dailyDeficitMinutes = Math.max(0,
     netLateMinutes
     + excessBreakMinutes
@@ -746,6 +750,12 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     + unauthorisedMissingMinutes
     - (hrCredit - hrCoveredLateMinutes)
   );
+  // What the ledger posts for the day: the deficit BEFORE HR's manual time.
+  // Manual time already reduces the balance through its own HR_ADJUSTMENT
+  // row; posting the net figure as well credited it twice (Kishore's 134 min
+  // on 19 Oct took 134 min off his older shortfall too).
+  const ledgerDeficitMinutes = Math.max(0,
+    lateAfterOffset + excessBreakMinutes + earlyDepartureMinutes + unauthorisedMissingMinutes);
 
   let attendanceStatus = 'PRESENT';
   if (isLateOccurrence) {
@@ -774,6 +784,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
     unauthorisedMissingMinutes,
     approvedAdjustmentMinutes,
     dailyDeficitMinutes,
+    ledgerDeficitMinutes,
     attendanceStatus,
     lateExcused,
     onBreak: !!openBreak,
@@ -819,14 +830,9 @@ const upsertSummary = db.prepare(`
     derived_at = excluded.derived_at
 `);
 
-const selectSummary = db.prepare(
-  'SELECT * FROM attendance_daily_summary WHERE employee_id = ? AND date_key = ?'
-);
-
 /** Derive and persist. Returns the derived day. */
 async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const d = await deriveDay(employeeId, dateKey, nowMs);
-  const previous = await selectSummary.get(employeeId, dateKey);
 
   await upsertSummary.run({
     employee_id: employeeId,
@@ -864,10 +870,11 @@ async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) 
 
   // The ledger records the day's deficit once it is settled. Writing it while
   // the day is still running would post a figure that keeps changing.
+  // postDeficit only writes the difference from what the ledger already holds
+  // for the day, so calling it on every settled recompute is safe.
   const dayEnded = nowMs >= T.endOfDay(dateKey);
   if (dayEnded) {
-    const changed = !previous || previous.daily_deficit_minutes !== d.dailyDeficitMinutes;
-    if (changed) await postDeficit(employeeId, dateKey, d.dailyDeficitMinutes, nowMs);
+    await postDeficit(employeeId, dateKey, d.ledgerDeficitMinutes || 0, nowMs);
   }
 
   return d;
@@ -918,7 +925,8 @@ async function balanceFor(employeeId, nowMs = T.now(), includeToday = true) {
     // If today's deficit has not yet been settled into the ledger at end of day
     if (!todaySettled) {
       const todaySummary = await deriveDay(employeeId, todayDateKey, nowMs);
-      balance += (todaySummary.dailyDeficitMinutes || 0);
+      // Gross, like the ledger: today's manual time is already on the ledger.
+      balance += (todaySummary.ledgerDeficitMinutes || 0);
     }
   }
 

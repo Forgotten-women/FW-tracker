@@ -541,6 +541,7 @@ function updateBreakCountdown() {
 async function refreshStatus() {
   try {
     const data = await callBackend('get_app_status');
+    try { renderPresencePrompt(data && data.presencePrompt); } catch (_) {}
 
     // Show version number wherever visible
     const versionBadge = document.getElementById('version-badge');
@@ -1259,6 +1260,55 @@ if (undoCheckoutBtn) {
   });
 }
 
+// "Are you there?" -- the app opens the question (presencePrompt in the
+// status); answering within 10 minutes keeps that stretch from counting as idle.
+const presencePanel = document.getElementById('presence-panel');
+const presenceText = document.getElementById('presence-text');
+const presenceCountdown = document.getElementById('presence-countdown');
+const presenceYes = document.getElementById('presence-yes');
+let presencePrompt = null;
+let presenceBusy = false;
+
+function renderPresencePrompt(prompt) {
+  presencePrompt = prompt || null;
+  if (!presencePanel) return;
+  if (!presencePrompt) { presencePanel.classList.add('hidden'); return; }
+  const since = new Date(presencePrompt.since).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (presenceText) {
+    presenceText.textContent = `No keyboard or mouse activity since ${since}. If you're here (a meeting, a call, reading), `
+      + 'confirm so this time isn\'t counted as idle.';
+  }
+  presencePanel.classList.remove('hidden');
+  tickPresenceCountdown();
+}
+
+function tickPresenceCountdown() {
+  if (!presencePrompt || !presenceCountdown) return;
+  const left = Math.max(0, Math.round((presencePrompt.expiresAt - Date.now()) / 1000));
+  presenceCountdown.textContent = left > 0
+    ? `Closes in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+    : 'Closing…';
+}
+setInterval(tickPresenceCountdown, 1000);
+
+presenceYes?.addEventListener('click', async () => {
+  if (presenceBusy) return;
+  presenceBusy = true;
+  presenceYes.disabled = true;
+  try {
+    await callBackend('confirm_presence', {});
+    renderPresencePrompt(null);
+    showFeedback('Thanks, that time counts as worked.');
+  } catch (err) {
+    renderPresencePrompt(null);
+    showFeedback(typeof err === 'string' ? err : (err && err.message) || 'Could not confirm.');
+  } finally {
+    presenceBusy = false;
+    presenceYes.disabled = false;
+    refreshStatus();
+  }
+});
+
 // Listen for Tauri events if running under Tauri (robust retry loop to ensure binding)
 async function initTauriEvents() {
   for (let i = 0; i < 30; i++) {
@@ -1266,6 +1316,9 @@ async function initTauriEvents() {
     if (t && t.event && typeof t.event.listen === 'function') {
       try {
         await t.event.listen('heartbeat-updated', () => {
+          refreshStatus();
+        });
+        await t.event.listen('presence-check', () => {
           refreshStatus();
         });
         break;

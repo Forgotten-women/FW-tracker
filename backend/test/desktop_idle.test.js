@@ -213,3 +213,56 @@ test('a remote worker\'s offline-queued heartbeats count as worked from their ho
   const pe = await db.prepare("SELECT COUNT(*) AS n FROM presence_events WHERE employee_id = ? AND location = 'REMOTE_VERIFIED'").get(p.employeeId);
   assert.equal(Number(pe.n), 30, 'presence recorded as remote-verified');
 });
+
+const OFF_IP = '10.20.30.40';
+async function beats(auth, from, minutes, { ip = '192.168.18.65', active = 60, idle = 0, skip = () => false } = {}) {
+  let last;
+  for (let m = 1; m <= minutes; m++) {
+    if (skip(m)) continue;
+    clock = from + m * 60000;
+    last = await json('POST', '/api/desktop/heartbeat', {
+      headers: auth,
+      body: { lockState: 'UNLOCKED', lockDurationSeconds: 0, activeSeconds: active, idleSeconds: idle, localIp: ip },
+    });
+  }
+  return last;
+}
+
+test('working off the office Wi-Fi: an unbroken stretch is filled on return; a stretch with a silence is not', async () => {
+  // Wed 23 Sep 2026, from 12:00 PKT.
+  const from = Date.UTC(2026, 8, 23, 7, 0, 0);
+  const a = await enrolLaptop('Wifi Drop');
+  await beats(a.auth, from, 30);                                   // 12:00-12:30 office
+  await beats(a.auth, from + 30 * 60000, 40, { ip: OFF_IP });      // 12:30-13:10 off network, working
+  const back = await beats(a.auth, from + 70 * 60000, 20);         // 13:10-13:30 office again
+  assert.equal(back.body.today.day.workedMinutes >= 88, true, `worked ${back.body.today.day.workedMinutes}: the 40 off-network minutes count`);
+
+  const b = await enrolLaptop('Wifi Drop Asleep');
+  await beats(b.auth, from, 30);
+  // Off network 40 min, but nothing at all from minute 10 to 25 (asleep).
+  await beats(b.auth, from + 30 * 60000, 40, { ip: OFF_IP, skip: (m) => m >= 10 && m <= 25 });
+  const back2 = await beats(b.auth, from + 70 * 60000, 20);
+  const w = back2.body.today.day.workedMinutes;
+  // Filled: minutes 1-9 (joined to the office before) and 26-40 (joined to the office after); not the silence.
+  assert.ok(w >= 70 && w <= 76, `worked ${w}: only the connected parts are filled`);
+});
+
+test('"Are you there?" answered: the idle stretch counts as worked and the counters move', async () => {
+  const p = await enrolLaptop('In A Meeting');
+  const from = Date.UTC(2026, 8, 23, 8, 0, 0);                    // 13:00 PKT, Wednesday
+  await beats(p.auth, from, 10);                                   // working
+  await beats(p.auth, from + 10 * 60000, 14, { active: 0, idle: 60 });  // 14 min no input (meeting)
+  let day = (await beats(p.auth, from + 24 * 60000, 1)).body.today.day;
+  assert.ok(day.idleMinutes >= 12, `idle ${day.idleMinutes} before answering`);
+  // The prompt went up after 10 minutes idle; answered at minute 24.
+  clock = from + 25 * 60000;
+  const r = await json('POST', '/api/desktop/presence-confirm', { headers: p.auth, body: { from: from + 10 * 60000, to: clock } });
+  assert.equal(r.status, 200);
+  day = (await beats(p.auth, from + 25 * 60000, 1)).body.today.day;
+  assert.equal(day.idleMinutes, 0, 'nothing in the confirmed stretch is idle');
+  const ws = await db.prepare('SELECT idle_seconds FROM workstation_sessions WHERE employee_id = ?').get(p.employeeId);
+  assert.ok(Number(ws.idle_seconds) < 60, `idle counter ${ws.idle_seconds}`);
+  // An old stretch can't be confirmed.
+  const late = await json('POST', '/api/desktop/presence-confirm', { headers: p.auth, body: { from: from, to: from + 2 * 60000 } });
+  assert.equal(late.status, 400);
+});

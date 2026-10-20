@@ -126,8 +126,47 @@ const selectClockOut = db.prepare(`
 
 const selectLastIdleSpan = db.prepare(`
   SELECT id, end_at FROM workstation_idle_spans
-  WHERE device_id = ? AND date_key = ? ORDER BY end_at DESC LIMIT 1
+  WHERE device_id = ? AND date_key = ? AND kind <> 'CONFIRMED' ORDER BY end_at DESC LIMIT 1
 `);
+
+// Stretches the employee confirmed they were there ("Are you there?" -> Yes):
+// stored as kind CONFIRMED and never idle.
+const selectConfirmedSpans = db.prepare(`
+  SELECT start_at, end_at FROM workstation_idle_spans
+  WHERE device_id = ? AND date_key = ? AND kind = 'CONFIRMED' AND end_at > ? AND start_at < ?
+`);
+
+function subtractRanges(list, cut) {
+  let out = list;
+  for (const [c, d] of cut) {
+    const next = [];
+    for (const [a, b] of out) {
+      if (d <= a || c >= b) { next.push([a, b]); continue; }
+      if (c > a) next.push([a, c]);
+      if (d < b) next.push([d, b]);
+    }
+    out = next;
+  }
+  return out;
+}
+
+/** Ranges inside [from, to] that are never idle: the Friday prayer hour and confirmed stretches. */
+async function idleExemptRanges(deviceId, dateKey, from, to) {
+  const out = [];
+  const prayer = schedule.prayerWindow(dateKey);
+  if (prayer && prayer[1] > from && prayer[0] < to) out.push([Math.max(from, prayer[0]), Math.min(to, prayer[1])]);
+  for (const c of await selectConfirmedSpans.all(deviceId, dateKey, from, to)) {
+    out.push([Math.max(from, Number(c.start_at)), Math.min(to, Number(c.end_at))]);
+  }
+  return out;
+}
+
+/** Milliseconds of [from, to] that are never idle (overlaps counted once). */
+async function idleExemptMs(deviceId, dateKey, from, to) {
+  if (!(to > from)) return 0;
+  const rest = subtractRanges([[from, to]], await idleExemptRanges(deviceId, dateKey, from, to));
+  return (to - from) - rest.reduce((n, [a, b]) => n + (b - a), 0);
+}
 
 const selectBreakEndedBetween = db.prepare(`
   SELECT 1 FROM break_records WHERE employee_id = ? AND ended_at > ? AND ended_at <= ? LIMIT 1
@@ -135,13 +174,14 @@ const selectBreakEndedBetween = db.prepare(`
 
 /** Adds [startAt, endAt] to the device's idle spans, extending the last one if they touch. */
 async function recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs }) {
-  // The Friday prayer hour is never idle: store only the parts outside it.
-  const prayer = schedule.prayerWindow(dateKey);
-  if (prayer && endAt > prayer[0] && startAt < prayer[1]) {
-    if (startAt < prayer[0]) await recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt: prayer[0], kind, nowMs });
-    if (endAt > prayer[1]) await recordIdleSpan({ deviceId, employeeId, dateKey, startAt: prayer[1], endAt, kind, nowMs });
-    return;
+  // The Friday prayer hour and confirmed stretches are never idle: store only the rest.
+  const pieces = subtractRanges([[startAt, endAt]], await idleExemptRanges(deviceId, dateKey, startAt, endAt));
+  for (const [a, b] of pieces) {
+    if (b > a) await storeIdleSpan({ deviceId, employeeId, dateKey, startAt: a, endAt: b, kind, nowMs });
   }
+}
+
+async function storeIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs }) {
   const last = await selectLastIdleSpan.get(deviceId, dateKey);
   if (last && Number(last.end_at) >= startAt - 90 * 1000) {
     await db.prepare('UPDATE workstation_idle_spans SET end_at = GREATEST(end_at, ?), updated_at = ? WHERE id = ?')
@@ -153,6 +193,97 @@ async function recordIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, k
     `).run('idl_' + crypto.randomBytes(8).toString('hex'), deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs, nowMs);
   }
 }
+
+// A laptop that kept working while off the office network (the office Wi-Fi
+// dropped, a hotspot) and is back on it. Its OFF_NETWORK heartbeats since its
+// last office sighting become presence where they connect to office presence
+// without a gap: forward from the last office sighting and back from now,
+// every step at most 3 minutes. A laptop that slept, was locked or switched
+// off sent nothing, so that part stays a gap; one that never came back to
+// office Wi-Fi (taken home) is never filled.
+const OFF_NETWORK_MAX_STEP_MS = 3 * 60 * 1000;
+async function fillOffNetworkStretch({ employeeId, deviceId, dateKey, nowMs }) {
+  const dayStart = T.startOfDay(dateKey);
+  const last = await db.prepare(`SELECT MAX(observed_at) AS t FROM presence_events
+    WHERE employee_id = ? AND device_id = ? AND location = 'OFFICE' AND observed_at >= ? AND observed_at < ?`).get(employeeId, deviceId, dayStart, nowMs);
+  const anchor = Number(last && last.t) || 0;
+  if (!anchor) return 0;
+  const off = (await db.prepare(`SELECT observed_at FROM presence_events
+    WHERE employee_id = ? AND device_id = ? AND location = 'OFF_NETWORK' AND observed_at > ? AND observed_at < ?
+    ORDER BY observed_at`).all(employeeId, deviceId, anchor, nowMs)).map(r => Number(r.observed_at));
+  if (!off.length) return 0;
+  const keep = new Set();
+  let prev = anchor;
+  for (const t of off) { if (t - prev > OFF_NETWORK_MAX_STEP_MS) break; keep.add(t); prev = t; }
+  let next = nowMs;
+  for (let i = off.length - 1; i >= 0; i--) { if (next - off[i] > OFF_NETWORK_MAX_STEP_MS) break; keep.add(off[i]); next = off[i]; }
+  for (const t of [...keep].sort((a, b) => a - b)) {
+    // One second on: the OFF_NETWORK row holds this second's dedupe key.
+    await presence.recordEvent({
+      employeeId, deviceId, source: 'DESKTOP_AGENT', observedAt: t + 1000, location: 'OFFICE',
+      note: 'Desktop Agent (off office Wi-Fi, reconciled)',
+    });
+  }
+  return keep.size;
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/desktop/presence-confirm - "Are you there?" -> "Yes, I'm here"
+//
+// The agent asks after 10 minutes without input; answered within the next 10
+// minutes, the whole stretch [from, to] is not idle (a meeting, a call). It is
+// stored as a CONFIRMED span: existing idle spans inside it are cut out, the
+// laptop counters move those seconds from idle to active, and later heartbeats
+// carrying idle seconds from inside it are credited as active.
+// ---------------------------------------------------------------------------
+router.post('/presence-confirm', requireDevice, async (req, res) => {
+  const { employeeId, deviceId } = req.auth;
+  const nowMs = T.now();
+  const from = Number(req.body && req.body.from);
+  const to = Math.min(Number(req.body && req.body.to) || nowMs, nowMs);
+  if (!Number.isFinite(from) || !(to > from)) {
+    return res.status(400).json({ status: 'ERROR', message: 'from and to (epoch ms) are required.' });
+  }
+  // Only a just-answered stretch: ending now-ish, at most 10 + 10 minutes long (+ slack).
+  if (nowMs - to > 2 * 60 * 1000 || to - from > 25 * 60 * 1000) {
+    return res.status(400).json({ status: 'ERROR', message: 'The prompt has expired.' });
+  }
+  const dateKey = T.dateKey(to);
+  const start = Math.max(from, T.startOfDay(dateKey));
+  const onBreak = await db.prepare('SELECT 1 FROM break_records WHERE employee_id = ? AND ended_at IS NULL').get(employeeId);
+  if (onBreak) return res.status(409).json({ status: 'ERROR', message: 'On break.' });
+
+  let movedSec = 0;
+  await tx(async () => {
+    const spans = await db.prepare(`SELECT * FROM workstation_idle_spans
+      WHERE device_id = ? AND date_key = ? AND kind <> 'CONFIRMED' AND end_at > ? AND start_at < ?`).all(deviceId, dateKey, start, to);
+    for (const sp of spans) {
+      const a = Number(sp.start_at), b = Number(sp.end_at);
+      movedSec += Math.round((Math.min(b, to) - Math.max(a, start)) / 1000);
+      if (a < start && b > to) {
+        await db.prepare('UPDATE workstation_idle_spans SET end_at = ?, updated_at = ? WHERE id = ?').run(start, nowMs, sp.id);
+        await db.prepare(`INSERT INTO workstation_idle_spans (id, device_id, employee_id, date_key, start_at, end_at, kind, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('idl_' + crypto.randomBytes(8).toString('hex'), deviceId, employeeId, dateKey, to, b, sp.kind, nowMs, nowMs);
+      } else if (a < start) {
+        await db.prepare('UPDATE workstation_idle_spans SET end_at = ?, updated_at = ? WHERE id = ?').run(start, nowMs, sp.id);
+      } else if (b > to) {
+        await db.prepare('UPDATE workstation_idle_spans SET start_at = ?, updated_at = ? WHERE id = ?').run(to, nowMs, sp.id);
+      } else {
+        // Kept, zero-length: the row stays as a record.
+        await db.prepare('UPDATE workstation_idle_spans SET end_at = start_at, updated_at = ? WHERE id = ?').run(nowMs, sp.id);
+      }
+    }
+    await db.prepare(`INSERT INTO workstation_idle_spans (id, device_id, employee_id, date_key, start_at, end_at, kind, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'CONFIRMED', ?, ?)`).run('idl_' + crypto.randomBytes(8).toString('hex'), deviceId, employeeId, dateKey, start, to, nowMs, nowMs);
+    if (movedSec > 0) {
+      await db.prepare(`UPDATE workstation_sessions
+        SET active_seconds = active_seconds + LEAST(idle_seconds, ?), idle_seconds = GREATEST(0, idle_seconds - ?), updated_at = ?
+        WHERE device_id = ? AND session_date = ?`).run(movedSec, movedSec, nowMs, deviceId, dateKey);
+    }
+  });
+  try { await presence.recomputeDay(employeeId, dateKey, nowMs); } catch (_) {}
+  res.json({ status: 'SUCCESS', confirmedSeconds: Math.round((to - start) / 1000), movedIdleSeconds: movedSec });
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/desktop/heartbeat
@@ -337,6 +468,14 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
       reconciledActiveSeconds = Number(existing.unverified_seconds || 0);
     }
 
+    // Back on office Wi-Fi after working off it (the office network dropped,
+    // a hotspot): the unbroken stretch becomes presence (fillOffNetworkStretch).
+    if (inOffice) {
+      try { await fillOffNetworkStretch({ employeeId, deviceId, dateKey, nowMs }); } catch (err) {
+        console.error('[desktop/heartbeat] off-network fill:', err.message);
+      }
+    }
+
     if (status === 'ACTIVE' || status === 'IDLE') {
       try {
         await presence.recordEvent({
@@ -356,6 +495,18 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
         await presence.recomputeDay(employeeId, dateKey, nowMs);
       } catch (_) {}
     }
+  } else if (!outsideWorkingHours && (status === 'ACTIVE' || status === 'IDLE')) {
+    // In use but not on the office network (and not remote): recorded as
+    // OFF_NETWORK, which never counts as presence by itself. If the laptop
+    // comes back onto office Wi-Fi without a break in its heartbeats, that
+    // stretch is filled in (fillOffNetworkStretch); otherwise it stays a gap.
+    try {
+      await presence.recordEvent({
+        employeeId, deviceId, source: 'DESKTOP_AGENT', srcIp, localIp,
+        bssid: connectedBssid, ssid: effectiveSsid, visibleOfficeBssids, mac: currentWifiMac,
+        observedAt: nowMs, location: 'OFF_NETWORK', note: `Desktop Agent (${status} - off office network)`,
+      });
+    } catch (_) {}
   }
 
   // 7. Upsert workstation session for today
@@ -400,7 +551,8 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
   if (effectiveIdle > 0) {
     const prevAt = existing && existing.last_heartbeat_at ? Number(existing.last_heartbeat_at) : null;
     const spanMs = Math.min(batchTotal * 1000 || 60000, prevAt ? Math.max(0, nowMs - prevAt) : 60000, 15 * 60000);
-    const prayerIdle = Math.min(effectiveIdle, Math.round(schedule.prayerOverlapMs(dateKey, nowMs - spanMs, nowMs) / 1000));
+    // Friday prayer hour and confirmed ("Are you there?" -> Yes) stretches.
+    const prayerIdle = Math.min(effectiveIdle, Math.round((await idleExemptMs(deviceId, dateKey, nowMs - spanMs, nowMs)) / 1000));
     if (prayerIdle > 0) {
       effectiveIdle -= prayerIdle;
       if (isVerifiedWork) effectiveActive += prayerIdle; else addUnverified += prayerIdle;
@@ -855,7 +1007,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
 
     // Idle inside the Friday prayer hour counts as active, as in the live heartbeat.
     let idleToAdd = numIdle;
-    const prayerIdle = Math.min(numIdle, Math.round(schedule.prayerOverlapMs(evtDateKey, evtObserved - (numActive + numIdle) * 1000, evtObserved) / 1000));
+    const prayerIdle = Math.min(numIdle, Math.round((await idleExemptMs(deviceId, evtDateKey, evtObserved - (numActive + numIdle) * 1000, evtObserved)) / 1000));
     if (prayerIdle > 0 && isWithinHours) {
       idleToAdd -= prayerIdle;
       if (verified) effectiveActive += prayerIdle; else addUnverified += prayerIdle;
