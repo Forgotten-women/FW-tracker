@@ -7,6 +7,12 @@
       "runtimeArgs": ["dashboard/node_modules/next/dist/bin/next", "dev", "dashboard", "-p", "3100"],
       "env": { "API_ORIGIN": "https://backend-ten-lyart-57.vercel.app" },
       "port": 3100
+    },
+    {
+      "name": "desktop-widget",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5180", "--bind", "127.0.0.1", "--directory", "desktop/src"],
+      "port": 5180
     }
   ]
 }
