@@ -1658,12 +1658,20 @@ class _BookingSheetState extends State<_BookingSheet> {
   LeaveType? _type;
   DateTime? _from;
   DateTime? _to;
+  String _dayPortion = 'FULL_DAY';
   final _reason = TextEditingController();
 
   LeavePreview? _preview;
   bool _loadingTypes = true;
   bool _submitting = false;
   String? _error;
+
+  bool get _isSingleDay =>
+      _from != null &&
+      _to != null &&
+      _from!.year == _to!.year &&
+      _from!.month == _to!.month &&
+      _from!.day == _to!.day;
 
   @override
   void initState() {
@@ -1705,6 +1713,9 @@ class _BookingSheetState extends State<_BookingSheet> {
       } else {
         _to = picked;
       }
+      if (!_isSingleDay) {
+        _dayPortion = 'FULL_DAY';
+      }
     });
     _refreshPreview();
   }
@@ -1716,6 +1727,7 @@ class _BookingSheetState extends State<_BookingSheet> {
         leaveTypeId: _type!.id,
         startDate: _fmt(_from!),
         endDate: _fmt(_to!),
+        dayPortion: _isSingleDay ? _dayPortion : 'FULL_DAY',
       );
       if (mounted) setState(() { _preview = p; _error = null; });
     } on ApiException catch (e) {
@@ -1731,6 +1743,7 @@ class _BookingSheetState extends State<_BookingSheet> {
         leaveTypeId: _type!.id,
         startDate: _fmt(_from!),
         endDate: _fmt(_to!),
+        dayPortion: _isSingleDay ? _dayPortion : 'FULL_DAY',
         reason: _reason.text.trim().isEmpty ? null : _reason.text.trim(),
       );
       if (mounted) Navigator.pop(context, true);
@@ -1788,6 +1801,35 @@ class _BookingSheetState extends State<_BookingSheet> {
                     Expanded(child: _dateField('To Date', _to, () => _pick(isStart: false))),
                   ],
                 ),
+                if (_isSingleDay) ...[
+                  const SizedBox(height: 14),
+                  Text('Day Portion / Duration', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: _dayPortion,
+                    dropdownColor: AppColors.sheet,
+                    decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10)),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'FULL_DAY',
+                        child: Text('Full Day (1.0 day)', style: TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: 'SECOND_HALF',
+                        child: Text('Afternoon / Leave Early (0.5 day)', style: TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: 'FIRST_HALF',
+                        child: Text('Morning / Arrive Late (0.5 day)', style: TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      if (val == null) return;
+                      setState(() => _dayPortion = val);
+                      _refreshPreview();
+                    },
+                  ),
+                ],
                 const SizedBox(height: 14),
                 Text('Reason / Explanation', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 6),
