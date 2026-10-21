@@ -45,8 +45,9 @@ function getDaysInRange(startDate, endDate) {
  */
 async function generateReportData({ from, to, employeeId = null, workStatus = null, departmentId = null }) {
   const nowMs = T.now();
+  const todayKey = T.dateKey(nowMs);
   const startDate = from || T.dateKey(T.startOfMonth(nowMs));
-  const endDate = to || T.dateKey(nowMs);
+  const endDate = to || todayKey;
   const dateList = getDaysInRange(startDate, endDate);
 
   // 1. Fetch targeted employees
@@ -210,6 +211,8 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
       let dailyDeficitMins = 0;
       let dailyCreditMins = 0;
 
+      const isFuture = dKey > todayKey;
+
       if (summary) {
         workedMins = Number(summary.worked_minutes) || 0;
         firstIn = summary.first_clock_in ? T.displayTime(Number(summary.first_clock_in)) : null;
@@ -225,11 +228,11 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         firstIn = rawDay.first_in_at ? T.displayTime(Number(rawDay.first_in_at)) : null;
         lastOut = rawDay.last_active_at ? T.displayTime(Number(rawDay.last_active_at)) : null;
         dailyCreditMins = Math.abs(Number(rawDay.adjustment_minutes) || 0);
-        if (isWorkDay && !leaveForDay) {
+        if (isWorkDay && !leaveForDay && !isFuture) {
           dailyDeficitMins = Math.max(0, dayEquivalentMinutes - workedMins);
         }
       } else {
-        if (isWorkDay && !leaveForDay) {
+        if (isWorkDay && !leaveForDay && !isFuture) {
           dailyDeficitMins = dayEquivalentMinutes;
         }
       }
@@ -248,21 +251,47 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         workStatusLabel = 'Rest Day';
       } else if (leaveForDay) {
         const lType = String(leaveForDay.type_name || leaveForDay.type || '').toUpperCase();
-        if (lType.includes('SICK')) {
+        if (leaveForDay.leave_type_id === 'wfh' || lType.includes('WORK FROM HOME') || lType.includes('WFH')) {
+          dailyStatus = 'Present';
+          workStatusLabel = 'WFH';
+          wfhDaysCount++;
+          expectedWorkingDays++;
+          completeWorkingDays++;
+          payrollMins = dayEquivalentMinutes;
+          workedMins = dayEquivalentMinutes;
+        } else if (lType.includes('SICK')) {
           dailyStatus = 'Sick Leave';
           sickLeaveDaysCount++;
+          workStatusLabel = 'Leave';
+          if (leaveForDay.is_paid === 1 || leaveForDay.type_is_paid === 1) {
+            payrollMins = dayEquivalentMinutes;
+          }
         } else if (lType.includes('UNPAID')) {
           dailyStatus = 'Unpaid Leave';
           unpaidLeaveDaysCount++;
+          workStatusLabel = 'Leave';
         } else if (lType.includes('COMPASSIONATE')) {
           dailyStatus = 'Compassionate Leave';
           compassionateLeaveDaysCount++;
+          workStatusLabel = 'Leave';
+          if (leaveForDay.is_paid === 1 || leaveForDay.type_is_paid === 1) {
+            payrollMins = dayEquivalentMinutes;
+          }
         } else {
           dailyStatus = 'Paid Leave';
           paidLeaveDaysCount++;
           payrollMins = dayEquivalentMinutes;
+          workStatusLabel = 'Leave';
         }
-        workStatusLabel = 'Leave';
+      } else if (isFuture) {
+        // Future working day with no approved leave: count as Present (for export only, no real DB write)
+        expectedWorkingDays++;
+        completeWorkingDays++;
+        dailyStatus = 'Present';
+        payrollMins = dayEquivalentMinutes;
+        workedMins = dayEquivalentMinutes;
+        if (workStatusLabel === 'WFH') wfhDaysCount++;
+        if (workStatusLabel === 'Remote') remoteDaysCount++;
       } else {
         expectedWorkingDays++;
         if (workStatusLabel === 'WFH') wfhDaysCount++;
@@ -702,7 +731,7 @@ async function buildExcelWorkbook(reportData) {
 
         // Badge styling for Daily Status
         if (colNum === 11) {
-          if (dr.dailyStatus === 'Complete Day') {
+          if (dr.dailyStatus === 'Complete Day' || dr.dailyStatus === 'Present') {
             c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF15803D' } };
           } else if (dr.dailyStatus.includes('Late') || dr.dailyStatus === 'Incomplete Day') {
             c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB45309' } };
