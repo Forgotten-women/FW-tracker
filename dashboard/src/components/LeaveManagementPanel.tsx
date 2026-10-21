@@ -83,6 +83,7 @@ export function LeaveManagementPanel() {
   const [recordLeaveTypeId, setRecordLeaveTypeId] = useState('annual');
   const [recordStartDate, setRecordStartDate] = useState('');
   const [recordEndDate, setRecordEndDate] = useState('');
+  const [recordDayPortion, setRecordDayPortion] = useState<'FULL_DAY' | 'FIRST_HALF' | 'SECOND_HALF'>('FULL_DAY');
   const [recordReason, setRecordReason] = useState('');
   const [recordIsPaid, setRecordIsPaid] = useState(true);
   const [recordOverdraftReason, setRecordOverdraftReason] = useState('');
@@ -323,12 +324,14 @@ export function LeaveManagementPanel() {
         leaveTypeId: recordLeaveTypeId,
         startDate: recordStartDate,
         endDate: recordEndDate || recordStartDate,
+        dayPortion: (!recordEndDate || recordStartDate === recordEndDate) ? recordDayPortion : 'FULL_DAY',
         reason: recordReason.trim() || 'Recorded by HR',
         isPaid: recordIsPaid,
         overdraftReason: effectiveOverdraftReason,
       });
       setShowRecordLeaveModal(false);
       setRecordEmployeeId('');
+      setRecordDayPortion('FULL_DAY');
       setRecordReason('');
       setRecordOverdraftReason('');
       await refresh();
@@ -3258,6 +3261,30 @@ export function LeaveManagementPanel() {
                       />
                     </div>
                   </div>
+
+                  {(!recordEndDate || recordStartDate === recordEndDate) && (
+                    <div>
+                      <label className="block text-xs font-semibold text-text mb-1">
+                        Day Portion (Full Day or Half Day)
+                      </label>
+                      <select
+                        value={recordDayPortion}
+                        onChange={(e) => setRecordDayPortion(e.target.value as any)}
+                        className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                      >
+                        <option value="FULL_DAY">Full Day (1.0 day off)</option>
+                        <option value="SECOND_HALF">Second Half / Afternoon — Leave Early (0.5 day off)</option>
+                        <option value="FIRST_HALF">First Half / Morning — Arrive Late (0.5 day off)</option>
+                      </select>
+                      <p className="text-[11px] text-muted mt-1">
+                        {recordDayPortion === 'SECOND_HALF'
+                          ? 'Employee works the morning and leaves early at midday (e.g. 3:00 PM). Shift end is adjusted to midday with 0 early departure deficit.'
+                          : recordDayPortion === 'FIRST_HALF'
+                          ? 'Employee arrives at midday (e.g. 3:00 PM). Shift start is adjusted with 0 morning lateness deficit.'
+                          : 'Standard full-day leave.'}
+                      </p>
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2 rounded-xl border border-line bg-raised p-3">
                     <input
