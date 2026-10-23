@@ -1968,7 +1968,14 @@ export function LeaveManagementPanel() {
                           {bal.accruedDays ?? bal.accrued}d
                         </td>
                         <td className="px-3 py-3 align-middle text-dim">
-                          {bal.takenDays ?? bal.taken}d
+                          <div className="font-medium text-text">
+                            {bal.takenDays ?? bal.taken}d
+                          </div>
+                          {(bal.approvedHourlyDays || 0) > 0 && (
+                            <div className="text-[10px] text-amber-300 font-mono mt-0.5" title={`${bal.approvedHourlyMinutes || 0} min total approved hourly exception`}>
+                              +{bal.approvedHourlyDays}d ({bal.approvedHourlyMinutes}m hrly)
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-middle text-teal-400 font-semibold">
                           {carriedIn > 0 ? `+${carriedIn}d` : '0d'}
@@ -1999,6 +2006,11 @@ export function LeaveManagementPanel() {
                           >
                             {bal.available}d
                           </span>
+                          {(bal.approvedHourlyFractionRemaining || 0) > 0 && (
+                            <div className="text-[10px] text-amber-400 font-mono mt-0.5" title="Approved hourly leaves accumulating towards 1 whole day deduction (450 min)">
+                              ({bal.approvedHourlyMinutesRemaining}m / {bal.approvedHourlyFractionRemaining}d hrly pending)
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-middle text-right">
                           <div className="flex items-center justify-end gap-1.5">

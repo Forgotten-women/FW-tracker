@@ -73,6 +73,13 @@ function presentBalance(b) {
     availableDays: b.availableDays,
     isNegative: b.isNegative,
     carryForwardDecision: b.carryForwardDecision || null,
+
+    // Solution 2: Approved Hourly Deductions / Exception tracking
+    approvedHourlyDays: b.approvedHourlyDays || 0,
+    approvedHourlyMinutes: b.approvedHourlyMinutes || 0,
+    approvedHourlyWholeDaysDeducted: b.approvedHourlyWholeDaysDeducted || 0,
+    approvedHourlyFractionRemaining: b.approvedHourlyFractionRemaining || 0,
+    approvedHourlyMinutesRemaining: b.approvedHourlyMinutesRemaining || 0,
   };
 }
 
@@ -468,6 +475,29 @@ router.post('/employee/:employeeId/adjust',
         onDate: req.body?.onDate || T.dateKey(),
       });
       res.json({ status: 'SUCCESS', balance: presentBalance(balance) });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
+// POST /api/leave/employee/:employeeId/resolve-deficit - Resolves accumulated unapproved deficit days
+// Option 1 ('ANNUAL_LEAVE'): Deducts 2 annual leaves for every 1 day deficit.
+// Option 2 ('PAYROLL_DEDUCTION'): Deducts 1 day of salary pay on payroll.
+router.post('/employee/:employeeId/resolve-deficit',
+  requireUserOrAdminKey('leave.write'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
+      const out = await L.resolveDeficitPenalty({
+        employeeId: req.params.employeeId,
+        wholeDays: req.body?.wholeDays || 1,
+        resolutionType: req.body?.resolutionType,
+        actor,
+        reason: req.body?.reason || '',
+        periodId: req.body?.periodId || null,
+      });
+      const balance = await L.balanceFor(req.params.employeeId);
+      res.json({ status: 'SUCCESS', ...out, balance: presentBalance(balance) });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
     }

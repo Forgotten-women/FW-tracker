@@ -382,6 +382,11 @@ export interface LeaveBalanceDetails {
   available: number;
   availableDays?: number;
   isNegative: boolean;
+  approvedHourlyDays?: number;
+  approvedHourlyMinutes?: number;
+  approvedHourlyWholeDaysDeducted?: number;
+  approvedHourlyFractionRemaining?: number;
+  approvedHourlyMinutesRemaining?: number;
   carryForwardDecision?: {
     approvedDays: number;
     lapsedDays: number;
@@ -845,6 +850,21 @@ export interface PayrollReviewEmployee {
     carryForwardMinutes: number;
     valueIfDeducted: number;
     needsHrDecision: boolean;
+    leavePenaltyDays?: number;
+    payDeductionDays?: number;
+    payDeductionAmount?: number;
+    options?: {
+      option1_leavePenalty?: {
+        daysToDeduct: number;
+        description: string;
+        availableLeaveAfter?: number;
+      };
+      option2_payDeduction?: {
+        daysToDeduct: number;
+        amountToDeduct: number;
+        description: string;
+      };
+    };
   };
   leave: { blocked: true; reason: string } | { blocked?: undefined; available: number; isNegative: boolean };
   adjustments: PayrollReviewLine[];

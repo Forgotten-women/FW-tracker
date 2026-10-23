@@ -4,7 +4,8 @@
 // their employment. A month is fetched at a time (the API allows 62 days a
 // call) and kept in the drawer's store; the day detail is fetched on open.
 
-import { useRef, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
+import { api } from '@/lib/api';
 import { Button, Empty } from '@/components/primitives';
 import {
   AlertTriangleIcon,
@@ -142,6 +143,36 @@ export function EmployeeHistory({
   const totals = monthTotals(days);
   const beforeEmployment = !!(data?.employmentStart && monthBounds(month).to < data.employmentStart);
   const openSummary = openDay ? days.find((d) => d.dateKey === openDay) ?? null : null;
+
+  const [resolving, setResolving] = useState<boolean>(false);
+  const [resolveSuccess, setResolveSuccess] = useState<string | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+
+  const wholeDeficitDays = Math.floor(totals.deficitMinutes / 450);
+
+  const handleResolveDeficit = async (resolutionType: 'ANNUAL_LEAVE' | 'PAYROLL_DEDUCTION') => {
+    if (!wholeDeficitDays || wholeDeficitDays < 1) return;
+    setResolving(true);
+    setResolveError(null);
+    setResolveSuccess(null);
+    try {
+      const res = await api.resolveDeficitPenalty(employeeId, {
+        wholeDays: wholeDeficitDays,
+        resolutionType,
+        reason: `HR resolved from employee history for ${monthLabel(month)}`,
+      });
+      setResolveSuccess(
+        resolutionType === 'ANNUAL_LEAVE'
+          ? `Successfully resolved ${res.deficitDaysResolved} day deficit! Deducted ${res.annualLeavesDeducted} annual leaves.`
+          : `Successfully resolved ${res.deficitDaysResolved} day deficit! Deducted ${res.payDaysDeducted} day pay on payroll.`
+      );
+      monthRes.reload();
+    } catch (err: unknown) {
+      setResolveError(err instanceof Error ? err.message : 'Failed to resolve deficit penalty.');
+    } finally {
+      setResolving(false);
+    }
+  };
 
   const monthOptions = monthsBetween(floorMonth < month ? floorMonth : month, todayMonth);
 
@@ -323,6 +354,69 @@ export function EmployeeHistory({
               hint={totals.pendingCorrections > 0 ? 'awaiting HR review' : undefined}
             />
           </section>
+
+          {wholeDeficitDays >= 1 && (
+            <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangleIcon className="h-5 w-5 text-rose-400 shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-bold text-white">
+                      Unapproved Deficit Threshold Reached: {wholeDeficitDays} Whole Day{wholeDeficitDays > 1 ? 's' : ''} ({fmtMinutes(totals.deficitMinutes)})
+                    </h4>
+                    <p className="text-xs text-rose-200/80 mt-0.5">
+                      Company policy gives HR two resolution options when unapproved deficit accumulates to whole day(s):
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {resolveSuccess && (
+                <div className="rounded-lg bg-emerald-500/20 border border-emerald-500/30 px-3 py-2 text-xs text-emerald-300">
+                  {resolveSuccess}
+                </div>
+              )}
+              {resolveError && (
+                <div className="rounded-lg bg-rose-500/20 border border-rose-500/30 px-3 py-2 text-xs text-rose-300">
+                  {resolveError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3 flex flex-col justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-amber-300">Option 1: Annual Leave Penalty</div>
+                    <div className="text-[11px] text-slate-300 mt-1">
+                      Deduct <strong>{wholeDeficitDays * 2} Annual Leaves</strong> (2 annual leaves per 1 day deficit)
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => handleResolveDeficit('ANNUAL_LEAVE')}
+                    disabled={resolving}
+                    className="mt-3 w-full py-1.5 text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30"
+                  >
+                    {resolving ? 'Applying…' : `Deduct ${wholeDeficitDays * 2} Annual Leaves`}
+                  </Button>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3 flex flex-col justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-sky-300">Option 2: Payroll Pay Deduction</div>
+                    <div className="text-[11px] text-slate-300 mt-1">
+                      Deduct <strong>{wholeDeficitDays} Day Pay</strong> from salary on Payroll
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => handleResolveDeficit('PAYROLL_DEDUCTION')}
+                    disabled={resolving}
+                    className="mt-3 w-full py-1.5 text-xs bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-500/30"
+                  >
+                    {resolving ? 'Applying…' : `Deduct ${wholeDeficitDays} Day Pay on Payroll`}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="glass-panel rounded-2xl p-3 sm:p-4 space-y-4">
             {mode === 'calendar' ? (

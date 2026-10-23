@@ -618,6 +618,32 @@ export const api = {
       },
     ),
 
+  resolveDeficitPenalty: (
+    employeeId: string,
+    data: {
+      wholeDays?: number;
+      resolutionType: 'ANNUAL_LEAVE' | 'PAYROLL_DEDUCTION';
+      reason?: string;
+      periodId?: string;
+    },
+  ) =>
+    request<{
+      status: string;
+      resolutionType: string;
+      deficitDaysResolved: number;
+      minutesCleared: number;
+      annualLeavesDeducted?: number;
+      payDaysDeducted?: number;
+      remainingDeficitMinutes: number;
+      balance: LeaveBalanceDetails;
+    }>(
+      `/api/leave/employee/${encodeURIComponent(employeeId)}/resolve-deficit`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
   fetchApproachingAnniversaries: (date?: string) =>
     request<{ status: string; employees: ApproachingAnniversaryEmployee[] }>(
       `/api/leave/carry-forward/approaching${date ? `?date=${encodeURIComponent(date)}` : ''}`

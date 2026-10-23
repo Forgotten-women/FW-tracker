@@ -427,6 +427,156 @@ function AddExceptionModal({
   );
 }
 
+function DeficitResolutionModal({
+  periodId,
+  employee,
+  currency,
+  periodRate,
+  onClose,
+  onSuccess,
+}: {
+  periodId: string;
+  employee: PrepareEmployee;
+  currency: Currency;
+  periodRate: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const empCurrency = employee.salary?.currency || 'PKR';
+  const wholeDays = employee.attendanceDeficit?.wholeDayEquivalents || 1;
+  const payDeductionAmount = employee.attendanceDeficit?.valueIfDeducted || (employee.salary.daily * wholeDays);
+  const leavePenaltyDays = wholeDays * 2;
+  const availableLeave = employee.leave?.available ?? 0;
+
+  const handleResolve = async (resolutionType: 'ANNUAL_LEAVE' | 'PAYROLL_DEDUCTION') => {
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.resolveDeficitPenalty(employee.employeeId, {
+        wholeDays,
+        resolutionType,
+        periodId,
+        reason: `HR resolved ${wholeDays} day deficit during payroll review`,
+      });
+      onSuccess();
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to resolve deficit.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={MODAL_BACKDROP}>
+      <div className={`${MODAL_SHELL} max-w-lg`}>
+        <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="text-rose-400">⚡ Resolve Attendance Deficit</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              For <strong className="text-indigo-300">{employee.employeeName}</strong>{' '}
+              {employee.employeeNumber ? `(${employee.employeeNumber})` : ''}
+            </p>
+          </div>
+          <span className="rounded bg-rose-500/20 px-2 py-0.5 text-xs font-mono font-bold text-rose-300 border border-rose-500/30">
+            Deficit: {wholeDays}d ({wholeDays * 450}m)
+          </span>
+        </div>
+
+        {error && (
+          <div className="rounded-lg bg-rose-500/20 border border-rose-500/30 p-2.5 text-xs text-rose-300 mb-3">
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-3 mb-4">
+          <p className="text-xs text-slate-300">
+            The employee has accumulated <strong>{wholeDays} full day(s)</strong> of unapproved attendance shortfall (lateness, excess breaks, early departure). Company policy gives HR two resolution options:
+          </p>
+
+          <div className="grid grid-cols-1 gap-3">
+            {/* Option 1: Leave Penalty */}
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-300 uppercase tracking-wide">
+                    Option 1: Annual Leave Penalty
+                  </span>
+                  <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-mono text-amber-300">
+                    2 Leaves / 1 Day Deficit
+                  </span>
+                </div>
+                <div className="text-xs text-slate-200 mt-2">
+                  Deduct <strong>{leavePenaltyDays} Annual Leaves</strong> from the employee&apos;s leave balance.
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Annual leaves available: <strong className="text-white">{availableLeave}d</strong> &rarr;{' '}
+                  <strong className={availableLeave - leavePenaltyDays < 0 ? 'text-rose-400' : 'text-amber-300'}>
+                    {availableLeave - leavePenaltyDays}d
+                  </strong>
+                  . No salary will be deducted on payroll.
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleResolve('ANNUAL_LEAVE')}
+                className="mt-3 w-full rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2 text-xs transition-colors disabled:opacity-50"
+              >
+                {submitting ? 'Applying…' : `Deduct ${leavePenaltyDays} Annual Leaves`}
+              </button>
+            </div>
+
+            {/* Option 2: Pay Deduction */}
+            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3.5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-sky-300 uppercase tracking-wide">
+                    Option 2: Payroll Salary Deduction
+                  </span>
+                  <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-mono text-sky-300">
+                    1 Day Pay / 1 Day Deficit
+                  </span>
+                </div>
+                <div className="text-xs text-slate-200 mt-2">
+                  Deduct <strong>{wholeDays} Day(s) Pay</strong> from salary on this payroll.
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Amount to deduct: <strong className="text-rose-400">-{formatMoney(payDeductionAmount, currency, empCurrency, periodRate)}</strong>.
+                  Employee&apos;s annual leave balance remains untouched.
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleResolve('PAYROLL_DEDUCTION')}
+                className="mt-3 w-full rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold py-2 text-xs transition-colors disabled:opacity-50"
+              >
+                {submitting ? 'Applying…' : `Deduct ${wholeDays} Day Pay on Payroll`}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2 border-t border-white/10">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-white/10 hover:bg-white/15 px-4 py-1.5 text-xs text-white"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Prepare-sheet employee row shape (from backend)
 // ---------------------------------------------------------------------------
@@ -481,6 +631,21 @@ interface PrepareEmployee {
     carryForwardMinutes: number;
     valueIfDeducted: number;
     needsHrDecision: boolean;
+    leavePenaltyDays?: number;
+    payDeductionDays?: number;
+    payDeductionAmount?: number;
+    options?: {
+      option1_leavePenalty?: {
+        daysToDeduct: number;
+        description: string;
+        availableLeaveAfter?: number;
+      };
+      option2_payDeduction?: {
+        daysToDeduct: number;
+        amountToDeduct: number;
+        description: string;
+      };
+    };
   };
   leave: { blocked: boolean; reason?: string; available?: number; isNegative?: boolean };
   adjustments: Array<{
@@ -1408,6 +1573,7 @@ function PeriodDetailView({
   const [closeError, setCloseError] = useState('');
   const [rateBasis, setRateBasis] = useState<'WORKING_DAYS_260' | 'CALENDAR_DAYS_30'>('WORKING_DAYS_260');
   const [exceptionEmployee, setExceptionEmployee] = useState<PrepareEmployee | null>(null);
+  const [deficitResolutionEmployee, setDeficitResolutionEmployee] = useState<PrepareEmployee | null>(null);
   const [draftInvoiceFor, setDraftInvoiceFor] = useState<{ employeeId: string; name: string } | null>(null);
   // A draft invoice is the open month's live figures; a final one lives on the payslips.
   const canPreviewDraft = period.status === 'OPEN' || period.status === 'IN_REVIEW';
@@ -1784,6 +1950,16 @@ function PeriodDetailView({
                               <div className="text-[10px] text-rose-400/80 font-sans">
                                 -{formatMoney(deficitAbsenceAmount, currency, emp.salary.currency, periodRate)}
                               </div>
+                              {(emp.attendanceDeficit?.wholeDayEquivalents || 0) > 0 && !isFinal && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeficitResolutionEmployee(emp)}
+                                  className="mt-1 inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-sans font-semibold text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+                                  title="Company Policy: Resolve whole-day deficit via 2 Annual Leaves OR 1 Day Pay"
+                                >
+                                  ⚡ Resolve ({emp.attendanceDeficit.wholeDayEquivalents}d)
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <span className="text-slate-500">—</span>
@@ -2072,6 +2248,18 @@ function PeriodDetailView({
           currency={currency}
           periodRate={periodRate}
           onClose={() => setExceptionEmployee(null)}
+          onSuccess={changed}
+        />
+      )}
+
+      {/* Deficit Policy: Resolve Deficit Modal */}
+      {deficitResolutionEmployee && (
+        <DeficitResolutionModal
+          periodId={period.id}
+          employee={deficitResolutionEmployee}
+          currency={currency}
+          periodRate={periodRate}
+          onClose={() => setDeficitResolutionEmployee(null)}
           onSuccess={changed}
         />
       )}

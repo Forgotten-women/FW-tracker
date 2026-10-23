@@ -885,6 +885,21 @@ async function employeePosition(period, e, { throughDate = null, detail = true, 
       carryForwardMinutes: deficit.carryForwardMinutes || 0,
       valueIfDeducted: money(salary.dailyPrecise * (deficit.wholeDayEquivalents || 0)),
       needsHrDecision: (deficit.wholeDayEquivalents || 0) > 0,
+      leavePenaltyDays: (deficit.wholeDayEquivalents || 0) * 2,
+      payDeductionDays: deficit.wholeDayEquivalents || 0,
+      payDeductionAmount: money(salary.dailyPrecise * (deficit.wholeDayEquivalents || 0)),
+      options: {
+        option1_leavePenalty: {
+          daysToDeduct: (deficit.wholeDayEquivalents || 0) * 2,
+          description: `Deduct ${(deficit.wholeDayEquivalents || 0) * 2} Annual Leaves (2 days per 1 day deficit)`,
+          availableLeaveAfter: (balance.availableDays || 0) - ((deficit.wholeDayEquivalents || 0) * 2),
+        },
+        option2_payDeduction: {
+          daysToDeduct: deficit.wholeDayEquivalents || 0,
+          amountToDeduct: money(salary.dailyPrecise * (deficit.wholeDayEquivalents || 0)),
+          description: `Deduct ${deficit.wholeDayEquivalents || 0} Day(s) Pay on Payroll`,
+        },
+      },
     },
     leave: balance.blocked
       ? { blocked: true, reason: balance.reason }

@@ -410,17 +410,18 @@ const selectLedgerTotals = db.prepare(`
 
 // Requests that consume entitlement, scoped to ONE holiday year.
 const selectYearRequests = db.prepare(`
-  SELECT r.id, r.start_date, r.end_date, r.total_days, r.status
+  SELECT r.id, r.start_date, r.end_date, r.total_days, r.status, r.day_portion
   FROM leave_requests r
   JOIN leave_types t ON t.id = r.leave_type_id
   WHERE r.employee_id = ?
+    AND t.reduces_entitlement = 1
     AND (
       (r.status = 'APPROVED' AND (
         (r.is_paid = 1)
-        OR (r.is_paid IS NULL AND t.is_paid = 1 AND t.reduces_entitlement = 1)
+        OR (r.is_paid IS NULL AND t.is_paid = 1)
       ))
       OR
-      (r.status IN ('PENDING_MANAGER', 'PENDING_HR') AND t.reduces_entitlement = 1)
+      (r.status IN ('PENDING_MANAGER', 'PENDING_HR'))
     )
     AND r.cancelled_at IS NULL
     AND r.leave_type_id <> 'wfh'   -- work from home is a working day, never leave used
@@ -442,12 +443,33 @@ async function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequest
   // would deduct every booking twice.
   const credited = accrued + carryOver + adjustments + forfeit;
 
-  let taken = 0;
-  let booked = 0;
+  let fullDaysTaken = 0;
+  let fullDaysBooked = 0;
+  let hourlyDaysTaken = 0;
+  let hourlyDaysBooked = 0;
+
   for (const r of await selectYearRequests.all(employeeId, year.yearStart, year.yearEnd, excludeRequestId)) {
-    if (r.status === 'APPROVED' && r.end_date < onDate) taken += r.total_days;
-    else booked += r.total_days;
+    const isHourly = (r.day_portion && String(r.day_portion).startsWith('HOURLY')) || (Number(r.total_days) < 1.0);
+    const isPastApproved = r.status === 'APPROVED' && r.end_date < onDate;
+
+    if (isHourly) {
+      if (isPastApproved) hourlyDaysTaken += Number(r.total_days);
+      else hourlyDaysBooked += Number(r.total_days);
+    } else {
+      if (isPastApproved) fullDaysTaken += Number(r.total_days);
+      else fullDaysBooked += Number(r.total_days);
+    }
   }
+
+  // Approved hourly leaves accumulate. Whole days deduct from annual leave; fraction remains in bucket
+  const totalHourlyApproved = hourlyDaysTaken;
+  const hourlyWholeDaysDeducted = Math.floor(totalHourlyApproved + 0.0001);
+  const hourlyFractionRemaining = Math.max(0, totalHourlyApproved - hourlyWholeDaysDeducted);
+  const hourlyMinutesTotal = Math.round(totalHourlyApproved * 450);
+  const hourlyMinutesRemaining = Math.round(hourlyFractionRemaining * 450);
+
+  const taken = fullDaysTaken + hourlyWholeDaysDeducted;
+  const booked = fullDaysBooked;
 
   // FIFO draw: leave is drawn against carry-forward first, then current cycle accrual
   const totalUsed = taken + booked;
@@ -468,6 +490,13 @@ async function balanceRaw(employeeId, year, onDate = T.dateKey(), excludeRequest
     remainingCarryForwardDays: remainingCarryForward,
     remainingCurrentCycleDays: remainingCurrentCycle,
     availableDays: credited - taken - booked,
+
+    // Hourly exception metrics (Solution 2)
+    approvedHourlyDays: Math.round(totalHourlyApproved * 100) / 100,
+    approvedHourlyMinutes: hourlyMinutesTotal,
+    approvedHourlyWholeDaysDeducted: hourlyWholeDaysDeducted,
+    approvedHourlyFractionRemaining: Math.round(hourlyFractionRemaining * 100) / 100,
+    approvedHourlyMinutesRemaining: hourlyMinutesRemaining,
   };
 }
 
@@ -538,6 +567,11 @@ async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestIdOrOp
       accruedDays: round2(raw.accruedDays),
       takenDays: round2(raw.takenDays),
       bookedDays: round2(raw.bookedDays),
+      approvedHourlyDays: raw.approvedHourlyDays || 0,
+      approvedHourlyMinutes: raw.approvedHourlyMinutes || 0,
+      approvedHourlyWholeDaysDeducted: raw.approvedHourlyWholeDaysDeducted || 0,
+      approvedHourlyFractionRemaining: raw.approvedHourlyFractionRemaining || 0,
+      approvedHourlyMinutesRemaining: raw.approvedHourlyMinutesRemaining || 0,
     };
   }
 
@@ -580,6 +614,14 @@ async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestIdOrOp
     // Additional convenient figures
     bookedDays: round2(raw.bookedDays),
     availableDays: round2(raw.availableDays),
+
+    // Solution 2: Approved Hourly Deductions / Exception tracking
+    approvedHourlyDays: round2(raw.approvedHourlyDays || 0),
+    approvedHourlyMinutes: raw.approvedHourlyMinutes || 0,
+    approvedHourlyWholeDaysDeducted: raw.approvedHourlyWholeDaysDeducted || 0,
+    approvedHourlyFractionRemaining: round2(raw.approvedHourlyFractionRemaining || 0),
+    approvedHourlyMinutesRemaining: raw.approvedHourlyMinutesRemaining || 0,
+
     carryForwardDecision: cf ? {
       decision: cf.decision,
       approvedDays: cf.approved_days,
@@ -663,10 +705,10 @@ async function previewRequest({
   const balance = await balanceFor(employeeId, startDate, excludeRequestId, { project: true });
   if (balance.blocked) return { ok: false, error: balance.message, blocked: true };
 
-  // Only paid requests reduce accrued annual leave entitlement.
-  const affectsBalance = isPaid !== null && isPaid !== undefined
+  // Only paid requests reduce accrued annual leave entitlement, provided the type itself reduces entitlement.
+  const affectsBalance = Boolean(type.reduces_entitlement) && (isPaid !== null && isPaid !== undefined
     ? !!isPaid
-    : !!type.reduces_entitlement;
+    : !!type.is_paid);
   const projected = affectsBalance
     ? balance.precise.availableDays - count.totalDays
     : balance.precise.availableDays;
@@ -773,11 +815,11 @@ async function decideRequest({ requestId, decision, notes, actor, overdraftReaso
     ? (isPaid !== null && isPaid !== undefined ? (isPaid ? 1 : 0) : Number(type?.is_paid ?? 1))
     : null;
 
-  // Crucial policy rule: If approved as paid, it is deducted from accrued leave.
+  // Crucial policy rule: If approved as paid, it is deducted from accrued leave only if the type reduces entitlement.
   // If not paid (unpaid), it is not deducted from accrued leave (deducted from pay/salary in payroll).
   // Work from home is a working day, so it never uses annual leave.
   const reducesEntitlement = (decision === 'APPROVED') && (effectiveIsPaid === 1)
-    && req.leave_type_id !== 'wfh';
+    && Boolean(type?.reduces_entitlement) && req.leave_type_id !== 'wfh';
 
   const preview = await previewRequest({
     employeeId: req.employee_id, leaveTypeId: req.leave_type_id,
@@ -1670,6 +1712,156 @@ async function monthlyReportFor(employeeId, { monthKey = null, asOfDate = T.date
   };
 }
 
+/**
+ * Resolves accumulated unapproved deficit days according to HR policy:
+ * - Option 1 ('ANNUAL_LEAVE'): Deducts 2 annual leaves for every 1 day of deficit (450 min).
+ * - Option 2 ('PAYROLL_DEDUCTION'): Deducts 1 day of salary pay on payroll.
+ */
+async function resolveDeficitPenalty({
+  employeeId,
+  wholeDays = 1,
+  resolutionType, // 'ANNUAL_LEAVE' | 'PAYROLL_DEDUCTION'
+  actor = 'admin',
+  reason = '',
+  periodId = null,
+}) {
+  if (!employeeId) throw new Error('employeeId is required.');
+  const days = Math.max(1, Math.floor(Number(wholeDays) || 1));
+  const minutesToClear = days * 450;
+  const nowMs = T.now();
+  const todayKey = T.dateKey();
+
+  const year = await holidayYearFor(employeeId, todayKey);
+
+  let result = null;
+
+  await tx(async () => {
+    const currentDeficit = await db.prepare(`
+      SELECT balance_after FROM attendance_deficit_ledger
+      WHERE employee_id = ? ORDER BY date_key DESC, id DESC LIMIT 1
+    `).get(employeeId);
+    const prevDeficitBalance = Number(currentDeficit?.balance_after || 0);
+
+    const newDeficitBalance = Math.max(0, prevDeficitBalance - minutesToClear);
+    const wholeDaysAfter = Math.floor(newDeficitBalance / 450);
+    const carryForwardAfter = newDeficitBalance % 450;
+
+    const defLedgerId = 'def_pen_' + crypto.randomBytes(8).toString('hex');
+
+    if (resolutionType === 'ANNUAL_LEAVE') {
+      const leavesToDeduct = days * 2; // Policy: 2 annual leaves for every 1 day deficit
+
+      // Record adjustment in attendance deficit ledger (offset minutes)
+      await db.prepare(`
+        INSERT INTO attendance_deficit_ledger
+          (id, employee_id, date_key, entry_type, minutes_delta, balance_after,
+           whole_days_after, carry_forward_after, description, created_at, created_by)
+        VALUES (?, ?, ?, 'HR_ADJUSTMENT', ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        defLedgerId, employeeId, todayKey, -minutesToClear, newDeficitBalance,
+        wholeDaysAfter, carryForwardAfter,
+        `Unapproved deficit penalty: ${days} day deficit (${minutesToClear} min) resolved via ${leavesToDeduct} annual leaves deducted. ${reason || ''}`.trim(),
+        nowMs, actor
+      );
+
+      // Record penalty deduction in leave_accrual_ledger
+      const lalId = 'lal_pen_' + crypto.randomBytes(8).toString('hex');
+      const curBalance = await balanceRaw(employeeId, year);
+      await insertLedger.run({
+        id: lalId,
+        employee_id: employeeId,
+        leave_year: year.leaveYear,
+        entry_type: 'ADJUSTMENT',
+        days_delta: -leavesToDeduct,
+        balance_after: curBalance.availableDays - leavesToDeduct,
+        effective_date: todayKey,
+        leave_request_id: null,
+        description: `Unapproved attendance deficit penalty: ${days} day deficit -> ${leavesToDeduct} annual leaves deducted. ${reason || ''}`.trim(),
+        created_at: nowMs,
+        created_by: actor,
+      });
+
+      await audit({
+        actor, action: 'DEFICIT_PENALTY_RESOLVED',
+        targetType: 'employee', targetId: employeeId,
+        after: {
+          resolutionType: 'ANNUAL_LEAVE',
+          deficitDaysResolved: days,
+          minutesCleared: minutesToClear,
+          annualLeavesDeducted: leavesToDeduct,
+          remainingDeficitMinutes: newDeficitBalance,
+        },
+        note: reason || `Resolved ${days} day(s) deficit by deducting ${leavesToDeduct} annual leaves`,
+      });
+
+      result = {
+        success: true,
+        resolutionType: 'ANNUAL_LEAVE',
+        deficitDaysResolved: days,
+        minutesCleared: minutesToClear,
+        annualLeavesDeducted: leavesToDeduct,
+        remainingDeficitMinutes: newDeficitBalance,
+      };
+
+    } else if (resolutionType === 'PAYROLL_DEDUCTION') {
+      // Record adjustment in attendance deficit ledger (offset minutes)
+      await db.prepare(`
+        INSERT INTO attendance_deficit_ledger
+          (id, employee_id, date_key, entry_type, minutes_delta, balance_after,
+           whole_days_after, carry_forward_after, description, created_at, created_by)
+        VALUES (?, ?, ?, 'HR_ADJUSTMENT', ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        defLedgerId, employeeId, todayKey, -minutesToClear, newDeficitBalance,
+        wholeDaysAfter, carryForwardAfter,
+        `Unapproved deficit penalty: ${days} day deficit (${minutesToClear} min) resolved via 1 day pay deduction on payroll. ${reason || ''}`.trim(),
+        nowMs, actor
+      );
+
+      // If periodId given, insert payroll adjustment
+      if (periodId) {
+        const adjId = 'adj_' + crypto.randomBytes(8).toString('hex');
+        await db.prepare(`
+          INSERT INTO payroll_adjustments
+            (id, period_id, employee_id, adjustment_type, calculated_days, approved_days,
+             explanation, source_reference, status, created_at, created_by)
+          VALUES (?, ?, ?, 'DEDUCTION', ?, ?, ?, 'ATTENDANCE_DEFICIT', 'APPROVED', ?, ?)
+        `).run(
+          adjId, periodId, employeeId, days, days,
+          `Attendance deficit deduction: ${days} day(s) pay for unapproved shortfall. ${reason || ''}`.trim(),
+          nowMs, actor
+        );
+      }
+
+      await audit({
+        actor, action: 'DEFICIT_PENALTY_RESOLVED',
+        targetType: 'employee', targetId: employeeId,
+        after: {
+          resolutionType: 'PAYROLL_DEDUCTION',
+          deficitDaysResolved: days,
+          minutesCleared: minutesToClear,
+          payDaysDeducted: days,
+          remainingDeficitMinutes: newDeficitBalance,
+          periodId: periodId || null,
+        },
+        note: reason || `Resolved ${days} day(s) deficit by deducting ${days} day pay on payroll`,
+      });
+
+      result = {
+        success: true,
+        resolutionType: 'PAYROLL_DEDUCTION',
+        deficitDaysResolved: days,
+        minutesCleared: minutesToClear,
+        payDaysDeducted: days,
+        remainingDeficitMinutes: newDeficitBalance,
+      };
+    } else {
+      throw new Error(`Invalid resolutionType: ${resolutionType}. Must be ANNUAL_LEAVE or PAYROLL_DEDUCTION.`);
+    }
+  });
+
+  return result;
+}
+
 module.exports = {
   holidayYearFor, addMonths, daysBetween,
   accrue, accrueAll, finaliseYear, closeHolidayYear,
@@ -1677,7 +1869,7 @@ module.exports = {
   previewRequest, submitRequest, decideRequest, cancelRequest, adjustBalance,
   recordCarryForwardApproval, rolloverHolidayYear, checkAndRolloverAll,
   historicalCyclesFor, employeesApproachingAnniversary,
-  monthlyReportFor, recomputeAttendanceFor,
+  monthlyReportFor, recomputeAttendanceFor, resolveDeficitPenalty,
   ENTITLEMENT,
 };
 
