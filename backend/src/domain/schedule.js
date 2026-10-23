@@ -283,6 +283,9 @@ async function leaveOn(employeeId, dateKey) {
   let partDay = null;
   for (const r of rows) {
     const p = String(r.day_portion || 'FULL_DAY').toUpperCase();
+    if (p.startsWith('HOURLY')) {
+      return { requestId: r.id, fullDay: false, half: null, hourly: true, dayPortion: r.day_portion };
+    }
     const half = /(^|_)(AM|MORNING|FIRST)/.test(p) ? 'FIRST_HALF'
       : /(^|_)(PM|AFTERNOON|SECOND)/.test(p) ? 'SECOND_HALF'
       : null;

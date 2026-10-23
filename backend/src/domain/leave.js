@@ -647,7 +647,7 @@ async function balanceFor(employeeId, onDate = T.dateKey(), excludeRequestIdOrOp
  * Rest days and paid office closures are skipped. Spec 16 is explicit that an
  * employee must not lose annual leave for a day the office is shut.
  */
-async function countLeaveDays(employeeId, startDate, endDate, dayPortion = 'FULL_DAY') {
+async function countLeaveDays(employeeId, startDate, endDate, dayPortion = 'FULL_DAY', options = {}) {
   const days = [];
   const skipped = [];
   let cursor = startDate;
@@ -660,11 +660,31 @@ async function countLeaveDays(employeeId, startDate, endDate, dayPortion = 'FULL
     cursor = T.dateKey(T.endOfDay(cursor));
   }
 
-  // A half day only makes sense for a single date.
-  const multiplier = (dayPortion !== 'FULL_DAY' && days.length === 1) ? 0.5 : 1;
+  // A half day or hourly portion only applies to a single date.
+  let multiplier = 1;
+  if (days.length === 1) {
+    if (dayPortion === 'FIRST_HALF' || dayPortion === 'SECOND_HALF') {
+      multiplier = 0.5;
+    } else if (options.customDays != null && Number(options.customDays) > 0) {
+      multiplier = Number(options.customDays);
+    } else if (options.startTime && options.endTime) {
+      const [sh, sm] = String(options.startTime).split(':').map(Number);
+      const [eh, em] = String(options.endTime).split(':').map(Number);
+      const minutes = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+      multiplier = Math.round((minutes / 450) * 10000) / 10000;
+    } else if (dayPortion && String(dayPortion).startsWith('HOURLY:')) {
+      const m = String(dayPortion).match(/HOURLY:(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/);
+      if (m) {
+        const [sh, sm] = m[1].split(':').map(Number);
+        const [eh, em] = m[2].split(':').map(Number);
+        const minutes = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+        multiplier = Math.round((minutes / 450) * 10000) / 10000;
+      }
+    }
+  }
 
   return {
-    totalDays: days.length * multiplier,
+    totalDays: Math.round(days.length * multiplier * 10000) / 10000,
     workingDates: days,
     skipped,
   };
@@ -686,6 +706,9 @@ async function previewRequest({
   // not counted against its own balance.
   excludeRequestId = null,
   isPaid = null,
+  customDays = null,
+  startTime = null,
+  endTime = null,
 }) {
   const type = await selectLeaveType.get(leaveTypeId);
   if (!type) return { ok: false, error: 'Unknown leave type.' };
@@ -693,7 +716,7 @@ async function previewRequest({
     return { ok: false, error: 'The end date must be on or after the start date.' };
   }
 
-  const count = await countLeaveDays(employeeId, startDate, endDate, dayPortion);
+  const count = await countLeaveDays(employeeId, startDate, endDate, dayPortion, { customDays, startTime, endTime });
   if (count.totalDays === 0) {
     return {
       ok: false,
@@ -734,8 +757,15 @@ async function previewRequest({
   };
 }
 
-async function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion = 'FULL_DAY', reason = null, evidenceDocumentId = null, source = 'EMPLOYEE_REQUEST' }) {
-  const preview = await previewRequest({ employeeId, leaveTypeId, startDate, endDate, dayPortion });
+async function submitRequest({
+  employeeId, leaveTypeId, startDate, endDate, dayPortion = 'FULL_DAY',
+  reason = null, evidenceDocumentId = null, source = 'EMPLOYEE_REQUEST',
+  customDays = null, startTime = null, endTime = null,
+}) {
+  const preview = await previewRequest({
+    employeeId, leaveTypeId, startDate, endDate, dayPortion,
+    customDays, startTime, endTime,
+  });
   if (!preview.ok) throw new Error(preview.error);
 
   if (preview.leaveType.requiresEvidence && !evidenceDocumentId && !reason) {
@@ -756,12 +786,16 @@ async function submitRequest({ employeeId, leaveTypeId, startDate, endDate, dayP
   const nowMs = T.now();
 
   await tx(async () => {
+    const effectiveDayPortion = (dayPortion === 'HOURLY' && startTime && endTime)
+      ? `HOURLY:${startTime}-${endTime}`
+      : dayPortion;
+
     await db.prepare(`
       INSERT INTO leave_requests
         (id, employee_id, leave_type_id, start_date, end_date, day_portion,
          total_days, reason, evidence_document_id, status, submitted_at, created_at, source)
       VALUES (?,?,?,?,?,?,?,?,?, 'PENDING_HR', ?, ?, ?)
-    `).run(id, employeeId, leaveTypeId, startDate, endDate, dayPortion,
+    `).run(id, employeeId, leaveTypeId, startDate, endDate, effectiveDayPortion,
            preview.requestedDays, reason, evidenceDocumentId, nowMs, nowMs, source);
 
     // Confirmed route: HR only, so there is exactly one step and a request is

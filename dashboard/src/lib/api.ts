@@ -554,6 +554,9 @@ export const api = {
       startDate: string;
       endDate?: string;
       dayPortion?: string;
+      startTime?: string;
+      endTime?: string;
+      customDays?: number;
       reason?: string;
       isPaid?: boolean;
       overdraftReason?: string;

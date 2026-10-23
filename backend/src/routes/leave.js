@@ -234,6 +234,7 @@ router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => 
         blocked: preview.ok ? null : preview.error,
         reducesEntitlement: !!r.reduces_entitlement,
         requiresEvidence: !!r.requires_evidence,
+        dayPortion: r.day_portion,
       };
     })),
   });
@@ -293,6 +294,7 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
         submittedAtMs: r.submitted_at,
         decidedAt: r.decided_at ? T.displayTime(r.decided_at) : null,
         decidedBy: r.decided_by,
+        dayPortion: r.day_portion,
       };
     }),
   });
@@ -427,28 +429,81 @@ router.post('/employee/:employeeId/request',
     const b = req.body || {};
     const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
     try {
+      let dayPortion = b.dayPortion || 'FULL_DAY';
+      let customDays = b.customDays ? Number(b.customDays) : null;
+      let startTime = b.startTime || null;
+      let endTime = b.endTime || null;
+      let minutes = null;
+
+      if (dayPortion === 'HOURLY' || String(dayPortion).startsWith('HOURLY:')) {
+        if (!startTime || !endTime) {
+          const m = String(dayPortion).match(/HOURLY:(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/);
+          if (m) {
+            startTime = m[1];
+            endTime = m[2];
+          }
+        }
+        if (startTime && endTime) {
+          const [sh, sm] = startTime.split(':').map(Number);
+          const [eh, em] = endTime.split(':').map(Number);
+          minutes = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+          if (minutes <= 0) {
+            return res.status(400).json({ status: 'ERROR', message: 'To time must be later than From time.' });
+          }
+          customDays = Math.round((minutes / 450) * 10000) / 10000;
+          dayPortion = 'HOURLY';
+        }
+      }
+
+      let reason = b.reason || 'Recorded by HR';
+      if (minutes && startTime && endTime && !reason.includes(startTime)) {
+        reason = `${reason} (Hourly: ${startTime} - ${endTime}, ${minutes}m)`.trim();
+      }
+
       const created = await L.submitRequest({
         employeeId: req.params.employeeId,
         leaveTypeId: b.leaveTypeId,
         startDate: b.startDate,
         endDate: b.endDate || b.startDate,
-        dayPortion: b.dayPortion || 'FULL_DAY',
-        reason: b.reason || 'Recorded by HR',
+        dayPortion,
+        reason,
         source: 'HR_MANUAL',
+        customDays,
+        startTime,
+        endTime,
       });
       let out;
       try {
         out = await L.decideRequest({
           requestId: created.id,
           decision: 'APPROVED',
-          notes: b.notes || b.reason || 'Recorded by HR',
+          notes: b.notes || reason,
           overdraftReason: (b.overdraftReason && String(b.overdraftReason).trim())
-            || (b.reason && String(b.reason).trim())
+            || (reason && String(reason).trim())
             || (b.notes && String(b.notes).trim())
             || 'Approved by HR during direct manual entry',
           isPaid: b.isPaid !== undefined ? (b.isPaid === true || b.isPaid === 1 || b.isPaid === 'true') : null,
           actor,
         });
+
+        // If hourly, also update attendance_days for that date so it offsets deficit
+        if (minutes && minutes > 0 && b.startDate) {
+          await db.prepare(`
+            UPDATE attendance_days
+            SET adjustment_minutes = GREATEST(COALESCE(adjustment_minutes, 0), ?),
+                adjustment_note = CASE 
+                  WHEN adjustment_note IS NULL OR adjustment_note = '' THEN ? 
+                  ELSE adjustment_note || '; ' || ? 
+                END
+            WHERE employee_id = ? AND date_key = ?
+          `).run(
+            minutes,
+            `Approved hourly leave (${startTime} - ${endTime})`,
+            `Approved hourly leave (${startTime} - ${endTime})`,
+            req.params.employeeId,
+            b.startDate
+          );
+        }
       } catch (err) {
         // Not approved (e.g. an overdraft with no reason): don't leave HR's own
         // entry sitting in the queue as if the employee had asked.

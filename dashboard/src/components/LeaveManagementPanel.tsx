@@ -12,6 +12,7 @@ import type {
   LeaveBalanceDetails,
   MonthlyLeaveReport,
   BankHolidayItem,
+  LeaveTypeItem,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
 import {
@@ -81,9 +82,26 @@ export function LeaveManagementPanel() {
   const [showRecordLeaveModal, setShowRecordLeaveModal] = useState(false);
   const [recordEmployeeId, setRecordEmployeeId] = useState('');
   const [recordLeaveTypeId, setRecordLeaveTypeId] = useState('annual');
+  const [availableLeaveTypes, setAvailableLeaveTypes] = useState<LeaveTypeItem[]>([
+    { id: 'annual', name: 'Paid annual leave (Annual Entitlement)', reducesEntitlement: true, requiresEvidence: false, isPaid: true },
+    { id: 'sick', name: 'Sick leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
+    { id: 'maternity', name: 'Maternity leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
+    { id: 'paternity', name: 'Paternity leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
+    { id: 'parental', name: 'Parental leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
+    { id: 'compassionate', name: 'Compassionate leave', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+    { id: 'emergency', name: 'Emergency leave', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+    { id: 'study', name: 'Study leave', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+    { id: 'toil', name: 'Time off in lieu (TOIL)', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+    { id: 'authorised', name: 'Authorised absence', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+    { id: 'unpaid', name: 'Unpaid leave', reducesEntitlement: false, requiresEvidence: false, isPaid: false },
+    { id: 'wfh', name: 'Work from home', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+    { id: 'other', name: 'Other', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+  ]);
   const [recordStartDate, setRecordStartDate] = useState('');
   const [recordEndDate, setRecordEndDate] = useState('');
-  const [recordDayPortion, setRecordDayPortion] = useState<'FULL_DAY' | 'FIRST_HALF' | 'SECOND_HALF'>('FULL_DAY');
+  const [recordDayPortion, setRecordDayPortion] = useState<'FULL_DAY' | 'FIRST_HALF' | 'SECOND_HALF' | 'HOURLY'>('FULL_DAY');
+  const [recordStartTime, setRecordStartTime] = useState('14:00');
+  const [recordEndTime, setRecordEndTime] = useState('19:00');
   const [recordReason, setRecordReason] = useState('');
   const [recordIsPaid, setRecordIsPaid] = useState(true);
   const [recordOverdraftReason, setRecordOverdraftReason] = useState('');
@@ -148,7 +166,7 @@ export function LeaveManagementPanel() {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [pData, rData, bData, cData, aData, appData, hData] = await Promise.all([
+      const [pData, rData, bData, cData, aData, appData, hData, ltData] = await Promise.all([
         api.pendingLeaveRequests(),
         api.leaveRequests(historyFilter),
         api.leaveBalances(),
@@ -156,6 +174,7 @@ export function LeaveManagementPanel() {
         api.absences('ALL'),
         api.fetchApproachingAnniversaries().catch(() => ({ employees: [] })),
         api.fetchBankHolidays(holidayYearRef.current).catch(() => ({ holidays: [] })),
+        api.leaveTypes().catch(() => ({ status: 'ERROR', types: [] })),
       ]);
       setPendingRequests(pData.requests || []);
       setAllRequests(rData.requests || []);
@@ -165,6 +184,9 @@ export function LeaveManagementPanel() {
       setAbsences(aData.absences || []);
       setApproachingEmployees(appData.employees || []);
       setBankHolidays(hData.holidays || []);
+      if (ltData && 'types' in ltData && Array.isArray(ltData.types) && ltData.types.length > 0) {
+        setAvailableLeaveTypes(ltData.types);
+      }
     } catch (err: unknown) {
       if (!silent) setError(err instanceof Error ? err.message : 'Failed to load leave data.');
     } finally {
@@ -312,6 +334,31 @@ export function LeaveManagementPanel() {
       return;
     }
 
+    const isSingleDay = !recordEndDate || recordStartDate === recordEndDate;
+    const isHourly = isSingleDay && recordDayPortion === 'HOURLY';
+    let customDays: number | undefined;
+    let startTimeToSend: string | undefined;
+    let endTimeToSend: string | undefined;
+
+    if (isHourly) {
+      if (!recordStartTime || !recordEndTime) {
+        alert('Please specify both From and To times for hourly adjustment.');
+        return;
+      }
+      const [sh, sm] = recordStartTime.split(':').map(Number);
+      const [eh, em] = recordEndTime.split(':').map(Number);
+      const startMin = (sh || 0) * 60 + (sm || 0);
+      const endMin = (eh || 0) * 60 + (em || 0);
+      if (endMin <= startMin) {
+        alert('To Time must be later than From Time.');
+        return;
+      }
+      const diffMin = endMin - startMin;
+      customDays = Math.round((diffMin / 450) * 10000) / 10000;
+      startTimeToSend = recordStartTime;
+      endTimeToSend = recordEndTime;
+    }
+
     setRecordSubmitting(true);
     setRecordError(null);
     try {
@@ -324,14 +371,19 @@ export function LeaveManagementPanel() {
         leaveTypeId: recordLeaveTypeId,
         startDate: recordStartDate,
         endDate: recordEndDate || recordStartDate,
-        dayPortion: (!recordEndDate || recordStartDate === recordEndDate) ? recordDayPortion : 'FULL_DAY',
-        reason: recordReason.trim() || 'Recorded by HR',
+        dayPortion: isSingleDay ? recordDayPortion : 'FULL_DAY',
+        startTime: startTimeToSend,
+        endTime: endTimeToSend,
+        customDays,
+        reason: recordReason.trim() || (isHourly ? `Approved hourly adjustment (${recordStartTime} - ${recordEndTime})` : 'Recorded by HR'),
         isPaid: recordIsPaid,
         overdraftReason: effectiveOverdraftReason,
       });
       setShowRecordLeaveModal(false);
       setRecordEmployeeId('');
       setRecordDayPortion('FULL_DAY');
+      setRecordStartTime('14:00');
+      setRecordEndTime('19:00');
       setRecordReason('');
       setRecordOverdraftReason('');
       await refresh();
@@ -1112,7 +1164,21 @@ export function LeaveManagementPanel() {
                         </td>
                         <td className="px-3 py-3 align-top">
                           <span className="font-bold text-sm text-brand">{r.days}d</span>
-                          <div className="text-[10px] text-dim">working days</div>
+                          <div className="text-[10px] text-dim">
+                            {r.dayPortion && r.dayPortion !== 'FULL_DAY' ? (
+                              <span className="text-indigo-400 font-medium">
+                                {r.dayPortion.startsWith('HOURLY:')
+                                  ? r.dayPortion.replace('HOURLY:', '')
+                                  : r.dayPortion === 'HOURLY'
+                                  ? 'Hourly'
+                                  : r.dayPortion === 'SECOND_HALF'
+                                  ? 'Afternoon (0.5d)'
+                                  : 'Morning (0.5d)'}
+                              </span>
+                            ) : (
+                              'working days'
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-3 align-top">
                           {r.balance ? (
@@ -2287,7 +2353,20 @@ export function LeaveManagementPanel() {
                         <td className="px-3 py-3 align-middle font-mono text-[11px]">
                           {r.from} &rarr; {r.to}
                         </td>
-                        <td className="px-3 py-3 align-middle font-bold text-brand">{r.days}d</td>
+                        <td className="px-3 py-3 align-middle font-bold text-brand">
+                          {r.days}d
+                          {r.dayPortion && r.dayPortion !== 'FULL_DAY' && (
+                            <span className="block text-[10px] font-normal text-muted">
+                              {r.dayPortion.startsWith('HOURLY:')
+                                ? r.dayPortion.replace('HOURLY:', '')
+                                : r.dayPortion === 'HOURLY'
+                                ? 'Hourly'
+                                : r.dayPortion === 'SECOND_HALF'
+                                ? 'Afternoon'
+                                : 'Morning'}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-3 align-middle">
                           <Badge tone={statusTone}>{r.status}</Badge>
                         </td>
@@ -3159,8 +3238,21 @@ export function LeaveManagementPanel() {
                   reqDays = Math.max(1, cnt);
                 }
               }
+              const isSingleDay = !recordEndDate || recordStartDate === recordEndDate;
+              if (isSingleDay) {
+                if (recordDayPortion === 'FIRST_HALF' || recordDayPortion === 'SECOND_HALF') {
+                  reqDays = 0.5;
+                } else if (recordDayPortion === 'HOURLY') {
+                  const [sh, sm] = (recordStartTime || '00:00').split(':').map(Number);
+                  const [eh, em] = (recordEndTime || '00:00').split(':').map(Number);
+                  const diff = Math.max(0, (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0)));
+                  reqDays = Math.round((diff / 450) * 100) / 100;
+                }
+              }
+              const selectedType = availableLeaveTypes.find((t) => t.id === recordLeaveTypeId);
               const avail = selectedEmp?.balance?.available ?? 0;
-              const hasShortfall = recordIsPaid && selectedEmp && (reqDays > avail);
+              const reducesBal = selectedType ? selectedType.reducesEntitlement : (recordLeaveTypeId === 'annual');
+              const hasShortfall = recordIsPaid && reducesBal && selectedEmp && (reqDays > avail);
               const shortfall = hasShortfall ? Math.max(0, Math.round((reqDays - avail) * 100) / 100) : 0;
 
               return (
@@ -3229,17 +3321,23 @@ export function LeaveManagementPanel() {
                     </label>
                     <select
                       value={recordLeaveTypeId}
-                      onChange={(e) => setRecordLeaveTypeId(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRecordLeaveTypeId(val);
+                        const matched = availableLeaveTypes.find((t) => t.id === val);
+                        if (matched) {
+                          setRecordIsPaid(matched.isPaid);
+                        } else {
+                          setRecordIsPaid(val !== 'unpaid');
+                        }
+                      }}
                       className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
                     >
-                      <option value="annual">Paid annual leave (Annual Entitlement)</option>
-                      <option value="sick">Sick leave</option>
-                      <option value="authorised">Authorised absence</option>
-                      <option value="unpaid">Unpaid leave</option>
-                      <option value="compassionate">Compassionate leave</option>
-                      <option value="emergency">Emergency leave</option>
-                      <option value="wfh">Work from home</option>
-                      <option value="other">Other</option>
+                      {availableLeaveTypes.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} {t.reducesEntitlement ? '(Annual Entitlement)' : '(Special/Non-entitlement)'} {t.isPaid ? '— Paid' : '— Unpaid'}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -3274,27 +3372,122 @@ export function LeaveManagementPanel() {
                     </div>
                   </div>
 
-                  {(!recordEndDate || recordStartDate === recordEndDate) && (
-                    <div>
-                      <label className="block text-xs font-semibold text-text mb-1">
-                        Day Portion (Full Day or Half Day)
-                      </label>
-                      <select
-                        value={recordDayPortion}
-                        onChange={(e) => setRecordDayPortion(e.target.value as any)}
-                        className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
-                      >
-                        <option value="FULL_DAY">Full Day (1.0 day off)</option>
-                        <option value="SECOND_HALF">Second Half / Afternoon — Leave Early (0.5 day off)</option>
-                        <option value="FIRST_HALF">First Half / Morning — Arrive Late (0.5 day off)</option>
-                      </select>
-                      <p className="text-[11px] text-muted mt-1">
-                        {recordDayPortion === 'SECOND_HALF'
-                          ? 'Employee works the morning and leaves early at midday (e.g. 3:00 PM). Shift end is adjusted to midday with 0 early departure deficit.'
-                          : recordDayPortion === 'FIRST_HALF'
-                          ? 'Employee arrives at midday (e.g. 3:00 PM). Shift start is adjusted with 0 morning lateness deficit.'
-                          : 'Standard full-day leave.'}
-                      </p>
+                  {isSingleDay && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-text mb-1">
+                          Day Portion / Duration
+                        </label>
+                        <select
+                          value={recordDayPortion}
+                          onChange={(e) => setRecordDayPortion(e.target.value as any)}
+                          className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                        >
+                          <option value="FULL_DAY">Full Day (1.0 day off)</option>
+                          <option value="SECOND_HALF">Second Half / Afternoon — Leave Early (0.5 day off)</option>
+                          <option value="FIRST_HALF">First Half / Morning — Arrive Late (0.5 day off)</option>
+                          <option value="HOURLY">Hourly Adjustment / Specific Hours (From → To)</option>
+                        </select>
+                        <p className="text-[11px] text-muted mt-1">
+                          {recordDayPortion === 'SECOND_HALF'
+                            ? 'Employee works the morning and leaves early at midday (e.g. 3:00 PM). Shift end is adjusted with 0 early departure deficit.'
+                            : recordDayPortion === 'FIRST_HALF'
+                            ? 'Employee arrives at midday (e.g. 3:00 PM). Shift start is adjusted with 0 morning lateness deficit.'
+                            : recordDayPortion === 'HOURLY'
+                            ? 'Specify custom From and To times (e.g. 14:00 to 19:00). Automatically adjusts attendance record and credits approved hourly leave bucket.'
+                            : 'Standard full-day leave.'}
+                        </p>
+                      </div>
+
+                      {recordDayPortion === 'HOURLY' && (
+                        <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-3 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-indigo-300">
+                              Adjust Hours (From → To)
+                            </span>
+                            <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-950/60 text-indigo-200 border border-indigo-500/30">
+                              {(() => {
+                                const [sh, sm] = (recordStartTime || '00:00').split(':').map(Number);
+                                const [eh, em] = (recordEndTime || '00:00').split(':').map(Number);
+                                const diff = (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0));
+                                if (diff <= 0) return 'Invalid range (To must be > From)';
+                                const h = Math.floor(diff / 60);
+                                const m = diff % 60;
+                                const frac = (diff / 450).toFixed(2);
+                                return `${h}h ${m}m (${diff} mins = ${frac}d)`;
+                              })()}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-text mb-1">
+                                From Time <span className="text-rose-400">*</span>
+                              </label>
+                              <Input
+                                type="time"
+                                value={recordStartTime}
+                                onChange={(e) => setRecordStartTime(e.target.value)}
+                                className="w-full text-xs py-1.5"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-text mb-1">
+                                To Time <span className="text-rose-400">*</span>
+                              </label>
+                              <Input
+                                type="time"
+                                value={recordEndTime}
+                                onChange={(e) => setRecordEndTime(e.target.value)}
+                                className="w-full text-xs py-1.5"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <span className="text-[10px] text-muted mr-1">Quick Presets:</span>
+                            <button
+                              type="button"
+                              onClick={() => { setRecordStartTime('14:00'); setRecordEndTime('19:00'); }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-raised border border-line hover:border-indigo-400 text-muted hover:text-text cursor-pointer transition-colors"
+                            >
+                              Afternoon (14:00 – 19:00, 5h)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setRecordStartTime('11:00'); setRecordEndTime('15:00'); }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-raised border border-line hover:border-indigo-400 text-muted hover:text-text cursor-pointer transition-colors"
+                            >
+                              Morning (11:00 – 15:00, 4h)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setRecordStartTime('17:00'); setRecordEndTime('19:00'); }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-raised border border-line hover:border-indigo-400 text-muted hover:text-text cursor-pointer transition-colors"
+                            >
+                              Early Leave (17:00 – 19:00, 2h)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setRecordStartTime('11:00'); setRecordEndTime('13:00'); }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-raised border border-line hover:border-indigo-400 text-muted hover:text-text cursor-pointer transition-colors"
+                            >
+                              Late Arrival (11:00 – 13:00, 2h)
+                            </button>
+                          </div>
+
+                          <p className="text-[11px] text-muted leading-relaxed">
+                            {(() => {
+                              const [sh, sm] = (recordStartTime || '00:00').split(':').map(Number);
+                              const [eh, em] = (recordEndTime || '00:00').split(':').map(Number);
+                              const diff = (eh * 60 + (em || 0)) - (sh * 60 + (sm || 0));
+                              if (diff <= 0) return 'Please ensure To Time is after From Time.';
+                              const frac = (diff / 450).toFixed(2);
+                              return `HR approved adjustment of ${diff} minutes (${frac} days against 7.5h standard day). The employee's attendance record on ${recordStartDate || 'this date'} will be credited by ${diff} mins to excuse this time, and the approved hourly leave bucket will be credited.`;
+                            })()}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
 

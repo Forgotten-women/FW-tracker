@@ -408,6 +408,7 @@ export interface LeaveRequestItem {
   from: string;
   to: string;
   days: number;
+  dayPortion?: string | null;
   status: 'PENDING_HR' | 'PENDING_MANAGER' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   reason?: string;
   notes?: string | null;
