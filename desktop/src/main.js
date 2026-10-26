@@ -1110,26 +1110,9 @@ if (lockResumeBtn) {
   });
 }
 
-// Undismissable lock screen enforcement: block Escape, Tab, Alt hotkeys while on break
-window.addEventListener('keydown', (e) => {
-  if (isOnBreakState) {
-    if (e.key === 'Escape' || e.key === 'Tab' || e.altKey || e.key === 'F4') {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  }
-}, true);
-
-// Refocus window if user tries to click away while on break
-window.addEventListener('blur', () => {
-  if (isOnBreakState) {
-    setTimeout(() => {
-      window.focus();
-      const win = getTauriWindow();
-      if (win && typeof win.setFocus === 'function') win.setFocus().catch(() => {});
-    }, 40);
-  }
-});
+// The break screen is full screen but no longer traps the person: keys aren't
+// blocked and focus isn't pulled back, so other apps (calls, downloads, music)
+// keep running and stay reachable with Alt+Tab / Cmd+Tab during a break.
 
 // The shift's scheduled end as "7:00 PM", from the day view.
 function shiftEndLabel() {

@@ -99,7 +99,10 @@ pub(crate) fn apply_break_window(app: &tauri::AppHandle, on_break: bool) {
             if !window.is_fullscreen().unwrap_or(false) && !BREAK_WINDOW_EXITING.load(Ordering::SeqCst) {
                 let _ = window.set_fullscreen(true);
             }
-            let _ = window.set_always_on_top(true);
+            // Full screen, but NOT always on top: other apps (and whatever
+            // they are doing in the background) stay reachable with
+            // Alt+Tab / Cmd+Tab during a break.
+            let _ = window.set_always_on_top(false);
             let _ = window.set_focus();
             return;
         }
@@ -1151,11 +1154,8 @@ fn main() {
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
                 if IS_MANUAL_BREAK.load(Ordering::SeqCst) {
-                    let _ = event.window().show();
-                    let _ = event.window().unminimize();
-                    let _ = event.window().set_fullscreen(true);
-                    let _ = event.window().set_always_on_top(true);
-                    let _ = event.window().set_focus();
+                    // The break screen stays open (Resume is on it), but nothing
+                    // is forced on top: the person can switch to other apps.
                     api.prevent_close();
                     return;
                 }
