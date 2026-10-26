@@ -175,8 +175,12 @@ test('a salary deduction is taken off the month whichever sign HR typed', async 
   // Typed negative: still a deduction of the same size.
   const neg = await PR.addException({ periodId: ctx.march.id, employeeId: EMP, amount: -20, type: 'SALARY_DEDUCTION', explanation: 'Equipment', actor: 'user:hr' });
   assert.equal(neg.amount, -20);
-  // Later steps check the March figures exactly: take both lines out again.
-  await db.prepare('DELETE FROM payroll_adjustments WHERE id IN (?, ?)').run(r.id, neg.id);
+  // An idle-time deduction (HR's decision) is always a deduction too.
+  const idle = await PR.addException({ periodId: ctx.march.id, employeeId: EMP, amount: 30, type: 'IDLE_DEDUCTION', explanation: 'Idle 2h', actor: 'user:hr' });
+  assert.equal(idle.type, 'IDLE_DEDUCTION');
+  assert.equal(idle.amount, -30);
+  // Later steps check the March figures exactly: take the lines out again.
+  await db.prepare('DELETE FROM payroll_adjustments WHERE id IN (?, ?, ?)').run(r.id, neg.id, idle.id);
   await PR.invalidatePayrollCache();
 });
 

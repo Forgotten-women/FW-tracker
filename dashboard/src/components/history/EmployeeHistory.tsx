@@ -348,6 +348,12 @@ export function EmployeeHistory({
               tone={totals.deficitMinutes > 0 ? 'text-rose-400' : 'text-slate-400'}
             />
             <Tile
+              label="Idle"
+              value={fmtMinutes(totals.idleMinutes)}
+              tone={totals.idleMinutes > 0 ? 'text-amber-300' : 'text-slate-400'}
+              hint="Not a deficit · no pay effect"
+            />
+            <Tile
               label="Pending corr."
               value={totals.pendingCorrections}
               tone={totals.pendingCorrections > 0 ? 'text-amber-300' : 'text-slate-400'}

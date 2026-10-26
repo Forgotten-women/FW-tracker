@@ -1531,6 +1531,8 @@ export interface HistoryDaySummary {
   workedFormatted: string;
   breakMinutes: number;
   deficit: HistoryDeficit;
+  /** Laptop idle, kept apart from the deficit (no effect on pay unless HR decides). */
+  idleMinutes?: number;
   adjustment: { minutes: number; note: string | null } | null;
   leave: HistoryLeave | null;
   absence: HistoryAbsence | null;

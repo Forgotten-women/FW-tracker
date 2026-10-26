@@ -253,6 +253,7 @@ function AddExceptionModal({
   periodRate,
   onClose,
   onSuccess,
+  preset,
 }: {
   periodId: string;
   employee: PrepareEmployee;
@@ -260,17 +261,19 @@ function AddExceptionModal({
   periodRate: number;
   onClose: () => void;
   onSuccess: () => void;
+  /** Opens with these filled in (e.g. "Deduct idle" from the Idle column). */
+  preset?: { type: string; amount?: number; explanation?: string };
 }) {
-  const [type, setType] = useState('BONUS');
-  const [amount, setAmount] = useState('');
-  const [explanation, setExplanation] = useState('');
+  const [type, setType] = useState(preset?.type || 'BONUS');
+  const [amount, setAmount] = useState(preset?.amount ? String(Math.round(preset.amount)) : '');
+  const [explanation, setExplanation] = useState(preset?.explanation || '');
   const [autoApprove, setAutoApprove] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   const empCurrency = employee.salary?.currency || 'PKR';
   const currSymbol = empCurrency === 'GBP' ? '£' : '₨';
-  const isDeduction = type === 'SALARY_DEDUCTION';
+  const isDeduction = type === 'SALARY_DEDUCTION' || type === 'IDLE_DEDUCTION';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -340,6 +343,7 @@ function AddExceptionModal({
               <option value="SPECIAL_ADDITION">Special / Festive Addition</option>
               <option value="OVERTIME">Overtime (paid extra hours)</option>
               <option value="SALARY_DEDUCTION">Salary Deduction (taken off this month&apos;s pay)</option>
+              <option value="IDLE_DEDUCTION">Idle Time Deduction (HR decision)</option>
               <option value="MANUAL_ADJUSTMENT">Custom Manual Adjustment</option>
             </select>
             {type === 'OVERTIME' && (
@@ -625,6 +629,15 @@ interface PrepareEmployee {
       approvedAmount: number | null;
       explanation: string;
     }>;
+  };
+  /** Laptop idle in the period: apart from the deficit, no pay effect unless HR adds an idle deduction. */
+  idleTime?: {
+    minutes: number;
+    formatted: string;
+    valueIfDeducted: number;
+    dayEquivalentMinutes: number;
+    affectsPay: boolean;
+    deductionAdjustmentIds: string[];
   };
   attendanceDeficit: {
     wholeDayEquivalents: number;
@@ -1573,6 +1586,7 @@ function PeriodDetailView({
   const [closeError, setCloseError] = useState('');
   const [rateBasis, setRateBasis] = useState<'WORKING_DAYS_260' | 'CALENDAR_DAYS_30'>('WORKING_DAYS_260');
   const [exceptionEmployee, setExceptionEmployee] = useState<PrepareEmployee | null>(null);
+  const [exceptionPreset, setExceptionPreset] = useState<{ type: string; amount?: number; explanation?: string } | undefined>(undefined);
   const [deficitResolutionEmployee, setDeficitResolutionEmployee] = useState<PrepareEmployee | null>(null);
   const [draftInvoiceFor, setDraftInvoiceFor] = useState<{ employeeId: string; name: string } | null>(null);
   // A draft invoice is the open month's live figures; a final one lives on the payslips.
@@ -1879,6 +1893,7 @@ function PeriodDetailView({
                     <th className="pb-2 text-right font-semibold">Daily Rate</th>
                     <th className="pb-2 text-right font-semibold">Unpaid Leaves Cut</th>
                     <th className="pb-2 text-right font-semibold">Deficit / Absences</th>
+                    <th className="pb-2 text-right font-semibold" title="Laptop idle in the period. Kept apart from the deficit; it never changes pay unless HR adds an idle deduction.">Idle (HR decides)</th>
                     <th className="pb-2 text-right font-semibold">Additions / Exceptions</th>
                     <th className="pb-2 text-right font-semibold">Net Payable</th>
                     <th className="pb-2 text-center font-semibold">Action</th>
@@ -1966,6 +1981,35 @@ function PeriodDetailView({
                           )}
                         </td>
                         <td className="py-2.5 text-right font-mono">
+                          {(emp.idleTime?.minutes || 0) > 0 ? (
+                            <div>
+                              <span className="text-amber-300 font-bold">{emp.idleTime!.formatted}</span>
+                              <div className="text-[10px] font-sans text-slate-500">
+                                {emp.idleTime!.affectsPay ? 'deduction added' : 'no pay effect'}
+                              </div>
+                              {!isFinal && !emp.idleTime!.affectsPay && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExceptionPreset({
+                                      type: 'IDLE_DEDUCTION',
+                                      amount: emp.idleTime!.valueIfDeducted,
+                                      explanation: `Idle time ${emp.idleTime!.formatted} in ${period.name}: HR decided to deduct it`,
+                                    });
+                                    setExceptionEmployee(emp);
+                                  }}
+                                  className="mt-1 inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-sans font-semibold text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+                                  title={`If deducted in full: ${formatMoney(emp.idleTime!.valueIfDeducted, currency, emp.salary.currency, periodRate)}. You can change the amount.`}
+                                >
+                                  Deduct…
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right font-mono">
                           {additionsTotal > 0 ? (
                             <div>
                               <span className="text-emerald-400 font-bold">
@@ -1992,7 +2036,7 @@ function PeriodDetailView({
                             {!isFinal && (
                               <button
                                 type="button"
-                                onClick={() => setExceptionEmployee(emp)}
+                                onClick={() => { setExceptionPreset(undefined); setExceptionEmployee(emp); }}
                                 title="Add custom bonus, allowance, overtime or exception amount for this employee"
                                 className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/60 px-2.5 py-1 text-xs font-semibold text-indigo-300 transition"
                               >
@@ -2247,8 +2291,9 @@ function PeriodDetailView({
           employee={exceptionEmployee}
           currency={currency}
           periodRate={periodRate}
-          onClose={() => setExceptionEmployee(null)}
+          onClose={() => { setExceptionEmployee(null); setExceptionPreset(undefined); }}
           onSuccess={changed}
+          preset={exceptionPreset}
         />
       )}
 

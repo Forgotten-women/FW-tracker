@@ -1684,3 +1684,5 @@ CREATE TABLE IF NOT EXISTS attendance_period_adjustments (
 CREATE INDEX IF NOT EXISTS idx_period_adj_emp ON attendance_period_adjustments(employee_id);
 CREATE INDEX IF NOT EXISTS idx_period_adj_dates ON attendance_period_adjustments(period_start, period_end);
 
+-- 036: laptop idle per day, kept apart from the deficit (never changes pay by itself).
+ALTER TABLE attendance_daily_summary ADD COLUMN IF NOT EXISTS idle_minutes INTEGER NOT NULL DEFAULT 0;

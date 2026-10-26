@@ -236,6 +236,8 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
         approvedAdjustmentMinutes: Math.abs(Number(s?.approved_adjustment_minutes || 0)),
         totalMinutes: Number(s?.daily_deficit_minutes || 0),
       },
+      // Laptop idle, kept apart from the deficit: no effect on pay unless HR adds an idle deduction.
+      idleMinutes: Number(s?.idle_minutes || 0),
       adjustment: d && Number(d.adjustment_minutes) ? { minutes: Number(d.adjustment_minutes), note: d.adjustment_note || null } : null,
       leave: leaveInfo,
       absence: abs ? { status: abs.status, type: abs.absence_type || null, treatAsUnpaid: Number(abs.treat_as_unpaid) === 1 } : null,

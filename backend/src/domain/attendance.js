@@ -803,13 +803,13 @@ const upsertSummary = db.prepare(`
      first_clock_in, last_clock_out, worked_minutes, break_minutes,
      late_minutes, excess_break_minutes, early_departure_minutes,
      unauthorised_missing_minutes, approved_adjustment_minutes,
-     daily_deficit_minutes, is_late_occurrence, attendance_status, leave_request_id, derived_at)
+     daily_deficit_minutes, is_late_occurrence, attendance_status, leave_request_id, idle_minutes, derived_at)
   VALUES
     (@employee_id, @date_key, @scheduled_start, @scheduled_end, @is_working_day,
      @first_clock_in, @last_clock_out, @worked_minutes, @break_minutes,
      @late_minutes, @excess_break_minutes, @early_departure_minutes,
      @unauthorised_missing_minutes, @approved_adjustment_minutes,
-     @daily_deficit_minutes, @is_late_occurrence, @attendance_status, @leave_request_id, @derived_at)
+     @daily_deficit_minutes, @is_late_occurrence, @attendance_status, @leave_request_id, @idle_minutes, @derived_at)
   ON CONFLICT(employee_id, date_key) DO UPDATE SET
     scheduled_start = excluded.scheduled_start,
     scheduled_end   = excluded.scheduled_end,
@@ -827,6 +827,7 @@ const upsertSummary = db.prepare(`
     is_late_occurrence = excluded.is_late_occurrence,
     attendance_status  = excluded.attendance_status,
     leave_request_id   = excluded.leave_request_id,
+    idle_minutes       = excluded.idle_minutes,
     derived_at = excluded.derived_at
 `);
 
@@ -853,6 +854,8 @@ async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) 
     is_late_occurrence: d.isLateOccurrence ? 1 : 0,
     attendance_status: d.attendanceStatus,
     leave_request_id: d.leaveRequestId || null,
+    // Kept apart from the deficit: idle never changes pay by itself (HR decides).
+    idle_minutes: d.isWorkingDay ? (d.day?.idleMinutes || 0) : 0,
     derived_at: nowMs,
   });
 

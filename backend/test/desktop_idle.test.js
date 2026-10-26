@@ -266,3 +266,16 @@ test('"Are you there?" answered: the idle stretch counts as worked and the count
   const late = await json('POST', '/api/desktop/presence-confirm', { headers: p.auth, body: { from: from, to: from + 2 * 60000 } });
   assert.equal(late.status, 400);
 });
+
+test('idle is stored for the day on its own and never enters the deficit', async () => {
+  const p = await enrolLaptop('Idle Apart');
+  const from = Date.UTC(2026, 8, 23, 6, 0, 0);                    // Wed 11:00 PKT
+  await beats(p.auth, from, 20);                                   // working
+  const last = await beats(p.auth, from + 20 * 60000, 20, { active: 0, idle: 60 });  // 20 min no input
+  const idle = last.body.today.day.idleMinutes;
+  assert.ok(idle >= 14, `idle ${idle}`);
+  const s = await db.prepare("SELECT idle_minutes, daily_deficit_minutes FROM attendance_daily_summary WHERE employee_id = ? AND date_key = '2026-09-23'").get(p.employeeId);
+  // Stored during the heartbeat, before that minute's idle span: up to a minute behind until the next one.
+  assert.ok(Math.abs(Number(s.idle_minutes) - idle) <= 1, `summary ${s.idle_minutes} vs day view ${idle}`);
+  assert.equal(Number(s.daily_deficit_minutes), 0, 'idle is not a deficit');
+});

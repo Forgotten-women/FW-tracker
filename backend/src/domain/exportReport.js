@@ -88,8 +88,8 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
   const [patterns, empRecords, summaries, attDays, calendarDays, leaveRows, periodAdjs, salaryRows, leaveBalances] = await Promise.all([
     db.prepare('SELECT * FROM working_patterns').all(),
     employeeId
-      ? db.prepare('SELECT * FROM employment_records WHERE employee_id = ?').all(employeeId)
-      : db.prepare('SELECT * FROM employment_records').all(),
+      ? db.prepare('SELECT * FROM employment_records WHERE employee_id = ? ORDER BY effective_from DESC, created_at DESC').all(employeeId)
+      : db.prepare('SELECT * FROM employment_records ORDER BY effective_from DESC, created_at DESC').all(),
     employeeId
       ? db.prepare('SELECT * FROM attendance_daily_summary WHERE employee_id = ? AND date_key >= ? AND date_key <= ?').all(employeeId, startDate, endDate)
       : db.prepare('SELECT * FROM attendance_daily_summary WHERE date_key >= ? AND date_key <= ?').all(startDate, endDate),
@@ -116,8 +116,8 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
       ? db.prepare('SELECT * FROM attendance_period_adjustments WHERE employee_id = ? AND period_start <= ? AND period_end >= ?').all(employeeId, endDate, startDate)
       : db.prepare('SELECT * FROM attendance_period_adjustments WHERE period_start <= ? AND period_end >= ?').all(endDate, startDate),
     employeeId
-      ? db.prepare('SELECT * FROM salary_history WHERE employee_id = ? ORDER BY effective_from DESC').all(employeeId)
-      : db.prepare('SELECT * FROM salary_history ORDER BY effective_from DESC').all(),
+      ? db.prepare('SELECT * FROM salary_history WHERE employee_id = ? ORDER BY effective_from DESC, created_at DESC').all(employeeId)
+      : db.prepare('SELECT * FROM salary_history ORDER BY effective_from DESC, created_at DESC').all(),
     employeeId
       ? db.prepare('SELECT * FROM leave_balances WHERE employee_id = ?').all(employeeId).catch(() => [])
       : db.prepare('SELECT * FROM leave_balances').all().catch(() => []),
@@ -126,11 +126,41 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
   // Fast map lookups
   const defaultPattern = patterns.find(p => p.is_default === 1) || patterns[0] || {};
   const patternById = new Map(patterns.map(p => [p.id, p]));
-  const empRecordByEmp = new Map(empRecords.map(r => [r.employee_id, r]));
+
+  // Resolve employment record in force for the period (prevent older historical records from overwriting)
+  const empRecordByEmp = new Map();
+  for (const r of empRecords) {
+    if (!empRecordByEmp.has(r.employee_id)) {
+      if (r.effective_from <= endDate && (!r.effective_to || r.effective_to >= startDate)) {
+        empRecordByEmp.set(r.employee_id, r);
+      }
+    }
+  }
+  for (const r of empRecords) {
+    if (!empRecordByEmp.has(r.employee_id)) {
+      empRecordByEmp.set(r.employee_id, r);
+    }
+  }
+
   const summaryMap = new Map(summaries.map(s => [`${s.employee_id}_${s.date_key}`, s]));
   const dayMap = new Map(attDays.map(d => [`${d.employee_id}_${d.date_key}`, d]));
   const holidayMap = new Map(calendarDays.map(c => [c.date, c]));
-  const salaryByEmp = new Map(salaryRows.map(s => [s.employee_id, s]));
+
+  // Resolve salary in force for the period (prevent older historical salaries from overwriting)
+  const salaryByEmp = new Map();
+  for (const s of salaryRows) {
+    if (!salaryByEmp.has(s.employee_id)) {
+      if (s.effective_from <= endDate && (!s.effective_to || s.effective_to >= startDate)) {
+        salaryByEmp.set(s.employee_id, s);
+      }
+    }
+  }
+  for (const s of salaryRows) {
+    if (!salaryByEmp.has(s.employee_id)) {
+      salaryByEmp.set(s.employee_id, s);
+    }
+  }
+
   const leaveBalByEmp = new Map(leaveBalances.map(b => [b.employee_id, b]));
 
   const leaveByEmpDate = new Map();
@@ -186,8 +216,10 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     let totalLateMinutes = 0;
     let totalEarlyMinutes = 0;
     let totalExtraBreakMinutes = 0;
+    let totalIdleMinutes = 0;
     let grossShortfallMinutes = 0;
     let totalDailyApprovedCredit = 0;
+    let totalDailyExtraMinutes = 0;
 
     for (const dKey of dateList) {
       const dt = new Date(dKey + 'T00:00:00Z');
@@ -210,6 +242,8 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
       let earlyMins = 0;
       let dailyDeficitMins = 0;
       let dailyCreditMins = 0;
+      // Laptop idle: shown on its own, never part of the shortfall or the pay.
+      let idleMins = 0;
 
       const isFuture = dKey > todayKey;
 
@@ -223,6 +257,7 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         earlyMins = Number(summary.early_departure_minutes) || 0;
         dailyDeficitMins = Number(summary.daily_deficit_minutes) || 0;
         dailyCreditMins = Math.abs(Number(summary.approved_adjustment_minutes) || 0);
+        idleMins = Number(summary.idle_minutes) || 0;
       } else if (rawDay) {
         workedMins = Number(rawDay.total_minutes) || 0;
         firstIn = rawDay.first_in_at ? T.displayTime(Number(rawDay.first_in_at)) : null;
@@ -297,7 +332,8 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         if (workStatusLabel === 'WFH') wfhDaysCount++;
         if (workStatusLabel === 'Remote') remoteDaysCount++;
 
-        if (workedMins >= dayEquivalentMinutes - 15) {
+        // Idle doesn't make a day incomplete: it is reported apart (HR decides).
+        if (workedMins + idleMins >= dayEquivalentMinutes - 15) {
           dailyStatus = 'Complete Day';
           completeWorkingDays++;
         } else if (workedMins > 0) {
@@ -310,13 +346,43 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         }
       }
 
+      // Check scheduled shift timing for this specific date
+      const dayStart = (summary?.scheduled_start) || startTime;
+      const dayEndStr = (summary?.scheduled_end) || endTime;
+      const scheduledShiftDisplay = isWorkDay ? `${dayStart} - ${dayEndStr}` : '—';
+
+      // Daily Extra Time calculation
+      let dailyExtraMins = 0;
+      if (workedMins > 0) {
+        if (!isWorkDay) {
+          dailyExtraMins = workedMins;
+        } else {
+          let extraPastEnd = 0;
+          if (summary?.last_clock_out) {
+            const endEpoch = T.wallClockToEpoch(dKey, dayEndStr);
+            if (Number(summary.last_clock_out) > endEpoch) {
+              extraPastEnd = Math.max(0, Math.round((Number(summary.last_clock_out) - endEpoch) / 60000));
+            }
+          } else if (rawDay?.last_active_at) {
+            const endEpoch = T.wallClockToEpoch(dKey, dayEndStr);
+            if (Number(rawDay.last_active_at) > endEpoch) {
+              extraPastEnd = Math.max(0, Math.round((Number(rawDay.last_active_at) - endEpoch) / 60000));
+            }
+          }
+          const extraOverDay = Math.max(0, workedMins - dayEquivalentMinutes);
+          dailyExtraMins = Math.max(extraPastEnd, extraOverDay);
+        }
+      }
+
       totalWorkedMinutes += workedMins;
       totalPayrollMinutes += payrollMins;
       totalLateMinutes += lateMins;
       totalEarlyMinutes += earlyMins;
       totalExtraBreakMinutes += excessBreakMins;
+      totalIdleMinutes += idleMins;
       grossShortfallMinutes += dailyDeficitMins;
       totalDailyApprovedCredit += dailyCreditMins;
+      totalDailyExtraMinutes += dailyExtraMins;
 
       const dailyNetShortfall = Math.max(0, dailyDeficitMins - dailyCreditMins);
 
@@ -325,7 +391,7 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         dateFormatted: formatDateDisplay(dKey),
         dayName,
         workStatus: workStatusLabel,
-        scheduledShift: isWorkDay ? `${startTime} - ${endTime}` : '—',
+        scheduledShift: scheduledShiftDisplay,
         payrollHoursFormatted: formatMins(payrollMins),
         payrollMinutes: payrollMins,
         regularHoursFormatted: formatMins(workedMins),
@@ -343,6 +409,10 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         creditMinutes: dailyCreditMins,
         netShortfallFormatted: dailyNetShortfall > 0 ? `${dailyNetShortfall}m` : '0m',
         netShortfallMinutes: dailyNetShortfall,
+        idleMinutes: idleMins,
+        idleFormatted: idleMins > 0 ? formatMins(idleMins) : '0m',
+        extraMinutes: dailyExtraMins,
+        extraTimeFormatted: dailyExtraMins > 0 ? formatMins(dailyExtraMins) : '0m',
         notes: '',
       });
     }
@@ -351,6 +421,7 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     const totalApprovedCreditMinutes = totalDailyApprovedCredit + totalPeriodCreditMins;
     const netShortfallMinutes = Math.max(0, grossShortfallMinutes - totalApprovedCreditMinutes);
     const surplusCreditMinutes = Math.max(0, totalApprovedCreditMinutes - grossShortfallMinutes);
+    const totalExtraMinutes = totalDailyExtraMinutes + surplusCreditMinutes;
 
     // Leave Summary
     const leaveBal = leaveBalByEmp.get(empId);
@@ -406,6 +477,9 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         totalEarlyFormatted: formatMins(totalEarlyMinutes),
         totalExtraBreakMinutes,
         totalExtraBreakFormatted: formatMins(totalExtraBreakMinutes),
+        // Kept apart from the shortfall; no effect on pay unless HR adds an idle deduction.
+        totalIdleMinutes,
+        totalIdleFormatted: formatMins(totalIdleMinutes),
         grossShortfallMinutes,
         grossShortfallFormatted: formatMins(grossShortfallMinutes),
         approvedCreditMinutes: totalApprovedCreditMinutes,
@@ -416,6 +490,10 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         netShortfallFormatted: formatMins(netShortfallMinutes),
         surplusCreditMinutes,
         surplusCreditFormatted: formatMins(surplusCreditMinutes),
+        totalExtraMinutes,
+        totalExtraFormatted: formatMins(totalExtraMinutes),
+        totalDailyExtraMinutes,
+        totalDailyExtraFormatted: formatMins(totalDailyExtraMinutes),
       },
       leaveSummary: {
         paidLeaveDays: paidLeaveDaysCount,
@@ -478,7 +556,7 @@ async function buildExcelWorkbook(reportData) {
   });
 
   // Title Banner
-  summarySheet.mergeCells('A1:X1');
+  summarySheet.mergeCells('A1:AB1');
   const titleCell = summarySheet.getCell('A1');
   titleCell.value = 'OFFICE TRACKER — WORKFORCE ATTENDANCE & PAYROLL SUMMARY';
   titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -487,7 +565,7 @@ async function buildExcelWorkbook(reportData) {
   summarySheet.getRow(1).height = 40;
 
   // Metadata Row
-  summarySheet.mergeCells('A2:X2');
+  summarySheet.mergeCells('A2:AB2');
   const metaCell = summarySheet.getCell('A2');
   metaCell.value = `Payroll & Attendance Period: ${reportData.meta.formattedPeriod}  |  Total Workforce: ${reportData.meta.totalEmployees} Employees  |  Generated: ${reportData.meta.generatedAt}`;
   metaCell.font = { name: 'Calibri', size: 11, italic: true, color: { argb: 'FFFFFFFF' } };
@@ -503,8 +581,10 @@ async function buildExcelWorkbook(reportData) {
     'Expected Days', 'Complete Days', 'Days Off', 'WFH Days', 'Paid Leave', 'Unpaid Leave',
     'Sick Leave', 'Compassionate', 'Unauth. Absence', 'Missing Days',
     'Total Worked (Reg)', 'Payroll Hours', 'Late Arrival', 'Early Leave', 'Extra Break',
-    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Monthly Wage', 'Deduction', 'Final Pay'
+    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time', 'Monthly Wage', 'Deduction', 'Final Pay',
+    'Idle (no pay effect)'
   ];
+  const moneyCols = new Set(['Monthly Wage', 'Deduction', 'Final Pay'].map(h => summaryHeaders.indexOf(h) + 1));
 
   const headerRow = summarySheet.addRow(summaryHeaders);
   headerRow.height = 28;
@@ -552,9 +632,11 @@ async function buildExcelWorkbook(reportData) {
       a.grossShortfallFormatted,
       a.approvedCreditFormatted,
       a.netShortfallFormatted,
+      a.totalExtraFormatted,
       p.monthlyWage,
       p.attendanceDeduction + p.unpaidLeaveDeduction,
       p.finalPayrollAmount,
+      a.totalIdleFormatted,
     ]);
 
     row.height = 22;
@@ -573,7 +655,7 @@ async function buildExcelWorkbook(reportData) {
       // Alignment
       if (colNum <= 3) {
         cell.alignment = { vertical: 'middle', horizontal: 'left' };
-      } else if (colNum >= summaryHeaders.length - 2) {
+      } else if (moneyCols.has(colNum)) {
         cell.alignment = { vertical: 'middle', horizontal: 'right' };
         cell.numFmt = '#,##0';
       } else {
@@ -584,6 +666,11 @@ async function buildExcelWorkbook(reportData) {
       if (colNum === 24 && a.netShortfallMinutes > 0) {
         cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB91C1C' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+      }
+
+      // Highlight Extra Time in teal/emerald
+      if (colNum === 25 && a.totalExtraMinutes > 0) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0D9488' } };
       }
     });
   });
@@ -614,7 +701,7 @@ async function buildExcelWorkbook(reportData) {
     });
 
     // 1. Employee Header Banner
-    ws.mergeCells('A1:N1');
+    ws.mergeCells('A1:O1');
     const empBanner = ws.getCell('A1');
     empBanner.value = `${e.name} (${e.employeeNumber}) — ATTENDANCE & PAYROLL RECORD`;
     empBanner.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -642,7 +729,7 @@ async function buildExcelWorkbook(reportData) {
       ['Main Schedule', e.scheduleSummary, '', '', 'Total Worked Hours', a.totalWorkedFormatted, '', '', 'Annual Leave Balance', `${l.annualLeaveClosing} days available`],
       ['Break Allowance', `${e.permittedBreakMinutes} mins`, '', '', 'Gross Shortfall', a.grossShortfallFormatted, '', '', 'Paid Leave Used', `${l.paidLeaveDays} days`],
       ['Overtime Counted', e.overtimeCounted ? 'Enabled' : 'Disabled', '', '', 'Approved Credit (Total)', a.approvedCreditFormatted, '', '', 'Unauthorised Absence', `${l.unauthorisedAbsenceDays} days`],
-      ['Payroll Period', reportData.meta.formattedPeriod, '', '', 'Net Shortfall', a.netShortfallFormatted, '', '', 'Surplus Extra Time', a.surplusCreditFormatted],
+      ['Payroll Period', reportData.meta.formattedPeriod, '', '', 'Net Shortfall', a.netShortfallFormatted, '', '', 'Extra Time / Overtime', a.totalExtraFormatted],
     ];
 
     infoRows.forEach(r => {
@@ -659,6 +746,10 @@ async function buildExcelWorkbook(reportData) {
       if (r[4] === 'Net Shortfall' && a.netShortfallMinutes > 0) {
         row.getCell(6).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB91C1C' } };
       }
+      // Highlight Extra Time in Teal/Emerald
+      if (r[8] === 'Extra Time / Overtime' && a.totalExtraMinutes > 0) {
+        row.getCell(10).font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0D9488' } };
+      }
       // Highlight Final Pay in Green
       if (r[8] === 'Final Payroll Amount') {
         row.getCell(10).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF15803D' } };
@@ -668,7 +759,7 @@ async function buildExcelWorkbook(reportData) {
     ws.addRow([]); // Blank spacer
 
     // Detailed Daily Attendance Header
-    ws.mergeCells(`A13:N13`);
+    ws.mergeCells(`A13:O13`);
     const tableTitle = ws.getCell('A13');
     tableTitle.value = 'DETAILED DAY-BY-DAY ATTENDANCE & TIMESHEET ENTRIES';
     tableTitle.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -679,7 +770,7 @@ async function buildExcelWorkbook(reportData) {
     const dailyHeaders = [
       'Date', 'Day', 'Work Status', 'Scheduled Shift', 'Payroll Hrs', 'Reg. Hrs',
       'Check In', 'Check Out', 'Break Taken', 'Break Allowed', 'Daily Status',
-      'Gross Shortfall', 'Approved Credit', 'Net Shortfall'
+      'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time', 'Idle (no pay effect)'
     ];
 
     const dHeadRow = ws.addRow(dailyHeaders);
@@ -713,6 +804,8 @@ async function buildExcelWorkbook(reportData) {
         dr.grossShortfallFormatted,
         dr.creditFormatted,
         dr.netShortfallFormatted,
+        dr.extraTimeFormatted,
+        dr.idleFormatted,
       ]);
 
       dRow.height = 20;
@@ -746,6 +839,11 @@ async function buildExcelWorkbook(reportData) {
         if (colNum === 14 && dr.netShortfallMinutes > 0) {
           c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB91C1C' } };
         }
+
+        // Highlight Extra Time in teal/emerald
+        if (colNum === 15 && dr.extraMinutes > 0) {
+          c.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0D9488' } };
+        }
       });
     });
 
@@ -765,6 +863,8 @@ async function buildExcelWorkbook(reportData) {
       { width: 15 }, // Gross Shortfall
       { width: 15 }, // Credit
       { width: 15 }, // Net Shortfall
+      { width: 14 }, // Extra Time
+      { width: 18 }, // Idle (no pay effect)
     ];
   }
 
@@ -787,7 +887,7 @@ function buildCsv(reportData) {
     'Employee ID', 'Employee Name', 'Role', 'Work Status', 'Main Schedule', 'Break Allowance',
     'Expected Days', 'Complete Days', 'Days Off', 'WFH Days', 'Paid Leave', 'Unpaid Leave',
     'Sick Leave', 'Unauth. Absence', 'Worked Hours', 'Payroll Hours',
-    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Monthly Wage', 'Final Pay'
+    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time', 'Monthly Wage', 'Final Pay', 'Idle (no pay effect)'
   ].join(','));
 
   for (const er of reportData.employees) {
@@ -800,7 +900,7 @@ function buildCsv(reportData) {
       esc(e.employeeNumber), esc(e.name), esc(e.role), esc(e.workStatus), esc(e.scheduleSummary), `${e.permittedBreakMinutes}m`,
       a.expectedWorkingDays, a.completeWorkingDays, a.scheduledDaysOff, a.wfhDays, l.paidLeaveDays, l.unpaidLeaveDays,
       l.sickLeaveDays, l.unauthorisedAbsenceDays, esc(a.totalWorkedFormatted), esc(a.totalPayrollFormatted),
-      esc(a.grossShortfallFormatted), esc(a.approvedCreditFormatted), esc(a.netShortfallFormatted), p.monthlyWage, p.finalPayrollAmount
+      esc(a.grossShortfallFormatted), esc(a.approvedCreditFormatted), esc(a.netShortfallFormatted), esc(a.totalExtraFormatted), p.monthlyWage, p.finalPayrollAmount, esc(a.totalIdleFormatted)
     ].join(','));
   }
 
@@ -809,7 +909,7 @@ function buildCsv(reportData) {
   lines.push([
     'Employee ID', 'Employee Name', 'Date', 'Day', 'Work Status', 'Scheduled Shift',
     'Payroll Hrs', 'Reg. Hrs', 'Check In', 'Check Out', 'Break Taken', 'Break Allowed',
-    'Daily Status', 'Gross Shortfall', 'Approved Credit', 'Net Shortfall'
+    'Daily Status', 'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time', 'Idle (no pay effect)'
   ].join(','));
 
   for (const er of reportData.employees) {
@@ -819,7 +919,7 @@ function buildCsv(reportData) {
         esc(e.employeeNumber), esc(e.name), dr.dateFormatted, esc(dr.dayName), esc(dr.workStatus), esc(dr.scheduledShift),
         esc(dr.payrollHoursFormatted), esc(dr.regularHoursFormatted), esc(dr.checkIn), esc(dr.checkOut),
         esc(dr.breakDurationFormatted), esc(dr.allowedBreakFormatted), esc(dr.dailyStatus),
-        esc(dr.grossShortfallFormatted), esc(dr.creditFormatted), esc(dr.netShortfallFormatted)
+        esc(dr.grossShortfallFormatted), esc(dr.creditFormatted), esc(dr.netShortfallFormatted), esc(dr.extraTimeFormatted), esc(dr.idleFormatted)
       ].join(','));
     }
   }

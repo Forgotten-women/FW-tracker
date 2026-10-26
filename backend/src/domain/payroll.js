@@ -161,13 +161,21 @@ async function setSalary({ employeeId, amount, effectiveFrom, reason, actor, cur
   const previous = await selectSalaryAt.get(employeeId, effectiveFrom, effectiveFrom);
 
   await tx(async () => {
-    if (previous) {
-      // Closed the day before the new one starts, so the two never overlap and
-      // salaryAt() can never return two answers for one date.
-      const dayBefore = T.dateKey(T.startOfDay(effectiveFrom) - 1);
-      await db.prepare('UPDATE salary_history SET effective_to = ? WHERE id = ?')
-        .run(dayBefore, previous.id);
-    }
+    const dayBefore = T.dateKey(T.startOfDay(effectiveFrom) - 1);
+
+    // 1. Close any earlier open or overlapping records at dayBefore
+    await db.prepare(`
+      UPDATE salary_history
+      SET effective_to = ?
+      WHERE employee_id = ? AND effective_from < ? AND (effective_to IS NULL OR effective_to >= ?)
+    `).run(dayBefore, employeeId, effectiveFrom, effectiveFrom);
+
+    // 2. Close any open records starting on or after effectiveFrom so they don't shadow the new salary
+    await db.prepare(`
+      UPDATE salary_history
+      SET effective_to = ?
+      WHERE employee_id = ? AND effective_from >= ? AND effective_to IS NULL
+    `).run(dayBefore, employeeId, effectiveFrom);
 
     await db.prepare(`
       INSERT INTO salary_history
@@ -781,6 +789,11 @@ function presentAdjustment(a) {
  * sheet and the estimate build on. `detail` adds the lifetime deficit and
  * leave views and the starter breakdown, which only the sheets show.
  */
+const selectIdleInWindow = db.prepare(`
+  SELECT COALESCE(SUM(idle_minutes), 0) AS m FROM attendance_daily_summary
+  WHERE employee_id = ? AND date_key >= ? AND date_key <= ?
+`);
+
 async function employeePosition(period, e, { throughDate = null, detail = true, rateBasis = null } = {}) {
   const basis = await periodBasis(period, e.id, { throughDate, rateBasis });
   if (basis.blocked) {
@@ -836,6 +849,14 @@ async function employeePosition(period, e, { throughDate = null, detail = true, 
     .filter(a => a.status === 'APPROVED' && Number(a.approved_amount || 0) < 0)
     .reduce((s, a) => s + -Number(a.approved_amount || 0), 0);
 
+  // Laptop idle in the period: shown to HR, kept apart from the attendance
+  // deficit, and never deducted by itself. HR decides; an IDLE_DEDUCTION line
+  // (addException) is how they choose to charge it.
+  const idleRow = await selectIdleInWindow.get(e.id, period.start_date, windowEnd);
+  const idleMinutes = Number(idleRow && idleRow.m) || 0;
+  const dayEqMinutes = (await schedule.resolve(e.id, windowEnd)).dayEquivalentMinutes || 480;
+  const idleLines = existing.filter(a => a.adjustment_type === 'IDLE_DEDUCTION' && a.status !== 'REJECTED');
+
   const projectedDeductions = Math.max(unpaid.totalAmount, deductionsTotal);
   const projectedNetPayable = money(grossBaseline - projectedDeductions + additionsTotal);
 
@@ -879,6 +900,15 @@ async function employeePosition(period, e, { throughDate = null, detail = true, 
       total: additionsTotal,
       approvedTotal: approvedAdditionsTotal,
       items: existing.filter(a => standingAmount(a) > 0).map(presentAdjustment),
+    },
+    idleTime: {
+      minutes: idleMinutes,
+      formatted: `${Math.floor(idleMinutes / 60)}h ${String(idleMinutes % 60).padStart(2, '0')}m`,
+      // What it would cost if HR chose to charge all of it (not applied).
+      valueIfDeducted: money(salary.dailyPrecise * idleMinutes / dayEqMinutes),
+      dayEquivalentMinutes: dayEqMinutes,
+      affectsPay: idleLines.length > 0,
+      deductionAdjustmentIds: idleLines.map(a => a.id),
     },
     attendanceDeficit: {
       wholeDayEquivalents: deficit.wholeDayEquivalents || 0,
@@ -2662,7 +2692,7 @@ async function addException({ periodId, employeeId, amount, type = 'BONUS', expl
     throw new Error('A non-zero numeric amount is required.');
   }
   // A salary deduction always reduces pay, whichever sign HR typed.
-  if (type === 'SALARY_DEDUCTION') numericAmount = -Math.abs(numericAmount);
+  if (type === 'SALARY_DEDUCTION' || type === 'IDLE_DEDUCTION') numericAmount = -Math.abs(numericAmount);
 
   const period = await selectPeriod.get(periodId);
   if (!period) throw new Error('No such payroll period.');
@@ -2670,7 +2700,8 @@ async function addException({ periodId, employeeId, amount, type = 'BONUS', expl
 
   // OVERTIME is never calculated automatically: HR adds it here when it is
   // paid, and the invoice prints it on its own line.
-  const validTypes = ['BONUS', 'ALLOWANCE', 'SPECIAL_ADDITION', 'OVERTIME', 'SALARY_DEDUCTION', 'HR_EXCEPTION', 'MANUAL_ADJUSTMENT'];
+  // IDLE_DEDUCTION: HR chose to charge laptop idle time (it never is by default).
+  const validTypes = ['BONUS', 'ALLOWANCE', 'SPECIAL_ADDITION', 'OVERTIME', 'SALARY_DEDUCTION', 'IDLE_DEDUCTION', 'HR_EXCEPTION', 'MANUAL_ADJUSTMENT'];
   const adjType = validTypes.includes(type) ? type : 'BONUS';
 
   const id = 'pa_' + crypto.randomBytes(8).toString('hex');

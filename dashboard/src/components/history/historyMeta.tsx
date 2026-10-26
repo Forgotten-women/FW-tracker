@@ -266,6 +266,8 @@ export interface MonthTotals {
   leaveDays: number;
   workedMinutes: number;
   deficitMinutes: number;
+  /** Laptop idle: apart from the deficit, no pay effect unless HR decides. */
+  idleMinutes: number;
   pendingCorrections: number;
   workingDays: number;
 }
@@ -275,7 +277,7 @@ const PRESENT: HistoryDayStatus[] = ['ON_TIME', 'LATE', 'SHORT', 'IN_PROGRESS', 
 export function monthTotals(days: HistoryDaySummary[]): MonthTotals {
   const t: MonthTotals = {
     present: 0, onTime: 0, late: 0, short: 0, absent: 0, leaveDays: 0,
-    workedMinutes: 0, deficitMinutes: 0, pendingCorrections: 0, workingDays: 0,
+    workedMinutes: 0, deficitMinutes: 0, idleMinutes: 0, pendingCorrections: 0, workingDays: 0,
   };
   for (const d of days) {
     if (d.status === 'NOT_EMPLOYED') continue;
@@ -288,6 +290,7 @@ export function monthTotals(days: HistoryDaySummary[]): MonthTotals {
     t.leaveDays += leaveDayValue(d);
     t.workedMinutes += d.workedMinutes || 0;
     t.deficitMinutes += d.deficit?.totalMinutes || 0;
+    t.idleMinutes += d.idleMinutes || 0;
     t.pendingCorrections += d.corrections?.pending || 0;
   }
   return t;
