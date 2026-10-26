@@ -663,7 +663,11 @@ async function countLeaveDays(employeeId, startDate, endDate, dayPortion = 'FULL
   // A half day or hourly portion only applies to a single date.
   let multiplier = 1;
   if (days.length === 1) {
-    if (dayPortion === 'FIRST_HALF' || dayPortion === 'SECOND_HALF') {
+    // Same spellings schedule.leaveOn accepts (FIRST_HALF / SECOND_HALF, and the
+    // older HALF_DAY_AM / PM, MORNING / AFTERNOON), so a half day is never shown
+    // as half there but charged as a whole day here.
+    if (/(^|_)(AM|MORNING|FIRST|PM|AFTERNOON|SECOND)(_|$)/.test(String(dayPortion || '').toUpperCase())
+        && !String(dayPortion).toUpperCase().startsWith('HOURLY')) {
       multiplier = 0.5;
     } else if (options.customDays != null && Number(options.customDays) > 0) {
       multiplier = Number(options.customDays);
