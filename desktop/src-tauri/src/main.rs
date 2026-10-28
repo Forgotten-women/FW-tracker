@@ -6,6 +6,7 @@ mod capture;
 mod client;
 mod db;
 mod live;
+mod namaz;
 mod net;
 mod single_instance;
 mod tracker {
@@ -138,6 +139,62 @@ pub(crate) fn apply_break_window(app: &tauri::AppHandle, on_break: bool) {
 #[tauri::command]
 fn sync_break_window(on_break: bool, app: tauri::AppHandle) {
     apply_break_window(&app, on_break);
+}
+
+// Namaz reminder: a small native notification at the exact minute of each
+// prayer inside working hours, worked out on this laptop from the device clock
+// (namaz.rs) - it needs no server and works offline. Nothing to click and
+// nothing else changes: the server counts idle / a locked laptop / stepping
+// out in the 15 minutes after as working. Shown during a break too (the break
+// stays a break). Working hours: the 11:00-19:00 shift, and the server's last
+// answer when there is one (shorter shifts, leave, a day already ended).
+const SHIFT_START_MIN: i64 = 11 * 60;
+const SHIFT_END_MIN: i64 = 19 * 60;
+
+fn spawn_namaz_reminders(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut shown: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        loop {
+            let now = now_unix_ms();
+            // The next prayer not yet shown, at most 2 minutes late (after a sleep or start-up).
+            let next = namaz::today(now).into_iter()
+                .filter(|p| !shown.contains(&p.at_ms) && p.at_ms + 120_000 > now)
+                .min_by_key(|p| p.at_ms);
+            let Some(p) = next else {
+                // Nothing left today: check again later (the date rolls over at midnight).
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                continue;
+            };
+            if p.at_ms > now {
+                // Wake on the exact minute; re-checked at least every 30 s.
+                tokio::time::sleep(Duration::from_millis((p.at_ms - now).min(30_000))).await;
+                continue;
+            }
+            shown.insert(p.at_ms);
+            if shown.len() > 64 { shown.clear(); shown.insert(p.at_ms); }
+
+            let enrolled = !app.state::<AppState>().config.lock().unwrap().token.is_empty();
+            let minute = namaz::office_minutes(p.at_ms);
+            let in_shift = minute >= SHIFT_START_MIN && minute < SHIFT_END_MIN;
+            let server_outside = {
+                let state = app.state::<AppState>();
+                let resp = state.latest_response.lock().unwrap();
+                resp.as_ref().and_then(|r| r.outside_working_hours)
+            };
+            if !enrolled || !in_shift || server_outside == Some(true) {
+                continue;
+            }
+            let body = if p.name.starts_with("Jumu") {
+                format!("{} \u{00B7} Jumu'ah Mubarak. Prayer time until 2:00 PM counts as work.", p.label)
+            } else {
+                format!("{} \u{00B7} Time for {}. The next {} minutes count as work, nothing to press.", p.label, p.name, namaz::WINDOW_MINUTES)
+            };
+            let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+                .title(format!("\u{1F54C} {}", p.name))
+                .body(&body)
+                .show();
+        }
+    });
 }
 
 fn mark_synced() {
@@ -655,6 +712,7 @@ fn main() {
             let app_handle = app.handle();
             client::set_agent_version(app.package_info().version.to_string());
             single_instance::start_listener(single_instance_listener, app_handle.clone());
+            spawn_namaz_reminders(app_handle.clone());
 
             // On macOS: disable App Nap, hold idle-sleep power assertion, and show window on launch
             #[cfg(target_os = "macos")]

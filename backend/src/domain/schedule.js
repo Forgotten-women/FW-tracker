@@ -73,6 +73,33 @@ function prayerWindow(dateKey) {
   return [T.wallClockToEpoch(dateKey, FRIDAY_PRAYER.start), T.wallClockToEpoch(dateKey, FRIDAY_PRAYER.end)];
 }
 
+/**
+ * Every protected prayer range of the day: the Friday hour, and the window
+ * after each daily namaz (domain/namaz.js: Zuhr, Asr, Maghrib; 15 minutes from
+ * the time the agent's notification shows). Inside them laptop idle / lock and
+ * stepping out are not idle or missing time. Breaks are NOT covered by the
+ * daily windows (a break stays a break; only the Friday hour covers breaks).
+ */
+function prayerRanges(dateKey) {
+  const out = [];
+  const friday = prayerWindow(dateKey);
+  if (friday) out.push(friday);
+  for (const w of require('./namaz').namazWindows(dateKey)) out.push([w.at, w.until]);
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+/** Milliseconds of [from, to] inside any prayer range of dateKey (overlaps counted once). */
+function prayerRangesOverlapMs(dateKey, from, to) {
+  let cur = from;
+  let total = 0;
+  for (const [a, b] of prayerRanges(dateKey)) {
+    const s = Math.max(cur, a);
+    const e = Math.min(to, b);
+    if (e > s) { total += e - s; cur = e; }
+  }
+  return total;
+}
+
 /** Milliseconds of [from, to] inside the Friday prayer hour of dateKey. */
 function prayerOverlapMs(dateKey, from, to) {
   const w = prayerWindow(dateKey);
@@ -295,4 +322,4 @@ async function leaveOn(employeeId, dateKey) {
   return partDay;
 }
 
-module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate, leaveOn, wfhOn, prayerWindow, prayerOverlapMs, FRIDAY_PRAYER };
+module.exports = { resolve, workingDaysBetween, weekdayKey, invalidate, leaveOn, wfhOn, prayerWindow, prayerOverlapMs, prayerRanges, prayerRangesOverlapMs, FRIDAY_PRAYER };

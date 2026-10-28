@@ -150,11 +150,12 @@ function subtractRanges(list, cut) {
   return out;
 }
 
-/** Ranges inside [from, to] that are never idle: the Friday prayer hour and confirmed stretches. */
+/** Ranges inside [from, to] that are never idle: prayer ranges (Friday hour, daily namaz windows) and confirmed stretches. */
 async function idleExemptRanges(deviceId, dateKey, from, to) {
   const out = [];
-  const prayer = schedule.prayerWindow(dateKey);
-  if (prayer && prayer[1] > from && prayer[0] < to) out.push([Math.max(from, prayer[0]), Math.min(to, prayer[1])]);
+  for (const [pa, pb] of schedule.prayerRanges(dateKey)) {
+    if (pb > from && pa < to) out.push([Math.max(from, pa), Math.min(to, pb)]);
+  }
   for (const c of await selectConfirmedSpans.all(deviceId, dateKey, from, to)) {
     out.push([Math.max(from, Number(c.start_at)), Math.min(to, Number(c.end_at))]);
   }
@@ -191,6 +192,26 @@ async function storeIdleSpan({ deviceId, employeeId, dateKey, startAt, endAt, ki
       INSERT INTO workstation_idle_spans (id, device_id, employee_id, date_key, start_at, end_at, kind, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run('idl_' + crypto.randomBytes(8).toString('hex'), deviceId, employeeId, dateKey, startAt, endAt, kind, nowMs, nowMs);
+  }
+}
+
+/**
+ * Today's namaz for the agent's notification: name, epoch ms, the time shown,
+ * and when the protected window ends. Only on a working day, not on leave,
+ * and only prayers inside the employee's shift (the agent also checks).
+ */
+function namazForAgent(dateKey, sched, onLeave) {
+  if (!sched || !sched.isWorkingDay || onLeave) return [];
+  try {
+    const start = sched.scheduledStartAt || 0;
+    const end = sched.scheduledEndAt || Infinity;
+    return require('../domain/namaz').namazWindows(dateKey)
+      .filter(w => w.at >= start && w.at < end)
+      // A Maghrib close to the end of the shift never reaches past it: the
+      // shift still ends at its time (7:00 PM) and nothing after it is credited.
+      .map(w => ({ name: w.name, at: w.at, until: Math.min(w.until, end), time: T.displayTime(w.at).replace(/:00 /, ' ') }));
+  } catch (_) {
+    return [];
   }
 }
 
@@ -408,7 +429,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     status = 'IDLE';
   }
   // Friday prayers (13:00-14:00 office time): idle or locked counts as active.
-  const inPrayerHour = schedule.prayerOverlapMs(dateKey, nowMs - 1, nowMs) > 0;
+  // Also the 15 minutes after each daily namaz (no button to press: idle or a
+  // locked laptop in that window counts as working). A break stays a break.
+  const inPrayerHour = schedule.prayerRangesOverlapMs(dateKey, nowMs - 1, nowMs) > 0;
   if (inPrayerHour && (status === 'IDLE' || status === 'AWAY')) status = 'ACTIVE';
 
   // 6. Retroactive Arrival Reconciliation & Presence Logging
@@ -834,6 +857,9 @@ router.post('/heartbeat', requireDevice, async (req, res) => {
     appTrackingEnabled,
     outsideWorkingHours,
     onLeave,
+    // Today's namaz the agent notifies for (Islamabad, Hanafi Asr), so each
+    // laptop shows its notification at the exact minute (domain/namaz.js).
+    namaz: namazForAgent(dateKey, sched, onLeave),
     // What this laptop's time is being booked as right now, so the widget can
     // say plainly when it isn't counting (instead of ticking a local counter
     // the server never credits, then snapping back to the real figure).
@@ -1078,6 +1104,7 @@ router.post('/sync-batch', requireDevice, async (req, res) => {
     appTrackingEnabled,
     outsideWorkingHours,
     onLeave,
+    namaz: namazForAgent(dateKey, sched, onLeave),
     today: {
       dateKey,
       activeSeconds: day ? day.workedMinutes * 60 : 0,

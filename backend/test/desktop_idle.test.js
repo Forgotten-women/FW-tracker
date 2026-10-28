@@ -279,3 +279,55 @@ test('idle is stored for the day on its own and never enters the deficit', async
   assert.ok(Math.abs(Number(s.idle_minutes) - idle) <= 1, `summary ${s.idle_minutes} vs day view ${idle}`);
   assert.equal(Number(s.daily_deficit_minutes), 0, 'idle is not a deficit');
 });
+
+test('namaz: the 15 minutes after Asr are not idle, need no button, and arrive with the heartbeat', async () => {
+  const N = require('../src/domain/namaz');
+  const day = '2026-09-23';                                        // Wednesday
+  const asr = N.namazWindows(day).find(w => w.name === 'Asr');
+  assert.ok(asr, 'Asr is in the working day');
+  // Times move daily.
+  assert.notEqual(N.prayerTimes('2026-09-23').asr, N.prayerTimes('2026-10-23').asr);
+
+  const p = await enrolLaptop('Namaz Asr');
+  const from = asr.at - 20 * 60000;
+  await beats(p.auth, from, 20);                                   // working up to Asr
+  const r = await beats(p.auth, asr.at, 15, { active: 0, idle: 60 }); // no input for the 15 minutes
+  assert.equal(r.body.workstationStatus, 'ACTIVE', 'idle inside the window counts as working');
+  assert.ok(r.body.today.day.idleMinutes <= 1, `idle ${r.body.today.day.idleMinutes}`);
+  assert.ok(Array.isArray(r.body.namaz) && r.body.namaz.some(n => n.name === 'Asr' && n.at === asr.at), 'the agent gets today\'s times');
+});
+
+test('namaz: stepping out in the window is not missing time; outside it, it is', async () => {
+  const N = require('../src/domain/namaz');
+  const A = require('../src/domain/attendance');
+  const day = '2026-09-24';                                        // Thursday
+  const asr = N.namazWindows(day).find(w => w.name === 'Asr');
+  const p = await enrolLaptop('Namaz Step Out');
+  // Working until Asr, nothing for 15 minutes (laptop away), back after.
+  await beats(p.auth, asr.at - 30 * 60000, 30);
+  await beats(p.auth, asr.at + 15 * 60000, 30);
+  const d = await A.deriveDay(p.employeeId, day, asr.at + 46 * 60000);
+  assert.ok(d.unauthorisedMissingMinutes <= 2, `missing ${d.unauthorisedMissingMinutes}`);
+});
+
+test('namaz: a Maghrib just before 7 PM does not move the end of the shift', async () => {
+  const N = require('../src/domain/namaz');
+  const A = require('../src/domain/attendance');
+  const day = '2026-08-19';                                        // Wednesday, Maghrib 18:50
+  const mg = N.namazWindows(day).find(w => w.name === 'Maghrib');
+  assert.equal(T.displayTime(mg.at), T.displayTime(T.wallClockToEpoch(day, '18:50')));
+  const p = await enrolLaptop('Namaz Maghrib');
+  const end = T.wallClockToEpoch(day, '19:00');
+  await beats(p.auth, mg.at - 60 * 60000, 60);                     // working 17:50-18:50
+  // Gone to pray: laptop locked from 18:50 until 19:10.
+  let last;
+  for (let m = 1; m <= 20; m++) {
+    clock = mg.at + m * 60000;
+    last = await json('POST', '/api/desktop/heartbeat', { headers: p.auth, body: { lockState: 'LOCKED', lockDurationSeconds: m * 60 + 300, activeSeconds: 0, idleSeconds: 60, localIp: '192.168.18.66' } });
+  }
+  const notified = last.body.namaz.find(n => n.name === 'Maghrib');
+  if (notified) assert.ok(notified.until <= end, 'the window stops at the shift end');
+  const d = await A.deriveDay(p.employeeId, day, T.wallClockToEpoch(day, '21:00'));
+  assert.equal(d.earlyDepartureMinutes, 0, 'praying Maghrib in the last minutes is not leaving early');
+  assert.ok(d.day.workedMinutes <= (end - (mg.at - 60 * 60000)) / 60000 + 1, `worked ${d.day.workedMinutes}: nothing after 7 PM`);
+});

@@ -362,6 +362,25 @@ function subtractIntervals(A, B) {
 const totalMs = (list) => list.reduce((acc, [a, b]) => acc + (b - a), 0);
 const toMinutes = (ms) => Math.round(ms / MIN);
 
+// How long before a daily namaz someone must still have been seen for its
+// window to cover them stepping out (a person out since long before is absent).
+const NAMAZ_LEAD_MS = 10 * MIN;
+
+/** Milliseconds of the gap [from, to] (which began at gapStart) excused by prayer ranges. */
+function prayerGapExemptMs(dateKey, gapStart, from, to) {
+  const friday = schedule.prayerWindow(dateKey);
+  const ranges = schedule.prayerRanges(dateKey).filter(([a, b]) =>
+    (friday && a === friday[0] && b === friday[1]) || gapStart >= a - NAMAZ_LEAD_MS);
+  let cur = from;
+  let total = 0;
+  for (const [a, b] of ranges) {
+    const st = Math.max(cur, a);
+    const en = Math.min(to, b);
+    if (en > st) { total += en - st; cur = en; }
+  }
+  return total;
+}
+
 /**
  * Builds the shared day view from what deriveDay already loaded. Pure.
  * `s` is the schedule actually in force for the day (half-day leave applied).
@@ -388,25 +407,34 @@ function buildDayView({
   // Friday prayers (schedule.prayerWindow, 13:00-14:00 office time): the hour is
   // worked for anyone at work that day, between when they were first and last
   // seen. Going out for prayers, a break or a locked laptop in it costs nothing.
+  // The same holds for the 15 minutes after each daily namaz (Zuhr, Asr,
+  // Maghrib: schedule.prayerRanges), so stepping out to pray isn't missing time.
   const prayer = schedule.prayerWindow(dateKey);
+  const prayerRanges = schedule.prayerRanges(dateKey);
   let prayerFill = [];
-  if (prayer && sessions.length && winEnd > winStart) {
-    const from = Math.max(prayer[0], sessions[0][0], winStart);
-    const to = Math.min(prayer[1], sessions[sessions.length - 1][1], winEnd);
-    if (to > from) {
-      prayerFill = subtractIntervals([[from, to]], P_);
-      P_ = mergeIntervals([...P_, [from, to]]);
+  if (prayerRanges.length && sessions.length && winEnd > winStart) {
+    for (const [pa, pb] of prayerRanges) {
+      // A daily namaz window covers someone who stepped out for it: present in
+      // the 10 minutes before the prayer. (Out since long before: still absent.)
+      const isFriday = prayer && pa === prayer[0] && pb === prayer[1];
+      if (!isFriday && !sessions.some(([a, b]) => b >= pa - NAMAZ_LEAD_MS && a <= pa)) continue;
+      const from = Math.max(pa, sessions[0][0], winStart);
+      const to = Math.min(pb, sessions[sessions.length - 1][1], winEnd);
+      if (to > from) {
+        prayerFill = mergeIntervals([...prayerFill, ...subtractIntervals([[from, to]], P_)]);
+        P_ = mergeIntervals([...P_, [from, to]]);
+      }
     }
   }
   const B_all = mergeIntervals(breaks.map(b => [Number(b.started_at), b.ended_at ? Number(b.ended_at) : nowMs]));
   const B_ = winEnd > winStart ? subtractIntervals(clipIntervals(B_all, winStart, winEnd), prayer ? [prayer] : []) : [];
-  // Idle inside the prayer hour is not idle either.
+  // Idle inside any prayer range is not idle either (breaks: only the Friday hour above).
   // Nor is a stretch the employee confirmed ("Are you there?" -> Yes: kind CONFIRMED).
   const confirmed = mergeIntervals((idleSpans || []).filter(x => x.kind === 'CONFIRMED')
     .map(x => [Number(x.start_at), Number(x.end_at)]));
   const I_raw = subtractIntervals(
     mergeIntervals((idleSpans || []).filter(x => x.kind !== 'CONFIRMED').map(x => [Number(x.start_at), Number(x.end_at)])),
-    mergeIntervals([...(prayer ? [prayer] : []), ...confirmed]),
+    mergeIntervals([...prayerRanges, ...confirmed]),
   );
   const I_ = subtractIntervals(intersectIntervals(I_raw, P_), B_);
 
@@ -475,7 +503,7 @@ function buildDayView({
     onLeave: Boolean(onLeave),
     isWorkingDay: Boolean(s.isWorkingDay),
     laptop: { activeMinutes: Math.round(Number(laptopActiveSeconds || 0) / 60) },
-    // Minutes of the Friday prayer hour counted as worked with no presence recorded.
+    // Minutes of prayer ranges (Friday hour, daily namaz windows) counted as worked with no presence recorded.
     prayerMinutes: toMinutes(totalMs(prayerFill)),
   };
 }
@@ -699,7 +727,9 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
       b.started_at <= gapStart + 5 * MIN &&
       (b.ended_at === null || b.ended_at >= gapEnd - 5 * MIN)
     );
-    if (!coveredByBreak) unauthorisedMissingMinutes += Math.max(0, gapMinutes - prayerMins(from, to));
+    // Stepping out inside a prayer range isn't missing time: the Friday hour,
+    // and a daily namaz window when the gap began at most 10 minutes before it.
+    if (!coveredByBreak) unauthorisedMissingMinutes += Math.max(0, gapMinutes - Math.round(prayerGapExemptMs(dateKey, gapStart, from, to) / MIN));
   }
 
   // --- late arrival & break offset policy ----------------------------------
