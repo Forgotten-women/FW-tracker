@@ -1,6 +1,6 @@
 {
   "name": "office-tracker-desktop",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Office Tracker - Cross-Platform Workstation Presence & Desktop Agent",
   "private": true,
   "scripts": {
