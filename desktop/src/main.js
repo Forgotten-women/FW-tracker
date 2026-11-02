@@ -961,6 +961,15 @@ if (enrollBtn) {
   });
 }
 
+// Same as the tray's "Check for Updates", one click away (Mac users rarely
+// open the menu-bar icon). The result arrives as a notification.
+const updateBtn = document.getElementById('update-btn');
+if (updateBtn) {
+  updateBtn.addEventListener('click', () => {
+    callBackend('check_for_updates').catch((e) => console.error('[updater]', e));
+  });
+}
+
 if (minimizeBtn) {
   minimizeBtn.addEventListener('click', () => {
     if (isOnBreakState) return;

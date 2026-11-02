@@ -610,6 +610,12 @@ async fn check_and_install_silent(app: &tauri::AppHandle) {
     }
 }
 
+/// The widget's "Check for updates" button (same as the tray item).
+#[tauri::command]
+fn check_for_updates(app: tauri::AppHandle) {
+    trigger_update_check(app);
+}
+
 pub fn trigger_update_check(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         println!("[updater] manual check triggered");
@@ -730,7 +736,8 @@ fn main() {
             toggle_manual_break,
             connect_office_wifi,
             checkout_shift,
-            resume_shift
+            resume_shift,
+            check_for_updates
         ])
         .setup(move |app| {
             let app_handle = app.handle();

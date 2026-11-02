@@ -98,6 +98,15 @@ jobs:
           # Tauri v1 updater signing keys (v1 uses TAURI_PRIVATE_KEY, not the v2 name)
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing with one fixed (self-signed) certificate, so every
+          # release has the same signature and macOS keeps the Screen Recording
+          # permission across updates. Unsigned builds got a new signature each
+          # time: macOS treated each update as a new app, live view showed only
+          # the wallpaper (no app windows) or a black screen until staff allowed
+          # it again. Used on macOS only; ignored on Windows.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
           projectPath: desktop
           tauriScript: npx @tauri-apps/cli
@@ -142,3 +151,13 @@ jobs:
             *Built automatically by GitHub Actions from commit `${{ github.sha }}`*
           releaseDraft: false
           prerelease: false
+
+      # ── 9. macOS: show how the app was signed (should name the fixed
+      #       "WorkSync Code Signing" certificate, not "adhoc") ─────────────────
+      - name: 🔏 Show macOS signature
+        if: matrix.platform == 'macos-latest'
+        run: |
+          APP=$(find desktop/src-tauri/target -path '*bundle/macos/*.app' -maxdepth 6 -type d | head -1)
+          echo "app: $APP"
+          codesign -dvv "$APP" 2>&1 | grep -E 'Identifier|Authority|Signature|TeamIdentifier' || true
+          codesign -d -r- "$APP" 2>&1 | tail -2 || true
