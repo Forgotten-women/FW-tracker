@@ -519,35 +519,66 @@ fn schedule_relaunch_after_update() {
     }
 }
 
-/// macOS: after an update installs, the agent restarts itself. If the new copy
-/// still fails to come up, this detached shell starts the app bundle once the
-/// old process has gone (checked a few times over the next minutes).
+/// macOS: after an update installs, a detached helper brings WorkSync back.
+///
+/// Tauri's app.restart() starts the program file directly, and after the
+/// updater has replaced the bundle that new copy often never came up: Mac
+/// users found WorkSync closed after every update and had to relaunch it.
+/// Now the app quits normally and this helper - detached with nohup, so it
+/// outlives the app - waits for the old process to go, opens the bundle
+/// through LaunchServices (`open`, as a double-click would), then checks by
+/// the executable's full path for two minutes and opens it again if it isn't
+/// running. What it did goes to ~/Library/Logs/WorkSync/relaunch.log.
 #[cfg(target_os = "macos")]
 fn schedule_relaunch_after_update() {
     let Ok(exe) = std::env::current_exe() else { return };
     // .../WorkSync.app/Contents/MacOS/WorkSync -> .../WorkSync.app
     let Some(bundle) = exe.ancestors().nth(3).map(|p| p.to_path_buf()) else { return };
     let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
-    let name = exe
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "WorkSync".to_string());
+    let exe_dir = format!("{}/Contents/MacOS/", bundle.to_string_lossy());
     let pid = std::process::id();
-    let script = format!(
-        "i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 900 ]; do sleep 1; i=$((i+1)); done; \
-         for d in 5 15 30 60 120; do sleep $d; pgrep -x {name} >/dev/null || open {bundle}; done",
-        name = quote(&name),
-        bundle = quote(&bundle.to_string_lossy()),
+    let inner = format!(
+        "i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 120 ]; do sleep 1; i=$((i+1)); done; \
+         echo \"$(date) old process gone, opening {b}\"; /usr/bin/open {b}; \
+         for d in 5 10 15 30 60; do sleep $d; \
+           if pgrep -f {dir} >/dev/null; then echo \"$(date) running\"; exit 0; fi; \
+           echo \"$(date) not running, opening again\"; /usr/bin/open {b}; \
+         done",
+        b = quote(&bundle.to_string_lossy()),
+        dir = quote(&exe_dir),
+    );
+    let log_dir = std::env::var("HOME").map(|h| format!("{h}/Library/Logs/WorkSync")).unwrap_or_else(|_| "/tmp".into());
+    let _ = std::fs::create_dir_all(&log_dir);
+    let outer = format!(
+        "nohup /bin/sh -c {inner} >> {log} 2>&1 &",
+        inner = quote(&inner),
+        log = quote(&format!("{log_dir}/relaunch.log")),
     );
     match std::process::Command::new("/bin/sh")
-        .args(["-c", &script])
+        .args(["-c", outer.as_str()])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn()
+        .status()
     {
-        Ok(_) => println!("[updater] relaunch watcher started"),
-        Err(e) => eprintln!("[updater] could not start relaunch watcher: {}", e),
+        Ok(_) => println!("[updater] relaunch helper started"),
+        Err(e) => eprintln!("[updater] could not start relaunch helper: {}", e),
+    }
+}
+
+/// After an installed update. macOS: the detached helper relaunches WorkSync
+/// (schedule_relaunch_after_update) and this copy quits normally - not
+/// app.restart(), which left Macs with WorkSync closed. Elsewhere: restart.
+#[allow(unused_variables)]
+async fn finish_update(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        show_notification("WorkSync updated", "WorkSync is restarting with the new version. It reopens on its own.");
+        schedule_relaunch_after_update();
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let cfg = app.state::<AppState>().config.lock().unwrap().clone();
+        client::save_config(&cfg);
+        app.exit(0);
     }
 }
 
@@ -559,29 +590,17 @@ async fn check_and_install_silent(app: &tauri::AppHandle) {
                 update.latest_version(),
                 update.current_version()
             );
-            let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                .title("WorkSync Update")
-                .body(&format!(
-                    "Updating to version {} (current {})...",
-                    update.latest_version(),
-                    update.current_version()
-                ))
-                .show();
+            show_notification("WorkSync Update", &format!(
+                "Updating to version {} (current {})...",
+                update.latest_version(),
+                update.current_version()
+            ));
             #[cfg(target_os = "windows")]
             schedule_relaunch_after_update();
             match update.download_and_install().await {
                 Ok(()) => {
                     println!("[updater] update installed successfully");
-                    #[cfg(target_os = "macos")]
-                    {
-                        let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                            .title("WorkSync Updated")
-                            .body("WorkSync has been updated to the latest version and will now restart.")
-                            .show();
-                        schedule_relaunch_after_update();
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        app.restart();
-                    }
+                    finish_update(app).await;
                 }
                 Err(e) => eprintln!("[updater] install failed: {}", e),
             }
@@ -594,10 +613,7 @@ async fn check_and_install_silent(app: &tauri::AppHandle) {
 pub fn trigger_update_check(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         println!("[updater] manual check triggered");
-        let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-            .title("WorkSync")
-            .body("Checking for updates...")
-            .show();
+        show_notification("WorkSync", "Checking for updates...");
 
         match tauri::updater::builder(app.clone()).check().await {
             Ok(update) if update.is_update_available() => {
@@ -606,46 +622,29 @@ pub fn trigger_update_check(app: tauri::AppHandle) {
                     update.latest_version(),
                     update.current_version()
                 );
-                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("WorkSync")
-                    .body(&msg)
-                    .show();
+                show_notification("WorkSync", &msg);
                 println!("[updater] {}", msg);
                 #[cfg(target_os = "windows")]
                 schedule_relaunch_after_update();
                 match update.download_and_install().await {
                     Ok(()) => {
                         println!("[updater] update installed successfully");
-                        #[cfg(target_os = "macos")]
-                        {
-                            schedule_relaunch_after_update();
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                            app.restart();
-                        }
+                        finish_update(&app).await;
                     }
                     Err(e) => {
                         eprintln!("[updater] install failed: {}", e);
-                        let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                            .title("WorkSync")
-                            .body(&format!("Update installation failed: {}", e))
-                            .show();
+                        show_notification("WorkSync", &format!("Update installation failed: {}", e));
                     }
                 }
             }
             Ok(_) => {
                 let msg = format!("WorkSync is up to date (v{}).", env!("CARGO_PKG_VERSION"));
-                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("WorkSync")
-                    .body(&msg)
-                    .show();
+                show_notification("WorkSync", &msg);
                 println!("[updater] up to date");
             }
             Err(e) => {
                 eprintln!("[updater] check failed: {}", e);
-                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("WorkSync")
-                    .body(&format!("Could not check for updates: {}", e))
-                    .show();
+                show_notification("WorkSync", &format!("Could not check for updates: {}", e));
             }
         }
     });
@@ -779,10 +778,7 @@ fn main() {
             // every launch so the person at the keyboard is told monitoring has
             // started for this session, not just once at enrollment time.
             if !initial_config.token.is_empty() {
-                let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                    .title("WorkSync")
-                    .body("Monitoring has started for this session. Right-click the tray icon for status and options.")
-                    .show();
+                show_notification("WorkSync", "Monitoring has started for this session. Right-click the tray icon for status and options.");
             }
 
             // Silent auto-update. tauri.conf.json sets updater.dialog=false and
