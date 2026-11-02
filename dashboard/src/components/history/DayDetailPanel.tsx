@@ -221,10 +221,15 @@ export function DayDetailPanel({
       {day && (
         <>
           {/* Figures */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Stat label="First in" value={day.firstIn ?? '—'} tone={day.deficit.lateMinutes > 0 ? 'text-amber-300' : 'text-white'} />
             <Stat label="Last out" value={day.lastOut ?? '—'} />
             <Stat label="Worked" value={worked > 0 ? fmtMinutes(worked) : '0m'} tone="text-emerald-400" />
+            <Stat
+              label="Extra Time"
+              value={day.extraMinutes && day.extraMinutes > 0 ? fmtMinutes(day.extraMinutes) : '0m'}
+              tone={day.extraMinutes && day.extraMinutes > 0 ? 'text-teal-300' : 'text-slate-400'}
+            />
             <Stat
               label="Break"
               value={`${day.breakMinutes}m`}

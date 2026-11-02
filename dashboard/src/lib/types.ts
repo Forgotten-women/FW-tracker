@@ -1529,6 +1529,8 @@ export interface HistoryDaySummary {
   lastOut: string | null;
   workedMinutes: number;
   workedFormatted: string;
+  extraMinutes?: number;
+  extraTimeFormatted?: string;
   breakMinutes: number;
   deficit: HistoryDeficit;
   /** Laptop idle, kept apart from the deficit (no effect on pay unless HR decides). */
@@ -1602,7 +1604,18 @@ export interface EmployeeHistoryDaysResponse {
   /** Clamped to today when the request reached into the future. */
   to: string;
   employmentStart: string | null;
+  employmentEnd?: string | null;
   days: HistoryDaySummary[];
+  periodAdjustments?: {
+    id: string;
+    periodStart: string;
+    periodEnd: string;
+    creditMinutes: number;
+    reason: string;
+    createdAt: number;
+    createdBy: string;
+  }[];
+  periodCreditMinutes?: number;
 }
 
 export interface EmployeeHistoryDayResponse {

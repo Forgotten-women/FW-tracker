@@ -144,19 +144,29 @@ function dayStatus({ isToday, beforeEmployment, afterEmployment, sched, summary,
   return { status: 'ON_TIME', label: a === 'RECOVERED' ? 'On time (lateness recovered)' : 'On time' };
 }
 
+const selectPeriodAdjustments = db.prepare(`
+  SELECT id, period_start, period_end, credit_minutes, reason, created_at, created_by
+  FROM attendance_period_adjustments
+  WHERE employee_id = ? AND NOT (period_end < ? OR period_start > ?)
+  ORDER BY created_at DESC
+`);
+
 /** Every day in [from, to] for one employee: one entry per date, oldest first. */
 async function daysInRange(employeeId, from, to, nowMs = T.now()) {
   const range = normaliseRange(from, to, nowMs);
   const employee = await selectEmployee.get(employeeId);
   if (!employee) throw new HistoryError('No such employee.', 404);
   if (range.dates.length === 0) {
-    return { employee: { id: employee.id, name: employee.name, role: employee.role }, from: range.from, to: range.to, days: [] };
+    return {
+      employee: { id: employee.id, name: employee.name, role: employee.role },
+      from: range.from, to: range.to, days: [], periodAdjustments: [], periodCreditMinutes: 0,
+    };
   }
 
   const f = range.from;
   const t = range.to;
   const today = T.dateKey(nowMs);
-  const [bounds, summaries, days, leave, absences, corrections, laptop] = await Promise.all([
+  const [bounds, summaries, days, leave, absences, corrections, laptop, periodAdjustments] = await Promise.all([
     selectEmploymentBounds.get(employeeId),
     selectSummaries.all(employeeId, f, t),
     selectDays.all(employeeId, f, t),
@@ -164,6 +174,7 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
     selectAbsences.all(employeeId, f, t),
     selectCorrectionCounts.all(employeeId, f, t),
     selectLaptop.all(employeeId, f, t),
+    selectPeriodAdjustments.all(employeeId, f, t),
   ]);
   const employmentStart = bounds?.start_date
     || (employee.created_at ? T.dateKey(Number(employee.created_at)) : null);
@@ -209,6 +220,24 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
       sched, summary: s, leave: leaveInfo, workedMinutes,
     });
 
+    let extraMinutes = 0;
+    if (!sched.isWorkingDay) {
+      if (workedMinutes > 0) extraMinutes = workedMinutes;
+    } else {
+      let overtimePastEnd = 0;
+      if (lastOutAt && sched.endTime) {
+        const lastOutClock = clock(lastOutAt);
+        if (lastOutClock && lastOutClock > sched.endTime) {
+          const [eh, em] = sched.endTime.split(':').map(Number);
+          const [lh, lm] = lastOutClock.split(':').map(Number);
+          const diffMins = (lh * 60 + lm) - (eh * 60 + em);
+          if (diffMins > 0) overtimePastEnd = diffMins;
+        }
+      }
+      const excessWorked = Math.max(0, workedMinutes - (sched.netMinutes || 450));
+      extraMinutes = Math.max(overtimePastEnd, excessWorked);
+    }
+
     return {
       dateKey,
       weekday: weekday(dateKey),
@@ -227,6 +256,8 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
       lastOut: clock(lastOutAt),
       workedMinutes,
       workedFormatted: T.formatMinutes(workedMinutes),
+      extraMinutes,
+      extraTimeFormatted: T.formatMinutes(extraMinutes),
       breakMinutes: Number(s?.break_minutes || 0),
       deficit: {
         lateMinutes: Number(s?.late_minutes || 0),
@@ -249,9 +280,28 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
     };
   });
 
+  const periodCreditMinutes = (periodAdjustments || []).reduce(
+    (sum, pa) => sum + (Number(pa.credit_minutes) || 0),
+    0
+  );
+
   return {
     employee: { id: employee.id, name: employee.name, role: employee.role },
-    from: range.from, to: range.to, employmentStart, employmentEnd, days: out,
+    from: range.from,
+    to: range.to,
+    employmentStart,
+    employmentEnd,
+    days: out,
+    periodAdjustments: (periodAdjustments || []).map((pa) => ({
+      id: pa.id,
+      periodStart: pa.period_start,
+      periodEnd: pa.period_end,
+      creditMinutes: Number(pa.credit_minutes) || 0,
+      reason: pa.reason,
+      createdAt: Number(pa.created_at) || 0,
+      createdBy: pa.created_by,
+    })),
+    periodCreditMinutes,
   };
 }
 

@@ -245,6 +245,18 @@ export const api = {
       { method: 'DELETE' },
     ),
 
+  setEmployeeStatus: (
+    employeeId: string,
+    data: { status: string; effectiveDate?: string; reason?: string }
+  ) =>
+    request<{ status: string; effectiveDate: string; message?: string }>(
+      `/api/admin/employees/${encodeURIComponent(employeeId)}/status`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
   unpairEmployeeDevices: (employeeId: string) =>
     request<{ status: string; count: number; message: string }>(
       `/api/admin/employees/${encodeURIComponent(employeeId)}/unpair-devices`,
@@ -539,6 +551,45 @@ export const api = {
       {
         method: 'POST',
         body: JSON.stringify({ decision, notes, overdraftReason, isPaid }),
+      },
+    ),
+
+  editLeaveRequest: (
+    id: string,
+    data: {
+      leaveTypeId?: string;
+      startDate?: string;
+      endDate?: string;
+      dayPortion?: string;
+      isPaid?: boolean;
+      status?: string;
+      reason?: string;
+      notes?: string;
+    },
+  ) =>
+    request<{ status: string; message: string }>(
+      `/api/leave/request/${encodeURIComponent(id)}/edit`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
+
+  cancelLeaveRequest: (id: string, reason?: string) =>
+    request<{ status: string; message: string }>(
+      `/api/leave/request/${encodeURIComponent(id)}/cancel`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      },
+    ),
+
+  deleteLeaveRequest: (id: string, reason?: string) =>
+    request<{ status: string; message: string }>(
+      `/api/leave/request/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
       },
     ),
 
@@ -1352,6 +1403,14 @@ export const api = {
       adjustments: any[];
     }>(`/api/reports/period-adjustments/${encodeURIComponent(employeeId)}?${qs.toString()}`);
   },
+
+  deletePeriodAdjustment: (id: string) =>
+    request<{
+      status: string;
+      message: string;
+    }>(`/api/reports/period-adjustments/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 };
 
 

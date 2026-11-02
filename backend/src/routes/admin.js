@@ -57,6 +57,7 @@ router.get('/employees', async (req, res) => {
       role: r.effective_job_title || r.role,
       employeeNumber: r.employee_number || null,
       active: !!r.active,
+      employmentStatus: r.employment_status || (r.active ? 'Active' : 'Left employment'),
       deviceCount: r.device_count,
       baseSalary: r.base_salary !== null && r.base_salary !== undefined ? Number(r.base_salary) : null,
       currency: r.salary_currency || null,
@@ -289,6 +290,22 @@ router.patch('/employees/:id/employment', async (req, res) => {
     message: 'Start date updated successfully.',
     record: updatedRecord,
   });
+});
+
+router.post('/employees/:id/status', async (req, res) => {
+  const people = require('../domain/people');
+  try {
+    const result = await people.setStatus({
+      employeeId: req.params.id,
+      status: req.body?.status,
+      effectiveDate: req.body?.effectiveDate || null,
+      reason: req.body?.reason || 'Status updated via admin console',
+      actor: 'admin',
+    });
+    res.json({ status: 'SUCCESS', ...result });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 router.delete('/employees/:id', async (req, res) => {

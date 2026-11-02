@@ -696,7 +696,7 @@ const selectActiveEmployees = db.prepare(`
     ORDER BY effective_from DESC
     LIMIT 1
   ) er ON TRUE
-  WHERE e.active = 1
+  WHERE e.active = 1 AND (e.employment_status IS NULL OR e.employment_status != 'Left employment')
   ORDER BY e.name
 `);
 

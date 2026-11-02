@@ -13,6 +13,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleSlashIcon,
+  ClockIcon,
   DownloadIcon,
   LayoutGridIcon,
   ListIcon,
@@ -343,6 +344,12 @@ export function EmployeeHistory({
             <Tile label="Leave days" value={totals.leaveDays} tone={totals.leaveDays > 0 ? 'text-sky-300' : 'text-slate-400'} />
             <Tile label="Worked" value={fmtMinutes(totals.workedMinutes)} tone="text-white" />
             <Tile
+              label="Extra Time"
+              value={fmtMinutes(totals.extraMinutes + (monthRes.data?.periodCreditMinutes || 0))}
+              tone={totals.extraMinutes + (monthRes.data?.periodCreditMinutes || 0) > 0 ? 'text-teal-400' : 'text-slate-400'}
+              hint={monthRes.data?.periodCreditMinutes ? `incl. +${fmtMinutes(monthRes.data.periodCreditMinutes)} period credit` : undefined}
+            />
+            <Tile
               label="Deficit"
               value={totals.deficitMinutes > 0 ? `−${fmtMinutes(totals.deficitMinutes)}` : '0m'}
               tone={totals.deficitMinutes > 0 ? 'text-rose-400' : 'text-slate-400'}
@@ -360,6 +367,44 @@ export function EmployeeHistory({
               hint={totals.pendingCorrections > 0 ? 'awaiting HR review' : undefined}
             />
           </section>
+
+          {monthRes.data?.periodAdjustments && monthRes.data.periodAdjustments.length > 0 && (
+            <div className="rounded-2xl border border-teal-500/30 bg-teal-500/10 p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ClockIcon className="h-4 w-4 text-teal-400 shrink-0" />
+                  <h4 className="text-xs font-bold text-teal-200">
+                    Period Extra Time Credits: +{fmtMinutes(monthRes.data.periodCreditMinutes || 0)}
+                  </h4>
+                </div>
+              </div>
+              <div className="divide-y divide-white/5 text-xs">
+                {monthRes.data.periodAdjustments.map((adj) => (
+                  <div key={adj.id} className="py-2 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="font-semibold text-teal-300">+{fmtMinutes(adj.creditMinutes)}</span>
+                      <span className="text-slate-300 ml-2">({adj.periodStart} to {adj.periodEnd})</span>
+                      <span className="text-slate-400 ml-2">· {adj.reason}</span>
+                      {adj.createdBy && <span className="text-slate-500 ml-1">· by {adj.createdBy}</span>}
+                    </div>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={async () => {
+                        if (confirm(`Delete period extra time credit of +${fmtMinutes(adj.creditMinutes)}?`)) {
+                          await api.deletePeriodAdjustment(adj.id);
+                          monthRes.reload();
+                        }
+                      }}
+                      className="px-2 py-0.5 text-[11px] shrink-0"
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {wholeDeficitDays >= 1 && (
             <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 space-y-3">

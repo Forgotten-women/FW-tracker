@@ -1076,6 +1076,159 @@ async function cancelRequest({ requestId, actor, reason = null, nowMs = T.now() 
   return { cancelled: true };
 }
 
+async function editRequest({ requestId, leaveTypeId, startDate, endDate, dayPortion, isPaid, status, reason, notes, actor, nowMs = T.now() }) {
+  const req = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(requestId);
+  if (!req) throw new Error('No such leave request.');
+
+  const type = await selectLeaveType.get(leaveTypeId || req.leave_type_id);
+  const newStartDate = startDate || req.start_date;
+  const newEndDate = endDate || req.end_date || newStartDate;
+  const newPortion = dayPortion || req.day_portion || 'FULL_DAY';
+  const newStatus = status || req.status;
+
+  // Compute total working days
+  let totalDays = req.total_days;
+  if (startDate || endDate || dayPortion) {
+    if (newPortion === 'FIRST_HALF' || newPortion === 'SECOND_HALF') {
+      totalDays = 0.5;
+    } else if (newPortion === 'HOURLY') {
+      totalDays = req.total_days;
+    } else {
+      const workingDays = await countWorkingDaysBetween(req.employee_id, newStartDate, newEndDate);
+      totalDays = workingDays;
+    }
+  }
+
+  let effectiveIsPaid = req.is_paid;
+  if (isPaid !== undefined && isPaid !== null) {
+    effectiveIsPaid = (isPaid === true || isPaid === 1 || isPaid === 'true') ? 1 : 0;
+  }
+
+  const reducesEntitlement = effectiveIsPaid === 1 && (type?.reduces_entitlement === 1 || type?.reduces_entitlement === undefined);
+
+  await tx(async () => {
+    // 1. Remove previous ledger entries for this booking
+    await db.prepare('DELETE FROM leave_accrual_ledger WHERE leave_request_id = ?').run(requestId);
+
+    // 2. Update leave request
+    await db.prepare(`
+      UPDATE leave_requests
+      SET leave_type_id = ?, start_date = ?, end_date = ?, day_portion = ?, total_days = ?,
+          is_paid = ?, status = ?, reason = ?
+      WHERE id = ?
+    `).run(
+      type?.id || req.leave_type_id,
+      newStartDate,
+      newEndDate,
+      newPortion,
+      totalDays,
+      effectiveIsPaid,
+      newStatus,
+      reason ? String(reason).trim() : req.reason,
+      requestId
+    );
+
+    // 3. Update approval if exists
+    await db.prepare(`
+      UPDATE leave_approvals
+      SET decision = ?, notes = ?, is_paid = ?
+      WHERE request_id = ? AND step = 1
+    `).run(newStatus, notes ? String(notes).trim() : 'Updated by HR', effectiveIsPaid, requestId);
+
+    // 4. If new status is APPROVED and paid and reduces entitlement, re-insert booked ledger entry
+    if (newStatus === 'APPROVED' && reducesEntitlement) {
+      const year = await holidayYearFor(req.employee_id, newStartDate);
+      if (!year.blocked) {
+        const balance = await balanceRaw(req.employee_id, year);
+        await insertLedger.run({
+          id: 'lal_' + crypto.randomBytes(8).toString('hex'),
+          employee_id: req.employee_id,
+          leave_year: year.leaveYear,
+          entry_type: 'BOOKED',
+          days_delta: -totalDays,
+          balance_after: balance.availableDays - totalDays,
+          effective_date: newStartDate,
+          leave_request_id: requestId,
+          description: `${type?.name || 'Leave'} (Paid): ${newStartDate} to ${newEndDate}`,
+          created_at: nowMs,
+          created_by: actor,
+        });
+      }
+    }
+
+    await audit({
+      actor,
+      action: 'LEAVE_EDITED',
+      targetType: 'leave_request',
+      targetId: requestId,
+      before: {
+        leaveTypeId: req.leave_type_id,
+        startDate: req.start_date,
+        endDate: req.end_date,
+        status: req.status,
+        isPaid: req.is_paid,
+        totalDays: req.total_days,
+      },
+      after: {
+        leaveTypeId: type?.id || req.leave_type_id,
+        startDate: newStartDate,
+        endDate: newEndDate,
+        status: newStatus,
+        isPaid: effectiveIsPaid,
+        totalDays,
+      },
+      note: notes || reason || 'Leave edited by HR',
+    });
+  });
+
+  try {
+    const PR = require('./payroll');
+    if (typeof PR.invalidatePayrollCache === 'function') PR.invalidatePayrollCache(req.employee_id);
+  } catch (_) {}
+
+  await recomputeAttendanceFor(req, nowMs);
+  return { id: requestId, status: newStatus, totalDays };
+}
+
+async function deleteRequest({ requestId, actor, reason = null, nowMs = T.now() }) {
+  const req = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(requestId);
+  if (!req) throw new Error('No such leave request.');
+
+  await tx(async () => {
+    // 1. Delete ledger entries
+    await db.prepare('DELETE FROM leave_accrual_ledger WHERE leave_request_id = ?').run(requestId);
+    // 2. Delete approvals
+    await db.prepare('DELETE FROM leave_approvals WHERE request_id = ?').run(requestId);
+    // 3. Delete leave overdraft approvals
+    await db.prepare('DELETE FROM leave_overdraft_approvals WHERE request_id = ?').run(requestId);
+    // 4. Delete request
+    await db.prepare('DELETE FROM leave_requests WHERE id = ?').run(requestId);
+
+    await audit({
+      actor,
+      action: 'LEAVE_DELETED',
+      targetType: 'leave_request',
+      targetId: requestId,
+      before: {
+        employeeId: req.employee_id,
+        startDate: req.start_date,
+        endDate: req.end_date,
+        totalDays: req.total_days,
+        status: req.status,
+      },
+      note: reason || 'Deleted by HR',
+    });
+  });
+
+  try {
+    const PR = require('./payroll');
+    if (typeof PR.invalidatePayrollCache === 'function') PR.invalidatePayrollCache(req.employee_id);
+  } catch (_) {}
+
+  await recomputeAttendanceFor(req, nowMs);
+  return { deleted: true };
+}
+
 /** An explicit HR adjustment to someone's entitlement. Always attributed. */
 async function adjustBalance({ employeeId, days, reason, actor, onDate = T.dateKey() }) {
   if (!reason || !String(reason).trim()) throw new Error('An adjustment needs a reason.');
@@ -1904,7 +2057,7 @@ module.exports = {
   holidayYearFor, addMonths, daysBetween,
   accrue, accrueAll, finaliseYear, closeHolidayYear,
   balanceFor, countLeaveDays,
-  previewRequest, submitRequest, decideRequest, cancelRequest, adjustBalance,
+  previewRequest, submitRequest, decideRequest, cancelRequest, editRequest, deleteRequest, adjustBalance,
   recordCarryForwardApproval, rolloverHolidayYear, checkAndRolloverAll,
   historicalCyclesFor, employeesApproachingAnniversary,
   monthlyReportFor, recomputeAttendanceFor, resolveDeficitPenalty,

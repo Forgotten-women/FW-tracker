@@ -1149,6 +1149,36 @@ async function listPeriodAdjustments(employeeId, periodStart = null, periodEnd =
   return await db.prepare(query).all(...params);
 }
 
+async function deletePeriodAdjustment(id, actor = 'HR') {
+  const row = await db.prepare('SELECT * FROM attendance_period_adjustments WHERE id = ?').get(id);
+  if (!row) throw new Error('No such period adjustment.');
+
+  const nowMs = T.now();
+  await tx(async () => {
+    await db.prepare('DELETE FROM attendance_period_adjustments WHERE id = ?').run(id);
+
+    // Reverse ledger credit (restore deficit)
+    await adjustBalance({
+      employeeId: row.employee_id,
+      dateKey: row.period_end || T.dateKey(nowMs),
+      minutes: Number(row.credit_minutes) || 0,
+      reason: `Reversal of bulk period credit (${row.id})`,
+      actor,
+    });
+
+    await audit({
+      actor,
+      action: 'ATTENDANCE_PERIOD_ADJUSTMENT_DELETED',
+      targetType: 'employee',
+      targetId: row.employee_id,
+      before: { creditMinutes: row.credit_minutes, periodStart: row.period_start, periodEnd: row.period_end, reason: row.reason },
+    });
+  });
+
+  try { require('./payroll').invalidatePayrollCache(); } catch (_) {}
+  return { id, employeeId: row.employee_id, balance: await balanceFor(row.employee_id) };
+}
+
 // ---------------------------------------------------------------------------
 // Lateness occurrences (spec 9.1, 9.6)
 // ---------------------------------------------------------------------------
@@ -1520,7 +1550,7 @@ module.exports = {
   deriveDay, recomputeDay, present,
   startBreak, endBreak, closeStaleBreaks, clockOut, selfClockOutRefusal, resumeDay, buildDayView,
   balanceFor, balanceAsOf, postDeficit, adjustBalance, countLateOccurrences,
-  addPeriodAdjustment, listPeriodAdjustments,
+  addPeriodAdjustment, listPeriodAdjustments, deletePeriodAdjustment,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,
 };

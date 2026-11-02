@@ -28,6 +28,7 @@ export function MonthTable({ days, selected, onSelect }: MonthTableProps) {
             <th scope="col" className="px-2 py-2.5">In</th>
             <th scope="col" className="px-2 py-2.5">Out</th>
             <th scope="col" className="px-2 py-2.5 text-right">Worked</th>
+            <th scope="col" className="px-2 py-2.5 text-right">Extra</th>
             <th scope="col" className="px-2 py-2.5 text-right">Break</th>
             <th scope="col" className="px-2 py-2.5 text-right">Deficit</th>
             <th scope="col" className="px-2 py-2.5 text-right">Laptop</th>
@@ -72,6 +73,9 @@ export function MonthTable({ days, selected, onSelect }: MonthTableProps) {
                 <td className="px-2 py-2 font-mono text-slate-300 whitespace-nowrap">{d.lastOut ?? '—'}</td>
                 <td className="px-2 py-2 text-right font-mono font-semibold text-emerald-400 tnum whitespace-nowrap">
                   {d.workedMinutes > 0 ? fmtMinutes(d.workedMinutes) : '—'}
+                </td>
+                <td className="px-2 py-2 text-right font-mono text-teal-300 tnum whitespace-nowrap">
+                  {d.extraMinutes && d.extraMinutes > 0 ? fmtMinutes(d.extraMinutes) : '—'}
                 </td>
                 <td className="px-2 py-2 text-right font-mono text-slate-300 tnum">{d.breakMinutes > 0 ? `${d.breakMinutes}m` : '—'}</td>
                 <td className={`px-2 py-2 text-right font-mono tnum whitespace-nowrap ${d.deficit.totalMinutes > 0 ? 'font-bold text-rose-400' : 'text-slate-500'}`}>

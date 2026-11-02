@@ -133,4 +133,18 @@ router.get('/period-adjustments/:employeeId', requireUserOrAdminKey('attendance.
   }
 });
 
+// ---------------------------------------------------------------------------
+// DELETE /api/reports/period-adjustments/:id - Delete a period adjustment
+// ---------------------------------------------------------------------------
+router.delete('/period-adjustments/:id', requireUserOrAdminKey('attendance.write'), async (req, res) => {
+  try {
+    const actor = req.auth.kind === 'user' ? `user:${req.auth.id}` : (req.auth.actor || 'admin');
+    const result = await attendance.deletePeriodAdjustment(req.params.id, actor);
+    res.json({ status: 'SUCCESS', message: 'Period adjustment deleted successfully.', ...result });
+  } catch (err) {
+    console.error('[reports/period-adjustments/delete] Error:', err);
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 module.exports = router;

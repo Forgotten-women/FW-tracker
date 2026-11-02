@@ -262,6 +262,8 @@ async function setStatus({ employeeId, status, effectiveDate = null, reason, act
         WHERE device_id IN (SELECT id FROM devices WHERE employee_id = ?) AND revoked_at IS NULL
       `).run(nowMs, employeeId);
       await require('./bindings').revokeForEmployee(employeeId, 'Employee left');
+    } else {
+      await db.prepare('UPDATE employees SET active = 1 WHERE id = ?').run(employeeId);
     }
 
     await audit({

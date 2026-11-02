@@ -397,6 +397,100 @@ router.post('/request/:id/decide',
     }
   });
 
+// POST /api/leave/request/:id/edit - HR modifies an existing leave request (dates, type, status, paid/unpaid, reason)
+router.post('/request/:id/edit',
+  requireUserOrAdminKey('leave.approve'),
+  async (req, res) => {
+    const r = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
+    if (!r) return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
+    if (!await rbac.canAccessEmployee(req.auth, r.employee_id)) {
+      return res.status(403).json({ status: 'ERROR', message: 'Cannot access this employee.' });
+    }
+
+    try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
+      const out = await L.editRequest({
+        requestId: req.params.id,
+        leaveTypeId: req.body?.leaveTypeId,
+        startDate: req.body?.startDate,
+        endDate: req.body?.endDate,
+        dayPortion: req.body?.dayPortion,
+        isPaid: req.body?.isPaid,
+        status: req.body?.status,
+        reason: req.body?.reason,
+        notes: req.body?.notes,
+        actor,
+      });
+      cache.invalidate('leave:balances');
+      res.json({
+        status: 'SUCCESS',
+        message: 'Leave request updated successfully.',
+        ...out,
+        balance: presentBalance(await L.balanceFor(r.employee_id)),
+      });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
+// POST /api/leave/request/:id/cancel - HR or employee cancels a leave request
+router.post('/request/:id/cancel',
+  requireUserOrAdminKey('leave.write'),
+  async (req, res) => {
+    const r = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
+    if (!r) return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
+    if (!await rbac.canAccessEmployee(req.auth, r.employee_id)) {
+      return res.status(403).json({ status: 'ERROR', message: 'Cannot access this employee.' });
+    }
+
+    try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
+      const out = await L.cancelRequest({
+        requestId: req.params.id,
+        actor,
+        reason: req.body?.reason || 'Cancelled by HR',
+      });
+      cache.invalidate('leave:balances');
+      res.json({
+        status: 'SUCCESS',
+        message: 'Leave request cancelled successfully.',
+        ...out,
+        balance: presentBalance(await L.balanceFor(r.employee_id)),
+      });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
+// DELETE /api/leave/request/:id - HR permanently deletes a leave request and reverses ledger
+router.delete('/request/:id',
+  requireUserOrAdminKey('leave.approve'),
+  async (req, res) => {
+    const r = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
+    if (!r) return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
+    if (!await rbac.canAccessEmployee(req.auth, r.employee_id)) {
+      return res.status(403).json({ status: 'ERROR', message: 'Cannot access this employee.' });
+    }
+
+    try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
+      const out = await L.deleteRequest({
+        requestId: req.params.id,
+        actor,
+        reason: req.body?.reason || 'Deleted by HR',
+      });
+      cache.invalidate('leave:balances');
+      res.json({
+        status: 'SUCCESS',
+        message: 'Leave request deleted successfully.',
+        ...out,
+        balance: presentBalance(await L.balanceFor(r.employee_id)),
+      });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
 router.get('/employee/:employeeId',
   requireUserOrAdminKey('leave.read'), requireEmployeeAccess(),
   async (req, res) => {
