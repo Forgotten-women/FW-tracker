@@ -26,6 +26,10 @@ use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 static IS_MANUAL_BREAK: AtomicBool = AtomicBool::new(false);
+// When this agent last ended a break (unix ms). A heartbeat sent before the
+// end can still answer "on break"; only within this window is that ignored.
+static LOCAL_BREAK_ENDED_AT: AtomicU64 = AtomicU64::new(0);
+const STALE_BREAK_REPLY_MS: u64 = 90_000;
 // Active seconds counted locally since the last delivered heartbeat. The
 // widget shows server-credited time plus this, so it never runs ahead of what
 // the server will actually record and then snaps back.
@@ -388,6 +392,7 @@ async fn set_manual_break(on_break: bool, state: State<'_, AppState>, app: tauri
             // recover cleanly by reconciling local break flag to false
             if !target && (err_lower.contains("no break") || err_lower.contains("not_on_break")) {
                 IS_MANUAL_BREAK.store(false, Ordering::SeqCst);
+                LOCAL_BREAK_ENDED_AT.store(now_unix_ms(), Ordering::SeqCst);
                 if let Ok(mut resp_guard) = state.latest_response.lock() {
                     if let Some(ref mut r) = *resp_guard {
                         r.today.on_break = false;
@@ -402,6 +407,9 @@ async fn set_manual_break(on_break: bool, state: State<'_, AppState>, app: tauri
     }
 
     IS_MANUAL_BREAK.store(target, Ordering::SeqCst);
+    if !target {
+        LOCAL_BREAK_ENDED_AT.store(now_unix_ms(), Ordering::SeqCst);
+    }
 
     if let Ok(mut resp_guard) = state.latest_response.lock() {
         if let Some(ref mut r) = *resp_guard {
@@ -1153,8 +1161,19 @@ fn main() {
                                 let local_is_break = IS_MANUAL_BREAK.load(Ordering::SeqCst);
                                 let mut final_resp = resp.clone();
 
-                                // If break was ended locally, do NOT let an in-flight delayed heartbeat resurrect on_break = true
-                                if !local_is_break {
+                                // A break ended here moments ago: a reply to a heartbeat sent
+                                // before the end must not bring it back. Any other "on break"
+                                // from the server is real -- after a restart (an update during
+                                // a break) the agent starts with no break of its own and used to
+                                // overwrite the server's, so the break screen vanished while the
+                                // break carried on; a break started from the phone too.
+                                let just_ended = now_unix_ms()
+                                    .saturating_sub(LOCAL_BREAK_ENDED_AT.load(Ordering::SeqCst))
+                                    < STALE_BREAK_REPLY_MS;
+                                if !local_is_break && resp.today.on_break && !just_ended {
+                                    IS_MANUAL_BREAK.store(true, Ordering::SeqCst);
+                                    apply_break_window(&app_handle, true);
+                                } else if !local_is_break {
                                     final_resp.today.on_break = false;
                                     if resp.today.break_seconds > 0 || resp.today.break_already_taken {
                                         final_resp.today.break_already_taken = true;
