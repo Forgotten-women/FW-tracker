@@ -167,6 +167,56 @@ pub fn capture_gdi_rgba() -> Result<RgbaImage, String> {
     }
 }
 
+/// macOS Screen Recording permission.
+///
+/// Without it macOS doesn't refuse a capture: it returns the screen with
+/// only WorkSync's own windows drawn (the rest wallpaper or empty), so HR saw
+/// just the widget on a dark background (Arsalan, 2 Nov 2026). The grant
+/// belongs to the app's signature; the first signed build (1.1.6) needs it
+/// once more even where System Settings still shows an older WorkSync on.
+#[cfg(target_os = "macos")]
+pub mod mac_permission {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+
+    static REQUESTED: AtomicBool = AtomicBool::new(false);
+    static LAST_NOTICE_MS: AtomicU64 = AtomicU64::new(0);
+
+    pub fn granted() -> bool {
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+
+    /// If permission is missing: asks macOS once per run (the system prompt,
+    /// which also lists WorkSync under Screen & System Audio Recording) and
+    /// tells the user how to switch it on, at most once an hour.
+    pub fn ensure() -> bool {
+        if granted() {
+            return true;
+        }
+        if !REQUESTED.swap(true, Ordering::SeqCst) {
+            unsafe { CGRequestScreenCaptureAccess(); }
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let last = LAST_NOTICE_MS.load(Ordering::SeqCst);
+        if now.saturating_sub(last) >= 3_600_000 {
+            LAST_NOTICE_MS.store(now, Ordering::SeqCst);
+            crate::show_notification(
+                "WorkSync needs Screen Recording",
+                "System Settings > Privacy & Security > Screen & System Audio Recording: remove WorkSync (-), add it again (+), switch it on, then reopen WorkSync.",
+            );
+        }
+        false
+    }
+}
+
 /// Captures the primary monitor as a base64 JPEG. Blocking: call it from
 /// `spawn_blocking`, never directly on the async runtime.
 pub fn capture_live_frame() -> Result<Frame, String> {

@@ -744,6 +744,13 @@ fn main() {
             client::set_agent_version(app.package_info().version.to_string());
             single_instance::start_listener(single_instance_listener, app_handle.clone());
             spawn_namaz_reminders(app_handle.clone());
+            // Ask for Screen Recording at launch, not first when HR opens the
+            // live view (see capture::mac_permission).
+            #[cfg(target_os = "macos")]
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                capture::mac_permission::ensure();
+            });
 
             // On macOS: disable App Nap, hold idle-sleep power assertion, and show window on launch
             #[cfg(target_os = "macos")]

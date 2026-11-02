@@ -366,6 +366,11 @@ async fn capture_frame(native_failures: &mut u32) -> Option<(String, Option<u64>
 }
 
 async fn stream_session(app: &AppHandle) {
+    // Frames still go out (wallpaper + WorkSync only) so HR sees the session
+    // is live; the user is told how to allow Screen Recording.
+    #[cfg(target_os = "macos")]
+    crate::capture::mac_permission::ensure();
+
     let mut last_fingerprint: Option<u64> = None;
     let mut last_frame_sent: Option<Instant> = None;
     let mut last_any_sent = Instant::now() - KEEPALIVE_EVERY;
