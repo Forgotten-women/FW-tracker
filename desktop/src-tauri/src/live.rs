@@ -219,7 +219,7 @@ async fn listen(rt: &RealtimeConfig, cfg: &AppConfig, last_hello: &mut Option<In
                                 *last_hello = Some(Instant::now());
                                 let cfg = cfg.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = client::send_live_hello(&cfg, true, "native").await;
+                                    let _ = client::send_live_hello(&cfg, true, crate::capture::capture_label()).await;
                                 });
                             }
                         } else if ev == "broadcast" && on_topic {
@@ -369,7 +369,10 @@ async fn stream_session(app: &AppHandle) {
     // Frames still go out (wallpaper + WorkSync only) so HR sees the session
     // is live; the user is told how to allow Screen Recording.
     #[cfg(target_os = "macos")]
-    crate::capture::mac_permission::ensure();
+    if !crate::capture::mac_permission::ensure() {
+        let cfg = current_config(app);
+        let _ = client::send_live_hello(&cfg, hub().doorbell_up.load(Ordering::SeqCst), crate::capture::capture_label()).await;
+    }
 
     let mut last_fingerprint: Option<u64> = None;
     let mut last_frame_sent: Option<Instant> = None;

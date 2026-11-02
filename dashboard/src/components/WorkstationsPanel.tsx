@@ -667,7 +667,12 @@ export function WorkstationsPanel({
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="font-mono text-xs text-slate-200">{ws.model || 'Work Laptop'}</div>
-                          <div className="text-xs text-slate-400 capitalize">{ws.platform} · {ws.label}</div>
+                          <div className="text-xs text-slate-400 capitalize">{ws.platform} · {ws.label}{ws.agentVersion ? ` · v${ws.agentVersion}` : ''}</div>
+                          {ws.screenPermission === false && (
+                            <div className="mt-1" title="This Mac hasn't allowed WorkSync to record the screen, so the live view shows only WorkSync. On the Mac: System Settings > Privacy & Security > Screen & System Audio Recording, remove WorkSync (-), add it again (+), switch it on, reopen WorkSync.">
+                              <Badge tone="danger">Screen Recording off</Badge>
+                            </div>
+                          )}
                         </td>
                         <td className="py-3.5 px-4">
                           {ws.status === 'ACTIVE' ? (

@@ -217,6 +217,19 @@ pub mod mac_permission {
     }
 }
 
+/// What the agent tells the server about its capture (live-hello). A Mac
+/// without Screen Recording permission says so, and the dashboard warns HR
+/// instead of showing a frame with only WorkSync on it.
+pub fn capture_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        if !mac_permission::granted() {
+            return "no-screen-permission";
+        }
+    }
+    "native"
+}
+
 /// Captures the primary monitor as a base64 JPEG. Blocking: call it from
 /// `spawn_blocking`, never directly on the async runtime.
 pub fn capture_live_frame() -> Result<Frame, String> {

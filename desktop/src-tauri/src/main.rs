@@ -754,11 +754,26 @@ fn main() {
             spawn_namaz_reminders(app_handle.clone());
             // Ask for Screen Recording at launch, not first when HR opens the
             // live view (see capture::mac_permission).
+            // Afterwards it re-checks every 5 minutes and reports a change, so
+            // the dashboard's "Screen Recording off" clears once it's allowed.
             #[cfg(target_os = "macos")]
-            std::thread::spawn(|| {
-                std::thread::sleep(std::time::Duration::from_secs(10));
-                capture::mac_permission::ensure();
-            });
+            {
+                let app_for_perm = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    let mut reported = capture::mac_permission::ensure();
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(300)).await;
+                        let now = capture::mac_permission::granted();
+                        if now != reported {
+                            let cfg = app_for_perm.state::<AppState>().config.lock().unwrap().clone();
+                            if client::send_live_hello(&cfg, true, capture::capture_label()).await.is_ok() {
+                                reported = now;
+                            }
+                        }
+                    }
+                });
+            }
 
             // On macOS: disable App Nap, hold idle-sleep power assertion, and show window on launch
             #[cfg(target_os = "macos")]

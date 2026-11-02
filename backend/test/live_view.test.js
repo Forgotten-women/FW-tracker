@@ -183,3 +183,12 @@ test('the health check reports where live frames are stored', async () => {
   const health = await json('GET', '/api/health');
   assert.deepEqual(health.body.liveView, { frameStore: 'memory', doorbell: false });
 });
+
+test('a Mac without Screen Recording is reported as such; older Mac agents are unknown', () => {
+  const { screenPermissionOf } = require('../src/lib/liveFrame');
+  assert.equal(screenPermissionOf({ capture: 'no-screen-permission', version: '1.1.8' }, 'macos'), false);
+  assert.equal(screenPermissionOf({ capture: 'native', version: '1.1.8' }, 'macos'), true);
+  assert.equal(screenPermissionOf({ capture: 'native', version: '1.1.7' }, 'macos'), null);
+  assert.equal(screenPermissionOf({ capture: 'native', version: '1.0.40' }, 'windows'), true);
+  assert.equal(screenPermissionOf(null, 'macos'), null);
+});

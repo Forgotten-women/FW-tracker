@@ -191,7 +191,29 @@ async function clearFrame(deviceId) {
   }
 }
 
+/** What each agent last said about itself, for many devices in one read. */
+async function getAgentInfos(deviceIds) {
+  if (!deviceIds.length) return new Map();
+  const vals = await getMany(deviceIds.map(k.agent));
+  return new Map(deviceIds.map((id, i) => [id, vals[i] || null]));
+}
+
+/**
+ * Whether the laptop can capture its whole screen: false when a Mac reports
+ * no Screen Recording permission (the live view then shows only WorkSync),
+ * null when unknown (a Mac agent older than 1.1.8 doesn't report it).
+ */
+function screenPermissionOf(agent, platform) {
+  if (!agent) return null;
+  if (agent.capture === 'no-screen-permission') return false;
+  if (platform !== 'macos') return true;
+  const [maj, min, pat] = String(agent.version || '').split('.').map(Number);
+  const reports = maj > 1 || (maj === 1 && (min > 1 || (min === 1 && pat >= 8)));
+  return reports ? true : null;
+}
+
 module.exports = {
   FRAME_TTL_SECONDS,
   storeKind, setFrame, markAlive, setAck, setAgentInfo, getState, getFrame, clearFrame,
+  getAgentInfos, screenPermissionOf,
 };

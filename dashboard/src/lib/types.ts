@@ -1106,6 +1106,10 @@ export interface WorkstationItem {
   lockState: string;
   connectedBssid: string | null;
   lastHeartbeat: string;
+  agentVersion?: string | null;
+  // false: a Mac without Screen Recording permission (live view shows only
+  // WorkSync); null: unknown (older Mac agent).
+  screenPermission?: boolean | null;
 }
 
 export interface ProcessAnomalyItem {
@@ -1167,7 +1171,7 @@ export interface LiveFrameResponse {
   lastSeenAt?: number | null;
   isBreak: boolean;
   breakMessage?: string | null;
-  agent?: { version: string | null; doorbell: boolean } | null;
+  agent?: { version: string | null; doorbell: boolean; screenPermission?: boolean | null } | null;
   doorbellConfigured?: boolean;
   frameStore?: 'redis' | 'memory';
   warning?: 'LIVE_STORE_NOT_SHARED' | null;

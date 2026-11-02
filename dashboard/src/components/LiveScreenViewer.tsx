@@ -360,6 +360,11 @@ export function LiveScreenViewer({ deviceId, employeeName, model, onClose }: Pro
                   <span>RECONNECTING…</span>
                 )}
               </div>
+              {info?.agent?.screenPermission === false && (
+                <div className="absolute inset-x-2 bottom-2 rounded-md border border-amber-400/30 bg-black/80 px-3 py-2 text-xs text-amber-200 backdrop-blur-md">
+                  This Mac hasn&apos;t allowed WorkSync to record the screen, so only WorkSync is visible. On the Mac: System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording → remove WorkSync (−), add it again (+), switch it on, then reopen WorkSync.
+                </div>
+              )}
               {stalled && !connecting && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <StatusCard

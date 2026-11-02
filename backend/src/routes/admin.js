@@ -463,6 +463,7 @@ router.get('/workstations', async (req, res) => {
     WHERE date_key = ?
   `).all(dateKey);
   const attByEmp = new Map(attRows.map(a => [a.employee_id, a]));
+  const agentInfos = await liveFrame.getAgentInfos(rows.map(r => r.device_id));
 
   res.json({
     status: 'SUCCESS',
@@ -506,6 +507,8 @@ router.get('/workstations', async (req, res) => {
         lockState: r.lock_state,
         connectedBssid: r.connected_bssid,
         lastHeartbeat: T.displayTime(r.last_heartbeat_at),
+        agentVersion: agentInfos.get(r.device_id)?.version || null,
+        screenPermission: liveFrame.screenPermissionOf(agentInfos.get(r.device_id), r.platform),
       };
     }),
   });
@@ -634,7 +637,12 @@ router.get('/workstations/:deviceId/live-frame', async (req, res) => {
     const state = await liveFrame.getState(deviceId);
     const frameAt = state.frame ? (state.frame.at || nowMs) : null;
     const lastActivityAt = Math.max(frameAt || 0, state.aliveAt || 0) || null;
-    const agent = state.agent ? { version: state.agent.version || null, doorbell: Boolean(state.agent.doorbell) } : null;
+    const devPlatform = state.agent ? (await db.prepare('SELECT platform FROM devices WHERE id = ?').get(deviceId))?.platform : null;
+    const agent = state.agent ? {
+      version: state.agent.version || null,
+      doorbell: Boolean(state.agent.doorbell),
+      screenPermission: liveFrame.screenPermissionOf(state.agent, devPlatform),
+    } : null;
 
     if (state.frame && lastActivityAt && nowMs - lastActivityAt < FRAME_FRESH_MS) {
       const unchanged = Boolean(since && frameAt <= since);
