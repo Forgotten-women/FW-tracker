@@ -141,6 +141,34 @@ fn sync_break_window(on_break: bool, app: tauri::AppHandle) {
     apply_break_window(&app, on_break);
 }
 
+/// A desktop notification that also works on macOS for this unsigned app.
+///
+/// Tauri's notification API posts through the app's own bundle, and recent
+/// macOS versions silently drop those from apps that aren't signed with a
+/// Developer ID (no error, nothing shown): the namaz reminder never appeared
+/// on Macs (2 Nov 2026). On macOS it goes through osascript's
+/// `display notification` instead, which every Mac allows (shown under
+/// "Script Editor" in Notification settings). Windows keeps the native API.
+pub(crate) fn show_notification(title: &str, body: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!("display notification \"{}\" with title \"{}\"", esc(body), esc(title));
+        match std::process::Command::new("/usr/bin/osascript").args(["-e", script.as_str()]).spawn() {
+            Ok(mut child) => {
+                // Reap it off the async runtime; osascript exits in well under a second.
+                std::thread::spawn(move || { let _ = child.wait(); });
+                return;
+            }
+            Err(e) => eprintln!("[notify] osascript failed ({e}); trying the native API"),
+        }
+    }
+    let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
+        .title(title)
+        .body(body)
+        .show();
+}
+
 // Namaz reminder: a small native notification at the exact minute of each
 // prayer inside working hours, worked out on this laptop from the device clock
 // (namaz.rs) - it needs no server and works offline. Nothing to click and
@@ -189,10 +217,7 @@ fn spawn_namaz_reminders(app: tauri::AppHandle) {
             } else {
                 format!("{} \u{00B7} Time for {}. The next {} minutes count as work, nothing to press.", p.label, p.name, namaz::WINDOW_MINUTES)
             };
-            let _ = tauri::api::notification::Notification::new("com.rethink.officetracker.desktop")
-                .title(format!("\u{1F54C} {}", p.name))
-                .body(&body)
-                .show();
+            show_notification(&format!("\u{1F54C} {}", p.name), &body);
         }
     });
 }
