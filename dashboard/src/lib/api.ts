@@ -1384,6 +1384,7 @@ export const api = {
     periodEnd: string;
     creditMinutes: number;
     reason: string;
+    kind?: 'EXTRA_TIME' | 'DEFICIT_FIX';
   }) =>
     request<{
       status: string;

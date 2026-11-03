@@ -1686,3 +1686,6 @@ CREATE INDEX IF NOT EXISTS idx_period_adj_dates ON attendance_period_adjustments
 
 -- 036: laptop idle per day, kept apart from the deficit (never changes pay by itself).
 ALTER TABLE attendance_daily_summary ADD COLUMN IF NOT EXISTS idle_minutes INTEGER NOT NULL DEFAULT 0;
+
+-- 037: period adjustment kind: EXTRA_TIME (offsets deficit, rest is extra time) or DEFICIT_FIX (cancels deficit only).
+ALTER TABLE attendance_period_adjustments ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'EXTRA_TIME';

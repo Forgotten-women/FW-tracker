@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { api } from '@/lib/api';
-import { CalendarIcon, CoffeeIcon, PlusIcon, TimerIcon, XIcon } from './icons';
+import { CalendarIcon, CheckIcon, CoffeeIcon, PlusIcon, TimerIcon, XIcon } from './icons';
 
 interface ManualTimeModalProps {
   isOpen: boolean;
@@ -21,7 +21,7 @@ export function ManualTimeModal({
   defaultDate = new Date().toISOString().slice(0, 10),
   onSuccess,
 }: ManualTimeModalProps) {
-  const [mode, setMode] = useState<'TIME' | 'BREAK' | 'PERIOD_CREDIT'>('TIME');
+  const [mode, setMode] = useState<'TIME' | 'BREAK' | 'PERIOD_CREDIT' | 'DEFICIT_FIX'>('TIME');
   const [employeeId, setEmployeeId] = useState(defaultEmployeeId || (employees[0]?.id || ''));
   const [dateKey, setDateKey] = useState(defaultDate);
   const [minutes, setMinutes] = useState('15');
@@ -40,6 +40,9 @@ export function ManualTimeModal({
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  // Both period tabs share the period form; they differ only in kind.
+  const isPeriod = mode === 'PERIOD_CREDIT' || mode === 'DEFICIT_FIX';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,7 +100,7 @@ export function ManualTimeModal({
       } else {
         const numCreditMins = parseInt(periodCreditMinutes, 10);
         if (isNaN(numCreditMins) || numCreditMins <= 0) {
-          setError('Credit minutes must be a positive number.');
+          setError(mode === 'DEFICIT_FIX' ? 'Deficit minutes must be a positive number.' : 'Credit minutes must be a positive number.');
           setLoading(false);
           return;
         }
@@ -117,6 +120,7 @@ export function ManualTimeModal({
           periodEnd: periodEndDate,
           creditMinutes: numCreditMins,
           reason: reason.trim(),
+          kind: mode === 'DEFICIT_FIX' ? 'DEFICIT_FIX' : 'EXTRA_TIME',
         });
       }
 
@@ -138,6 +142,8 @@ export function ManualTimeModal({
               <TimerIcon className="h-5 w-5 text-indigo-400 shrink-0" />
             ) : mode === 'BREAK' ? (
               <CoffeeIcon className="h-5 w-5 text-amber-400 shrink-0" />
+            ) : mode === 'DEFICIT_FIX' ? (
+              <CheckIcon className="h-5 w-5 text-rose-300 shrink-0" />
             ) : (
               <CalendarIcon className="h-5 w-5 text-emerald-400 shrink-0" />
             )}
@@ -147,6 +153,8 @@ export function ManualTimeModal({
                   ? 'HR Daily Time Adjustment'
                   : mode === 'BREAK'
                   ? 'HR Manual Break Entry'
+                  : mode === 'DEFICIT_FIX'
+                  ? 'HR Deficit Fix'
                   : 'HR Period Extra Time Credit'}
               </h3>
               <p className="text-[11px] text-slate-400">
@@ -154,6 +162,8 @@ export function ManualTimeModal({
                   ? 'Directly credit or adjust worked minutes for an employee on a single day'
                   : mode === 'BREAK'
                   ? 'Manually record an authorized employee break for today or past days'
+                  : mode === 'DEFICIT_FIX'
+                  ? 'Cancel deficit minutes for a period; they never count as extra time'
                   : 'Add extra time credit (regardless of date) to adjust monthly deficit / surplus'}
               </p>
             </div>
@@ -214,6 +224,21 @@ export function ManualTimeModal({
             <CalendarIcon className="h-3.5 w-3.5" />
             <span>Period Extra Time</span>
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('DEFICIT_FIX');
+              setError(null);
+            }}
+            className={`flex-1 py-1.5 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              mode === 'DEFICIT_FIX'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-950/40'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <CheckIcon className="h-3.5 w-3.5" />
+            <span>Deficit Fix</span>
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
@@ -236,7 +261,7 @@ export function ManualTimeModal({
           </div>
 
           {/* Date / Period Selection */}
-          {mode === 'PERIOD_CREDIT' ? (
+          {isPeriod ? (
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1">
@@ -275,12 +300,12 @@ export function ManualTimeModal({
             </div>
           )}
 
-          {mode === 'PERIOD_CREDIT' ? (
-            /* Mode PERIOD_CREDIT: Bulk/Period Extra Time Credit */
+          {isPeriod ? (
+            /* PERIOD_CREDIT (extra time) or DEFICIT_FIX: minutes for a period */
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-[11px] font-semibold text-slate-300">
-                  EXTRA TIME CREDIT (MINUTES)
+                  {mode === 'DEFICIT_FIX' ? 'DEFICIT MINUTES TO FIX' : 'EXTRA TIME CREDIT (MINUTES)'}
                 </label>
                 <span className="text-[10px] text-emerald-400 font-mono">
                   {parseInt(periodCreditMinutes, 10) > 0
@@ -310,7 +335,9 @@ export function ManualTimeModal({
                 ))}
               </div>
               <p className="text-[10px] text-slate-400 mt-2 bg-slate-950/60 p-2 rounded-lg border border-white/5">
-                ℹ️ Directly reduces the employee&apos;s monthly gross deficit. Any credit exceeding total shortfall becomes surplus extra time / overtime in reports.
+                {mode === 'DEFICIT_FIX'
+                  ? 'ℹ️ Cancels this many minutes of the employee\'s deficit in the period, so they no longer count towards the whole-day penalty. Never adds extra time.'
+                  : 'ℹ️ Offsets the employee\'s deficit in the period first; anything beyond the deficit becomes extra time / overtime.'}
               </p>
             </div>
           ) : mode === 'TIME' ? (
@@ -394,7 +421,9 @@ export function ManualTimeModal({
               onChange={(e) => setReason(e.target.value)}
               placeholder={
                 mode === 'PERIOD_CREDIT'
-                  ? 'e.g. Approved project extra hours / monthly deficit waiver agreed with management.'
+                  ? 'e.g. Approved project extra hours.'
+                  : mode === 'DEFICIT_FIX'
+                  ? 'e.g. October deficit waived as agreed with management.'
                   : mode === 'TIME'
                   ? 'e.g. Employee arrived at 11:09 AM; Wi-Fi connection recorded at 11:20 AM.'
                   : 'e.g. Authorized medical/lunch break or personal errand approved by manager.'
@@ -425,6 +454,8 @@ export function ManualTimeModal({
                   ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950/40'
                   : mode === 'BREAK'
                   ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-950/40'
+                  : mode === 'DEFICIT_FIX'
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/40'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/40'
               }`}
             >
@@ -437,6 +468,10 @@ export function ManualTimeModal({
               ) : mode === 'BREAK' ? (
                 <>
                   <CoffeeIcon className="h-3.5 w-3.5" /> Record Break Entry
+                </>
+              ) : mode === 'DEFICIT_FIX' ? (
+                <>
+                  <CheckIcon className="h-3.5 w-3.5" /> Fix Deficit
                 </>
               ) : (
                 <>

@@ -1618,8 +1618,11 @@ export interface EmployeeHistoryDaysResponse {
     reason: string;
     createdAt: number;
     createdBy: string;
+    kind?: 'EXTRA_TIME' | 'DEFICIT_FIX';
   }[];
   periodCreditMinutes?: number;
+  // HR "Deficit Fix" minutes: cancel deficit, never extra time.
+  deficitFixMinutes?: number;
 }
 
 export interface EmployeeHistoryDayResponse {

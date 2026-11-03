@@ -195,7 +195,13 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     const dayEquivalentMinutes = Number(pat.day_equivalent_minutes) || 480;
 
     const empAdjs = periodAdjByEmp.get(empId) || [];
-    const totalPeriodCreditMins = empAdjs.reduce((s, a) => s + (Number(a.credit_minutes) || 0), 0);
+    const totalPeriodCreditMins = empAdjs
+      .filter(a => (a.kind || 'EXTRA_TIME') !== 'DEFICIT_FIX')
+      .reduce((s, a) => s + (Number(a.credit_minutes) || 0), 0);
+    // Deficit fixes cancel shortfall only; any excess is not extra time.
+    const totalDeficitFixMins = empAdjs
+      .filter(a => a.kind === 'DEFICIT_FIX')
+      .reduce((s, a) => s + (Number(a.credit_minutes) || 0), 0);
 
     const dailyRows = [];
     let expectedWorkingDays = 0;
@@ -418,9 +424,11 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     }
 
     // Roll up monthly figures
-    const totalApprovedCreditMinutes = totalDailyApprovedCredit + totalPeriodCreditMins;
-    const netShortfallMinutes = Math.max(0, grossShortfallMinutes - totalApprovedCreditMinutes);
-    const surplusCreditMinutes = Math.max(0, totalApprovedCreditMinutes - grossShortfallMinutes);
+    const shortfallAfterFixMinutes = Math.max(0, grossShortfallMinutes - totalDeficitFixMins);
+    const creditMinutes = totalDailyApprovedCredit + totalPeriodCreditMins;
+    const totalApprovedCreditMinutes = creditMinutes + Math.min(totalDeficitFixMins, grossShortfallMinutes);
+    const netShortfallMinutes = Math.max(0, shortfallAfterFixMinutes - creditMinutes);
+    const surplusCreditMinutes = Math.max(0, creditMinutes - shortfallAfterFixMinutes);
     const totalExtraMinutes = totalDailyExtraMinutes + surplusCreditMinutes;
 
     // Leave Summary

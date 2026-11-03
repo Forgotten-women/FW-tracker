@@ -1097,7 +1097,10 @@ async function adjustBalance({ employeeId, dateKey, minutes, reason, actor }) {
  * Adjusts the employee's running deficit ledger, records the period adjustment row,
  * and attributes the entry.
  */
-async function addPeriodAdjustment({ employeeId, periodStart, periodEnd, minutes, reason, actor }) {
+const PERIOD_ADJUSTMENT_KINDS = ['EXTRA_TIME', 'DEFICIT_FIX'];
+
+async function addPeriodAdjustment({ employeeId, periodStart, periodEnd, minutes, reason, actor, kind = 'EXTRA_TIME' }) {
+  if (!PERIOD_ADJUSTMENT_KINDS.includes(kind)) throw new Error('Unknown adjustment kind.');
   if (!employeeId) throw new Error('employeeId is required.');
   if (!minutes || isNaN(Number(minutes)) || Number(minutes) <= 0) {
     throw new Error('Credit minutes must be a positive integer.');
@@ -1112,16 +1115,16 @@ async function addPeriodAdjustment({ employeeId, periodStart, periodEnd, minutes
   await tx(async () => {
     await db.prepare(`
       INSERT INTO attendance_period_adjustments
-        (id, employee_id, period_start, period_end, credit_minutes, reason, created_at, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, employeeId, periodStart || T.dateKey(nowMs), periodEnd || T.dateKey(nowMs), creditMins, String(reason).trim(), nowMs, actor || 'HR');
+        (id, employee_id, period_start, period_end, credit_minutes, reason, created_at, created_by, kind)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, employeeId, periodStart || T.dateKey(nowMs), periodEnd || T.dateKey(nowMs), creditMins, String(reason).trim(), nowMs, actor || 'HR', kind);
 
     // Reduce deficit balance in ledger
     await adjustBalance({
       employeeId,
       dateKey: periodEnd || T.dateKey(nowMs),
       minutes: -creditMins,
-      reason: `Bulk Period Credit: ${String(reason).trim()}`,
+      reason: `${kind === 'DEFICIT_FIX' ? 'Deficit Fix' : 'Bulk Period Credit'}: ${String(reason).trim()}`,
       actor: actor || 'HR',
     });
 
@@ -1130,12 +1133,12 @@ async function addPeriodAdjustment({ employeeId, periodStart, periodEnd, minutes
       action: 'ATTENDANCE_PERIOD_ADJUSTMENT',
       targetType: 'employee',
       targetId: employeeId,
-      after: { creditMinutes: creditMins, periodStart, periodEnd, reason: String(reason).trim() },
+      after: { kind, creditMinutes: creditMins, periodStart, periodEnd, reason: String(reason).trim() },
     });
   });
 
   try { require('./payroll').invalidatePayrollCache(); } catch (_) {}
-  return { id, employeeId, creditMinutes: creditMins, balance: await balanceFor(employeeId) };
+  return { id, employeeId, kind, creditMinutes: creditMins, balance: await balanceFor(employeeId) };
 }
 
 async function listPeriodAdjustments(employeeId, periodStart = null, periodEnd = null) {

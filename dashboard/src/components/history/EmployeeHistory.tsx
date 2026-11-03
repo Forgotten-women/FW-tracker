@@ -149,7 +149,16 @@ export function EmployeeHistory({
   const [resolveSuccess, setResolveSuccess] = useState<string | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
 
-  const wholeDeficitDays = Math.floor(totals.deficitMinutes / 450);
+  // Period adjustments, as the export applies them: a Deficit Fix cancels
+  // deficit only; an extra-time credit offsets what's left, and only the
+  // rest is extra time. The whole-day penalty counts the remaining deficit.
+  const deficitFixMins = data?.deficitFixMinutes || 0;
+  const periodCreditMins = data?.periodCreditMinutes || 0;
+  const deficitAfterFix = Math.max(0, totals.deficitMinutes - deficitFixMins);
+  const netDeficitMinutes = Math.max(0, deficitAfterFix - periodCreditMins);
+  const surplusCreditMins = Math.max(0, periodCreditMins - deficitAfterFix);
+  const coveredDeficitMins = totals.deficitMinutes - netDeficitMinutes;
+  const wholeDeficitDays = Math.floor(netDeficitMinutes / 450);
 
   const handleResolveDeficit = async (resolutionType: 'ANNUAL_LEAVE' | 'PAYROLL_DEDUCTION') => {
     if (!wholeDeficitDays || wholeDeficitDays < 1) return;
@@ -345,14 +354,15 @@ export function EmployeeHistory({
             <Tile label="Worked" value={fmtMinutes(totals.workedMinutes)} tone="text-white" />
             <Tile
               label="Extra Time"
-              value={fmtMinutes(totals.extraMinutes + (monthRes.data?.periodCreditMinutes || 0))}
-              tone={totals.extraMinutes + (monthRes.data?.periodCreditMinutes || 0) > 0 ? 'text-teal-400' : 'text-slate-400'}
-              hint={monthRes.data?.periodCreditMinutes ? `incl. +${fmtMinutes(monthRes.data.periodCreditMinutes)} period credit` : undefined}
+              value={fmtMinutes(totals.extraMinutes + surplusCreditMins)}
+              tone={totals.extraMinutes + surplusCreditMins > 0 ? 'text-teal-400' : 'text-slate-400'}
+              hint={surplusCreditMins ? `incl. +${fmtMinutes(surplusCreditMins)} period credit` : undefined}
             />
             <Tile
               label="Deficit"
-              value={totals.deficitMinutes > 0 ? `−${fmtMinutes(totals.deficitMinutes)}` : '0m'}
-              tone={totals.deficitMinutes > 0 ? 'text-rose-400' : 'text-slate-400'}
+              value={netDeficitMinutes > 0 ? `−${fmtMinutes(netDeficitMinutes)}` : '0m'}
+              tone={netDeficitMinutes > 0 ? 'text-rose-400' : 'text-slate-400'}
+              hint={coveredDeficitMins > 0 ? `${fmtMinutes(totals.deficitMinutes)} − ${fmtMinutes(coveredDeficitMins)} fixed by HR` : undefined}
             />
             <Tile
               label="Idle"
@@ -374,7 +384,9 @@ export function EmployeeHistory({
                 <div className="flex items-center gap-2">
                   <ClockIcon className="h-4 w-4 text-teal-400 shrink-0" />
                   <h4 className="text-xs font-bold text-teal-200">
-                    Period Extra Time Credits: +{fmtMinutes(monthRes.data.periodCreditMinutes || 0)}
+                    HR Period Adjustments
+                    {periodCreditMins > 0 && ` · extra time +${fmtMinutes(periodCreditMins)}`}
+                    {deficitFixMins > 0 && ` · deficit fixed ${fmtMinutes(deficitFixMins)}`}
                   </h4>
                 </div>
               </div>
@@ -382,7 +394,9 @@ export function EmployeeHistory({
                 {monthRes.data.periodAdjustments.map((adj) => (
                   <div key={adj.id} className="py-2 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <span className="font-semibold text-teal-300">+{fmtMinutes(adj.creditMinutes)}</span>
+                      <span className={`font-semibold ${adj.kind === 'DEFICIT_FIX' ? 'text-rose-300' : 'text-teal-300'}`}>
+                        {adj.kind === 'DEFICIT_FIX' ? `Deficit fix ${fmtMinutes(adj.creditMinutes)}` : `Extra time +${fmtMinutes(adj.creditMinutes)}`}
+                      </span>
                       <span className="text-slate-300 ml-2">({adj.periodStart} to {adj.periodEnd})</span>
                       <span className="text-slate-400 ml-2">· {adj.reason}</span>
                       {adj.createdBy && <span className="text-slate-500 ml-1">· by {adj.createdBy}</span>}
@@ -391,7 +405,7 @@ export function EmployeeHistory({
                       variant="danger"
                       size="sm"
                       onClick={async () => {
-                        if (confirm(`Delete period extra time credit of +${fmtMinutes(adj.creditMinutes)}?`)) {
+                        if (confirm(`Delete this ${adj.kind === 'DEFICIT_FIX' ? 'deficit fix' : 'extra time credit'} of ${fmtMinutes(adj.creditMinutes)}?`)) {
                           await api.deletePeriodAdjustment(adj.id);
                           monthRes.reload();
                         }
@@ -413,7 +427,7 @@ export function EmployeeHistory({
                   <AlertTriangleIcon className="h-5 w-5 text-rose-400 shrink-0" />
                   <div>
                     <h4 className="text-sm font-bold text-white">
-                      Unapproved Deficit Threshold Reached: {wholeDeficitDays} Whole Day{wholeDeficitDays > 1 ? 's' : ''} ({fmtMinutes(totals.deficitMinutes)})
+                      Unapproved Deficit Threshold Reached: {wholeDeficitDays} Whole Day{wholeDeficitDays > 1 ? 's' : ''} ({fmtMinutes(netDeficitMinutes)})
                     </h4>
                     <p className="text-xs text-rose-200/80 mt-0.5">
                       Company policy gives HR two resolution options when unapproved deficit accumulates to whole day(s):

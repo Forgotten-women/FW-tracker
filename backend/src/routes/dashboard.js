@@ -116,6 +116,7 @@ router.get('/employees/:employeeId/days', async (req, res) => {
       employmentStart: out.employmentStart || null, employmentEnd: out.employmentEnd || null, days: out.days,
       periodAdjustments: out.periodAdjustments || [],
       periodCreditMinutes: out.periodCreditMinutes || 0,
+      deficitFixMinutes: out.deficitFixMinutes || 0,
     });
   } catch (err) {
     // Validation errors are the caller's to fix; anything else stays in the logs.

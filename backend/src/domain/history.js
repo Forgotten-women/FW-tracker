@@ -145,7 +145,7 @@ function dayStatus({ isToday, beforeEmployment, afterEmployment, sched, summary,
 }
 
 const selectPeriodAdjustments = db.prepare(`
-  SELECT id, period_start, period_end, credit_minutes, reason, created_at, created_by
+  SELECT id, period_start, period_end, credit_minutes, reason, created_at, created_by, kind
   FROM attendance_period_adjustments
   WHERE employee_id = ? AND NOT (period_end < ? OR period_start > ?)
   ORDER BY created_at DESC
@@ -159,7 +159,7 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
   if (range.dates.length === 0) {
     return {
       employee: { id: employee.id, name: employee.name, role: employee.role },
-      from: range.from, to: range.to, days: [], periodAdjustments: [], periodCreditMinutes: 0,
+      from: range.from, to: range.to, days: [], periodAdjustments: [], periodCreditMinutes: 0, deficitFixMinutes: 0,
     };
   }
 
@@ -280,10 +280,13 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
     };
   });
 
-  const periodCreditMinutes = (periodAdjustments || []).reduce(
-    (sum, pa) => sum + (Number(pa.credit_minutes) || 0),
-    0
-  );
+  // EXTRA_TIME credits offset the month's deficit first and only the rest is
+  // extra time; DEFICIT_FIX only cancels deficit (see migration 037).
+  const sumKind = (kind) => (periodAdjustments || [])
+    .filter((pa) => (pa.kind || 'EXTRA_TIME') === kind)
+    .reduce((sum, pa) => sum + (Number(pa.credit_minutes) || 0), 0);
+  const periodCreditMinutes = sumKind('EXTRA_TIME');
+  const deficitFixMinutes = sumKind('DEFICIT_FIX');
 
   return {
     employee: { id: employee.id, name: employee.name, role: employee.role },
@@ -300,8 +303,10 @@ async function daysInRange(employeeId, from, to, nowMs = T.now()) {
       reason: pa.reason,
       createdAt: Number(pa.created_at) || 0,
       createdBy: pa.created_by,
+      kind: pa.kind || 'EXTRA_TIME',
     })),
     periodCreditMinutes,
+    deficitFixMinutes,
   };
 }
 

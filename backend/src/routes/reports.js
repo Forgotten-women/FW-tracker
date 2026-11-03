@@ -86,6 +86,7 @@ router.get('/preview', requireUserOrAdminKey('attendance.read'), async (req, res
 router.post('/period-adjustment', requireUserOrAdminKey('attendance.write'), async (req, res) => {
   try {
     const { employeeId, periodStart, periodEnd, creditMinutes, reason } = req.body;
+    const kind = req.body.kind === 'DEFICIT_FIX' ? 'DEFICIT_FIX' : 'EXTRA_TIME';
     if (!employeeId) {
       return res.status(400).json({ status: 'ERROR', message: 'employeeId is required.' });
     }
@@ -105,11 +106,12 @@ router.post('/period-adjustment', requireUserOrAdminKey('attendance.write'), asy
       minutes: mins,
       reason: String(reason).trim(),
       actor,
+      kind,
     });
 
     res.json({
       status: 'SUCCESS',
-      message: `Successfully credited ${mins} minutes for period ${periodStart || 'current'} – ${periodEnd || 'current'}.`,
+      message: `${kind === 'DEFICIT_FIX' ? 'Fixed' : 'Credited'} ${mins} minutes for period ${periodStart || 'current'} – ${periodEnd || 'current'}.`,
       ...result,
     });
   } catch (err) {
