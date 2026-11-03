@@ -575,6 +575,16 @@ export const api = {
       },
     ),
 
+  // HR: the employee wasn't on leave that day (shrinks, splits or cancels it).
+  removeLeaveDay: (id: string, dateKey: string, reason?: string) =>
+    request<{ status: string; message: string; action: 'CANCELLED' | 'SHORTENED' | 'SPLIT' }>(
+      `/api/leave/request/${encodeURIComponent(id)}/remove-day`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ dateKey, reason }),
+      },
+    ),
+
   cancelLeaveRequest: (id: string, reason?: string) =>
     request<{ status: string; message: string }>(
       `/api/leave/request/${encodeURIComponent(id)}/cancel`,

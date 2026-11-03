@@ -548,3 +548,31 @@ test('previewing a future request projects accrual without writing it', async ()
   const after = await db.prepare('SELECT COUNT(*) AS n FROM leave_accrual_ledger WHERE employee_id = ?').get(emp);
   assert.equal(Number(after.n), Number(before.n), 'nothing posted for months not yet served');
 });
+
+// HR correction: booked leave the employee didn't take (they came in).
+test('removing a day the employee came in shrinks, splits or cancels the leave and restores the balance', async () => {
+  const emp = await makeEmployee('emp_notonleave', '2025-01-01');
+  await L.accrue(emp, '2025-07-01');
+  const before = (await L.balanceFor(emp, '2025-07-01')).availableDays;
+  const book = async (start, end) => {
+    const r = await L.submitRequest({ employeeId: emp, leaveTypeId: 'annual', startDate: start, endDate: end });
+    await L.decideRequest({ requestId: r.id, decision: 'APPROVED', notes: 'Approved', actor: 'user:hr' });
+    return r.id;
+  };
+  const get = (id) => db.prepare('SELECT start_date, end_date, total_days, status FROM leave_requests WHERE id = ?').get(id);
+
+  // Mon 21 - Fri 25 Jul 2025; came in on Wednesday: split into Mon-Tue and Thu-Fri.
+  const id = await book('2025-07-21', '2025-07-25');
+  const split = await L.removeLeaveDay({ requestId: id, dateKey: '2025-07-23', actor: 'user:hr', reason: 'In office' });
+  assert.equal(split.action, 'SPLIT');
+  assert.deepEqual(await get(id), { start_date: '2025-07-21', end_date: '2025-07-22', total_days: 2, status: 'APPROVED' });
+  assert.deepEqual(await get(split.newRequestId), { start_date: '2025-07-24', end_date: '2025-07-25', total_days: 2, status: 'APPROVED' });
+  assert.equal((await L.balanceFor(emp, '2025-07-28')).availableDays, before - 4, 'one day back');
+
+  // Last day off the first part, then the only day of a one-day leave.
+  assert.equal((await L.removeLeaveDay({ requestId: id, dateKey: '2025-07-22', actor: 'user:hr' })).action, 'SHORTENED');
+  assert.equal((await L.removeLeaveDay({ requestId: id, dateKey: '2025-07-21', actor: 'user:hr' })).action, 'CANCELLED');
+  assert.equal((await L.balanceFor(emp, '2025-07-28')).availableDays, before - 2);
+
+  await assert.rejects(L.removeLeaveDay({ requestId: split.newRequestId, dateKey: '2025-07-30', actor: 'user:hr' }), /not part of this leave/);
+});

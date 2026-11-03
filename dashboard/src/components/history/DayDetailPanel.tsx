@@ -4,7 +4,8 @@
 // the full detail (sessions, breaks, corrections, laptop, apps, movements)
 // fills in when it arrives.
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { api } from '@/lib/api';
 import type { HistoryBreak, HistoryDayDetail, HistoryDaySummary, HistorySession } from '@/lib/types';
 import { Badge, Button } from '@/components/primitives';
 import {
@@ -38,6 +39,8 @@ interface DayDetailPanelProps {
   onPrev: (() => void) | null;
   onNext: (() => void) | null;
   onViewScreenshots: (dateKey: string) => void;
+  /** After HR corrects the day's leave, so the month and day reload. */
+  onLeaveChanged?: () => void;
 }
 
 const CORRECTION_TONE: Record<string, string> = {
@@ -150,8 +153,27 @@ export function DayDetailPanel({
   onPrev,
   onNext,
   onViewScreenshots,
+  onLeaveChanged,
 }: DayDetailPanelProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const [leaveBusy, setLeaveBusy] = useState(false);
+  const [leaveMsg, setLeaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const notOnLeave = async (requestId: string) => {
+    const reason = window.prompt(`Remove ${dateKey} from this leave? The day's balance is restored and attendance is counted from what was recorded.\n\nReason (required):`);
+    if (!reason || !reason.trim()) return;
+    setLeaveBusy(true);
+    setLeaveMsg(null);
+    try {
+      const res = await api.removeLeaveDay(requestId, dateKey, reason.trim());
+      setLeaveMsg({ ok: true, text: res.message });
+      onLeaveChanged?.();
+    } catch (err: unknown) {
+      setLeaveMsg({ ok: false, text: err instanceof Error ? err.message : 'Could not change the leave.' });
+    } finally {
+      setLeaveBusy(false);
+    }
+  };
 
   // Move focus to the panel when a day is opened, so keyboard and screen
   // reader users land on what they asked for.
@@ -292,9 +314,27 @@ export function DayDetailPanel({
                         {day.leave.isPaid === null ? '' : day.leave.isPaid ? ' · Paid' : ' · Unpaid'}
                       </span>
                     </span>
-                    <Badge tone={day.leave.status === 'APPROVED' ? 'ok' : 'warn'} size="sm">
-                      {day.leave.status === 'APPROVED' ? 'Approved' : 'Pending approval'}
-                    </Badge>
+                    <span className="flex items-center gap-2">
+                      <Badge tone={day.leave.status === 'APPROVED' ? 'ok' : 'warn'} size="sm">
+                        {day.leave.status === 'APPROVED' ? 'Approved' : 'Pending approval'}
+                      </Badge>
+                      {day.leave.requestId && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={leaveBusy}
+                          onClick={() => notOnLeave(day.leave!.requestId)}
+                          title="The employee wasn't on leave this day: remove it from the leave and restore the balance"
+                        >
+                          {leaveBusy ? 'Saving…' : 'Not on leave this day'}
+                        </Button>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {leaveMsg && (
+                  <div role="status" className={`rounded-xl px-3 py-2 ${leaveMsg.ok ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'}`}>
+                    {leaveMsg.text}
                   </div>
                 )}
                 {day.absence && (

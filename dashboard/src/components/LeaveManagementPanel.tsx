@@ -785,6 +785,38 @@ export function LeaveManagementPanel() {
     );
   });
 
+  // Correcting a leave that was booked but not (or not fully) taken. Both
+  // restore the balance and recount attendance for those days.
+  const cancelWrongLeave = async (r: LeaveRequestItem) => {
+    const reason = window.prompt(`Cancel ${r.employeeName}'s ${r.type} (${r.from} to ${r.to}) as not taken? The ${r.days} day(s) go back to the balance.\n\nReason (required):`);
+    if (!reason || !reason.trim()) return;
+    try {
+      await api.cancelLeaveRequest(r.id, reason.trim());
+      await refresh(true);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : 'Could not cancel the leave.');
+    }
+  };
+
+  const fixLeaveDates = async (r: LeaveRequestItem) => {
+    const from = window.prompt(`First day ${r.employeeName} was actually on leave (YYYY-MM-DD):`, r.from);
+    if (!from) return;
+    const to = window.prompt('Last day on leave (YYYY-MM-DD):', r.to);
+    if (!to) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      window.alert('Please enter two dates as YYYY-MM-DD, the first not after the second.');
+      return;
+    }
+    const reason = window.prompt('Reason for the change (required):');
+    if (!reason || !reason.trim()) return;
+    try {
+      await api.editLeaveRequest(r.id, { startDate: from, endDate: to, notes: reason.trim() });
+      await refresh(true);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : 'Could not change the leave.');
+    }
+  };
+
   const filteredHistory = allRequests.filter((r) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -2310,6 +2342,7 @@ export function LeaveManagementPanel() {
                     <th className="px-3 py-2.5 font-semibold">Days</th>
                     <th className="px-3 py-2.5 font-semibold">Status</th>
                     <th className="px-3 py-2.5 font-semibold">Decision Details</th>
+                    <th className="px-3 py-2.5 font-semibold">Fix</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -2378,6 +2411,28 @@ export function LeaveManagementPanel() {
                             </div>
                           ) : (
                             <span className="text-dim">Submitted {r.submittedAt}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-middle whitespace-nowrap">
+                          {r.status !== 'CANCELLED' && r.status !== 'REJECTED' && (
+                            <div className="flex flex-col items-start gap-1">
+                              <button
+                                type="button"
+                                className="text-[11px] font-semibold text-brand hover:underline cursor-pointer"
+                                title="Change the dates (e.g. the employee came in on some of them). The balance is re-booked."
+                                onClick={() => fixLeaveDates(r)}
+                              >
+                                Edit dates
+                              </button>
+                              <button
+                                type="button"
+                                className="text-[11px] font-semibold text-rose-400 hover:underline cursor-pointer"
+                                title="The employee didn't take this leave: cancel it and restore the balance"
+                                onClick={() => cancelWrongLeave(r)}
+                              >
+                                Not taken
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>

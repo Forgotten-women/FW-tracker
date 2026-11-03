@@ -694,6 +694,12 @@ async function countLeaveDays(employeeId, startDate, endDate, dayPortion = 'FULL
   };
 }
 
+/** Working days in [startDate, endDate] for this employee (rest days and office closures skipped). */
+async function countWorkingDaysBetween(employeeId, startDate, endDate) {
+  if (!startDate || !endDate || startDate > endDate) return 0;
+  return (await countLeaveDays(employeeId, startDate, endDate, 'FULL_DAY')).workingDates.length;
+}
+
 // ---------------------------------------------------------------------------
 // Requests (spec 15)
 // ---------------------------------------------------------------------------
@@ -1186,7 +1192,12 @@ async function editRequest({ requestId, leaveTypeId, startDate, endDate, dayPort
     if (typeof PR.invalidatePayrollCache === 'function') PR.invalidatePayrollCache(req.employee_id);
   } catch (_) {}
 
-  await recomputeAttendanceFor(req, nowMs);
+  // Old and new dates both: days taken out of the leave and days added to it.
+  await recomputeAttendanceFor({
+    ...req,
+    start_date: newStartDate < req.start_date ? newStartDate : req.start_date,
+    end_date: newEndDate > req.end_date ? newEndDate : req.end_date,
+  }, nowMs);
   return { id: requestId, status: newStatus, totalDays };
 }
 
@@ -1227,6 +1238,62 @@ async function deleteRequest({ requestId, actor, reason = null, nowMs = T.now() 
 
   await recomputeAttendanceFor(req, nowMs);
   return { deleted: true };
+}
+
+/**
+ * HR: the employee wasn't actually on leave on `dateKey` (they came in).
+ * Takes that one day out of the booking and restores its balance; the day's
+ * attendance is then worked out from what was really recorded.
+ *  - a one-day (or part-day) leave is cancelled;
+ *  - the first or last day shrinks the range;
+ *  - a day in the middle splits it: this request keeps the days before, and a
+ *    new approved request with the same type and pay takes the days after.
+ */
+async function removeLeaveDay({ requestId, dateKey, actor, reason = null, nowMs = T.now() }) {
+  const req = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(requestId);
+  if (!req) throw new Error('No such leave request.');
+  if (req.cancelled_at || req.status === 'CANCELLED' || req.status === 'REJECTED') {
+    throw new Error('This leave is not active.');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '')) || dateKey < req.start_date || dateKey > req.end_date) {
+    throw new Error('That day is not part of this leave.');
+  }
+  const note = `Not on leave on ${dateKey}${reason ? `: ${String(reason).trim()}` : ''}`;
+  const partDay = req.day_portion && req.day_portion !== 'FULL_DAY';
+  const before = addDays(dateKey, -1);
+  const after = addDays(dateKey, 1);
+  const keepBefore = !partDay && dateKey > req.start_date
+    && (await countWorkingDaysBetween(req.employee_id, req.start_date, before)) > 0;
+  const keepAfter = !partDay && dateKey < req.end_date
+    && (await countWorkingDaysBetween(req.employee_id, after, req.end_date)) > 0;
+
+  if (!keepBefore && !keepAfter) {
+    await cancelRequest({ requestId, actor, reason: note, nowMs });
+    return { action: 'CANCELLED', requestId };
+  }
+  if (keepBefore && !keepAfter) {
+    await editRequest({ requestId, endDate: before, notes: note, actor, nowMs });
+    return { action: 'SHORTENED', requestId };
+  }
+  if (!keepBefore && keepAfter) {
+    await editRequest({ requestId, startDate: after, notes: note, actor, nowMs });
+    return { action: 'SHORTENED', requestId };
+  }
+
+  // Split: a copy of the booking for the days after, then each part is
+  // re-dated through editRequest so its balance entry is re-booked.
+  const newId = 'lr_' + crypto.randomBytes(8).toString('hex');
+  await db.prepare(`
+    INSERT INTO leave_requests
+      (id, employee_id, leave_type_id, start_date, end_date, day_portion, total_days, reason,
+       evidence_document_id, status, is_paid, source, submitted_at, decided_at, cancelled_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+  `).run(newId, req.employee_id, req.leave_type_id, after, req.end_date, req.day_portion || 'FULL_DAY', 0,
+    req.reason, req.evidence_document_id || null, req.status, req.is_paid, req.source || 'HR_SPLIT',
+    req.submitted_at, req.decided_at || nowMs, nowMs);
+  await editRequest({ requestId, endDate: before, notes: note, actor, nowMs });
+  await editRequest({ requestId: newId, startDate: after, endDate: req.end_date, notes: `${note} (split from ${requestId})`, actor, nowMs });
+  return { action: 'SPLIT', requestId, newRequestId: newId };
 }
 
 /** An explicit HR adjustment to someone's entitlement. Always attributed. */
@@ -2057,7 +2124,7 @@ module.exports = {
   holidayYearFor, addMonths, daysBetween,
   accrue, accrueAll, finaliseYear, closeHolidayYear,
   balanceFor, countLeaveDays,
-  previewRequest, submitRequest, decideRequest, cancelRequest, editRequest, deleteRequest, adjustBalance,
+  previewRequest, submitRequest, decideRequest, cancelRequest, removeLeaveDay, editRequest, deleteRequest, adjustBalance,
   recordCarryForwardApproval, rolloverHolidayYear, checkAndRolloverAll,
   historicalCyclesFor, employeesApproachingAnniversary,
   monthlyReportFor, recomputeAttendanceFor, resolveDeficitPenalty,

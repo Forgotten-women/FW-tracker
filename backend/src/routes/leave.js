@@ -462,6 +462,36 @@ router.post('/request/:id/cancel',
     }
   });
 
+// POST /api/leave/request/:id/remove-day - HR: the employee wasn't on leave
+// that day (shrinks, splits or cancels the leave and restores the balance)
+router.post('/request/:id/remove-day',
+  requireUserOrAdminKey('leave.write'),
+  async (req, res) => {
+    const r = await db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
+    if (!r) return res.status(404).json({ status: 'ERROR', message: 'No such request.' });
+    if (!await rbac.canAccessEmployee(req.auth, r.employee_id)) {
+      return res.status(403).json({ status: 'ERROR', message: 'Cannot access this employee.' });
+    }
+    try {
+      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
+      const out = await L.removeLeaveDay({
+        requestId: req.params.id,
+        dateKey: req.body?.dateKey,
+        actor,
+        reason: req.body?.reason || null,
+      });
+      cache.invalidate('leave:balances');
+      res.json({
+        status: 'SUCCESS',
+        message: out.action === 'CANCELLED' ? 'Leave cancelled.' : out.action === 'SPLIT' ? 'Day removed; the leave was split in two.' : 'Day removed from the leave.',
+        ...out,
+        balance: presentBalance(await L.balanceFor(r.employee_id)),
+      });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
 // DELETE /api/leave/request/:id - HR permanently deletes a leave request and reverses ledger
 router.delete('/request/:id',
   requireUserOrAdminKey('leave.approve'),

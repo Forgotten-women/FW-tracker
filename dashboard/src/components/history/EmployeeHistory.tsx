@@ -516,6 +516,10 @@ export function EmployeeHistory({
           onPrev={prevDay}
           onNext={nextDay}
           onViewScreenshots={onViewScreenshots}
+          onLeaveChanged={() => {
+            monthRes.reload();
+            dayRes.reload();
+          }}
         />
       )}
     </div>
