@@ -1108,6 +1108,8 @@ async function editRequest({ requestId, leaveTypeId, startDate, endDate, dayPort
   let effectiveIsPaid = req.is_paid;
   if (isPaid !== undefined && isPaid !== null) {
     effectiveIsPaid = (isPaid === true || isPaid === 1 || isPaid === 'true') ? 1 : 0;
+  } else if (leaveTypeId && type && type.is_paid !== undefined && type.is_paid !== null) {
+    effectiveIsPaid = (type.is_paid === true || type.is_paid === 1) ? 1 : 0;
   }
 
   const reducesEntitlement = effectiveIsPaid === 1 && (type?.reduces_entitlement === 1 || type?.reduces_entitlement === undefined);
@@ -1134,12 +1136,28 @@ async function editRequest({ requestId, leaveTypeId, startDate, endDate, dayPort
       requestId
     );
 
-    // 3. Update approval if exists
-    await db.prepare(`
-      UPDATE leave_approvals
-      SET decision = ?, notes = ?, is_paid = ?
-      WHERE request_id = ? AND step = 1
-    `).run(newStatus, notes ? String(notes).trim() : 'Updated by HR', effectiveIsPaid, requestId);
+    // 3. Update approval if exists, or insert if missing
+    const existingApproval = await db.prepare('SELECT id FROM leave_approvals WHERE request_id = ? AND step = 1').get(requestId);
+    if (existingApproval) {
+      await db.prepare(`
+        UPDATE leave_approvals
+        SET decision = ?, notes = ?, is_paid = ?
+        WHERE request_id = ? AND step = 1
+      `).run(newStatus, notes ? String(notes).trim() : 'Updated by HR', effectiveIsPaid, requestId);
+    } else {
+      await db.prepare(`
+        INSERT INTO leave_approvals (id, request_id, step, approver_role, decision, notes, is_paid, decided_at, created_at)
+        VALUES (?, ?, 1, 'HR', ?, ?, ?, ?, ?)
+      `).run(
+        'la_' + crypto.randomBytes(8).toString('hex'),
+        requestId,
+        newStatus,
+        notes ? String(notes).trim() : 'Updated by HR',
+        effectiveIsPaid,
+        nowMs,
+        nowMs
+      );
+    }
 
     // 4. If new status is APPROVED and paid and reduces entitlement, re-insert booked ledger entry
     if (newStatus === 'APPROVED' && reducesEntitlement) {

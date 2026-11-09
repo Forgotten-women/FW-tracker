@@ -105,6 +105,17 @@ export function LeaveManagementPanel() {
   const [recordReason, setRecordReason] = useState('');
   const [recordIsPaid, setRecordIsPaid] = useState(true);
   const [recordOverdraftReason, setRecordOverdraftReason] = useState('');
+  const [editingLeaveRequest, setEditingLeaveRequest] = useState<LeaveRequestItem | null>(null);
+  const [editLeaveTypeId, setEditLeaveTypeId] = useState('annual');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
+  const [editDayPortion, setEditDayPortion] = useState<'FULL_DAY' | 'FIRST_HALF' | 'SECOND_HALF' | 'HOURLY'>('FULL_DAY');
+  const [editIsPaid, setEditIsPaid] = useState<boolean>(true);
+  const [editStatus, setEditStatus] = useState<string>('APPROVED');
+  const [editReason, setEditReason] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
@@ -814,6 +825,54 @@ export function LeaveManagementPanel() {
       await refresh(true);
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : 'Could not change the leave.');
+    }
+  };
+  const openEditModal = (r: LeaveRequestItem) => {
+    setEditingLeaveRequest(r);
+    setEditLeaveTypeId(r.leaveTypeId || 'annual');
+    setEditStartDate(r.from);
+    setEditEndDate(r.to || r.from);
+    const portion = (r.dayPortion as any) || 'FULL_DAY';
+    setEditDayPortion(portion === 'FIRST_HALF' || portion === 'SECOND_HALF' || portion === 'HOURLY' ? portion : 'FULL_DAY');
+    const defaultPaid = r.isPaid !== undefined && r.isPaid !== null
+      ? Boolean(r.isPaid)
+      : (r.defaultIsPaid !== undefined ? Boolean(r.defaultIsPaid) : (r.leaveTypeId !== 'unpaid'));
+    setEditIsPaid(defaultPaid);
+    setEditStatus(r.status);
+    setEditReason(r.reason || '');
+    setEditNotes(r.notes || '');
+    setEditError(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingLeaveRequest) return;
+    if (!editStartDate || !editEndDate) {
+      setEditError('Start date and end date are required.');
+      return;
+    }
+    if (editStartDate > editEndDate) {
+      setEditError('Start date cannot be after end date.');
+      return;
+    }
+    setEditSubmitting(true);
+    setEditError(null);
+    try {
+      await api.editLeaveRequest(editingLeaveRequest.id, {
+        leaveTypeId: editLeaveTypeId,
+        startDate: editStartDate,
+        endDate: editEndDate,
+        dayPortion: editDayPortion,
+        isPaid: editIsPaid,
+        status: editStatus,
+        reason: editReason.trim() || undefined,
+        notes: editNotes.trim() || undefined,
+      });
+      setEditingLeaveRequest(null);
+      await refresh(true);
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update leave.');
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -2414,16 +2473,16 @@ export function LeaveManagementPanel() {
                           )}
                         </td>
                         <td className="px-3 py-3 align-middle whitespace-nowrap">
-                          {r.status !== 'CANCELLED' && r.status !== 'REJECTED' && (
-                            <div className="flex flex-col items-start gap-1">
-                              <button
-                                type="button"
-                                className="text-[11px] font-semibold text-brand hover:underline cursor-pointer"
-                                title="Change the dates (e.g. the employee came in on some of them). The balance is re-booked."
-                                onClick={() => fixLeaveDates(r)}
-                              >
-                                Edit dates
-                              </button>
+                          <div className="flex flex-col items-start gap-1">
+                            <button
+                              type="button"
+                              className="text-[11px] font-semibold text-brand hover:underline cursor-pointer"
+                              title="Edit leave details (Paid/Unpaid, Leave Type, Status, Dates)"
+                              onClick={() => openEditModal(r)}
+                            >
+                              Edit leave
+                            </button>
+                            {r.status !== 'CANCELLED' && r.status !== 'REJECTED' && (
                               <button
                                 type="button"
                                 className="text-[11px] font-semibold text-rose-400 hover:underline cursor-pointer"
@@ -2432,8 +2491,8 @@ export function LeaveManagementPanel() {
                               >
                                 Not taken
                               </button>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -3616,6 +3675,216 @@ export function LeaveManagementPanel() {
                 className="bg-indigo-600 hover:bg-indigo-500 text-white"
               >
                 {recordSubmitting ? 'Recording…' : 'Record & Approve Leave'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Leave Request Modal (HR In-Place Leave & Status Correction) */}
+      {editingLeaveRequest && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6 overflow-y-auto">
+          <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div>
+                <h2 className="text-base font-bold text-text flex items-center gap-2">
+                  <span>Edit Leave Record</span>
+                  <Badge tone={editingLeaveRequest.status === 'APPROVED' ? 'brand' : 'muted'} size="sm">
+                    {editingLeaveRequest.status}
+                  </Badge>
+                </h2>
+                <p className="mt-0.5 text-xs text-muted">
+                  Employee: <strong className="text-text">{editingLeaveRequest.employeeName}</strong>
+                  {editingLeaveRequest.employeeNumber && ` [${editingLeaveRequest.employeeNumber}]`}
+                  {editingLeaveRequest.employeeRole && ` · ${editingLeaveRequest.employeeRole}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingLeaveRequest(null)}
+                className="text-muted hover:text-text cursor-pointer p-1"
+                aria-label="Close modal"
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            {editError && (
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+                {editError}
+              </div>
+            )}
+
+            <div className="space-y-3.5 text-xs">
+              {/* Compensation Setting: Paid vs Unpaid */}
+              <div className="rounded-xl border border-line bg-raised/50 p-3.5">
+                <label className="block text-xs font-semibold text-text mb-1.5">
+                  Compensation Setting
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditIsPaid(true);
+                      if (editLeaveTypeId === 'unpaid') setEditLeaveTypeId('annual');
+                    }}
+                    className={`flex items-center justify-center gap-2 rounded-lg border p-2.5 font-semibold transition cursor-pointer ${
+                      editIsPaid
+                        ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 shadow-sm'
+                        : 'border-line bg-raised text-muted hover:text-text'
+                    }`}
+                  >
+                    <span className={`h-2.5 w-2.5 rounded-full ${editIsPaid ? 'bg-emerald-400' : 'bg-muted'}`} />
+                    <span>Paid Leave</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditIsPaid(false);
+                      if (editLeaveTypeId === 'annual') setEditLeaveTypeId('unpaid');
+                    }}
+                    className={`flex items-center justify-center gap-2 rounded-lg border p-2.5 font-semibold transition cursor-pointer ${
+                      !editIsPaid
+                        ? 'border-amber-500/60 bg-amber-500/15 text-amber-300 shadow-sm'
+                        : 'border-line bg-raised text-muted hover:text-text'
+                    }`}
+                  >
+                    <span className={`h-2.5 w-2.5 rounded-full ${!editIsPaid ? 'bg-amber-400' : 'bg-muted'}`} />
+                    <span>Unpaid Leave</span>
+                  </button>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted">
+                  {editIsPaid ? (
+                    <span className="text-emerald-300/90 font-medium">
+                      ✓ Deducts days from employee's paid annual leave allowance. Monthly salary is paid in full.
+                    </span>
+                  ) : (
+                    <span className="text-amber-300/90 font-medium">
+                      ⚠ Does NOT deduct from annual balance (days refunded). Salary will be deducted in payroll.
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {/* Leave Type & Approval Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1">Leave Type</label>
+                  <select
+                    value={editLeaveTypeId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditLeaveTypeId(val);
+                      if (val === 'unpaid') setEditIsPaid(false);
+                      else if (val === 'annual') setEditIsPaid(true);
+                    }}
+                    className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none cursor-pointer"
+                  >
+                    {availableLeaveTypes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1">Approval Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none cursor-pointer"
+                  >
+                    <option value="APPROVED">Approved</option>
+                    <option value="PENDING_HR">Pending HR Review</option>
+                    <option value="REJECTED">Rejected</option>
+                    <option value="CANCELLED">Cancelled (Refunds Days)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Dates & Day Portion */}
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={editStartDate}
+                    onChange={(e) => {
+                      setEditStartDate(e.target.value);
+                      if (editEndDate && e.target.value > editEndDate) {
+                        setEditEndDate(e.target.value);
+                      }
+                    }}
+                    className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={editEndDate}
+                    onChange={(e) => setEditEndDate(e.target.value)}
+                    className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text mb-1">Day Portion</label>
+                  <select
+                    value={editDayPortion}
+                    onChange={(e) => setEditDayPortion(e.target.value as any)}
+                    className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none cursor-pointer"
+                  >
+                    <option value="FULL_DAY">Full Day</option>
+                    <option value="FIRST_HALF">First Half (Morning)</option>
+                    <option value="SECOND_HALF">Second Half (Afternoon)</option>
+                    {editingLeaveRequest.dayPortion === 'HOURLY' && (
+                      <option value="HOURLY">Hourly Portion ({editingLeaveRequest.days}d)</option>
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              {/* Reason & HR Note */}
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1">Leave Reason / Description</label>
+                <input
+                  type="text"
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  placeholder="e.g. Annual leave or sickness reason"
+                  className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text mb-1">HR Note / Reason for Change</label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="e.g. Changed from paid to unpaid per employee request"
+                  className="w-full rounded-lg border border-line bg-raised p-2 text-xs text-text focus:border-brand focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-line pt-3">
+              <Button
+                variant="ghost"
+                onClick={() => setEditingLeaveRequest(null)}
+                disabled={editSubmitting}
+                className="text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSaveEdit}
+                disabled={editSubmitting}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs"
+              >
+                {editSubmitting ? 'Saving Changes…' : 'Save Changes'}
               </Button>
             </div>
           </div>
