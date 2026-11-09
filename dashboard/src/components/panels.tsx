@@ -1110,6 +1110,25 @@ export function TeamPanel({
   const [selectedEmpId, setSelectedEmpId] = useState<string | undefined>(undefined);
   const [viewProfileEmp, setViewProfileEmp] = useState<AdminEmployee | null>(null);
   const [manageDevicesEmp, setManageDevicesEmp] = useState<AdminEmployee | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
+
+  const filteredEmployees = employees.filter((e) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      e.name.toLowerCase().includes(q) ||
+      e.role.toLowerCase().includes(q) ||
+      (e.employeeNumber && e.employeeNumber.toLowerCase().includes(q))
+    );
+  });
+
+  const totalItems = filteredEmployees.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const paginatedEmployees = filteredEmployees.slice(startIndex, startIndex + pageSize);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1166,11 +1185,63 @@ export function TeamPanel({
     <>
       <Panel
         title="Workforce Enrolment & Compensation"
-        subtitle={`${employees.length} registered employee(s)`}
+        subtitle={`${employees.length} registered employee(s) · Page ${safePage} of ${totalPages}`}
         icon={
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
           </svg>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search name, role, ID..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                aria-label="Search workforce directory"
+                className="w-44 sm:w-52 rounded-xl border border-white/10 bg-slate-900/90 pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition"
+              />
+              <svg
+                className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer"
+                >
+                  <XIcon className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              aria-label="Items per page"
+              className="rounded-xl border border-white/10 bg-slate-900/90 px-2.5 py-1.5 text-xs font-semibold text-slate-300 focus:border-indigo-500 focus:outline-none cursor-pointer"
+            >
+              <option value={6}>6 / page</option>
+              <option value={8}>8 / page</option>
+              <option value={12}>12 / page</option>
+              <option value={24}>24 / page</option>
+            </select>
+          </div>
         }
       >
         {/* Quick Add Form */}
@@ -1215,126 +1286,201 @@ export function TeamPanel({
 
         {employees.length === 0 ? (
           <Empty title="No Employees Registered" description="Add your first team member above to issue mobile pairing credentials and set base pay." />
+        ) : filteredEmployees.length === 0 ? (
+          <div className="py-10 text-center text-slate-400">
+            <p className="text-sm font-semibold text-slate-300">No employees match &ldquo;{searchQuery}&rdquo;</p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setCurrentPage(1);
+              }}
+              className="mt-2 text-xs font-semibold text-indigo-400 hover:underline cursor-pointer"
+            >
+              Clear search
+            </button>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {employees.map((e) => {
-              const cur = e.currency || 'PKR';
-              const curSymbol = cur === 'GBP' ? '£' : cur === 'PKR' ? '₨' : '$';
-              return (
-                <div
-                  key={e.id}
-                  className="flex flex-col justify-between gap-3 rounded-2xl border border-white/8 bg-slate-900/60 p-4 transition-all hover:border-white/15 overflow-hidden"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/20 shrink-0">
-                        {e.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-bold text-white text-sm truncate">{e.name}</span>
-                          {e.employeeNumber && (
-                            <span className="rounded-md bg-indigo-500/15 px-2 py-0.5 text-[11px] font-mono font-bold text-indigo-300 border border-indigo-500/30 shrink-0">
-                              {e.employeeNumber}
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {paginatedEmployees.map((e) => {
+                const cur = e.currency || 'PKR';
+                const curSymbol = cur === 'GBP' ? '£' : cur === 'PKR' ? '₨' : '$';
+                return (
+                  <div
+                    key={e.id}
+                    className="flex flex-col justify-between gap-3 rounded-2xl border border-white/8 bg-slate-900/60 p-4 transition-all hover:border-white/15 overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/20 shrink-0">
+                          {e.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-bold text-white text-sm truncate">{e.name}</span>
+                            {e.employeeNumber && (
+                              <span className="rounded-md bg-indigo-500/15 px-2 py-0.5 text-[11px] font-mono font-bold text-indigo-300 border border-indigo-500/30 shrink-0">
+                                {e.employeeNumber}
+                              </span>
+                            )}
+                            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 border border-emerald-500/20 shrink-0">
+                              {e.deviceCount} Device{e.deviceCount === 1 ? '' : 's'}
                             </span>
-                          )}
-                          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 border border-emerald-500/20 shrink-0">
-                            {e.deviceCount} Device{e.deviceCount === 1 ? '' : 's'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAppTracking(e)}
-                            title="Click to toggle Application/Window Title Tracking (BYOD Personal Laptop Privacy)"
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold border transition cursor-pointer shrink-0 ${
-                              e.appTrackingEnabled !== false
-                                ? 'bg-teal-500/10 text-teal-400 border-teal-500/20 hover:bg-teal-500/20'
-                                : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
-                            }`}
-                          >
-                            {e.appTrackingEnabled !== false ? <><ShieldCheckIcon className="inline-block h-3 w-3" /> App Tracking: ON</> : <><LockIcon className="inline-block h-3 w-3" /> BYOD: App Tracking OFF</>}
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAppTracking(e)}
+                              title="Click to toggle Application/Window Title Tracking (BYOD Personal Laptop Privacy)"
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold border transition cursor-pointer shrink-0 ${
+                                e.appTrackingEnabled !== false
+                                  ? 'bg-teal-500/10 text-teal-400 border-teal-500/20 hover:bg-teal-500/20'
+                                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
+                              }`}
+                            >
+                              {e.appTrackingEnabled !== false ? <><ShieldCheckIcon className="inline-block h-3 w-3" /> App Tracking: ON</> : <><LockIcon className="inline-block h-3 w-3" /> BYOD: App Tracking OFF</>}
+                            </button>
+                          </div>
+                          <span className="text-xs text-slate-400 block truncate">{e.role}</span>
                         </div>
-                        <span className="text-xs text-slate-400 block truncate">{e.role}</span>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {e.baseSalary ? (
+                          <div className="font-mono text-xs font-bold text-emerald-400">
+                            {curSymbol}{Number(e.baseSalary).toLocaleString()}
+                            <span className="text-[10px] text-slate-500 font-normal block">/ month</span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 italic block">No salary set</span>
+                        )}
+                        {e.startDate && (
+                          <span className="text-[10px] text-slate-400 block mt-0.5">
+                            Joined {e.startDate}
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      {e.baseSalary ? (
-                        <div className="font-mono text-xs font-bold text-emerald-400">
-                          {curSymbol}{Number(e.baseSalary).toLocaleString()}
-                          <span className="text-[10px] text-slate-500 font-normal block">/ month</span>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-slate-500 italic block">No salary set</span>
-                      )}
-                      {e.startDate && (
-                        <span className="text-[10px] text-slate-400 block mt-0.5">
-                          Joined {e.startDate}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/5 pt-2.5">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setViewProfileEmp(e);
-                      }}
-                      icon={
-                        <svg className="h-3.5 w-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                      }
-                    >
-                      View Details
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => {
-                        setSelectedEmpId(e.id);
-                        setShowSalaryModal(true);
-                      }}
-                      icon={
-                        <svg className="h-3.5 w-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                      }
-                    >
-                      {e.baseSalary ? 'Update Salary' : 'Set Base Salary'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void onPair(e)}
-                      icon={
-                        <svg className="h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                        </svg>
-                      }
-                    >
-                      Pair App
-                    </Button>
-                    {e.deviceCount > 0 && (
+                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/5 pt-2.5">
                       <Button
                         size="sm"
                         variant="secondary"
-                        disabled={busy}
-                        onClick={() => setManageDevicesEmp(e)}
+                        onClick={() => {
+                          setViewProfileEmp(e);
+                        }}
+                        icon={
+                          <svg className="h-3.5 w-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        }
+                      >
+                        View Details
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setSelectedEmpId(e.id);
+                          setShowSalaryModal(true);
+                        }}
+                        icon={
+                          <svg className="h-3.5 w-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                        }
+                      >
+                        {e.baseSalary ? 'Update Salary' : 'Set Base Salary'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void onPair(e)}
                         icon={
                           <svg className="h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                           </svg>
                         }
                       >
-                        Devices ({e.deviceCount})
+                        Pair App
                       </Button>
-                    )}
+                      {e.deviceCount > 0 && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={() => setManageDevicesEmp(e)}
+                          icon={
+                            <svg className="h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                          }
+                        >
+                          Devices ({e.deviceCount})
+                        </Button>
+                      )}
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+
+            {/* Pagination Footer */}
+            {totalPages > 1 && (
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-4 text-xs">
+                <span className="text-slate-400">
+                  Showing{' '}
+                  <strong className="font-mono text-slate-200 tnum">
+                    {startIndex + 1}–{Math.min(startIndex + pageSize, totalItems)}
+                  </strong>{' '}
+                  of <strong className="font-mono text-slate-200 tnum">{totalItems}</strong> employee{totalItems === 1 ? '' : 's'}
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={safePage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    aria-label="Previous page"
+                    className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-slate-900/80 px-2.5 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+                  >
+                    <ChevronLeftIcon className="h-3.5 w-3.5" />
+                    <span>Prev</span>
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      const isActive = page === safePage;
+                      return (
+                        <button
+                          key={page}
+                          type="button"
+                          onClick={() => setCurrentPage(page)}
+                          aria-label={`Page ${page}`}
+                          aria-current={isActive ? 'page' : undefined}
+                          className={`h-7 min-w-[28px] rounded-lg px-2 font-mono text-xs font-bold transition cursor-pointer ${
+                            isActive
+                              ? 'bg-accent-gradient text-on-accent shadow-accent'
+                              : 'border border-white/10 bg-slate-900/60 text-slate-400 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    aria-label="Next page"
+                    className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-slate-900/80 px-2.5 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+                  >
+                    <span>Next</span>
+                    <ChevronRightIcon className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </Panel>
 
