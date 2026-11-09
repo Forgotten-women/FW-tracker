@@ -34,6 +34,13 @@ import {
   XIcon,
 } from './icons';
 
+export function formatDays(val: number | string | null | undefined): string {
+  if (val === null || val === undefined || val === '') return '0';
+  const num = typeof val === 'number' ? val : parseFloat(String(val));
+  if (isNaN(num)) return String(val);
+  return parseFloat(num.toFixed(2)).toString();
+}
+
 export function LeaveManagementPanel() {
   const [pendingRequests, setPendingRequests] = useState<LeaveRequestItem[]>([]);
   const [allRequests, setAllRequests] = useState<LeaveRequestItem[]>([]);
@@ -580,7 +587,7 @@ export function LeaveManagementPanel() {
       const bucket = map.get(mKey)!;
       bucket.leaves.push(l);
       const leaveDays = Number(l.days) || 1;
-      bucket.totalDays += leaveDays;
+      bucket.totalDays = Math.round((bucket.totalDays + leaveDays) * 100) / 100;
 
       if (!bucket.employees.has(l.employeeId)) {
         bucket.employees.set(l.employeeId, {
@@ -593,7 +600,7 @@ export function LeaveManagementPanel() {
         });
       }
       const emp = bucket.employees.get(l.employeeId)!;
-      emp.totalDays += leaveDays;
+      emp.totalDays = Math.round((emp.totalDays + leaveDays) * 100) / 100;
       emp.leaves.push(l);
     }
 
@@ -639,7 +646,7 @@ export function LeaveManagementPanel() {
       }
       const yBucket = map.get(b.year)!;
       yBucket.monthsCount += 1;
-      yBucket.totalDays += b.totalDays;
+      yBucket.totalDays = Math.round((yBucket.totalDays + b.totalDays) * 100) / 100;
       yBucket.leaves.push(...b.leaves);
       for (const [empId, empData] of b.employees.entries()) {
         if (!yBucket.employees.has(empId)) {
@@ -653,7 +660,7 @@ export function LeaveManagementPanel() {
           });
         }
         const existingEmp = yBucket.employees.get(empId)!;
-        existingEmp.totalDays += empData.totalDays;
+        existingEmp.totalDays = Math.round((existingEmp.totalDays + empData.totalDays) * 100) / 100;
         existingEmp.leaves.push(...empData.leaves);
       }
     }
@@ -731,7 +738,7 @@ export function LeaveManagementPanel() {
         });
       }
       const emp = map.get(l.employeeId)!;
-      emp.totalDays += Number(l.days) || 1;
+      emp.totalDays = Math.round((emp.totalDays + (Number(l.days) || 1)) * 100) / 100;
       emp.leaves.push(l);
     }
     return Array.from(map.values());
@@ -1254,7 +1261,7 @@ export function LeaveManagementPanel() {
                           <div className="text-dim">to {r.to}</div>
                         </td>
                         <td className="px-3 py-3 align-top">
-                          <span className="font-bold text-sm text-brand">{r.days}d</span>
+                          <span className="font-bold text-sm text-brand">{formatDays(r.days)}d</span>
                           <div className="text-[10px] text-dim">
                             {r.dayPortion && r.dayPortion !== 'FULL_DAY' ? (
                               <span className="text-indigo-400 font-medium">
@@ -1510,7 +1517,7 @@ export function LeaveManagementPanel() {
                             isYearActive ? 'bg-black/25 text-white' : 'bg-white/5 text-dim'
                           }`}
                         >
-                          {y.totalDays}d
+                          {formatDays(y.totalDays)}d
                         </span>
                         {isCurrentYear && (
                           <span
@@ -1544,7 +1551,7 @@ export function LeaveManagementPanel() {
                 {activeYearBucket ? (
                   <span>
                     Year <strong className="text-text">{activeYear}</strong>:{' '}
-                    <strong className="font-mono text-indigo-300">{activeYearBucket.totalDays}d leave</strong> taken by{' '}
+                    <strong className="font-mono text-indigo-300">{formatDays(activeYearBucket.totalDays)}d leave</strong> taken by{' '}
                     <strong className="text-text">{activeYearBucket.employees.size} employees</strong> across{' '}
                     <strong className="text-text">{activeYearBucket.monthsCount} months</strong>
                   </span>
@@ -1552,7 +1559,7 @@ export function LeaveManagementPanel() {
                   <span>
                     Total Across All Years:{' '}
                     <strong className="font-mono text-indigo-300">
-                      {calendarLeaves.reduce((acc, c) => acc + (Number(c.days) || 1), 0)}d
+                      {formatDays(calendarLeaves.reduce((acc, c) => acc + (Number(c.days) || 1), 0))}d
                     </strong>{' '}
                     across <strong className="text-text">{calendarLeaves.length} bookings</strong>
                   </span>
@@ -1628,7 +1635,7 @@ export function LeaveManagementPanel() {
                           {b.employees.size} {b.employees.size === 1 ? 'person' : 'people'}
                         </span>
                         <span className="font-mono font-bold text-indigo-400">
-                          {b.totalDays}d
+                          {formatDays(b.totalDays)}d
                         </span>
                       </div>
                     </button>
@@ -1702,7 +1709,7 @@ export function LeaveManagementPanel() {
                         </span>
                       ) : (
                         <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-0.5 text-[11px] font-mono font-bold text-text">
-                          {emp.totalDays}d leave
+                          {formatDays(emp.totalDays)}d leave
                         </span>
                       )}
                     </div>
@@ -1744,7 +1751,7 @@ export function LeaveManagementPanel() {
                                   </span>
                                 ) : null}
                                 <span className="font-mono font-bold text-brand bg-brand-dim/30 px-1.5 py-0.2 rounded text-[11px]">
-                                  {l.days}d
+                                  {formatDays(l.days)}d
                                 </span>
                               </div>
                             </div>
@@ -1834,7 +1841,7 @@ export function LeaveManagementPanel() {
                         )}
                       </div>
                       <Badge tone={isTodayActive ? 'brand' : 'muted'}>
-                        {isTodayActive ? 'Away Today' : `${l.days}d`}
+                        {isTodayActive ? 'Away Today' : `${formatDays(l.days)}d`}
                       </Badge>
                     </div>
 
@@ -2470,7 +2477,7 @@ export function LeaveManagementPanel() {
                           {r.from} &rarr; {r.to}
                         </td>
                         <td className="px-3 py-3 align-middle font-bold text-brand">
-                          {r.days}d
+                          {formatDays(r.days)}d
                           {r.dayPortion && r.dayPortion !== 'FULL_DAY' && (
                             <span className="block text-[10px] font-normal text-muted">
                               {r.dayPortion.startsWith('HOURLY:')
@@ -2995,7 +3002,7 @@ export function LeaveManagementPanel() {
                 <div className="rounded-xl border border-line bg-raised/40 p-3.5">
                   <span className="text-[10px] text-muted block uppercase tracking-wider font-semibold mb-1">Duration</span>
                   <div className="text-base font-extrabold text-brand">
-                    {selectedRequest.days} Working Day(s)
+                    {formatDays(selectedRequest.days)} Working Day(s)
                   </div>
                   <div className="text-[11px] text-muted">
                     Excludes standard off days
@@ -3060,7 +3067,7 @@ export function LeaveManagementPanel() {
                         {decisionIsPaid ? 'Requested Leave' : 'Requested (Unpaid)'}
                       </span>
                       <span className="text-base font-extrabold text-brand">
-                        {decisionIsPaid ? `− ${reqDays}d` : '0d (Unpaid)'}
+                        {decisionIsPaid ? `− ${formatDays(reqDays)}d` : '0d (Unpaid)'}
                       </span>
                     </div>
                     <div className="p-2.5 rounded-xl bg-brand/10 border border-brand/30 shadow-sm">
@@ -3863,7 +3870,7 @@ export function LeaveManagementPanel() {
                     <option value="FIRST_HALF">First Half (Morning)</option>
                     <option value="SECOND_HALF">Second Half (Afternoon)</option>
                     {editingLeaveRequest.dayPortion === 'HOURLY' && (
-                      <option value="HOURLY">Hourly Portion ({editingLeaveRequest.days}d)</option>
+                      <option value="HOURLY">Hourly Portion ({formatDays(editingLeaveRequest.days)}d)</option>
                     )}
                   </select>
                 </div>
@@ -4319,7 +4326,7 @@ export function LeaveManagementPanel() {
                         {monthlyReport.requestedLeaveSufficiency.pendingRequests.map((pr) => (
                           <div key={pr.id} className="flex items-center justify-between text-[11px] rounded bg-surface/60 px-2.5 py-1.5 border border-line">
                             <span className="font-medium text-text">{pr.leaveType}: {pr.startDate} &rarr; {pr.endDate}</span>
-                            <span className="font-bold text-brand">{pr.totalDays}d ({pr.reducesEntitlement ? 'Paid' : 'Unpaid'})</span>
+                            <span className="font-bold text-brand">{formatDays(pr.totalDays)}d ({pr.reducesEntitlement ? 'Paid' : 'Unpaid'})</span>
                           </div>
                         ))}
                       </div>

@@ -21,6 +21,11 @@ router.use((req, res, next) => {
   next();
 });
 
+function roundDays(n) {
+  if (n == null || isNaN(Number(n))) return n;
+  return Math.round(Number(n) * 100) / 100;
+}
+
 function presentBalance(b) {
   if (!b || b.blocked) {
     return {
@@ -43,34 +48,34 @@ function presentBalance(b) {
 
     // 8-Metric Leave Report Breakdown (spec & policy):
     // 1. Current year's/cycle's annual leave entitlement
-    annualEntitlement: b.annualEntitlementDays,
-    annualEntitlementDays: b.annualEntitlementDays,
+    annualEntitlement: roundDays(b.annualEntitlementDays),
+    annualEntitlementDays: roundDays(b.annualEntitlementDays),
     // 2. Leave accrued to date
-    accrued: b.accruedDays,
-    accruedDays: b.accruedDays,
+    accrued: roundDays(b.accruedDays),
+    accruedDays: roundDays(b.accruedDays),
     // 3. Leave already used
-    taken: b.takenDays,
-    takenDays: b.takenDays,
+    taken: roundDays(b.takenDays),
+    takenDays: roundDays(b.takenDays),
     // 4. Approved carry-forward leave from the previous cycle
-    approvedCarryForward: b.approvedCarryForwardDays || 0,
-    approvedCarryForwardDays: b.approvedCarryForwardDays || 0,
+    approvedCarryForward: roundDays(b.approvedCarryForwardDays || 0),
+    approvedCarryForwardDays: roundDays(b.approvedCarryForwardDays || 0),
     // 5. Remaining current-cycle leave
-    remainingCurrentCycle: b.remainingCurrentCycleDays != null ? b.remainingCurrentCycleDays : b.availableDays,
-    remainingCurrentCycleDays: b.remainingCurrentCycleDays != null ? b.remainingCurrentCycleDays : b.availableDays,
+    remainingCurrentCycle: roundDays(b.remainingCurrentCycleDays != null ? b.remainingCurrentCycleDays : b.availableDays),
+    remainingCurrentCycleDays: roundDays(b.remainingCurrentCycleDays != null ? b.remainingCurrentCycleDays : b.availableDays),
     // 6. Leave due to expire
-    dueToExpire: b.leaveDueToExpire || 0,
-    leaveDueToExpire: b.leaveDueToExpire || 0,
+    dueToExpire: roundDays(b.leaveDueToExpire || 0),
+    leaveDueToExpire: roundDays(b.leaveDueToExpire || 0),
     // 7. Leave that has already lapsed
-    alreadyLapsed: b.leaveAlreadyLapsed || 0,
-    leaveAlreadyLapsed: b.leaveAlreadyLapsed || 0,
+    alreadyLapsed: roundDays(b.leaveAlreadyLapsed || 0),
+    leaveAlreadyLapsed: roundDays(b.leaveAlreadyLapsed || 0),
     // 8. Next leave renewal / work-anniversary date
     renewalDate: b.nextRenewalDate || b.yearEnd,
 
     // Balances
-    booked: b.bookedDays,
-    bookedDays: b.bookedDays,
-    available: b.availableDays,
-    availableDays: b.availableDays,
+    booked: roundDays(b.bookedDays),
+    bookedDays: roundDays(b.bookedDays),
+    available: roundDays(b.availableDays),
+    availableDays: roundDays(b.availableDays),
     isNegative: b.isNegative,
     carryForwardDecision: b.carryForwardDecision || null,
 
@@ -102,7 +107,7 @@ router.get('/mine', requireDevice, async (req, res) => {
     balance: presentBalance(balance),
     requests: requests.map(r => ({
       id: r.id, type: r.type_name, from: r.start_date, to: r.end_date,
-      days: r.total_days, status: r.status,
+      days: roundDays(r.total_days), status: r.status,
       isPaid: r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1),
       submittedAt: T.displayTime(r.submitted_at),
       decidedAt: r.decided_at ? T.displayTime(r.decided_at) : null,
@@ -222,7 +227,7 @@ router.get('/pending', requireUserOrAdminKey('leave.read'), async (req, res) => 
         employeeRole: r.employee_role,
         type: r.type_name,
         leaveTypeId: r.leave_type_id,
-        from: r.start_date, to: r.end_date, days: r.total_days,
+        from: r.start_date, to: r.end_date, days: roundDays(r.total_days),
         reason: r.reason,
         isPaid: r.is_paid !== null ? r.is_paid === 1 : (r.type_is_paid === 1),
         defaultIsPaid: r.type_is_paid === 1,
@@ -279,7 +284,7 @@ router.get('/requests', requireUserOrAdminKey('leave.read'), async (req, res) =>
         leaveTypeId: r.leave_type_id,
         from: r.start_date,
         to: r.end_date,
-        days: r.total_days,
+        days: roundDays(r.total_days),
         status: r.status,
         reason: r.reason,
         notes: r.decision_notes,
@@ -361,7 +366,7 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) =>
         leaveTypeId: r.leave_type_id,
         from: r.start_date,
         to: r.end_date,
-        days: r.total_days,
+        days: roundDays(r.total_days),
         dayPortion: r.day_portion || 'FULL_DAY',
         status: r.status || 'APPROVED',
         reason: r.reason,
