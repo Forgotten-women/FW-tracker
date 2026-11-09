@@ -362,8 +362,12 @@ router.get('/calendar', requireUserOrAdminKey('leave.read'), async (req, res) =>
         from: r.start_date,
         to: r.end_date,
         days: r.total_days,
+        dayPortion: r.day_portion || 'FULL_DAY',
+        status: r.status || 'APPROVED',
         reason: r.reason,
+        notes: null,
         isPaid: r.is_paid,
+        defaultIsPaid: r.is_paid === 1,
         source: isHrManual ? 'HR_MANUAL' : 'EMPLOYEE_REQUEST',
         sourceLabel: isHrManual ? 'HR Added' : 'Requested & Approved',
       };

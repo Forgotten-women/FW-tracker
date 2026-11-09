@@ -446,8 +446,12 @@ export interface TeamCalendarLeave {
   from: string;
   to: string;
   days: number;
+  dayPortion?: string | null;
+  status?: string;
   reason?: string | null;
+  notes?: string | null;
   isPaid?: number | null;
+  defaultIsPaid?: boolean;
   employeeRole?: string | null;
   source?: 'HR_MANUAL' | 'EMPLOYEE_REQUEST';
   sourceLabel?: string;

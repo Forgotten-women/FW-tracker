@@ -105,7 +105,7 @@ export function LeaveManagementPanel() {
   const [recordReason, setRecordReason] = useState('');
   const [recordIsPaid, setRecordIsPaid] = useState(true);
   const [recordOverdraftReason, setRecordOverdraftReason] = useState('');
-  const [editingLeaveRequest, setEditingLeaveRequest] = useState<LeaveRequestItem | null>(null);
+  const [editingLeaveRequest, setEditingLeaveRequest] = useState<LeaveRequestItem | TeamCalendarLeave | null>(null);
   const [editLeaveTypeId, setEditLeaveTypeId] = useState('annual');
   const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
@@ -827,7 +827,7 @@ export function LeaveManagementPanel() {
       window.alert(err instanceof Error ? err.message : 'Could not change the leave.');
     }
   };
-  const openEditModal = (r: LeaveRequestItem) => {
+  const openEditModal = (r: LeaveRequestItem | TeamCalendarLeave) => {
     setEditingLeaveRequest(r);
     setEditLeaveTypeId(r.leaveTypeId || 'annual');
     setEditStartDate(r.from);
@@ -838,7 +838,7 @@ export function LeaveManagementPanel() {
       ? Boolean(r.isPaid)
       : (r.defaultIsPaid !== undefined ? Boolean(r.defaultIsPaid) : (r.leaveTypeId !== 'unpaid'));
     setEditIsPaid(defaultPaid);
-    setEditStatus(r.status);
+    setEditStatus(r.status || 'APPROVED');
     setEditReason(r.reason || '');
     setEditNotes(r.notes || '');
     setEditError(null);
@@ -1360,6 +1360,14 @@ export function LeaveManagementPanel() {
                         <span className="rounded bg-emerald-500/20 px-1 py-0.2 text-[9px] font-mono text-emerald-300">
                           {l.type}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(l)}
+                          className="ml-1 text-[10px] text-emerald-300 hover:text-white underline cursor-pointer"
+                          title="Edit leave details (Paid/Unpaid, Leave Type, Status, Dates)"
+                        >
+                          Edit
+                        </button>
                       </span>
                     ))}
                   </div>
@@ -1771,6 +1779,14 @@ export function LeaveManagementPanel() {
                                   <span>Requested & Approved</span>
                                 </span>
                               )}
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(l)}
+                                className="text-[11px] font-semibold text-brand hover:underline cursor-pointer ml-auto"
+                                title="Edit leave details (Paid/Unpaid, Leave Type, Status, Dates)"
+                              >
+                                Edit leave
+                              </button>
                             </div>
 
                             {/* Reason / HR Notes */}
@@ -1850,6 +1866,14 @@ export function LeaveManagementPanel() {
                           <span>Requested & Approved</span>
                         </span>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(l)}
+                        className="text-[11px] font-semibold text-brand hover:underline cursor-pointer ml-auto"
+                        title="Edit leave details (Paid/Unpaid, Leave Type, Status, Dates)"
+                      >
+                        Edit leave
+                      </button>
                     </div>
 
                     {l.reason && (
@@ -3690,7 +3714,7 @@ export function LeaveManagementPanel() {
                 <h2 className="text-base font-bold text-text flex items-center gap-2">
                   <span>Edit Leave Record</span>
                   <Badge tone={editingLeaveRequest.status === 'APPROVED' ? 'brand' : 'muted'} size="sm">
-                    {editingLeaveRequest.status}
+                    {editingLeaveRequest.status || 'APPROVED'}
                   </Badge>
                 </h2>
                 <p className="mt-0.5 text-xs text-muted">
