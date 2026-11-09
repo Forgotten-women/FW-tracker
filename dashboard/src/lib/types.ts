@@ -159,6 +159,8 @@ export interface AdminEmployee {
   name: string;
   role: string;
   employeeNumber?: string | null;
+  workEmail?: string | null;
+  personalEmail?: string | null;
   active: boolean;
   deviceCount: number;
   createdAt: string;

@@ -5,7 +5,7 @@ import type { NotificationItem } from './types';
 
 export type DashboardTabId =
   | 'overview' | 'workstations' | 'leave' | 'disciplinary' | 'documents'
-  | 'complaints' | 'workforce' | 'payroll' | 'ota';
+  | 'complaints' | 'workforce' | 'payroll' | 'ota' | 'settings';
 
 /** Sections a tab can open or scroll to when HR arrives from a notification. */
 export type FocusTarget = 'corrections' | 'hr-alerts';

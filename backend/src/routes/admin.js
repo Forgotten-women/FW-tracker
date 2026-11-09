@@ -28,6 +28,7 @@ const CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 router.get('/employees', async (req, res) => {
   const rows = await db.prepare(`
     SELECT e.*,
+           ep.personal_email,
            COALESCE(er.job_title, e.role) AS effective_job_title,
            er.start_date AS employment_start_date,
            sh.amount AS base_salary,
@@ -35,6 +36,7 @@ router.get('/employees', async (req, res) => {
            sh.daily_rate AS salary_daily_rate,
            (SELECT COUNT(*) FROM devices d WHERE d.employee_id = e.id AND d.revoked_at IS NULL) AS device_count
     FROM employees e
+    LEFT JOIN employee_personal ep ON ep.employee_id = e.id
     LEFT JOIN LATERAL (
       SELECT job_title, start_date FROM employment_records
       WHERE employee_id = e.id AND effective_to IS NULL
@@ -56,6 +58,8 @@ router.get('/employees', async (req, res) => {
       name: r.name,
       role: r.effective_job_title || r.role,
       employeeNumber: r.employee_number || null,
+      workEmail: r.work_email || null,
+      personalEmail: r.personal_email || null,
       active: !!r.active,
       employmentStatus: r.employment_status || (r.active ? 'Active' : 'Left employment'),
       deviceCount: r.device_count,
@@ -157,19 +161,36 @@ router.patch('/employees/:id', async (req, res) => {
   const role = req.body?.role !== undefined ? String(req.body.role).trim() : before.role;
   const active = req.body?.active !== undefined ? (req.body.active ? 1 : 0) : before.active;
 
+  const workEmail = req.body?.workEmail !== undefined
+    ? (req.body.workEmail ? String(req.body.workEmail).trim().toLowerCase() : null)
+    : (req.body?.work_email !== undefined ? (req.body.work_email ? String(req.body.work_email).trim().toLowerCase() : null) : before.work_email);
+
+  const personalEmail = req.body?.personalEmail !== undefined
+    ? (req.body.personalEmail ? String(req.body.personalEmail).trim() : null)
+    : (req.body?.personal_email !== undefined ? (req.body.personal_email ? String(req.body.personal_email).trim() : null) : undefined);
+
   await tx(async () => {
-    await db.prepare('UPDATE employees SET name=?, role=?, active=?, updated_at=? WHERE id=?')
-      .run(name, role, active, T.now(), req.params.id);
+    await db.prepare('UPDATE employees SET name=?, role=?, active=?, work_email=?, updated_at=? WHERE id=?')
+      .run(name, role, active, workEmail, T.now(), req.params.id);
+
+    if (personalEmail !== undefined) {
+      await db.prepare(`
+        INSERT INTO employee_personal (employee_id, personal_email, updated_at, updated_by)
+        VALUES (?, ?, ?, 'admin')
+        ON CONFLICT(employee_id) DO UPDATE SET personal_email = excluded.personal_email, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(req.params.id, personalEmail, T.now());
+    }
+
     await audit({
       actor: 'admin', action: 'EMPLOYEE_UPDATED', targetType: 'employee', targetId: req.params.id,
-      before: { name: before.name, role: before.role, active: !!before.active },
-      after: { name, role, active: !!active },
+      before: { name: before.name, role: before.role, active: !!before.active, workEmail: before.work_email },
+      after: { name, role, active: !!active, workEmail },
     });
   });
 
   res.json({
     status: 'SUCCESS',
-    employee: { id: req.params.id, name, role, employeeNumber: before.employee_number, active: !!active },
+    employee: { id: req.params.id, name, role, employeeNumber: before.employee_number, workEmail, personalEmail, active: !!active },
   });
 });
 
@@ -1069,6 +1090,43 @@ router.post('/settings', async (req, res) => {
   events.broadcast('SETTINGS_UPDATED', { key, value: String(value) });
 
   res.json({ status: 'SUCCESS', key, value: String(value) });
+});
+
+router.post('/settings/batch', async (req, res) => {
+  const { settings } = req.body || {};
+  if (!settings || typeof settings !== 'object') {
+    return res.status(400).json({ status: 'ERROR', message: 'settings object is required.' });
+  }
+
+  const nowMs = T.now();
+  await tx(async () => {
+    for (const [key, value] of Object.entries(settings)) {
+      if (value === undefined || value === null) continue;
+      await db.prepare(`
+        INSERT INTO org_settings (key, value, updated_at, updated_by)
+        VALUES (?, ?, ?, 'admin')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(String(key).trim(), String(value), nowMs);
+    }
+  });
+
+  const events = require('../events');
+  events.broadcast('SETTINGS_UPDATED', { batch: true });
+
+  const rows = await db.prepare('SELECT * FROM org_settings').all();
+  const out = {};
+  for (const r of rows) out[r.key] = r.value;
+  res.json({ status: 'SUCCESS', settings: out });
+});
+
+router.post('/email/test', async (req, res) => {
+  const mailer = require('../domain/mailer');
+  try {
+    const result = await mailer.testConnection(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 // Exchanges the admin key for a short-lived ticket the dashboard can pass to

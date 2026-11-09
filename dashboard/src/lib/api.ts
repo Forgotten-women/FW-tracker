@@ -245,6 +245,18 @@ export const api = {
       { method: 'DELETE' },
     ),
 
+  updateEmployee: (
+    employeeId: string,
+    data: { name?: string; role?: string; active?: boolean; workEmail?: string | null; personalEmail?: string | null }
+  ) =>
+    request<{ status: string; employee: AdminEmployee }>(
+      `/api/admin/employees/${encodeURIComponent(employeeId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    ),
+
   setEmployeeStatus: (
     employeeId: string,
     data: { status: string; effectiveDate?: string; reason?: string }
@@ -1088,6 +1100,27 @@ export const api = {
     request<{ status: string; key: string; value: string }>('/api/admin/settings', {
       method: 'POST',
       body: JSON.stringify({ key, value }),
+    }),
+
+  updateSettingsBatch: (settings: Record<string, string>) =>
+    request<{ status: string; settings: Record<string, string> }>('/api/admin/settings/batch', {
+      method: 'POST',
+      body: JSON.stringify({ settings }),
+    }),
+
+  testEmailConnection: (data: {
+    to: string;
+    smtpHost?: string;
+    smtpPort?: string | number;
+    smtpSecure?: string | boolean;
+    smtpUser?: string;
+    smtpPass?: string;
+    fromName?: string;
+    fromAddress?: string;
+  }) =>
+    request<{ status: string; message: string; messageId?: string }>('/api/admin/email/test', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 
   // -------------------------------------------------------------------------

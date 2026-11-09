@@ -59,6 +59,24 @@ async function notify({
     events.broadcast('NOTIFICATION', payload);
   } catch (_) {}
 
+  // If targeted to an employee, dispatch notification email in background if configured
+  if (employeeId) {
+    try {
+      const mailer = require('./mailer');
+      mailer.sendNotificationEmail({
+        employeeId,
+        category,
+        title,
+        body,
+        severity,
+        link,
+        nowMs,
+      }).catch(err => {
+        console.warn('[notifications] Email dispatch warning:', err?.message);
+      });
+    } catch (_) {}
+  }
+
   return payload;
 }
 
