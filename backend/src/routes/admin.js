@@ -19,6 +19,31 @@ const liveFrame = require('../lib/liveFrame');
 const liveDoorbell = require('../lib/liveDoorbell');
 const liveView = require('../domain/liveView');
 
+// --- Public Microsoft 365 OAuth 2.0 Callback (Browser Redirect from Microsoft) ---
+router.get('/email/microsoft/callback', async (req, res) => {
+  const mailer = require('../domain/mailer');
+  const { code, error, error_description } = req.query;
+
+  const dashboardUrl = process.env.DASHBOARD_ORIGIN || 'https://fwtracker.tech';
+
+  if (error) {
+    const msg = error_description || error || 'Microsoft login was cancelled or denied.';
+    return res.redirect(`${dashboardUrl}/?tab=settings&ms_oauth=error&error=${encodeURIComponent(msg)}`);
+  }
+
+  if (!code) {
+    return res.redirect(`${dashboardUrl}/?tab=settings&ms_oauth=error&error=${encodeURIComponent('No authorization code received from Microsoft.')}`);
+  }
+
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/admin/email/microsoft/callback`;
+    const result = await mailer.handleMicrosoftOAuthCallback(String(code), redirectUri);
+    return res.redirect(`${dashboardUrl}/?tab=settings&ms_oauth=success&email=${encodeURIComponent(result.accountEmail || '')}`);
+  } catch (err) {
+    return res.redirect(`${dashboardUrl}/?tab=settings&ms_oauth=error&error=${encodeURIComponent(err.message)}`);
+  }
+});
+
 router.use(requireAdmin);
 
 const CODE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -1117,6 +1142,28 @@ router.post('/settings/batch', async (req, res) => {
   const out = {};
   for (const r of rows) out[r.key] = r.value;
   res.json({ status: 'SUCCESS', settings: out });
+});
+
+router.get('/email/microsoft/auth-url', async (req, res) => {
+  const mailer = require('../domain/mailer');
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/admin/email/microsoft/callback`;
+    const stateToken = crypto.randomBytes(16).toString('hex');
+    const url = await mailer.getMicrosoftAuthUrl(redirectUri, stateToken);
+    res.json({ status: 'SUCCESS', url, redirectUri });
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
+});
+
+router.post('/email/microsoft/disconnect', async (req, res) => {
+  const mailer = require('../domain/mailer');
+  try {
+    const result = await mailer.disconnectMicrosoftOAuth();
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ status: 'ERROR', message: err.message });
+  }
 });
 
 router.post('/email/test', async (req, res) => {

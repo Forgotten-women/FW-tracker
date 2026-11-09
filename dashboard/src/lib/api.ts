@@ -1110,6 +1110,7 @@ export const api = {
 
   testEmailConnection: (data: {
     to: string;
+    deliveryMethod?: string;
     smtpHost?: string;
     smtpPort?: string | number;
     smtpSecure?: string | boolean;
@@ -1121,6 +1122,14 @@ export const api = {
     request<{ status: string; message: string; messageId?: string }>('/api/admin/email/test', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  getMicrosoftAuthUrl: () =>
+    request<{ status: string; url: string; redirectUri: string }>('/api/admin/email/microsoft/auth-url'),
+
+  disconnectMicrosoftOAuth: () =>
+    request<{ status: string }>('/api/admin/email/microsoft/disconnect', {
+      method: 'POST',
     }),
 
   // -------------------------------------------------------------------------

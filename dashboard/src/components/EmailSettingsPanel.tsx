@@ -22,8 +22,20 @@ export function EmailSettingsPanel() {
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Settings form state
+  // Delivery Method: 'oauth' (1-click Microsoft 365) vs 'smtp'
+  const [deliveryMethod, setDeliveryMethod] = useState<'oauth' | 'smtp'>('oauth');
   const [emailEnabled, setEmailEnabled] = useState(false);
+
+  // Microsoft OAuth 2.0 (Azure AD / Entra ID)
+  const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthClientSecret, setOauthClientSecret] = useState('');
+  const [oauthTenantId, setOauthTenantId] = useState('common');
+  const [oauthAccountEmail, setOauthAccountEmail] = useState('');
+  const [oauthAccountName, setOauthAccountName] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
+  const [copiedRedirect, setCopiedRedirect] = useState(false);
+
+  // Standard SMTP Configuration
   const [smtpHost, setSmtpHost] = useState('smtp.office365.com');
   const [smtpPort, setSmtpPort] = useState('587');
   const [smtpSecure, setSmtpSecure] = useState(false);
@@ -56,6 +68,10 @@ export function EmailSettingsPanel() {
   const [savingEmployee, setSavingEmployee] = useState(false);
   const [editEmpError, setEditEmpError] = useState<string | null>(null);
 
+  const redirectUri = typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.host}/api/admin/email/microsoft/callback`
+    : 'https://api.fwtracker.tech/api/admin/email/microsoft/callback';
+
   const loadData = async () => {
     setLoading(true);
     setSaveError(null);
@@ -66,15 +82,27 @@ export function EmailSettingsPanel() {
       ]);
 
       const s = settingsRes.settings || {};
+      const method = (s['email_delivery_method'] || (s['email_oauth_refresh_token'] ? 'oauth' : 'smtp')) as 'oauth' | 'smtp';
+      setDeliveryMethod(method);
       setEmailEnabled(s['email_notifications_enabled'] === '1');
+
+      // OAuth
+      setOauthClientId(s['email_oauth_client_id'] || '');
+      setOauthClientSecret(s['email_oauth_client_secret'] || '');
+      setOauthTenantId(s['email_oauth_tenant_id'] || 'common');
+      setOauthAccountEmail(s['email_oauth_account_email'] || '');
+      setOauthAccountName(s['email_oauth_account_name'] || '');
+
+      // SMTP
       setSmtpHost(s['email_smtp_host'] || 'smtp.office365.com');
       setSmtpPort(s['email_smtp_port'] || '587');
       setSmtpSecure(s['email_smtp_secure'] === '1');
       setSmtpUser(s['email_smtp_user'] || '');
       setSmtpPass(s['email_smtp_pass'] || '');
       setFromName(s['email_from_name'] || 'Forgotten Women HR');
-      setFromAddress(s['email_from_address'] || 'hr@forgottenwomen.org');
+      setFromAddress(s['email_from_address'] || s['email_oauth_account_email'] || s['email_smtp_user'] || 'hr@forgottenwomen.org');
 
+      // Toggles
       setNotifFormalWarnings(s['email_notif_formal_warnings'] !== '0');
       setNotifLateWarnings(s['email_notif_late_warnings'] !== '0');
       setNotifLeaveDecisions(s['email_notif_leave_decisions'] !== '0');
@@ -83,8 +111,8 @@ export function EmailSettingsPanel() {
       setNotifDocuments(s['email_notif_documents'] !== '0');
       setNotifAbsences(s['email_notif_absences'] !== '0');
 
-      if (!testRecipient && s['email_smtp_user']) {
-        setTestRecipient(s['email_smtp_user']);
+      if (!testRecipient) {
+        setTestRecipient(s['email_oauth_account_email'] || s['email_smtp_user'] || 'hr@forgottenwomen.org');
       }
 
       setEmployees(empsRes.employees || []);
@@ -97,15 +125,80 @@ export function EmailSettingsPanel() {
 
   useEffect(() => {
     loadData();
+
+    // Check URL parameters for OAuth redirect outcomes
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const oauthStatus = params.get('ms_oauth');
+      const email = params.get('email');
+      const err = params.get('error');
+
+      if (oauthStatus === 'success') {
+        setSaveSuccess(`Microsoft 365 connected successfully as ${email || 'authorized user'}! 1-click email delivery is active.`);
+        window.history.replaceState({}, document.title, window.location.pathname + '?tab=settings');
+      } else if (oauthStatus === 'error') {
+        setSaveError(`Microsoft 365 connection failed: ${err || 'Authentication cancelled or refused.'}`);
+        window.history.replaceState({}, document.title, window.location.pathname + '?tab=settings');
+      }
+    }
   }, []);
 
-  const handleApplyM365Preset = () => {
-    setSmtpHost('smtp.office365.com');
-    setSmtpPort('587');
-    setSmtpSecure(false);
-    setFromName('Forgotten Women HR');
-    setSaveSuccess('Applied Microsoft 365 recommended defaults (smtp.office365.com:587 STARTTLS).');
-    setTimeout(() => setSaveSuccess(null), 4000);
+  const handleCopyRedirect = () => {
+    navigator.clipboard.writeText(redirectUri);
+    setCopiedRedirect(true);
+    setTimeout(() => setCopiedRedirect(false), 2500);
+  };
+
+  const handleSignInWithMicrosoft = async () => {
+    if (!oauthClientId.trim()) {
+      alert('Please enter your Azure Application (Client) ID before connecting.');
+      return;
+    }
+    if (!oauthClientSecret.trim()) {
+      alert('Please enter your Azure Client Secret before connecting.');
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // 1. Save Azure credentials
+      await api.updateSettingsBatch({
+        email_oauth_client_id: oauthClientId.trim(),
+        email_oauth_client_secret: oauthClientSecret.trim(),
+        email_oauth_tenant_id: oauthTenantId.trim() || 'common',
+      });
+
+      // 2. Fetch Microsoft OAuth authorization URL
+      const res = await api.getMicrosoftAuthUrl();
+      if (res.url) {
+        // 3. Redirect to Microsoft Single Sign-On
+        window.location.href = res.url;
+      } else {
+        throw new Error('Server did not return a valid Microsoft OAuth URL.');
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not initialize Microsoft login.');
+      setSaving(false);
+    }
+  };
+
+  const handleDisconnectMicrosoft = async () => {
+    if (!window.confirm(`Disconnect Microsoft 365 account (${oauthAccountEmail})? Automated emails will pause until reconnected.`)) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.disconnectMicrosoftOAuth();
+      setOauthAccountEmail('');
+      setOauthAccountName('');
+      setSaveSuccess('Microsoft 365 account disconnected.');
+      await loadData();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to disconnect account.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -115,13 +208,17 @@ export function EmailSettingsPanel() {
     try {
       const payload: Record<string, string> = {
         email_notifications_enabled: emailEnabled ? '1' : '0',
+        email_delivery_method: deliveryMethod,
+        email_oauth_client_id: oauthClientId.trim(),
+        email_oauth_client_secret: oauthClientSecret.trim(),
+        email_oauth_tenant_id: oauthTenantId.trim() || 'common',
         email_smtp_host: smtpHost.trim(),
         email_smtp_port: smtpPort.trim(),
         email_smtp_secure: smtpSecure ? '1' : '0',
         email_smtp_user: smtpUser.trim(),
         email_smtp_pass: smtpPass.trim(),
         email_from_name: fromName.trim(),
-        email_from_address: fromAddress.trim() || smtpUser.trim(),
+        email_from_address: fromAddress.trim() || oauthAccountEmail.trim() || smtpUser.trim(),
         email_notif_formal_warnings: notifFormalWarnings ? '1' : '0',
         email_notif_late_warnings: notifLateWarnings ? '1' : '0',
         email_notif_leave_decisions: notifLeaveDecisions ? '1' : '0',
@@ -132,7 +229,7 @@ export function EmailSettingsPanel() {
       };
 
       await api.updateSettingsBatch(payload);
-      setSaveSuccess('Microsoft 365 & email notification configuration saved successfully!');
+      setSaveSuccess('Email notification configuration saved successfully!');
       setTimeout(() => setSaveSuccess(null), 4000);
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save email settings.');
@@ -152,13 +249,14 @@ export function EmailSettingsPanel() {
     try {
       const res = await api.testEmailConnection({
         to: testRecipient.trim(),
+        deliveryMethod,
         smtpHost: smtpHost.trim(),
         smtpPort: smtpPort.trim(),
         smtpSecure: smtpSecure,
         smtpUser: smtpUser.trim(),
         smtpPass: smtpPass.trim(),
         fromName: fromName.trim(),
-        fromAddress: fromAddress.trim() || smtpUser.trim(),
+        fromAddress: fromAddress.trim() || oauthAccountEmail.trim() || smtpUser.trim(),
       });
 
       setTestResult({
@@ -225,6 +323,7 @@ export function EmailSettingsPanel() {
   }, [employees, search]);
 
   const configuredCount = employees.filter((e) => e.workEmail && e.workEmail.includes('@')).length;
+  const isOauthConnected = Boolean(oauthAccountEmail);
 
   if (loading) {
     return (
@@ -249,550 +348,692 @@ export function EmailSettingsPanel() {
                 <h1 className="text-lg font-extrabold text-text tracking-tight">
                   Email Notifications & Microsoft 365 Integration
                 </h1>
-                <Badge tone={emailEnabled ? 'brand' : 'muted'} size="sm">
-                  {emailEnabled ? 'Live Active' : 'Disabled'}
+                <Badge tone={emailEnabled ? 'brand' : 'muted'}>
+                  {emailEnabled ? 'Notifications Active' : 'Notifications Paused'}
                 </Badge>
+                {isOauthConnected && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Microsoft 365 Connected
+                  </span>
+                )}
               </div>
-              <p className="mt-0.5 text-xs text-muted max-w-2xl">
-                Configure Microsoft 365 / Exchange SMTP credentials to automatically email employees regarding formal warnings, lateness occurrences, leave approvals, and attendance dispute outcomes.
+              <p className="mt-1 text-xs text-muted">
+                One-click Microsoft 365 Single Sign-On, automated email dispatches for HR updates, warnings, and directory management.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <Button
-              variant="primary"
+              variant="secondary"
+              onClick={loadData}
+              disabled={loading || saving}
+              className="text-xs"
+            >
+              Refresh
+            </Button>
+            <Button
               onClick={handleSaveSettings}
               disabled={saving}
-              className="py-2 px-4 text-xs font-bold"
+              className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4"
             >
-              {saving ? 'Saving Settings…' : 'Save Configuration'}
+              {saving ? 'Saving…' : 'Save Settings'}
             </Button>
           </div>
         </div>
-
-        {saveSuccess && (
-          <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-300 font-semibold flex items-center gap-2">
-            <CheckCircleIcon className="h-4 w-4" />
-            <span>{saveSuccess}</span>
-          </div>
-        )}
-
-        {saveError && (
-          <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 font-semibold flex items-center gap-2">
-            <AlertTriangleIcon className="h-4 w-4" />
-            <span>{saveError}</span>
-          </div>
-        )}
       </div>
 
+      {/* Status Banners */}
+      {saveSuccess && (
+        <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-300">
+          <div className="flex items-center gap-2">
+            <CheckCircleIcon className="h-4 w-4 shrink-0" />
+            <span>{saveSuccess}</span>
+          </div>
+          <button onClick={() => setSaveSuccess(null)} className="text-emerald-400 hover:text-white">
+            <XIcon className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="flex items-center justify-between rounded-xl border border-rose-500/30 bg-rose-500/10 p-3.5 text-xs text-rose-300">
+          <div className="flex items-center gap-2">
+            <AlertTriangleIcon className="h-4 w-4 shrink-0" />
+            <span>{saveError}</span>
+          </div>
+          <button onClick={() => setSaveError(null)} className="text-rose-400 hover:text-white">
+            <XIcon className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Main Grid: Auth Method on Left, Toggles & Test on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Microsoft 365 Server Configuration & Testing (7 cols) */}
+        {/* Left Column: Integration Cards */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Main SMTP Settings Card */}
-          <div className="glass-panel rounded-2xl p-5 border border-line space-y-4">
-            <div className="flex items-center justify-between border-b border-line pb-3">
-              <div>
-                <h2 className="text-sm font-bold text-text flex items-center gap-2">
-                  <MailIcon className="h-4 w-4 text-indigo-400" />
-                  <span>Microsoft 365 / SMTP Gateway</span>
-                </h2>
-                <p className="text-xs text-muted mt-0.5">
-                  Outgoing mail transport credentials for notifications.
-                </p>
+          {/* Master Switch & Delivery Mode Selector */}
+          <Panel title="Email Delivery Method">
+            <div className="space-y-4">
+              {/* Master Enabled Switch */}
+              <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3.5">
+                <div>
+                  <div className="text-sm font-bold text-text">Send Outbound Email Notifications</div>
+                  <div className="text-xs text-muted">
+                    When enabled, employees will receive email alerts for approved leaves, warnings, and notices.
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={emailEnabled}
+                    onChange={(e) => setEmailEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
               </div>
-              <Button
-                variant="ghost"
-                onClick={handleApplyM365Preset}
-                className="text-[11px] text-indigo-300 hover:text-white"
-                title="Fill in Microsoft 365 standard SMTP host and port"
-              >
-                Use Microsoft 365 Preset
-              </Button>
-            </div>
 
-            {/* Master Toggle */}
-            <div className="flex items-center justify-between p-3.5 rounded-xl border border-line bg-raised/50">
-              <div>
-                <div className="text-xs font-bold text-text">
-                  Dispatch Automated Email Notifications
-                </div>
-                <div className="text-[11px] text-muted">
-                  When enabled, targeted emails will be sent out as events trigger in the system.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEmailEnabled(!emailEnabled)}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                  emailEnabled ? 'bg-indigo-600' : 'bg-line'
-                }`}
-                role="switch"
-                aria-checked={emailEnabled}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                    emailEnabled ? 'translate-x-5' : 'translate-x-0'
+              {/* Delivery Tabs */}
+              <div className="flex items-center gap-2 p-1 rounded-xl bg-raised border border-line">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryMethod('oauth')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition ${
+                    deliveryMethod === 'oauth'
+                      ? 'bg-accent-gradient text-on-accent shadow-accent'
+                      : 'text-muted hover:text-text hover:bg-white/5'
                   }`}
-                />
-              </button>
-            </div>
+                >
+                  {/* Official Microsoft 4-square icon */}
+                  <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 21 21">
+                    <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                    <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                    <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                    <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                  </svg>
+                  <span>1-Click Microsoft 365 (OAuth)</span>
+                  {isOauthConnected && (
+                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                  )}
+                </button>
 
-            {/* Inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
-              <div>
-                <label className="block text-muted font-semibold mb-1">
-                  SMTP Host Server
-                </label>
-                <input
-                  type="text"
-                  value={smtpHost}
-                  onChange={(e) => setSmtpHost(e.target.value)}
-                  placeholder="smtp.office365.com"
-                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-text font-mono placeholder-dim focus:border-brand focus:outline-none"
-                />
+                <button
+                  type="button"
+                  onClick={() => setDeliveryMethod('smtp')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition ${
+                    deliveryMethod === 'smtp'
+                      ? 'bg-accent-gradient text-on-accent shadow-accent'
+                      : 'text-muted hover:text-text hover:bg-white/5'
+                  }`}
+                >
+                  <MailIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span>Standard SMTP Gateway</span>
+                </button>
               </div>
+            </div>
+          </Panel>
 
-              <div>
-                <label className="block text-muted font-semibold mb-1">
-                  SMTP Port
-                </label>
+          {/* METHOD 1: Microsoft 365 OAuth 2.0 (1-Click Login) */}
+          {deliveryMethod === 'oauth' && (
+            <Panel title="Microsoft 365 Single Sign-On (OAuth 2.0)">
+              <div className="space-y-4">
+                {isOauthConnected ? (
+                  /* Connected State */
+                  <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/20 via-surface to-surface p-5 space-y-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/5 border border-emerald-500/30 p-2.5">
+                          <svg className="h-full w-full" viewBox="0 0 21 21">
+                            <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                            <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                            <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                            <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                          </svg>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-extrabold text-sm text-text">{oauthAccountName || 'Microsoft 365 Mailbox'}</h3>
+                            <span className="rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.2 text-[10px] font-bold">
+                              Connected
+                            </span>
+                          </div>
+                          <div className="font-mono text-xs text-indigo-300 font-semibold mt-0.5">
+                            {oauthAccountEmail}
+                          </div>
+                          <div className="text-[11px] text-muted mt-1">
+                            Authorized via official Microsoft Graph API. Outbound emails are sent directly through your Microsoft 365 mailbox with zero passwords stored.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-2 border-t border-line">
+                      <Button
+                        variant="secondary"
+                        onClick={handleSignInWithMicrosoft}
+                        disabled={saving}
+                        className="text-xs"
+                      >
+                        Re-authenticate / Switch Account
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={handleDisconnectMicrosoft}
+                        disabled={saving}
+                        className="text-xs border-rose-500/40 text-rose-300 hover:bg-rose-500/10 hover:text-white"
+                      >
+                        Disconnect Account
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Not Connected State - 1-Click Login CTA */
+                  <div className="rounded-2xl border border-indigo-500/30 bg-raised/40 p-5 space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 border border-white/10 p-2">
+                        <svg className="h-full w-full" viewBox="0 0 21 21">
+                          <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                          <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                          <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                          <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm text-text">Connect Microsoft 365 Account</h3>
+                        <p className="text-xs text-muted">
+                          Log in directly with your current Microsoft 365 browser session. No App Password needed.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Azure App Registration Credentials */}
+                    <div className="space-y-3 pt-2">
+                      <div>
+                        <label className="text-xs font-semibold text-text block mb-1">
+                          Azure Application (Client) ID <span className="text-rose-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={oauthClientId}
+                          onChange={(e) => setOauthClientId(e.target.value)}
+                          placeholder="e.g. 11111111-2222-3333-4444-555555555555"
+                          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-semibold text-text">
+                            Azure Client Secret <span className="text-rose-400">*</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowSecret(!showSecret)}
+                            className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium"
+                          >
+                            {showSecret ? 'Hide Secret' : 'Show Secret'}
+                          </button>
+                        </div>
+                        <input
+                          type={showSecret ? 'text' : 'password'}
+                          value={oauthClientSecret}
+                          onChange={(e) => setOauthClientSecret(e.target.value)}
+                          placeholder="Paste client secret value from Azure Certificates & secrets"
+                          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-semibold text-text block mb-1">
+                            Directory (Tenant) ID
+                          </label>
+                          <input
+                            type="text"
+                            value={oauthTenantId}
+                            onChange={(e) => setOauthTenantId(e.target.value)}
+                            placeholder="common (or your Azure Tenant GUID)"
+                            className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-semibold text-text block mb-1">
+                            Sender Display Name
+                          </label>
+                          <input
+                            type="text"
+                            value={fromName}
+                            onChange={(e) => setFromName(e.target.value)}
+                            placeholder="Forgotten Women HR"
+                            className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs text-text focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Callback URL Card */}
+                      <div className="rounded-xl border border-line bg-surface/70 p-3 text-xs space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-dim text-[11px] uppercase tracking-wider">
+                            Redirect URI in Azure App:
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyRedirect}
+                            className="text-indigo-400 hover:text-white font-medium text-[11px]"
+                          >
+                            {copiedRedirect ? '✓ Copied' : 'Copy URL'}
+                          </button>
+                        </div>
+                        <div className="font-mono text-[11px] text-indigo-300 break-all select-all">
+                          {redirectUri}
+                        </div>
+                        <div className="text-[10px] text-dim">
+                          Paste this exact Web redirect URI into Azure Portal &gt; App registrations &gt; Authentication.
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Official Big Sign In Button */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={handleSignInWithMicrosoft}
+                        disabled={saving}
+                        className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl font-bold text-sm bg-[#2f2f2f] hover:bg-[#1f1f1f] border border-white/20 text-white shadow-lg transition cursor-pointer"
+                      >
+                        <svg className="h-5 w-5 shrink-0" viewBox="0 0 21 21">
+                          <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                          <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                          <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                          <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                        </svg>
+                        <span>{saving ? 'Opening Microsoft Login…' : 'Sign in with Microsoft'}</span>
+                      </button>
+                      <p className="mt-2 text-center text-[11px] text-muted">
+                        Connects with your currently logged-in account in one click. No password typing required.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Panel>
+          )}
+
+          {/* METHOD 2: Standard SMTP Gateway */}
+          {deliveryMethod === 'smtp' && (
+            <Panel title="Microsoft 365 / Standard SMTP Gateway">
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-semibold text-text block mb-1">
+                      SMTP Host
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpHost}
+                      onChange={(e) => setSmtpHost(e.target.value)}
+                      placeholder="smtp.office365.com"
+                      className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-text block mb-1">
+                      Port
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpPort}
+                      onChange={(e) => setSmtpPort(e.target.value)}
+                      placeholder="587"
+                      className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-2">
                   <input
-                    type="number"
-                    value={smtpPort}
-                    onChange={(e) => setSmtpPort(e.target.value)}
-                    placeholder="587"
-                    className="w-24 rounded-xl border border-line bg-raised px-3 py-2 text-text font-mono placeholder-dim focus:border-brand focus:outline-none"
+                    type="checkbox"
+                    id="smtpSecure"
+                    checked={smtpSecure}
+                    onChange={(e) => setSmtpSecure(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
                   />
-                  <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={smtpSecure}
-                      onChange={(e) => setSmtpSecure(e.target.checked)}
-                      className="rounded border-line bg-raised text-indigo-600 focus:ring-0"
-                    />
-                    <span>Direct SSL (465)</span>
+                  <label htmlFor="smtpSecure" className="text-xs text-text cursor-pointer">
+                    Use Direct SSL (Port 465). Leave unchecked for Port 587 (STARTTLS, recommended for Microsoft 365).
                   </label>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-muted font-semibold mb-1">
-                  Microsoft 365 Account (Email / Username)
-                </label>
-                <input
-                  type="email"
-                  value={smtpUser}
-                  onChange={(e) => setSmtpUser(e.target.value)}
-                  placeholder="hr@forgottenwomen.org"
-                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-text placeholder-dim focus:border-brand focus:outline-none"
-                />
-              </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-text block mb-1">
+                      SMTP Username / Email
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpUser}
+                      onChange={(e) => setSmtpUser(e.target.value)}
+                      placeholder="hr@forgottenwomen.org"
+                      className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs text-text focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-muted font-semibold mb-1">
-                  Password / Microsoft App Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={smtpPass}
-                    onChange={(e) => setSmtpPass(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-text placeholder-dim focus:border-brand focus:outline-none pr-14"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted hover:text-text cursor-pointer uppercase font-bold"
-                  >
-                    {showPassword ? 'Hide' : 'Show'}
-                  </button>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-text">
+                        SMTP Password / App Password
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium"
+                      >
+                        {showPassword ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={smtpPass}
+                      onChange={(e) => setSmtpPass(e.target.value)}
+                      placeholder="••••••••••••••••"
+                      className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-text block mb-1">
+                      From Display Name
+                    </label>
+                    <input
+                      type="text"
+                      value={fromName}
+                      onChange={(e) => setFromName(e.target.value)}
+                      placeholder="Forgotten Women HR"
+                      className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs text-text focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-text block mb-1">
+                      From Email Address
+                    </label>
+                    <input
+                      type="text"
+                      value={fromAddress}
+                      onChange={(e) => setFromAddress(e.target.value)}
+                      placeholder="hr@forgottenwomen.org"
+                      className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs text-text focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-muted font-semibold mb-1">
-                  Sender Display Name
-                </label>
-                <input
-                  type="text"
-                  value={fromName}
-                  onChange={(e) => setFromName(e.target.value)}
-                  placeholder="Forgotten Women HR"
-                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-text placeholder-dim focus:border-brand focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-muted font-semibold mb-1">
-                  From Email Address
-                </label>
-                <input
-                  type="email"
-                  value={fromAddress}
-                  onChange={(e) => setFromAddress(e.target.value)}
-                  placeholder="hr@forgottenwomen.org"
-                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-text placeholder-dim focus:border-brand focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {/* Microsoft 365 Guidance */}
-            <div className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3.5 text-xs text-sky-200/90 leading-relaxed space-y-1.5">
-              <div className="font-bold text-sky-300 flex items-center gap-1.5">
-                <span>💡 Microsoft 365 Configuration Guidance</span>
-              </div>
-              <ul className="list-disc list-inside space-y-1 text-[11px] text-sky-300/80">
-                <li>
-                  <strong>MFA / 2-Step Verification:</strong> If your Microsoft 365 account has Two-Factor Authentication enabled, generate an <em>App Password</em> from your Microsoft Account Portal (Security Info &rarr; Add method &rarr; App password) and paste it above.
-                </li>
-                <li>
-                  <strong>SMTP AUTH Enabled:</strong> In Microsoft 365 Admin Center, verify that Authenticated SMTP is enabled on this mailbox (Active users &rarr; Select User &rarr; Mail &rarr; Manage email apps &rarr; Check Authenticated SMTP).
-                </li>
-              </ul>
-            </div>
-          </div>
+            </Panel>
+          )}
 
           {/* Test Connection Card */}
-          <div className="glass-panel rounded-2xl p-5 border border-line space-y-3.5">
-            <div>
-              <h3 className="text-sm font-bold text-text flex items-center gap-2">
-                <CheckIcon className="h-4 w-4 text-emerald-400" />
-                <span>Test Microsoft 365 Connection</span>
-              </h3>
-              <p className="text-xs text-muted mt-0.5">
-                Dispatch an immediate test email to verify credentials, encryption, and connectivity.
+          <Panel title="Test Connection & Verify Delivery">
+            <div className="space-y-3">
+              <p className="text-xs text-muted">
+                Send a real test email to verify credentials and ensure deliverability before turning on automated notifications.
               </p>
-            </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <input
-                type="email"
-                value={testRecipient}
-                onChange={(e) => setTestRecipient(e.target.value)}
-                placeholder="Enter recipient email (e.g. hr@forgottenwomen.org)"
-                className="flex-1 rounded-xl border border-line bg-raised px-3 py-2 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
-              />
-              <Button
-                variant="accent"
-                onClick={handleTestEmail}
-                disabled={testing || !testRecipient}
-                className="shrink-0 py-2 px-4 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white"
-              >
-                {testing ? 'Connecting…' : 'Send Test Email'}
-              </Button>
-            </div>
-
-            {testResult && (
-              <div
-                className={`rounded-xl border p-3 text-xs leading-relaxed ${
-                  testResult.status === 'SUCCESS'
-                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                    : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-                }`}
-              >
-                <div className="font-bold flex items-center gap-1.5 mb-1">
-                  {testResult.status === 'SUCCESS' ? (
-                    <>
-                      <CheckCircleIcon className="h-4 w-4" />
-                      <span>Verification Succeeded!</span>
-                    </>
-                  ) : (
-                    <>
-                      <AlertTriangleIcon className="h-4 w-4" />
-                      <span>Connection Error</span>
-                    </>
-                  )}
-                </div>
-                <div className="font-mono text-[11px] break-all">{testResult.message}</div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <input
+                  type="email"
+                  value={testRecipient}
+                  onChange={(e) => setTestRecipient(e.target.value)}
+                  placeholder="Enter recipient email (e.g. your email address)"
+                  className="flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-text focus:border-indigo-500 focus:outline-none"
+                />
+                <Button
+                  onClick={handleTestEmail}
+                  disabled={testing}
+                  className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 shrink-0"
+                >
+                  {testing ? 'Testing…' : 'Send Test Email'}
+                </Button>
               </div>
-            )}
-          </div>
+
+              {testResult && (
+                <div
+                  className={`rounded-xl border p-3 text-xs ${
+                    testResult.status === 'SUCCESS'
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                      : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {testResult.status === 'SUCCESS' ? (
+                      <CheckCircleIcon className="h-4 w-4 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangleIcon className="h-4 w-4 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-1">
+                      <div className="font-bold">
+                        {testResult.status === 'SUCCESS' ? 'Connection Succeeded' : 'Connection Failed'}
+                      </div>
+                      <div className="text-[11px] leading-relaxed break-all font-mono">
+                        {testResult.message}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Panel>
         </div>
 
-        {/* Right Column: Event Toggles (5 cols) */}
+        {/* Right Column: Notification Category Toggles */}
         <div className="lg:col-span-5 space-y-6">
-          <div className="glass-panel rounded-2xl p-5 border border-line space-y-4">
-            <div className="border-b border-line pb-3">
-              <h2 className="text-sm font-bold text-text flex items-center gap-2">
-                <ClockIcon className="h-4 w-4 text-amber-400" />
-                <span>Notification Event Rules</span>
-              </h2>
-              <p className="text-xs text-muted mt-0.5">
-                Select which event categories trigger employee emails.
+          <Panel title="Automated Event Toggles">
+            <div className="space-y-3">
+              <p className="text-xs text-muted">
+                Choose which system events automatically trigger an email to the affected employee.
               </p>
+
+              <div className="space-y-2">
+                {/* 1. Formal Warnings */}
+                <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3">
+                  <div>
+                    <div className="text-xs font-bold text-text">Formal Warnings</div>
+                    <div className="text-[10px] text-muted">Written warnings, escalations &amp; review triggers</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={notifFormalWarnings}
+                    onChange={(e) => setNotifFormalWarnings(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
+                  />
+                </div>
+
+                {/* 2. Late Warnings */}
+                <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3">
+                  <div>
+                    <div className="text-xs font-bold text-text">Late Attendance Warnings</div>
+                    <div className="text-[10px] text-muted">Exceeded monthly late allowances &amp; triggers</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={notifLateWarnings}
+                    onChange={(e) => setNotifLateWarnings(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
+                  />
+                </div>
+
+                {/* 3. Leave Approvals & Rejections */}
+                <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3">
+                  <div>
+                    <div className="text-xs font-bold text-text">Leave Decisions</div>
+                    <div className="text-[10px] text-muted">Approved or rejected employee leave requests</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={notifLeaveDecisions}
+                    onChange={(e) => setNotifLeaveDecisions(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
+                  />
+                </div>
+
+                {/* 4. HR Direct Leave Recorded */}
+                <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3">
+                  <div>
+                    <div className="text-xs font-bold text-text">HR Direct Leave</div>
+                    <div className="text-[10px] text-muted">When HR registers leave directly on an employee profile</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={notifLeaveRecorded}
+                    onChange={(e) => setNotifLeaveRecorded(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
+                  />
+                </div>
+
+                {/* 5. Attendance Corrections */}
+                <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3">
+                  <div>
+                    <div className="text-xs font-bold text-text">Attendance Corrections</div>
+                    <div className="text-[10px] text-muted">Manual timesheet fixes &amp; approved disputes</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={notifCorrections}
+                    onChange={(e) => setNotifCorrections(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
+                  />
+                </div>
+
+                {/* 6. Document Expiry Alerts */}
+                <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3">
+                  <div>
+                    <div className="text-xs font-bold text-text">Employee Documents / KYC</div>
+                    <div className="text-[10px] text-muted">Expiring ID, contracts &amp; probation reviews</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={notifDocuments}
+                    onChange={(e) => setNotifDocuments(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
+                  />
+                </div>
+
+                {/* 7. Absence Reviews */}
+                <div className="flex items-center justify-between rounded-xl border border-line bg-surface/50 p-3">
+                  <div>
+                    <div className="text-xs font-bold text-text">Absence Reviews</div>
+                    <div className="text-[10px] text-muted">Self-reported sickness &amp; HR determinations</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={notifAbsences}
+                    onChange={(e) => setNotifAbsences(e.target.checked)}
+                    className="rounded border-line bg-surface text-indigo-600 focus:ring-0"
+                  />
+                </div>
+              </div>
             </div>
-
-            <div className="space-y-2.5">
-              {/* Formal Disciplinary Warnings */}
-              <label className="flex items-start justify-between gap-3 p-3 rounded-xl border border-line bg-raised/40 hover:bg-raised cursor-pointer transition">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-text flex items-center gap-1.5">
-                    <ShieldCheckIcon className="h-3.5 w-3.5 text-rose-400" />
-                    <span>Formal Disciplinary Warnings</span>
-                  </div>
-                  <div className="text-[11px] text-muted">
-                    First Written, Final Written, and Dismissal formal warning notices.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifFormalWarnings}
-                  onChange={(e) => setNotifFormalWarnings(e.target.checked)}
-                  className="mt-0.5 rounded border-line bg-surface text-indigo-600 focus:ring-0"
-                />
-              </label>
-
-              {/* Lateness & Attendance Triggers */}
-              <label className="flex items-start justify-between gap-3 p-3 rounded-xl border border-line bg-raised/40 hover:bg-raised cursor-pointer transition">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-text flex items-center gap-1.5">
-                    <ClockIcon className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Late Attendance Triggers</span>
-                  </div>
-                  <div className="text-[11px] text-muted">
-                    Notices when employee crosses monthly lateness occurrence thresholds.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifLateWarnings}
-                  onChange={(e) => setNotifLateWarnings(e.target.checked)}
-                  className="mt-0.5 rounded border-line bg-surface text-indigo-600 focus:ring-0"
-                />
-              </label>
-
-              {/* Leave Approvals & Decisions */}
-              <label className="flex items-start justify-between gap-3 p-3 rounded-xl border border-line bg-raised/40 hover:bg-raised cursor-pointer transition">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-text flex items-center gap-1.5">
-                    <CheckCircleIcon className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Leave Approvals & Decisions</span>
-                  </div>
-                  <div className="text-[11px] text-muted">
-                    Updates when an employee leave booking is approved or rejected.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifLeaveDecisions}
-                  onChange={(e) => setNotifLeaveDecisions(e.target.checked)}
-                  className="mt-0.5 rounded border-line bg-surface text-indigo-600 focus:ring-0"
-                />
-              </label>
-
-              {/* HR Direct Leave Entry */}
-              <label className="flex items-start justify-between gap-3 p-3 rounded-xl border border-line bg-raised/40 hover:bg-raised cursor-pointer transition">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-text flex items-center gap-1.5">
-                    <FileTextIcon className="h-3.5 w-3.5 text-purple-400" />
-                    <span>HR Direct Leave Entry</span>
-                  </div>
-                  <div className="text-[11px] text-muted">
-                    Notifies employee when HR manually registers a leave or hourly adjustment.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifLeaveRecorded}
-                  onChange={(e) => setNotifLeaveRecorded(e.target.checked)}
-                  className="mt-0.5 rounded border-line bg-surface text-indigo-600 focus:ring-0"
-                />
-              </label>
-
-              {/* Attendance Dispute Reviews */}
-              <label className="flex items-start justify-between gap-3 p-3 rounded-xl border border-line bg-raised/40 hover:bg-raised cursor-pointer transition">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-text flex items-center gap-1.5">
-                    <ClockIcon className="h-3.5 w-3.5 text-sky-400" />
-                    <span>Attendance Correction Decisions</span>
-                  </div>
-                  <div className="text-[11px] text-muted">
-                    Outcomes when clock-in / out adjustment requests are decided.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifCorrections}
-                  onChange={(e) => setNotifCorrections(e.target.checked)}
-                  className="mt-0.5 rounded border-line bg-surface text-indigo-600 focus:ring-0"
-                />
-              </label>
-
-              {/* KYC Document Alerts */}
-              <label className="flex items-start justify-between gap-3 p-3 rounded-xl border border-line bg-raised/40 hover:bg-raised cursor-pointer transition">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-text flex items-center gap-1.5">
-                    <FileTextIcon className="h-3.5 w-3.5 text-indigo-400" />
-                    <span>Document & KYC Alerts</span>
-                  </div>
-                  <div className="text-[11px] text-muted">
-                    When mandatory documents are verified, rejected, or approaching expiry.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifDocuments}
-                  onChange={(e) => setNotifDocuments(e.target.checked)}
-                  className="mt-0.5 rounded border-line bg-surface text-indigo-600 focus:ring-0"
-                />
-              </label>
-
-              {/* Absence & Sickness Reviews */}
-              <label className="flex items-start justify-between gap-3 p-3 rounded-xl border border-line bg-raised/40 hover:bg-raised cursor-pointer transition">
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-text flex items-center gap-1.5">
-                    <AlertTriangleIcon className="h-3.5 w-3.5 text-orange-400" />
-                    <span>Absence & Sickness Reviews</span>
-                  </div>
-                  <div className="text-[11px] text-muted">
-                    Outcomes when unauthorized absence or sickness reports are reviewed.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={notifAbsences}
-                  onChange={(e) => setNotifAbsences(e.target.checked)}
-                  className="mt-0.5 rounded border-line bg-surface text-indigo-600 focus:ring-0"
-                />
-              </label>
-            </div>
-          </div>
+          </Panel>
         </div>
       </div>
 
       {/* Bottom Section: Employee Email Directory */}
-      <div className="glass-panel rounded-2xl p-5 border border-line space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-text">
-                Employee Email Directory
-              </h2>
-              <Badge tone={configuredCount === employees.length ? 'brand' : 'muted'} size="sm">
-                {configuredCount} / {employees.length} Configured
-              </Badge>
-            </div>
-            <p className="text-xs text-muted mt-0.5">
-              Verified work and personal email records for outgoing HR notifications.
+      <Panel title={`Employee Email Directory (${configuredCount}/${employees.length} Configured)`}>
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-muted">
+              Notifications are delivered to the employee&apos;s official work email, with personal email used as fallback.
             </p>
+            <div className="w-full sm:w-72">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search employee by name, code or email…"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-1.5 text-xs text-text focus:border-indigo-500 focus:outline-none"
+              />
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, ID (PK001), email..."
-              className="w-56 sm:w-64 rounded-xl border border-line bg-raised px-3 py-1.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="text-xs text-muted hover:text-text cursor-pointer p-1"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        </div>
-
-        {filteredEmployees.length === 0 ? (
-          <Empty>No employees found matching &quot;{search}&quot;</Empty>
-        ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface/40">
             <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-line text-[11px] uppercase tracking-wider text-muted font-bold">
-                  <th className="py-2.5 px-3">Employee ID</th>
-                  <th className="py-2.5 px-3">Employee Name</th>
-                  <th className="py-2.5 px-3">Role</th>
-                  <th className="py-2.5 px-3">Official Work Email</th>
-                  <th className="py-2.5 px-3">Personal Email</th>
-                  <th className="py-2.5 px-3 text-right">Actions</th>
+              <thead className="border-b border-line bg-raised/50 text-[11px] font-bold uppercase tracking-wider text-dim">
+                <tr>
+                  <th className="px-4 py-3">Employee</th>
+                  <th className="px-4 py-3">Role</th>
+                  <th className="px-4 py-3">Work Email (Primary)</th>
+                  <th className="px-4 py-3">Personal Email (Backup)</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/60">
-                {filteredEmployees.map((emp) => {
-                  const hasWorkEmail = Boolean(emp.workEmail && emp.workEmail.includes('@'));
-
-                  return (
-                    <tr key={emp.id} className="hover:bg-raised/40 transition">
-                      <td className="py-2.5 px-3 font-mono font-bold text-indigo-300">
-                        {emp.employeeNumber || '—'}
-                      </td>
-                      <td className="py-2.5 px-3 font-bold text-text">
-                        {emp.name}
-                      </td>
-                      <td className="py-2.5 px-3 text-muted">
-                        {emp.role}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {hasWorkEmail ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-emerald-400 font-medium">
-                              {emp.workEmail}
+                {filteredEmployees.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="p-6 text-center text-muted">
+                      No employees matched your search.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredEmployees.map((emp) => (
+                    <tr key={emp.id} className="hover:bg-white/[0.02]">
+                      <td className="px-4 py-3 font-semibold text-text">
+                        <div className="flex items-center gap-2">
+                          <span>{emp.name}</span>
+                          {emp.employeeNumber && (
+                            <span className="rounded bg-indigo-500/20 px-1.5 py-0.2 font-mono text-[10px] font-bold text-indigo-300 border border-indigo-500/30">
+                              {emp.employeeNumber}
                             </span>
-                            <span className="rounded bg-emerald-500/20 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300 border border-emerald-500/30">
-                              Active
-                            </span>
-                          </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-dim">{emp.role}</td>
+                      <td className="px-4 py-3 font-mono">
+                        {emp.workEmail ? (
+                          <span className="text-indigo-300 font-medium">{emp.workEmail}</span>
                         ) : (
-                          <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30">
-                            Missing Work Email
-                          </span>
+                          <span className="text-rose-400 italic text-[11px]">No work email</span>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 font-mono text-muted text-[11px]">
+                      <td className="px-4 py-3 font-mono text-dim">
                         {emp.personalEmail || '—'}
                       </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <button
-                          type="button"
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          variant="secondary"
                           onClick={() => openEditEmployee(emp)}
-                          className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 hover:underline cursor-pointer"
+                          className="py-1 px-2.5 text-[11px]"
                         >
                           Edit Email
-                        </button>
+                        </Button>
                       </td>
                     </tr>
-                  );
-                })}
+                  ))
+                )}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      </Panel>
 
       {/* Edit Employee Email Modal */}
       {editingEmployee && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6 overflow-y-auto">
-          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-2xl space-y-4 text-text">
             <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h3 className="text-base font-bold text-text flex items-center gap-2">
-                  <span>Update Employee Email</span>
-                  {editingEmployee.employeeNumber && (
-                    <Badge tone="brand" size="sm">
-                      {editingEmployee.employeeNumber}
-                    </Badge>
-                  )}
-                </h3>
-                <p className="mt-0.5 text-xs text-muted">
-                  {editingEmployee.name} · {editingEmployee.role}
+                <h3 className="font-bold text-sm">Edit Employee Email</h3>
+                <p className="text-xs text-muted">
+                  {editingEmployee.name} ({editingEmployee.employeeNumber || editingEmployee.id})
                 </p>
               </div>
               <button
-                type="button"
                 onClick={() => setEditingEmployee(null)}
-                className="text-muted hover:text-text cursor-pointer p-1"
-                aria-label="Close modal"
+                className="text-muted hover:text-white"
               >
-                <XIcon className="h-5 w-5" />
+                <XIcon className="h-4 w-4" />
               </button>
             </div>
 
@@ -802,37 +1043,37 @@ export function EmailSettingsPanel() {
               </div>
             )}
 
-            <div className="space-y-3.5 text-xs">
+            <div className="space-y-3">
               <div>
-                <label className="block text-muted font-semibold mb-1">
-                  Official Work Email (Used for Notifications)
+                <label className="text-xs font-semibold text-text block mb-1">
+                  Work Email (Primary notification inbox)
                 </label>
                 <input
                   type="email"
                   value={editWorkEmail}
                   onChange={(e) => setEditWorkEmail(e.target.value)}
-                  placeholder="name@forgottenwomen.org"
-                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-text font-mono placeholder-dim focus:border-brand focus:outline-none"
+                  placeholder="e.g. employee@forgottenwomen.org"
+                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-muted font-semibold mb-1">
-                  Personal Backup Email
+                <label className="text-xs font-semibold text-text block mb-1">
+                  Personal Email (Backup notification inbox)
                 </label>
                 <input
                   type="email"
                   value={editPersonalEmail}
                   onChange={(e) => setEditPersonalEmail(e.target.value)}
-                  placeholder="personal@gmail.com"
-                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-text font-mono placeholder-dim focus:border-brand focus:outline-none"
+                  placeholder="e.g. personal@gmail.com"
+                  className="w-full rounded-xl border border-line bg-raised px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 border-t border-line pt-3">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
               <Button
-                variant="ghost"
+                variant="secondary"
                 onClick={() => setEditingEmployee(null)}
                 disabled={savingEmployee}
                 className="text-xs"
@@ -840,12 +1081,11 @@ export function EmailSettingsPanel() {
                 Cancel
               </Button>
               <Button
-                variant="primary"
                 onClick={handleSaveEmployeeEmail}
                 disabled={savingEmployee}
-                className="text-xs font-bold"
+                className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4"
               >
-                {savingEmployee ? 'Saving…' : 'Save Email Changes'}
+                {savingEmployee ? 'Saving…' : 'Save Changes'}
               </Button>
             </div>
           </div>
