@@ -587,16 +587,24 @@ export function EmailSettingsPanel() {
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-semibold text-text block mb-1">
-                            Directory (Tenant) ID
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs font-semibold text-text">
+                              Directory (Tenant) ID
+                            </label>
+                            <span className="text-[10px] text-amber-300 font-medium">
+                              Required for Single-Tenant
+                            </span>
+                          </div>
                           <input
                             type="text"
                             value={oauthTenantId}
                             onChange={(e) => setOauthTenantId(e.target.value)}
-                            placeholder="common (or your Azure Tenant GUID)"
+                            placeholder="e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx or domain"
                             className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-mono text-text focus:border-indigo-500 focus:outline-none"
                           />
+                          <p className="text-[10px] text-muted mt-1">
+                            Found directly beneath Client ID on your Azure App Overview page.
+                          </p>
                         </div>
 
                         <div>
@@ -612,6 +620,15 @@ export function EmailSettingsPanel() {
                           />
                         </div>
                       </div>
+
+                      {oauthTenantId === 'common' && (
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-300 flex items-start gap-2">
+                          <AlertTriangleIcon className="h-4 w-4 shrink-0 mt-0.5" />
+                          <span>
+                            If your Azure app was created as <em>Single Tenant</em>, replace <code>common</code> with your <strong>Directory (tenant) ID</strong> (found on your Azure App Overview page) to avoid Microsoft error AADSTS50194.
+                          </span>
+                        </div>
+                      )}
 
                       {/* Callback URL Card */}
                       <div className="rounded-xl border border-line bg-surface/70 p-3 text-xs space-y-1">
