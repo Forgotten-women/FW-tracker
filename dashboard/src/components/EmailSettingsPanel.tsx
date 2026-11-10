@@ -68,9 +68,7 @@ export function EmailSettingsPanel() {
   const [savingEmployee, setSavingEmployee] = useState(false);
   const [editEmpError, setEditEmpError] = useState<string | null>(null);
 
-  const redirectUri = typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.host}/api/admin/email/microsoft/callback`
-    : 'https://api.fwtracker.tech/api/admin/email/microsoft/callback';
+  const redirectUri = 'https://api.fwtracker.tech/api/admin/email/microsoft/callback';
 
   const loadData = async () => {
     setLoading(true);
@@ -170,7 +168,7 @@ export function EmailSettingsPanel() {
       });
 
       // 2. Fetch Microsoft OAuth authorization URL
-      const res = await api.getMicrosoftAuthUrl();
+      const res = await api.getMicrosoftAuthUrl(redirectUri);
       if (res.url) {
         // 3. Redirect to Microsoft Single Sign-On
         window.location.href = res.url;

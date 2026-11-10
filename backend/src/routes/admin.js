@@ -20,6 +20,16 @@ const liveDoorbell = require('../lib/liveDoorbell');
 const liveView = require('../domain/liveView');
 
 // --- Public Microsoft 365 OAuth 2.0 Callback (Browser Redirect from Microsoft) ---
+function getMicrosoftRedirectUri(req) {
+  if (req.query.redirectUri) return String(req.query.redirectUri);
+  const host = req.get('x-forwarded-host') || req.get('host') || '';
+  if (!host || host.startsWith('backend') || host.includes('backend:5000') || host.includes('localhost') || host.includes('127.0.0.1')) {
+    return 'https://api.fwtracker.tech/api/admin/email/microsoft/callback';
+  }
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+  return `${proto}://${host}/api/admin/email/microsoft/callback`;
+}
+
 router.get('/email/microsoft/callback', async (req, res) => {
   const mailer = require('../domain/mailer');
   const { code, error, error_description } = req.query;
@@ -36,7 +46,7 @@ router.get('/email/microsoft/callback', async (req, res) => {
   }
 
   try {
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/admin/email/microsoft/callback`;
+    const redirectUri = getMicrosoftRedirectUri(req);
     const result = await mailer.handleMicrosoftOAuthCallback(String(code), redirectUri);
     return res.redirect(`${dashboardUrl}/?tab=settings&ms_oauth=success&email=${encodeURIComponent(result.accountEmail || '')}`);
   } catch (err) {
@@ -1147,7 +1157,7 @@ router.post('/settings/batch', async (req, res) => {
 router.get('/email/microsoft/auth-url', async (req, res) => {
   const mailer = require('../domain/mailer');
   try {
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/admin/email/microsoft/callback`;
+    const redirectUri = getMicrosoftRedirectUri(req);
     const stateToken = crypto.randomBytes(16).toString('hex');
     const url = await mailer.getMicrosoftAuthUrl(redirectUri, stateToken);
     res.json({ status: 'SUCCESS', url, redirectUri });

@@ -1124,8 +1124,10 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  getMicrosoftAuthUrl: () =>
-    request<{ status: string; url: string; redirectUri: string }>('/api/admin/email/microsoft/auth-url'),
+  getMicrosoftAuthUrl: (redirectUri?: string) =>
+    request<{ status: string; url: string; redirectUri: string }>(
+      `/api/admin/email/microsoft/auth-url${redirectUri ? `?redirectUri=${encodeURIComponent(redirectUri)}` : ''}`,
+    ),
 
   disconnectMicrosoftOAuth: () =>
     request<{ status: string }>('/api/admin/email/microsoft/disconnect', {
