@@ -21,9 +21,22 @@ const liveView = require('../domain/liveView');
 
 // --- Public Microsoft 365 OAuth 2.0 Callback (Browser Redirect from Microsoft) ---
 function getMicrosoftRedirectUri(req) {
-  if (req.query.redirectUri) return String(req.query.redirectUri);
+  if (req.query && req.query.redirectUri) {
+    const qUri = String(req.query.redirectUri).trim();
+    if (qUri.startsWith('http://') || qUri.startsWith('https://')) {
+      return qUri;
+    }
+  }
   const host = req.get('x-forwarded-host') || req.get('host') || '';
-  if (!host || host.startsWith('backend') || host.includes('backend:5000') || host.includes('localhost') || host.includes('127.0.0.1')) {
+  if (
+    process.env.NODE_ENV === 'production' ||
+    !host ||
+    host.includes('fwtracker.tech') ||
+    host.startsWith('backend') ||
+    host.includes('backend:5000') ||
+    host.includes('localhost') ||
+    host.includes('127.0.0.1')
+  ) {
     return 'https://api.fwtracker.tech/api/admin/email/microsoft/callback';
   }
   const proto = req.get('x-forwarded-proto') || req.protocol || 'https';

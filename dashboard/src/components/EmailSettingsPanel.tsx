@@ -645,8 +645,8 @@ export function EmailSettingsPanel() {
                         <div className="font-mono text-[11px] text-indigo-300 break-all select-all">
                           {redirectUri}
                         </div>
-                        <div className="text-[10px] text-dim">
-                          Paste this exact Web redirect URI into Azure Portal &gt; App registrations &gt; Authentication.
+                        <div className="text-[10px] text-dim leading-relaxed">
+                          Add this Web redirect URI in Azure Portal &gt; Authentication. You can also click <strong>Add URI</strong> and add <span className="font-mono text-indigo-300">https://fwtracker.tech/api/admin/email/microsoft/callback</span> so both domains are permitted.
                         </div>
                       </div>
                     </div>
