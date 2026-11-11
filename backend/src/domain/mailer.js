@@ -7,6 +7,28 @@
 const nodemailer = require('nodemailer');
 const { db, tx } = require('../db');
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Normalizes a single email, comma/semicolon-separated string, or array into a
+ * deduplicated list of valid recipient email addresses.
+ */
+function normalizeRecipients(to) {
+  const items = Array.isArray(to) ? to : String(to || '').split(/[;,]/);
+  const unique = [];
+  const seen = new Set();
+  for (const raw of items) {
+    const addr = String(raw || '').trim();
+    if (!EMAIL_RE.test(addr)) continue;
+    const key = addr.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(addr);
+    }
+  }
+  return unique;
+}
+
 /**
  * Retrieves the current email configuration from org_settings.
  */
@@ -281,6 +303,11 @@ async function getFreshMicrosoftAccessToken() {
  * Dispatches an email via Microsoft Graph API (/me/sendMail).
  */
 async function sendEmailViaGraph({ to, subject, html, text }) {
+  const recipients = normalizeRecipients(to);
+  if (recipients.length === 0) {
+    throw new Error('At least one valid recipient email address is required.');
+  }
+
   const token = await getFreshMicrosoftAccessToken();
 
   const payload = {
@@ -290,13 +317,9 @@ async function sendEmailViaGraph({ to, subject, html, text }) {
         contentType: 'HTML',
         content: html || `<p>${text || subject}</p>`,
       },
-      toRecipients: [
-        {
-          emailAddress: {
-            address: to,
-          },
-        },
-      ],
+      toRecipients: recipients.map(address => ({
+        emailAddress: { address },
+      })),
     },
     saveToSentItems: true,
   };
@@ -320,7 +343,7 @@ async function sendEmailViaGraph({ to, subject, html, text }) {
     throw new Error(errMsg);
   }
 
-  return { sent: true, messageId: `ms_graph_${Date.now()}` };
+  return { sent: true, messageId: `ms_graph_${Date.now()}`, recipients };
 }
 
 /**
@@ -465,8 +488,13 @@ async function sendEmail({ to, subject, html, text }) {
     return { sent: false, reason: 'email_notifications_disabled' };
   }
 
+  const recipients = normalizeRecipients(to);
+  if (recipients.length === 0) {
+    return { sent: false, reason: 'no_valid_email_on_file' };
+  }
+
   if (cfg.deliveryMethod === 'oauth' && cfg.oauthRefreshToken) {
-    return sendEmailViaGraph({ to, subject, html, text });
+    return sendEmailViaGraph({ to: recipients, subject, html, text });
   }
 
   const transporter = createTransporter(cfg);
@@ -476,18 +504,18 @@ async function sendEmail({ to, subject, html, text }) {
 
   const info = await transporter.sendMail({
     from: `"${cfg.fromName}" <${cfg.fromAddress}>`,
-    to,
+    to: recipients.join(', '),
     subject,
     text: text || subject,
     html: html || `<p>${text || subject}</p>`,
   });
 
-  return { sent: true, messageId: info.messageId };
+  return { sent: true, messageId: info.messageId, recipients };
 }
 
 /**
  * Handles targeted employee notification dispatch.
- * Checks category configuration and looks up recipient work/personal email.
+ * Checks category configuration and delivers to both work and personal emails.
  */
 async function sendNotificationEmail({ employeeId, category, title, body, severity = 'info' }) {
   if (!employeeId) return { sent: false, reason: 'no_employee_id' };
@@ -514,7 +542,7 @@ async function sendNotificationEmail({ employeeId, category, title, body, severi
     return { sent: false, reason: 'absences_email_disabled' };
   }
 
-  // Look up employee email
+  // Look up employee work and personal emails
   const emp = await db.prepare(`
     SELECT e.id, e.name, e.employee_number, e.work_email, ep.personal_email
     FROM employees e
@@ -526,8 +554,8 @@ async function sendNotificationEmail({ employeeId, category, title, body, severi
     return { sent: false, reason: 'employee_not_found' };
   }
 
-  const recipientEmail = emp.work_email || emp.personal_email;
-  if (!recipientEmail || !recipientEmail.includes('@')) {
+  const recipients = normalizeRecipients([emp.work_email, emp.personal_email]);
+  if (recipients.length === 0) {
     return { sent: false, reason: 'no_valid_email_on_file' };
   }
 
@@ -547,7 +575,7 @@ async function sendNotificationEmail({ employeeId, category, title, body, severi
   });
 
   return sendEmail({
-    to: recipientEmail,
+    to: recipients,
     subject,
     html,
     text: `${title}\n\n${body}\n\nEmployee: ${emp.name} (${emp.employee_number || ''})`,
@@ -556,9 +584,11 @@ async function sendNotificationEmail({ employeeId, category, title, body, severi
 
 /**
  * Tests connection with custom or stored credentials and sends a test email.
+ * Accepts `to` (single or comma-separated emails) and/or `employeeId`.
  */
 async function testConnection({
   to,
+  employeeId,
   deliveryMethod,
   smtpHost,
   smtpPort,
@@ -568,9 +598,28 @@ async function testConnection({
   fromName,
   fromAddress,
 }) {
-  if (!to || !to.includes('@')) {
-    throw new Error('A valid recipient email address is required for the test email.');
+  let rawRecipients = to;
+  let recipientName = 'HR Administrator';
+
+  if ((!rawRecipients || !String(rawRecipients).trim()) && employeeId) {
+    const emp = await db.prepare(`
+      SELECT e.id, e.name, e.employee_number, e.work_email, ep.personal_email
+      FROM employees e
+      LEFT JOIN employee_personal ep ON ep.employee_id = e.id
+      WHERE e.id = ?
+    `).get(employeeId);
+    if (!emp) {
+      throw new Error('Employee not found.');
+    }
+    rawRecipients = [emp.work_email, emp.personal_email];
+    recipientName = emp.name;
   }
+
+  const recipients = normalizeRecipients(rawRecipients);
+  if (recipients.length === 0) {
+    throw new Error('At least one valid recipient email address is required for the test email.');
+  }
+  const recipientsList = recipients.join(', ');
 
   const stored = await getEmailConfig();
   const method = deliveryMethod || stored.deliveryMethod;
@@ -586,27 +635,28 @@ async function testConnection({
       title: 'Microsoft 365 OAuth Connection Test Succeeded',
       body: 'Your Microsoft 365 account has been verified via OAuth 2.0 / Microsoft Graph API and is ready to send automated workforce updates, warnings, and leave notifications without passwords.',
       severity: 'info',
-      employeeName: 'HR Administrator',
+      employeeName: recipientName,
       details: [
         { label: 'Delivery Mode', value: 'Microsoft Graph API (OAuth 2.0)' },
         { label: 'Connected Account', value: stored.oauthAccountEmail || stored.fromAddress },
         { label: 'Account Name', value: stored.oauthAccountName || 'Microsoft 365 User' },
-        { label: 'Test Delivered To', value: to },
-        { label: 'Verification Time', value: new Date().toLocaleString('en-GB') },
+        { label: 'Test Delivered To', value: recipientsList },
+        { label: 'Verification Time', value: new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi' }) },
       ],
     });
 
     const graphResult = await sendEmailViaGraph({
-      to,
+      to: recipients,
       subject: testSubject,
       html: testHtml,
-      text: `Microsoft 365 OAuth Test Succeeded.\nAccount: ${stored.oauthAccountEmail}\nDelivered To: ${to}\nTime: ${new Date().toISOString()}`,
+      text: `Microsoft 365 OAuth Test Succeeded.\nAccount: ${stored.oauthAccountEmail}\nDelivered To: ${recipientsList}\nTime: ${new Date().toISOString()}`,
     });
 
     return {
       status: 'SUCCESS',
-      message: `Test email successfully sent via Microsoft Graph API to ${to}. Connected account: ${stored.oauthAccountEmail}`,
+      message: `Test email successfully sent via Microsoft Graph API to ${recipientsList}. Connected account: ${stored.oauthAccountEmail}`,
       deliveryMethod: 'oauth',
+      recipients,
       messageId: graphResult.messageId,
     };
   }
@@ -637,33 +687,35 @@ async function testConnection({
   // 2. Dispatch test email
   const info = await transporter.sendMail({
     from: `"${cfg.fromName}" <${cfg.fromAddress}>`,
-    to,
+    to: recipientsList,
     subject: '[FW Tracker] Microsoft 365 SMTP Email Connection Test Succeeded',
-    text: `Your Microsoft 365 email configuration is working successfully.\n\nHost: ${cfg.smtpHost}:${cfg.smtpPort}\nUser: ${cfg.smtpUser}\nTime: ${new Date().toISOString()}`,
+    text: `Your Microsoft 365 email configuration is working successfully.\n\nHost: ${cfg.smtpHost}:${cfg.smtpPort}\nUser: ${cfg.smtpUser}\nDelivered To: ${recipientsList}\nTime: ${new Date().toISOString()}`,
     html: renderEmailHtml({
       title: 'Microsoft 365 SMTP Connection Test Succeeded',
       body: 'Your Microsoft 365 email service has been verified via SMTP and is ready to send automated workforce updates, warnings, and leave notifications.',
       severity: 'info',
-      employeeName: 'HR Administrator',
+      employeeName: recipientName,
       details: [
         { label: 'SMTP Host', value: `${cfg.smtpHost}:${cfg.smtpPort}` },
         { label: 'Authenticated Account', value: cfg.smtpUser },
         { label: 'Sender Address', value: cfg.fromAddress },
-        { label: 'Test Delivered To', value: to },
-        { label: 'Verification Time', value: new Date().toLocaleString('en-GB') },
+        { label: 'Test Delivered To', value: recipientsList },
+        { label: 'Verification Time', value: new Date().toLocaleString('en-GB', { timeZone: 'Asia/Karachi' }) },
       ],
     }),
   });
 
   return {
     status: 'SUCCESS',
-    message: `Test email successfully sent to ${to}. Message ID: ${info.messageId}`,
+    message: `Test email successfully sent to ${recipientsList}. Message ID: ${info.messageId}`,
     deliveryMethod: 'smtp',
+    recipients,
     messageId: info.messageId,
   };
 }
 
 module.exports = {
+  normalizeRecipients,
   getEmailConfig,
   createTransporter,
   getMicrosoftAuthUrl,

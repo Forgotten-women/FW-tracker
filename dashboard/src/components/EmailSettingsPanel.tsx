@@ -320,7 +320,11 @@ export function EmailSettingsPanel() {
     );
   }, [employees, search]);
 
-  const configuredCount = employees.filter((e) => e.workEmail && e.workEmail.includes('@')).length;
+  const configuredCount = employees.filter(
+    (e) =>
+      (e.workEmail && e.workEmail.includes('@')) ||
+      (e.personalEmail && e.personalEmail.includes('@')),
+  ).length;
   const isOauthConnected = Boolean(oauthAccountEmail);
 
   if (loading) {
@@ -799,10 +803,10 @@ export function EmailSettingsPanel() {
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <input
-                  type="email"
+                  type="text"
                   value={testRecipient}
                   onChange={(e) => setTestRecipient(e.target.value)}
-                  placeholder="Enter recipient email (e.g. your email address)"
+                  placeholder="Enter recipient email(s), comma-separated"
                   className="flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-text focus:border-indigo-500 focus:outline-none"
                 />
                 <Button
@@ -960,7 +964,7 @@ export function EmailSettingsPanel() {
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <p className="text-xs text-muted">
-              Notifications are delivered to the employee&apos;s official work email, with personal email used as fallback.
+              Notifications are delivered to both the employee&apos;s work email and personal email when configured.
             </p>
             <div className="w-full sm:w-72">
               <input
@@ -979,8 +983,8 @@ export function EmailSettingsPanel() {
                 <tr>
                   <th className="px-4 py-3">Employee</th>
                   <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">Work Email (Primary)</th>
-                  <th className="px-4 py-3">Personal Email (Backup)</th>
+                  <th className="px-4 py-3">Work Email</th>
+                  <th className="px-4 py-3">Personal Email</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -1061,7 +1065,7 @@ export function EmailSettingsPanel() {
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-text block mb-1">
-                  Work Email (Primary notification inbox)
+                  Work Email
                 </label>
                 <input
                   type="email"
@@ -1074,7 +1078,7 @@ export function EmailSettingsPanel() {
 
               <div>
                 <label className="text-xs font-semibold text-text block mb-1">
-                  Personal Email (Backup notification inbox)
+                  Personal Email
                 </label>
                 <input
                   type="email"
