@@ -165,11 +165,19 @@ function resolveTarget(target, callback) {
       try {
         const data = JSON.parse(raw);
         if (data.status === 'SUCCESS' && Array.isArray(data.workstations)) {
-          const match = data.workstations.find(w =>
+          const matches = data.workstations.filter(w =>
             String(w.employeeNumber).toUpperCase() === String(target).toUpperCase() ||
             w.deviceId === target
           );
-          if (match) return callback(null, match);
+          if (matches.length > 0) {
+            // Prioritize CONNECTED device first, then ONLINE, then most recently active
+            matches.sort((a, b) => {
+              if (a.status === 'CONNECTED' && b.status !== 'CONNECTED') return -1;
+              if (b.status === 'CONNECTED' && a.status !== 'CONNECTED') return 1;
+              return (Number(b.lastSeenAt) || 0) - (Number(a.lastSeenAt) || 0);
+            });
+            return callback(null, matches[0]);
+          }
         }
         callback(null, { deviceId: target, employeeNumber: target, employeeName: target, status: 'UNKNOWN' });
       } catch (err) {
