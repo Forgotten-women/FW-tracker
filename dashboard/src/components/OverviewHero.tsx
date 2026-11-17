@@ -3,7 +3,7 @@
 import { useId } from 'react';
 import type { DashboardSummary } from '@/lib/types';
 
-export type HeroFilter = 'ALL' | 'IN_OFFICE' | 'WORKSTATION' | 'ON_BREAK' | 'ON_LEAVE' | 'LATE' | 'AWAY';
+export type HeroFilter = 'ALL' | 'IN_OFFICE' | 'WORKSTATION' | 'ON_BREAK' | 'ON_LEAVE' | 'LATE' | 'AWAY' | 'FORMER';
 
 interface Props {
   summary: DashboardSummary;
@@ -80,6 +80,8 @@ export function OverviewHero({
     { filter: 'ON_LEAVE', label: 'On leave', value: onLeave, hint: 'Approved coverage', icon: Icon.leave, from: '#a78bfa', to: '#7c3aed' },
     { filter: 'LATE', label: 'Late / deficit', value: late, hint: 'Policy flagged', icon: Icon.clock, from: '#fb7185', to: '#e11d48' },
     { filter: 'AWAY', label: 'Away / out', value: away, hint: 'Not in office', icon: Icon.away, from: '#94a3b8', to: '#64748b' },
+    // Separate from every live figure above (and from the presence ring).
+    { filter: 'FORMER', label: 'Former employees', value: summary.stats.formerEmployees ?? 0, hint: 'Employment ended', icon: Icon.away, from: '#64748b', to: '#334155' },
   ];
 
   return (

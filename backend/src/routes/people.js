@@ -212,7 +212,9 @@ router.post('/employee/:employeeId/status',
         employeeId: req.params.employeeId,
         status: req.body?.status,
         effectiveDate: req.body?.effectiveDate || null,
+        finalEmploymentDate: req.body?.finalEmploymentDate || null,
         reason: req.body?.reason,
+        approvedBy: req.body?.approvedBy || null,
         actor: req.auth.actor,
       });
       res.json({ status: 'SUCCESS', ...r });

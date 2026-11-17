@@ -59,10 +59,12 @@ const selectEmployee = db.prepare('SELECT id, name, role, created_at FROM employ
 // contract end on the current record, if any. With no employment record at
 // all, the employee's creation date stands in for the start, so days before
 // they existed in the system aren't reported as absences.
+// A former employee's confirmed final date ends it: no attendance is expected after it.
 const selectEmploymentBounds = db.prepare(`
-  SELECT MIN(COALESCE(start_date, effective_from)) AS start_date,
-         MAX(CASE WHEN effective_to IS NULL THEN contract_end_date END) AS end_date
-  FROM employment_records WHERE employee_id = ?
+  SELECT MIN(COALESCE(er.start_date, er.effective_from)) AS start_date,
+         COALESCE(MAX(e.final_employment_date), MAX(CASE WHEN er.effective_to IS NULL THEN er.contract_end_date END)) AS end_date
+  FROM employment_records er JOIN employees e ON e.id = er.employee_id
+  WHERE er.employee_id = ?
 `);
 const selectSummaries = db.prepare(`
   SELECT date_key, first_clock_in, last_clock_out, worked_minutes, break_minutes, late_minutes,

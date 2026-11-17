@@ -1755,3 +1755,9 @@ CREATE TABLE IF NOT EXISTS leave_outstanding_adjustments (
   settled_at BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_leave_outstanding_emp ON leave_outstanding_adjustments(employee_id, status);
+
+-- 041: former employees (final employment date; pending until it has passed).
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS final_employment_date TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS former_pending BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS former_since BIGINT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS former_by TEXT;

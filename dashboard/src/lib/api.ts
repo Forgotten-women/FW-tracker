@@ -6,6 +6,7 @@
 
 import type {
   AbsenceRecord,
+  FormerEmployee,
   AbsenceReviewPreview,
   DeficitPeriodView,
   DeficitSettlementPreview,
@@ -264,14 +265,20 @@ export const api = {
 
   setEmployeeStatus: (
     employeeId: string,
-    data: { status: string; effectiveDate?: string; reason?: string }
+    data: { status: string; effectiveDate?: string; finalEmploymentDate?: string; reason?: string; approvedBy?: string }
   ) =>
-    request<{ status: string; effectiveDate: string; message?: string }>(
+    request<{ status: string; effectiveDate: string; message?: string; scheduled?: boolean; rehired?: boolean }>(
       `/api/admin/employees/${encodeURIComponent(employeeId)}/status`,
       {
         method: 'POST',
         body: JSON.stringify(data),
       },
+    ),
+
+  // Former employees (HR update 2026-11-17): kept apart from the live workforce.
+  formerEmployees: (q?: string) =>
+    request<{ status: string; count: number; employees: FormerEmployee[] }>(
+      `/api/admin/former-employees${q ? `?q=${encodeURIComponent(q)}` : ''}`,
     ),
 
   unpairEmployeeDevices: (employeeId: string) =>

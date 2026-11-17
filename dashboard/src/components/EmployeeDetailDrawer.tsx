@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import type { EmployeeDay, WorkstationItem, AppUsageItem, ScreenshotItem, EmployeeScreenshotsResponse, ShiftPattern } from '../lib/types';
 import { Badge, Button } from './primitives';
 import { ManualTimeModal } from './ManualTimeModal';
+import { EmploymentStatusControl } from './EmploymentStatusControl';
 import { ExportReportModal } from './ExportReportModal';
 import { LiveScreenViewer } from './LiveScreenViewer';
 import { EmployeeHistory } from './history/EmployeeHistory';
@@ -673,6 +674,8 @@ export function EmployeeDetailDrawer({ employee, onClose, onOpenPairing, onRefre
                   </Badge>
                 </div>
               </div>
+
+              <EmploymentStatusControl employeeId={employee.employeeId} employeeName={employee.employeeName} onChanged={onRefresh} />
 
               {/* Actions & Alerts Toolbar */}
               <div className="mt-4 pt-3.5 border-t border-white/8 flex items-center justify-between gap-3 flex-wrap">

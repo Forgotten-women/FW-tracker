@@ -109,7 +109,9 @@ router.get('/employees', async (req, res) => {
       workEmail: r.work_email || null,
       personalEmail: r.personal_email || null,
       active: !!r.active,
-      employmentStatus: r.employment_status || (r.active ? 'Active' : 'Left employment'),
+      employmentStatus: r.employment_status === 'Left employment' ? 'Former employee' : (r.employment_status || (r.active ? 'Active' : 'Former employee')),
+      finalEmploymentDate: r.final_employment_date || null,
+      formerPending: Number(r.former_pending) === 1,
       deviceCount: r.device_count,
       baseSalary: r.base_salary !== null && r.base_salary !== undefined ? Number(r.base_salary) : null,
       currency: r.salary_currency || null,
@@ -133,7 +135,7 @@ router.post('/employees', async (req, res) => {
     employeeNumber = String(employeeNumber).trim().toUpperCase();
     const existing = await db.prepare('SELECT id FROM employees WHERE UPPER(employee_number) = ?').get(employeeNumber);
     if (existing) {
-      return res.status(409).json({ status: 'ERROR', message: `Employee ID ${employeeNumber} is already assigned to another employee.` });
+      return res.status(409).json({ status: 'ERROR', message: 'Employee ID already assigned. Please use a new Employee ID.' });
     }
   } else {
     employeeNumber = await people.nextEmployeeNumber();
@@ -368,7 +370,9 @@ router.post('/employees/:id/status', async (req, res) => {
       employeeId: req.params.id,
       status: req.body?.status,
       effectiveDate: req.body?.effectiveDate || null,
-      reason: req.body?.reason || 'Status updated via admin console',
+      finalEmploymentDate: req.body?.finalEmploymentDate || null,
+      reason: req.body?.reason,
+      approvedBy: req.body?.approvedBy || null,
       actor: 'admin',
     });
     res.json({ status: 'SUCCESS', ...result });
@@ -377,10 +381,22 @@ router.post('/employees/:id/status', async (req, res) => {
   }
 });
 
+// GET /api/admin/former-employees?q= - employees whose employment has ended,
+// kept apart from the live workforce (search: name, ID, role, dates).
+router.get('/former-employees', async (req, res) => {
+  const people = require('../domain/people');
+  try {
+    const rows = await people.listFormerEmployees({ q: req.query.q || '' });
+    res.json({ status: 'SUCCESS', count: rows.length, employees: rows });
+  } catch (err) {
+    res.status(500).json({ status: 'ERROR', message: err.message });
+  }
+});
+
 router.delete('/employees/:id', async (req, res) => {
   return res.status(400).json({
     status: 'ERROR',
-    message: 'Permanent deletion of employee records is strictly prohibited to preserve historical attendance, payroll, leave, and audit integrity. Every Employee ID must remain attached to its historical record and cannot be deleted or reissued. To disconnect the mobile app, use "Unpair App"; to mark an employee departure, change their status to "Left employment".',
+    message: 'Permanent deletion of employee records is strictly prohibited to preserve historical attendance, payroll, leave, and audit integrity. Every Employee ID must remain attached to its historical record and cannot be deleted or reissued. To disconnect the mobile app, use "Unpair App"; to mark an employee departure, change their status to "Former employee".',
   });
 });
 

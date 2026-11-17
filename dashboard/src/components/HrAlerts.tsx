@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type { HrAlert, HrAlerts, AlertSeverity } from '@/lib/types';
 import { Button, Empty, Panel } from './primitives';
+import { EmploymentStatusModal } from './EmploymentStatusModal';
 
 // Colour SUPPLEMENTS the words, per spec 21 - the label is always present, so
 // colour is never the only signal.
@@ -36,6 +37,9 @@ export function HrAlertsPanel({ focusSignal }: { focusSignal?: number } = {}) {
   const [data, setData] = useState<HrAlerts | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // End employment (contract / probation): moves to Former Employees.
+  const [ending, setEnding] = useState<HrAlert | null>(null);
+  const [endedNote, setEndedNote] = useState<string | null>(null);
   // Contract renewal form, open for one alert at a time.
   const [renewing, setRenewing] = useState<HrAlert | null>(null);
   const [renewEnd, setRenewEnd] = useState('');
@@ -152,6 +156,11 @@ export function HrAlertsPanel({ focusSignal }: { focusSignal?: number } = {}) {
                       Renew
                     </Button>
                   )}
+                  {(a.type === 'CONTRACT_EXPIRY' || a.type === 'PROBATION_REVIEW') && (
+                    <Button onClick={() => { setEndedNote(null); setEnding(a); }} disabled={busy === a.key} title="End employment and move to Former Employees on the confirmed final date">
+                      End employment
+                    </Button>
+                  )}
                   <Button
                     onClick={() => dismiss(a)}
                     disabled={busy === a.key}
@@ -166,6 +175,19 @@ export function HrAlertsPanel({ focusSignal }: { focusSignal?: number } = {}) {
         </ul>
       )}
 
+      {endedNote && (
+        <div role="status" className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{endedNote}</div>
+      )}
+      {ending && (
+        <EmploymentStatusModal
+          employeeId={ending.employeeId}
+          employeeName={ending.employeeName}
+          mode="FORMER"
+          defaultFinalDate={/^\d{4}-\d{2}-\d{2}$/.test(String(ending.value || '')) ? String(ending.value) : null}
+          onClose={() => setEnding(null)}
+          onDone={(message) => { setEnding(null); setEndedNote(`${ending.employeeName}: ${message}`); void load(); }}
+        />
+      )}
       {renewing && (
         <div className="mt-3 rounded-lg border border-line bg-raised p-3 text-xs">
           <p className="font-semibold text-text">

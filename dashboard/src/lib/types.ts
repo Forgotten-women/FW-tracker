@@ -117,6 +117,8 @@ export interface DashboardSummary {
   currentDateKey: string;
   stats: {
     totalActiveEmployees: number;
+    // Shown on its own card, never part of the live figures.
+    formerEmployees?: number;
     currentlyInOffice: number;
     currentlyInGracePeriod: number;
     currentlyAway: number;
@@ -170,6 +172,22 @@ export interface AdminEmployee {
   startDate?: string | null;
   appTrackingEnabled?: boolean;
   overtimeCounted?: boolean;
+  employmentStatus?: string;
+  finalEmploymentDate?: string | null;
+  formerPending?: boolean;
+}
+
+export interface FormerEmployee {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string | null;
+  role: string;
+  employmentStatus: 'Former employee';
+  employmentStartDate: string | null;
+  finalEmploymentDate: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+  reason: string | null;
 }
 
 export interface EnrollmentCode {

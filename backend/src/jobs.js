@@ -568,6 +568,8 @@ let timer = null;
  */
 async function runMaintenanceTick(nowMs = T.now()) {
   try {
+    // First, so nobody past their final employment date is expected at work today.
+    try { await require('./domain/people').applyScheduledFormerEmployees(nowMs); } catch (err) { console.error('[jobs] former employees failed:', err.message); }
     await rollover(nowMs);
     // Its own guard: a stuck break silently books whole days as break time.
     try { await A.closeStaleBreaks(null, nowMs); } catch (err) { console.error('[jobs] closeStaleBreaks failed:', err.message); }

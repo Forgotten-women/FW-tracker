@@ -53,6 +53,11 @@ router.get('/summary', async (req, res) => {
 
   const movements = await db.prepare('SELECT * FROM movements ORDER BY at DESC LIMIT 20').all();
 
+  // Shown on its own card, never counted in the live workforce figures.
+  const formerEmployees = Number((await db.prepare(
+    "SELECT COUNT(*) c FROM employees WHERE active = 0 AND employment_status IN ('Former employee', 'Left employment')"
+  ).get()).c) || 0;
+
   // Days where a session hit the cap, usually a phone left in the office
   // overnight. Surfaced rather than silently truncated, so HR can correct it.
   const needsReview = board.filter(e => e.needsReview);
@@ -65,6 +70,7 @@ router.get('/summary', async (req, res) => {
     currentDateKey: todayKey,
     stats: {
       totalActiveEmployees: board.length,
+      formerEmployees,
       currentlyInOffice: inOffice.length,
       currentlyInGracePeriod: grace.length,
       currentlyAway: away.length,

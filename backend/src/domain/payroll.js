@@ -233,9 +233,12 @@ async function eligibleWorkingDays(employeeId, fromDate, toDate) {
   return days;
 }
 
+// A former employee's confirmed final employment date ends their employment
+// for payroll, whatever the contract said.
 const selectEmploymentDates = db.prepare(`
-  SELECT start_date, contract_end_date FROM employment_records
-  WHERE employee_id = ? ORDER BY effective_from ASC LIMIT 1
+  SELECT er.start_date, COALESCE(e.final_employment_date, er.contract_end_date) AS contract_end_date
+  FROM employment_records er JOIN employees e ON e.id = er.employee_id
+  WHERE er.employee_id = ? ORDER BY er.effective_from ASC LIMIT 1
 `);
 
 // ---------------------------------------------------------------------------
@@ -657,6 +660,7 @@ function deductionWindowEnd(period, effectiveEnd, throughDate = null) {
 const selectPayrollEmployees = db.prepare(`
   SELECT e.id, e.name, e.employee_number FROM employees e
   WHERE e.active = 1
+     OR (e.final_employment_date >= ? AND e.final_employment_date <= ?)
      OR EXISTS (
        SELECT 1 FROM employment_records er
        WHERE er.employee_id = e.id AND er.contract_end_date >= ? AND er.contract_end_date <= ?
@@ -680,7 +684,7 @@ async function payrollEmployees(period) {
     const paid = await selectPaidEmployees.all(period.id);
     if (paid.length > 0) return paid;
   }
-  return await selectPayrollEmployees.all(period.start_date, period.end_date);
+  return await selectPayrollEmployees.all(period.start_date, period.end_date, period.start_date, period.end_date);
 }
 
 /**

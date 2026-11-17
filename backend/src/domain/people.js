@@ -233,46 +233,191 @@ async function employmentHistory(employeeId) {
 // Employment status (spec 4.3)
 // ---------------------------------------------------------------------------
 
+// "Former employee" (HR update 2026-11-17) replaces "Left employment", which
+// is still accepted and still means the same thing for records set before.
+const FORMER = 'Former employee';
+const FORMER_STATUSES = ['Former employee', 'Left employment'];
 const VALID_STATUS = ['Pre-start', 'Active', 'Probation', 'Probation extended',
-  'Notice period', 'Suspended', 'Long-term leave', 'Left employment'];
+  'Notice period', 'Suspended', 'Long-term leave', FORMER, 'Left employment'];
+const isFormerStatus = (s) => FORMER_STATUSES.includes(s);
 
-async function setStatus({ employeeId, status, effectiveDate = null, reason, actor }) {
-  if (!VALID_STATUS.includes(status)) throw new Error(`status must be one of ${VALID_STATUS.join(', ')}.`);
+function isDateKey(d) { return /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')); }
+
+/** Takes the employee out of the live workforce: no access, no devices, no expected attendance. */
+async function deactivateAsFormer(employeeId, nowMs, actor) {
+  await db.prepare(`
+    UPDATE employees SET employment_status = ?, active = 0, former_pending = 0, former_since = ?, former_by = ?, updated_at = ?
+    WHERE id = ?
+  `).run(FORMER, nowMs, actor, nowMs, employeeId);
+  await db.prepare('UPDATE devices SET revoked_at = ? WHERE employee_id = ? AND revoked_at IS NULL').run(nowMs, employeeId);
+  await db.prepare(`
+    UPDATE device_tokens SET revoked_at = ?
+    WHERE device_id IN (SELECT id FROM devices WHERE employee_id = ?) AND revoked_at IS NULL
+  `).run(nowMs, employeeId);
+  await require('./bindings').revokeForEmployee(employeeId, 'Former employee');
+}
+
+/**
+ * Changes an employee's employment status. Every change is kept in
+ * employment_status_history (who, when, effective date, reason) and audited.
+ *
+ * Former employee: needs the confirmed final employment date. If it has
+ * already passed, the employee leaves the live workforce now; if it is today
+ * or still ahead, they keep working until then and the daily job moves them
+ * the day after (applyScheduledFormerEmployees). Nothing is deleted: profile,
+ * contracts, attendance, leave, deficit, payroll, warnings, documents, notes,
+ * notifications and audit history all stay, and the Employee ID stays theirs.
+ *
+ * Rehire (any active status for a former employee): active again under the
+ * same permanent Employee ID; the earlier final date stays in the history.
+ */
+async function setStatus({ employeeId, status, effectiveDate = null, finalEmploymentDate = null, reason, approvedBy = null, actor, nowMs = T.now() }) {
+  if (!VALID_STATUS.includes(status)) throw new Error(`status must be one of ${VALID_STATUS.filter(s => s !== 'Left employment').join(', ')}.`);
+  // The older "Left employment" call (no date) means: ended today, effective now.
+  const legacyLeaver = status === 'Left employment';
+  if (legacyLeaver) status = FORMER;
   const emp = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
   if (!emp) throw new Error('No such employee.');
   if (!reason || !String(reason).trim()) throw new Error('A reason is required.');
+  const note = String(reason).trim() + (approvedBy && String(approvedBy).trim() ? ` (approved by ${String(approvedBy).trim()})` : '');
 
-  const nowMs = T.now();
-  const effDate = effectiveDate || T.dateKey(nowMs);
+  const todayKey = T.dateKey(nowMs);
+  const wasFormer = isFormerStatus(emp.employment_status) && !emp.active;
 
+  if (status === FORMER) {
+    const finalDate = finalEmploymentDate || effectiveDate || (legacyLeaver ? T.dateKey(nowMs) : null);
+    if (!isDateKey(finalDate)) throw new Error('The final employment date is required (YYYY-MM-DD).');
+    if (wasFormer) throw new Error('This employee is already a former employee.');
+    const startRow = await db.prepare('SELECT MIN(start_date) AS d FROM employment_records WHERE employee_id = ?').get(employeeId);
+    if (startRow?.d && finalDate < startRow.d) throw new Error(`The final employment date cannot be before the employment start date (${startRow.d}).`);
+    const scheduled = legacyLeaver ? false : finalDate >= todayKey;
+
+    await tx(async () => {
+      await db.prepare(`
+        INSERT INTO employment_status_history (employee_id, from_status, to_status, effective_date, reason, changed_at, changed_by)
+        VALUES (?,?,?,?,?,?,?)
+      `).run(employeeId, emp.employment_status, scheduled ? `${FORMER} (from ${finalDate})` : FORMER, finalDate, note, nowMs, actor);
+      if (scheduled) {
+        await db.prepare('UPDATE employees SET final_employment_date = ?, former_pending = 1, updated_at = ? WHERE id = ?')
+          .run(finalDate, nowMs, employeeId);
+      } else {
+        await db.prepare('UPDATE employees SET final_employment_date = ? WHERE id = ?').run(finalDate, employeeId);
+        await deactivateAsFormer(employeeId, nowMs, actor);
+      }
+      await audit({
+        actor, action: scheduled ? 'FORMER_EMPLOYEE_SCHEDULED' : 'FORMER_EMPLOYEE',
+        targetType: 'employee', targetId: employeeId,
+        before: { status: emp.employment_status, active: Boolean(emp.active), finalEmploymentDate: emp.final_employment_date || null },
+        after: { status: FORMER, finalEmploymentDate: finalDate, scheduled, approvedBy: approvedBy || null },
+        note,
+      });
+    });
+    try { require('../lib/swrCache').invalidate('liveBoard'); } catch (_) {}
+    try { require('./payroll').invalidatePayrollCache(employeeId); } catch (_) {}
+    return {
+      status: scheduled ? emp.employment_status || 'Active' : FORMER,
+      effectiveDate: finalDate,
+      finalEmploymentDate: finalDate,
+      scheduled,
+      message: scheduled
+        ? `Final employment date ${finalDate} recorded. They stay in the live workforce until then and become a former employee the day after.`
+        : 'Moved to Former employees. Their full history is kept.',
+    };
+  }
+
+  // Any other status. For a former (or pending-former) employee this is a rehire / cancellation.
+  const effDate = effectiveDate || todayKey;
   await tx(async () => {
     await db.prepare(`
       INSERT INTO employment_status_history (employee_id, from_status, to_status, effective_date, reason, changed_at, changed_by)
       VALUES (?,?,?,?,?,?,?)
-    `).run(employeeId, emp.employment_status, status, effDate, String(reason).trim(), nowMs, actor);
-    await db.prepare('UPDATE employees SET employment_status = ?, updated_at = ? WHERE id = ?')
-      .run(status, nowMs, employeeId);
-
-    // A leaver loses access at once. Spec 27.
-    if (status === 'Left employment') {
-      await db.prepare('UPDATE employees SET active = 0 WHERE id = ?').run(employeeId);
-      await db.prepare('UPDATE devices SET revoked_at = ? WHERE employee_id = ? AND revoked_at IS NULL').run(nowMs, employeeId);
-      await db.prepare(`
-        UPDATE device_tokens SET revoked_at = ?
-        WHERE device_id IN (SELECT id FROM devices WHERE employee_id = ?) AND revoked_at IS NULL
-      `).run(nowMs, employeeId);
-      await require('./bindings').revokeForEmployee(employeeId, 'Employee left');
-    } else {
-      await db.prepare('UPDATE employees SET active = 1 WHERE id = ?').run(employeeId);
-    }
-
+    `).run(employeeId, wasFormer ? FORMER : emp.employment_status, status, effDate, wasFormer ? `Rehired: ${note}` : note, nowMs, actor);
+    await db.prepare(`
+      UPDATE employees SET employment_status = ?, active = 1, former_pending = 0,
+        final_employment_date = CASE WHEN ? THEN NULL ELSE final_employment_date END,
+        former_since = CASE WHEN ? THEN NULL ELSE former_since END,
+        updated_at = ?
+      WHERE id = ?
+    `).run(status, wasFormer || Number(emp.former_pending) === 1, wasFormer, nowMs, employeeId);
     await audit({
-      actor, action: 'STATUS_CHANGED', targetType: 'employee', targetId: employeeId,
-      before: { status: emp.employment_status }, after: { status }, note: String(reason).trim(),
+      actor, action: wasFormer ? 'EMPLOYEE_REHIRED' : 'STATUS_CHANGED', targetType: 'employee', targetId: employeeId,
+      before: { status: emp.employment_status, active: Boolean(emp.active), finalEmploymentDate: emp.final_employment_date || null, formerPending: Number(emp.former_pending) === 1 },
+      after: { status, effectiveDate: effDate, employeeNumber: emp.employee_number, approvedBy: approvedBy || null },
+      note,
     });
   });
+  try { require('../lib/swrCache').invalidate('liveBoard'); } catch (_) {}
+  return {
+    status, effectiveDate: effDate, rehired: wasFormer,
+    message: wasFormer
+      ? `Rehired as ${status} with the same Employee ID (${emp.employee_number || 'unchanged'}). Their earlier employment history is kept. Pair their devices again to resume tracking.`
+      : 'Status updated.',
+  };
+}
 
-  return { status, effectiveDate: effDate };
+/** Daily: employees whose confirmed final date has passed become former employees. */
+async function applyScheduledFormerEmployees(nowMs = T.now()) {
+  const todayKey = T.dateKey(nowMs);
+  const due = await db.prepare(`
+    SELECT id, name, final_employment_date FROM employees
+    WHERE former_pending = 1 AND final_employment_date IS NOT NULL AND final_employment_date < ?
+  `).all(todayKey);
+  for (const e of due) {
+    await tx(async () => {
+      await deactivateAsFormer(e.id, nowMs, 'system:final-date');
+      await db.prepare(`
+        INSERT INTO employment_status_history (employee_id, from_status, to_status, effective_date, reason, changed_at, changed_by)
+        VALUES (?,?,?,?,?,?,?)
+      `).run(e.id, null, FORMER, e.final_employment_date, 'Final employment date passed', nowMs, 'system:final-date');
+      await audit({
+        actor: 'system:final-date', action: 'FORMER_EMPLOYEE', targetType: 'employee', targetId: e.id,
+        after: { status: FORMER, finalEmploymentDate: e.final_employment_date, scheduled: false },
+        note: 'Final employment date passed',
+      });
+    });
+  }
+  if (due.length) { try { require('../lib/swrCache').invalidate('liveBoard'); } catch (_) {} }
+  return { moved: due.length };
+}
+
+/** Former employees for the dashboard list, newest first; searchable. */
+async function listFormerEmployees({ q = '' } = {}) {
+  const rows = await db.prepare(`
+    SELECT e.id, e.name, e.employee_number, e.role, e.employment_status, e.final_employment_date,
+           e.former_since, e.former_by,
+           COALESCE(er.job_title, e.role) AS job_title, er.start_date,
+           h.changed_at AS status_changed_at, h.changed_by AS status_changed_by, h.reason AS status_reason
+    FROM employees e
+    LEFT JOIN LATERAL (
+      SELECT job_title, start_date FROM employment_records
+      WHERE employee_id = e.id ORDER BY effective_from DESC LIMIT 1
+    ) er ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT changed_at, changed_by, reason FROM employment_status_history
+      WHERE employee_id = e.id AND to_status IN ('Former employee', 'Left employment')
+      ORDER BY changed_at DESC LIMIT 1
+    ) h ON TRUE
+    WHERE e.active = 0 AND e.employment_status IN ('Former employee', 'Left employment')
+    ORDER BY COALESCE(e.final_employment_date, '') DESC, e.name
+  `).all();
+  const firstStart = await db.prepare('SELECT employee_id, MIN(start_date) AS d FROM employment_records GROUP BY employee_id').all();
+  const startBy = new Map(firstStart.map(r => [r.employee_id, r.d]));
+  const term = String(q || '').trim().toLowerCase();
+  return rows
+    .map(r => ({
+      employeeId: r.id,
+      employeeName: r.name,
+      employeeNumber: r.employee_number || null,
+      role: r.job_title || r.role || '',
+      employmentStatus: 'Former employee',
+      employmentStartDate: startBy.get(r.id) || r.start_date || null,
+      finalEmploymentDate: r.final_employment_date || null,
+      updatedBy: r.former_by || r.status_changed_by || null,
+      updatedAt: r.former_since || r.status_changed_at ? T.displayDate(Number(r.former_since || r.status_changed_at)) : null,
+      reason: r.status_reason || null,
+    }))
+    .filter(r => !term || [r.employeeName, r.employeeNumber, r.role, r.employmentStartDate, r.finalEmploymentDate]
+      .some(v => v && String(v).toLowerCase().includes(term)));
 }
 
 // ---------------------------------------------------------------------------
@@ -655,7 +800,7 @@ module.exports = {
   createOffice, listOffices, createDepartment, listDepartments,
   assignManager, endManagerAssignment,
   setEmployment, renewContract, currentEmployment, employmentHistory,
-  setStatus, setPersonal, setBank, addEmergencyContact,
+  setStatus, applyScheduledFormerEmployees, listFormerEmployees, isFormerStatus, FORMER, setPersonal, setBank, addEmergencyContact,
   updateEmergencyContact, deleteEmergencyContact,
   profile, myEmployeeProfile, nextEmployeeNumber, unpairEmployeeDevices,
   VALID_TYPES, VALID_STATUS,

@@ -15,6 +15,7 @@ import { formatHM } from '@/lib/dayView';
 import { Badge, Button, Empty, STATUS_META } from '@/components/primitives';
 import { AttendanceCorrectionsPanel } from '@/components/panels';
 import { OverviewHero, type HeroFilter } from '@/components/OverviewHero';
+import { FormerEmployeesList } from './FormerEmployeesList';
 import { DownloadIcon, XIcon } from '@/components/icons';
 import { ExportReportModal } from '@/components/ExportReportModal';
 import type { DrawerOpenOptions } from '@/components/EmployeeDetailDrawer';
@@ -38,6 +39,7 @@ const FILTER_LABEL: Record<HeroFilter, string> = {
   LATE: 'Late / deficit',
   AWAY: 'Away / out',
   ON_LEAVE: 'On leave',
+  FORMER: 'Former employees',
 };
 
 interface UnifiedWorkforcePanelProps {
@@ -437,7 +439,22 @@ export function UnifiedWorkforcePanel({
       </div>
 
       {/* 4. WORKFORCE ROSTER CONTENT */}
-      {isHistorical ? (
+      {statusFilter === 'FORMER' && !isHistorical ? (
+        <FormerEmployeesList
+          onOpen={(f) => onSelectEmployee({
+            employeeId: f.employeeId,
+            employeeName: f.employeeName,
+            employeeNumber: f.employeeNumber,
+            role: f.role,
+            date: summary.currentDateKey,
+            status: 'NOT_CHECKED_IN',
+            statusLabel: 'Former employee',
+            firstCheckIn: '—',
+            lastActiveTime: '—',
+            totalMinutes: 0,
+          } as EmployeeDay, { tab: 'history' })}
+        />
+      ) : isHistorical ? (
         /* Historical Attendance Ledger */
         <div className="glass-panel rounded-3xl p-6">
           <div className="mb-4 flex items-center justify-between">
