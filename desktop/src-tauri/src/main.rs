@@ -5,6 +5,7 @@ mod autostart;
 mod capture;
 mod client;
 mod db;
+mod it_relay;
 mod live;
 mod namaz;
 mod net;
@@ -848,6 +849,7 @@ fn main() {
             tauri::async_runtime::spawn(live::run_doorbell(app_handle.clone()));
             tauri::async_runtime::spawn(live::run_stream_worker(app_handle.clone()));
             tauri::async_runtime::spawn(live::run_break_sync(app_handle.clone()));
+            tauri::async_runtime::spawn(it_relay::run(app_handle.clone()));
 
             // Dedicated Periodic Screenshot Task (Customizable HR Interval + Self-Healing Watchdog)
             let app_handle_shots = app_handle.clone();
