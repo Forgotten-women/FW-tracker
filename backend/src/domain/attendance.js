@@ -577,6 +577,23 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
       ? { ...s, scheduledStartAt: mid, latestOnTimeAt: mid + (s.graceMinutes || 0) * MIN + 59999 }
       : { ...s, scheduledEndAt: mid };
     s.dayEquivalentMinutes = Math.round((s.dayEquivalentMinutes || 480) / 2);
+  } else if (leave && leave.hourly && leave.startTime && leave.endTime && s.isWorkingDay && s.scheduledStartAt && s.scheduledEndAt) {
+    const [sh, sm] = leave.startTime.split(':').map(Number);
+    const [eh, em] = leave.endTime.split(':').map(Number);
+    const leaveStartMs = T.startOfDay(dateKey) + (sh * 60 + sm) * MIN;
+    const leaveEndMs = T.startOfDay(dateKey) + (eh * 60 + em) * MIN;
+    if (leaveEndMs >= s.scheduledEndAt) {
+      s = { ...s, scheduledEndAt: Math.min(s.scheduledEndAt, leaveStartMs) };
+    }
+    if (leaveStartMs <= s.scheduledStartAt) {
+      s = {
+        ...s,
+        scheduledStartAt: Math.max(s.scheduledStartAt, leaveEndMs),
+        latestOnTimeAt: Math.max(s.scheduledStartAt, leaveEndMs) + (s.graceMinutes || 0) * MIN + 59999,
+      };
+    }
+    const leaveMins = leave.minutes || Math.max(0, Math.round((leaveEndMs - leaveStartMs) / MIN));
+    s.dayEquivalentMinutes = Math.max(0, (s.dayEquivalentMinutes || 480) - leaveMins);
   }
 
   const day = buildDayView({

@@ -271,7 +271,7 @@ async function workingDaysBetween(employeeId, fromKey, toKey) {
 // Work from home (leave type 'wfh') is a working day, not time off: it is
 // excluded here and answered by wfhOn() instead.
 const selectLeaveOn = db.prepare(`
-  SELECT id, day_portion FROM leave_requests
+  SELECT id, day_portion, reason FROM leave_requests
   WHERE employee_id = ? AND status = 'APPROVED' AND cancelled_at IS NULL
     AND leave_type_id <> 'wfh'
     AND start_date <= ? AND end_date >= ?
@@ -311,7 +311,35 @@ async function leaveOn(employeeId, dateKey) {
   for (const r of rows) {
     const p = String(r.day_portion || 'FULL_DAY').toUpperCase();
     if (p.startsWith('HOURLY')) {
-      return { requestId: r.id, fullDay: false, half: null, hourly: true, dayPortion: r.day_portion };
+      let startTime = null;
+      let endTime = null;
+      let minutes = null;
+      const m = p.match(/HOURLY:(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/);
+      if (m) {
+        startTime = m[1];
+        endTime = m[2];
+      } else if (r.reason) {
+        const mReason = String(r.reason).match(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
+        if (mReason) {
+          startTime = mReason[1];
+          endTime = mReason[2];
+        }
+      }
+      if (startTime && endTime) {
+        const [sh, sm] = startTime.split(':').map(Number);
+        const [eh, em] = endTime.split(':').map(Number);
+        minutes = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+      }
+      return {
+        requestId: r.id,
+        fullDay: false,
+        half: null,
+        hourly: true,
+        startTime,
+        endTime,
+        minutes,
+        dayPortion: r.day_portion,
+      };
     }
     const half = /(^|_)(AM|MORNING|FIRST)/.test(p) ? 'FIRST_HALF'
       : /(^|_)(PM|AFTERNOON|SECOND)/.test(p) ? 'SECOND_HALF'
