@@ -74,6 +74,8 @@ wss.on('connection', (ws, req, clientInfo) => {
             return;
           }
 
+          // Normalize target to deviceId so client-side agent accepts it
+          msg.target = agentEntry.meta.deviceId;
           agentEntry.ws.send(JSON.stringify(msg));
         }
       } catch (err) {

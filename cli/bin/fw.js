@@ -147,67 +147,127 @@ function cmdList() {
   });
 }
 
+function resolveTarget(target, callback) {
+  if (!target) return callback(new Error('Target required'));
+  if (target.startsWith('dev_')) {
+    return callback(null, { deviceId: target, employeeNumber: target, employeeName: target, status: 'CONNECTED' });
+  }
+
+  const urlObj = new URL(`${config.serverUrl}/api/it/workstations`);
+  const reqModule = urlObj.protocol === 'https:' ? https : http;
+
+  const req = reqModule.get(urlObj.toString(), {
+    headers: { 'x-it-key': config.masterKey },
+  }, (res) => {
+    let raw = '';
+    res.on('data', chunk => raw += chunk);
+    res.on('end', () => {
+      try {
+        const data = JSON.parse(raw);
+        if (data.status === 'SUCCESS' && Array.isArray(data.workstations)) {
+          const match = data.workstations.find(w =>
+            String(w.employeeNumber).toUpperCase() === String(target).toUpperCase() ||
+            w.deviceId === target
+          );
+          if (match) return callback(null, match);
+        }
+        callback(null, { deviceId: target, employeeNumber: target, employeeName: target, status: 'UNKNOWN' });
+      } catch (err) {
+        callback(null, { deviceId: target, employeeNumber: target, employeeName: target, status: 'UNKNOWN' });
+      }
+    });
+  });
+
+  req.on('error', () => {
+    callback(null, { deviceId: target, employeeNumber: target, employeeName: target, status: 'UNKNOWN' });
+  });
+}
+
 function cmdDiag(target) {
   if (!target) {
-    console.error('\x1b[31mError: Target required. e.g. fw diag PK018\x1b[0m');
+    console.error('\x1b[31mError: Target required. e.g. fwt diag PK018\x1b[0m');
     process.exit(1);
   }
 
-  getWebSocket((ws) => {
-    const reqId = crypto.randomBytes(4).toString('hex');
-    ws.send(JSON.stringify({ action: 'forward', target, type: 'diag', reqId }));
+  resolveTarget(target, (err, info) => {
+    const devId = info ? info.deviceId : target;
+    const empName = info && info.employeeName ? ` (${info.employeeName})` : '';
 
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === 'diag_res' && msg.reqId === reqId) {
-        console.log(`\n\x1b[1m\x1b[32m--- WORKSTATION DIAGNOSTICS [${target}] ---\x1b[0m`);
-        console.log(`  \x1b[1mHostname:\x1b[0m    ${msg.hostname}`);
-        console.log(`  \x1b[1mActive User:\x1b[0m ${msg.user}`);
-        console.log(`  \x1b[1mOS Version:\x1b[0m  ${msg.os}`);
-        console.log(`  \x1b[1mCPUs:\x1b[0m        ${msg.cpus} cores`);
-        console.log(`  \x1b[1mMemory:\x1b[0m      ${msg.memory}`);
-        console.log(`  \x1b[1mUptime:\x1b[0m      ${msg.uptime}`);
-        console.log(`  \x1b[1mStatus:\x1b[0m      \x1b[32mONLINE\x1b[0m\n`);
+    getWebSocket((ws) => {
+      const reqId = crypto.randomBytes(4).toString('hex');
+      ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'diag', reqId }));
+
+      const timeout = setTimeout(() => {
+        console.log(`\x1b[33mRequest timed out waiting for ${target}${empName}.\x1b[0m`);
         ws.close();
-      } else if (msg.type === 'error' || msg.type === 'queued') {
-        console.log(`\x1b[33m${msg.message}\x1b[0m`);
-        ws.close();
-      }
+        process.exit(1);
+      }, 10000);
+
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'diag_res' && msg.reqId === reqId) {
+          clearTimeout(timeout);
+          console.log(`\n\x1b[1m\x1b[32m--- WORKSTATION DIAGNOSTICS [${target}${empName}] ---\x1b[0m`);
+          console.log(`  \x1b[1mHostname:\x1b[0m    ${msg.hostname}`);
+          console.log(`  \x1b[1mActive User:\x1b[0m ${msg.user}`);
+          console.log(`  \x1b[1mOS Version:\x1b[0m  ${msg.os}`);
+          console.log(`  \x1b[1mCPUs:\x1b[0m        ${msg.cpus} cores`);
+          if (msg.memory) console.log(`  \x1b[1mMemory:\x1b[0m      ${msg.memory}`);
+          if (msg.uptime) console.log(`  \x1b[1mUptime:\x1b[0m      ${msg.uptime}`);
+          console.log(`  \x1b[1mStatus:\x1b[0m      \x1b[32mONLINE\x1b[0m\n`);
+          ws.close();
+        } else if (msg.type === 'error' || msg.type === 'queued') {
+          clearTimeout(timeout);
+          console.log(`\x1b[33m${msg.message}\x1b[0m`);
+          ws.close();
+        }
+      });
     });
   });
 }
 
 function cmdExec(target, command) {
   if (!target || !command) {
-    console.error('\x1b[31mError: Target and command required. e.g. fw exec PK018 "<cmd>"\x1b[0m');
+    console.error('\x1b[31mError: Target and command required. e.g. fwt exec PK018 "<cmd>"\x1b[0m');
     process.exit(1);
   }
 
-  getWebSocket((ws) => {
-    const reqId = crypto.randomBytes(4).toString('hex');
-    ws.send(JSON.stringify({ action: 'forward', target, type: 'exec', command, reqId }));
+  resolveTarget(target, (err, info) => {
+    const devId = info ? info.deviceId : target;
+    const empName = info && info.employeeName ? ` (${info.employeeName})` : '';
 
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === 'queued') {
-        console.log(`\x1b[33m${msg.message}\x1b[0m`);
-        ws.close();
-        process.exit(0);
-      }
-      if (msg.reqId !== reqId) return;
+    getWebSocket((ws) => {
+      const reqId = crypto.randomBytes(4).toString('hex');
+      ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'exec', command, reqId }));
 
-      if (msg.type === 'exec_out') {
-        process.stdout.write(msg.data);
-      } else if (msg.type === 'exec_err') {
-        process.stderr.write(msg.data);
-      } else if (msg.type === 'exec_done') {
-        ws.close();
-        process.exit(msg.code || 0);
-      } else if (msg.type === 'error') {
-        console.error(`\x1b[31m${msg.message}\x1b[0m`);
-        ws.close();
-        process.exit(1);
-      }
+      const timeout = setTimeout(() => {
+        console.log(`\x1b[33mCommand sent to ${target}${empName}. Waiting for execution...\x1b[0m`);
+      }, 5000);
+
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'queued') {
+          clearTimeout(timeout);
+          console.log(`\x1b[33m${msg.message}\x1b[0m`);
+          ws.close();
+          process.exit(0);
+        }
+        if (msg.reqId !== reqId) return;
+
+        clearTimeout(timeout);
+        if (msg.type === 'exec_out') {
+          process.stdout.write(msg.data);
+        } else if (msg.type === 'exec_err') {
+          process.stderr.write(msg.data);
+        } else if (msg.type === 'exec_done') {
+          ws.close();
+          process.exit(msg.code || 0);
+        } else if (msg.type === 'error') {
+          console.error(`\x1b[31m${msg.message}\x1b[0m`);
+          ws.close();
+          process.exit(1);
+        }
+      });
     });
   });
 }
@@ -223,23 +283,27 @@ function cmdPush(target, localPath, remotePath) {
     process.exit(1);
   }
 
-  const content = fs.readFileSync(localPath).toString('base64');
-  getWebSocket((ws) => {
-    const reqId = crypto.randomBytes(4).toString('hex');
-    ws.send(JSON.stringify({ action: 'forward', target, type: 'push', destPath: remotePath, content, reqId }));
+  resolveTarget(target, (err, info) => {
+    const devId = info ? info.deviceId : target;
+    const content = fs.readFileSync(localPath).toString('base64');
 
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.reqId !== reqId) return;
+    getWebSocket((ws) => {
+      const reqId = crypto.randomBytes(4).toString('hex');
+      ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'push', destPath: remotePath, content, reqId }));
 
-      if (msg.type === 'push_res') {
-        if (msg.success) {
-          console.log(`\x1b[32m✓ File successfully pushed to ${msg.path} (${msg.size} bytes)\x1b[0m`);
-        } else {
-          console.error(`\x1b[31mFailed to push file: ${msg.error}\x1b[0m`);
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.reqId !== reqId) return;
+
+        if (msg.type === 'push_res') {
+          if (msg.success) {
+            console.log(`\x1b[32m✓ File successfully pushed to ${msg.path} (${msg.size} bytes)\x1b[0m`);
+          } else {
+            console.error(`\x1b[31mFailed to push file: ${msg.error}\x1b[0m`);
+          }
+          ws.close();
         }
-        ws.close();
-      }
+      });
     });
   });
 }
@@ -250,75 +314,117 @@ function cmdPull(target, remotePath, localDest) {
     process.exit(1);
   }
 
-  getWebSocket((ws) => {
-    const reqId = crypto.randomBytes(4).toString('hex');
-    ws.send(JSON.stringify({ action: 'forward', target, type: 'pull', srcPath: remotePath, reqId }));
+  resolveTarget(target, (err, info) => {
+    const devId = info ? info.deviceId : target;
 
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.reqId !== reqId) return;
+    getWebSocket((ws) => {
+      const reqId = crypto.randomBytes(4).toString('hex');
+      ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'pull', srcPath: remotePath, reqId }));
 
-      if (msg.type === 'pull_res') {
-        if (msg.success) {
-          const destFile = fs.existsSync(localDest) && fs.statSync(localDest).isDirectory()
-            ? path.join(localDest, path.basename(remotePath))
-            : localDest;
-          fs.writeFileSync(destFile, Buffer.from(msg.content, 'base64'));
-          console.log(`\x1b[32m✓ File successfully downloaded to ${destFile}\x1b[0m`);
-        } else {
-          console.error(`\x1b[31mFailed to pull file: ${msg.error}\x1b[0m`);
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.reqId !== reqId) return;
+
+        if (msg.type === 'pull_res') {
+          if (msg.success) {
+            const destFile = fs.existsSync(localDest) && fs.statSync(localDest).isDirectory()
+              ? path.join(localDest, path.basename(remotePath))
+              : localDest;
+            fs.writeFileSync(destFile, Buffer.from(msg.content, 'base64'));
+            console.log(`\x1b[32m✓ File successfully downloaded to ${destFile}\x1b[0m`);
+          } else {
+            console.error(`\x1b[31mFailed to pull file: ${msg.error}\x1b[0m`);
+          }
+          ws.close();
         }
-        ws.close();
-      }
+      });
     });
   });
 }
 
 function cmdConnect(target) {
   if (!target) {
-    console.error('\x1b[31mError: Target required. e.g. fw connect PK018\x1b[0m');
+    console.error('\x1b[31mError: Target required. e.g. fwt connect PK018\x1b[0m');
     process.exit(1);
   }
 
-  console.log(`\x1b[33mConnecting to interactive shell on ${target}...\x1b[0m`);
-  console.log(`\x1b[90m(Type 'exit' to terminate the remote session)\x1b[0m\n`);
+  resolveTarget(target, (err, info) => {
+    const devId = info ? info.deviceId : target;
+    const empName = info && info.employeeName ? ` (${info.employeeName})` : '';
 
-  getWebSocket((ws) => {
-    ws.send(JSON.stringify({ action: 'forward', target, type: 'shell_start' }));
-
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
+    if (info && info.status === 'OFFLINE') {
+      console.log(`\x1b[31mWorkstation ${target}${empName} is currently OFFLINE.\x1b[0m`);
+      console.log(`\x1b[90mThe workstation must be powered on and online to open a live session.\x1b[0m\n`);
+      process.exit(1);
     }
-    process.stdin.resume();
 
-    process.stdin.on('data', (chunk) => {
-      ws.send(JSON.stringify({ action: 'forward', target, type: 'shell_input', data: chunk.toString() }));
-    });
+    if (info && info.status === 'ONLINE (POLLING)') {
+      console.log(`\x1b[33mNotice: Workstation ${target}${empName} is currently in polling mode (updating in background).\x1b[0m`);
+      console.log(`\x1b[33mDirect interactive shell requires CONNECTED status (v1.1.10).\x1b[0m`);
+      console.log(`\x1b[90mTip: To run a command immediately on next heartbeat, use: fwt exec ${target} "<cmd>"\x1b[0m\n`);
+      process.exit(1);
+    }
 
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === 'shell_output') {
-        process.stdout.write(msg.data);
-      } else if (msg.type === 'shell_closed') {
-        cleanup();
-        console.log(`\n\x1b[33mRemote shell closed (exit code ${msg.code}).\x1b[0m`);
-        process.exit(0);
-      } else if (msg.type === 'error' || msg.type === 'queued') {
-        cleanup();
-        console.error(`\x1b[31m${msg.message}\x1b[0m`);
-        process.exit(1);
-      }
-    });
+    console.log(`\x1b[33mConnecting to interactive shell on ${target}${empName}...\x1b[0m`);
+    console.log(`\x1b[90m(Type 'exit' to terminate the remote session)\x1b[0m\n`);
 
-    function cleanup() {
+    getWebSocket((ws) => {
+      let shellStarted = false;
+      const handshakeTimeout = setTimeout(() => {
+        if (!shellStarted) {
+          cleanup();
+          console.error(`\n\x1b[31m[Timeout] Workstation did not initialize shell within 12s.\x1b[0m`);
+          console.error(`\x1b[90mWorkstation may be in sleep mode or background update in progress.\x1b[0m`);
+          ws.close();
+          process.exit(1);
+        }
+      }, 12000);
+
+      ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_start' }));
+
+      // Prompt kickstart
+      setTimeout(() => {
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: "\r\n" }));
+        }
+      }, 400);
+
       if (process.stdin.isTTY) {
-        process.stdin.setRawMode(false);
+        process.stdin.setRawMode(true);
       }
-      process.stdin.pause();
-    }
+      process.stdin.resume();
 
-    ws.on('close', () => {
-      cleanup();
+      process.stdin.on('data', (chunk) => {
+        ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: chunk.toString() }));
+      });
+
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'shell_output') {
+          shellStarted = true;
+          clearTimeout(handshakeTimeout);
+          process.stdout.write(msg.data);
+        } else if (msg.type === 'shell_closed') {
+          cleanup();
+          console.log(`\n\x1b[33mRemote shell closed (exit code ${msg.code}).\x1b[0m`);
+          process.exit(0);
+        } else if (msg.type === 'error' || msg.type === 'queued') {
+          cleanup();
+          console.error(`\x1b[31m${msg.message}\x1b[0m`);
+          process.exit(1);
+        }
+      });
+
+      function cleanup() {
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(false);
+        }
+        process.stdin.pause();
+      }
+
+      ws.on('close', () => {
+        cleanup();
+      });
     });
   });
 }
