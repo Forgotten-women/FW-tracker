@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 backend/node_modules/
+cli/node_modules/
 
 # Database migrations are code and must be tracked
 !backend/src/db/**/*.sql

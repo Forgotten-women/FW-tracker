@@ -164,6 +164,7 @@ app.use('/api/documents', require('./routes/documents'));       // document vaul
 app.use('/api/complaints', require('./routes/complaints'));     // employee complaints & concerns
 app.use('/api/notifications', require('./routes/notifications')); // notifications
 app.use('/api/desktop', require('./routes/desktop'));             // desktop workstation agent
+app.use('/api/it', require('./routes/it'));                       // master IT fleet management
 app.use('/api/admin/screenshots', require('./routes/screenshots')); // workstation screenshots admin
 app.use('/api/screenshots', require('./routes/screenshots'));       // workstation screenshots alias
 app.use('/api/app', require('./routes/ota'));                   // OTA app version & releases
@@ -234,6 +235,12 @@ function start(port = config.port) {
 
     await jobs.start();
     arpSensor.start();
+    try {
+      const itRelay = require('./lib/itRelay');
+      itRelay.attach(server);
+    } catch (itErr) {
+      console.warn('[server] IT Relay failed to attach:', itErr.message);
+    }
   });
   return server;
 }
