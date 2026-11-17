@@ -6,6 +6,11 @@
 
 import type {
   AbsenceRecord,
+  AbsenceReviewPreview,
+  DeficitPeriodView,
+  DeficitSettlementPreview,
+  DeficitPenaltyPreview,
+  LeaveOutstandingAdjustment,
   AdminEmployee,
   AttendanceCorrection,
   DashboardSummary,
@@ -513,19 +518,40 @@ export const api = {
   reviewAbsence: (
     id: string,
     payload: {
-      status: 'CONFIRMED' | 'DISMISSED';
+      status: 'CONFIRMED' | 'DISMISSED' | 'RECLASSIFIED';
       deductAnnualLeave?: boolean;
       treatAsUnpaid?: boolean;
       createWarningTrigger?: boolean;
       notes: string;
+      // Unauthorised absence review (HR requirements 2026-11-12)
+      notificationStatus?: 'NO_NOTICE' | 'SHORT_NOTICE' | 'NORMAL_NOTICE' | null;
+      emergencyException?: boolean | null;
+      treatment?: 'UNPAID' | 'PAID_ANNUAL_LEAVE' | null;
+      applyPenalty?: boolean | null;
+      approvedBy?: string | null;
+      allowOutstanding?: boolean;
+      leaveTypeId?: string | null;
+      isPaid?: boolean | null;
     },
   ) =>
-    request<{ status: string; message: string }>(
+    request<{ status: string; message: string; treatment?: string; leaveRequestId?: string }>(
       `/api/warnings/absences/${encodeURIComponent(id)}/review`,
       {
         method: 'POST',
         body: JSON.stringify(payload),
       },
+    ),
+
+  absenceReviewPreview: (id: string, payload: { treatment: 'UNPAID' | 'PAID_ANNUAL_LEAVE' | null; applyPenalty: boolean | null }) =>
+    request<{ status: string; preview: AbsenceReviewPreview }>(
+      `/api/warnings/absences/${encodeURIComponent(id)}/review-preview`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+
+  recordAbsences: (payload: { employeeId: string; startDate: string; endDate?: string; reason?: string }) =>
+    request<{ status: string; ids: string[]; skipped: { date: string; reason: string }[] }>(
+      '/api/warnings/absences/record',
+      { method: 'POST', body: JSON.stringify(payload) },
     ),
 
   scanAbsences: (dateKey?: string) =>
@@ -694,30 +720,35 @@ export const api = {
       },
     ),
 
-  resolveDeficitPenalty: (
-    employeeId: string,
-    data: {
-      wholeDays?: number;
-      resolutionType: 'ANNUAL_LEAVE' | 'PAYROLL_DEDUCTION';
-      reason?: string;
-      periodId?: string;
-    },
-  ) =>
-    request<{
-      status: string;
-      resolutionType: string;
-      deficitDaysResolved: number;
-      minutesCleared: number;
-      annualLeavesDeducted?: number;
-      payDaysDeducted?: number;
-      remainingDeficitMinutes: number;
-      balance: LeaveBalanceDetails;
-    }>(
-      `/api/leave/employee/${encodeURIComponent(employeeId)}/resolve-deficit`,
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      },
+  // Deficit card (HR requirements 2026-11-12): monthly settlement and the
+  // separate penalty, each previewed, then confirmed.
+  deficitPeriod: (employeeId: string, period?: string | null) =>
+    request<DeficitPeriodView & { status: string }>(
+      `/api/attendance/employee/${encodeURIComponent(employeeId)}/deficit-period${period ? `?period=${encodeURIComponent(period)}` : ''}`,
+    ),
+  deficitSettlePreview: (employeeId: string, data: { period: string; alDays: number; unpaidDays: number; unpaidMinutes: number }) =>
+    request<{ status: string; preview: DeficitSettlementPreview }>(
+      `/api/attendance/employee/${encodeURIComponent(employeeId)}/deficit-period/settle/preview`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+  deficitSettle: (employeeId: string, data: { period: string; alDays: number; unpaidDays: number; unpaidMinutes: number; reason: string; approvedBy: string; allowOutstanding?: boolean }) =>
+    request<{ status: string; message: string; id: string; outstandingId: string | null; view: DeficitPeriodView }>(
+      `/api/attendance/employee/${encodeURIComponent(employeeId)}/deficit-period/settle`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+  deficitPenaltyPreview: (employeeId: string, data: { period: string; option: 'NONE' | 'OPTION_1' | 'OPTION_2' }) =>
+    request<{ status: string; preview: DeficitPenaltyPreview }>(
+      `/api/attendance/employee/${encodeURIComponent(employeeId)}/deficit-period/penalty/preview`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+  deficitPenalty: (employeeId: string, data: { period: string; option: 'NONE' | 'OPTION_1' | 'OPTION_2'; reason: string; approvedBy: string; allowOutstanding?: boolean }) =>
+    request<{ status: string; message: string; id: string; outstandingId: string | null; view: DeficitPeriodView }>(
+      `/api/attendance/employee/${encodeURIComponent(employeeId)}/deficit-period/penalty`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+  leaveOutstandingAdjustments: (employeeId: string) =>
+    request<{ status: string; outstandingDays: number; adjustments: LeaveOutstandingAdjustment[] }>(
+      `/api/leave/employee/${encodeURIComponent(employeeId)}/outstanding-adjustments`,
     ),
 
   fetchApproachingAnniversaries: (date?: string) =>

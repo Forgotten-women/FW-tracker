@@ -917,6 +917,11 @@ async function recomputeDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) 
 // Deficit ledger (spec 8.2, 8.3)
 // ---------------------------------------------------------------------------
 
+// One deficit day is eight hours (HR requirements 2026-11-12, section 9),
+// whatever the shift's own length. 26h 54m = 3 deficit days + 2h 54m, never
+// rounded up.
+const DEFICIT_DAY_MINUTES = 480;
+
 const selectLatestLedger = db.prepare(`
   SELECT * FROM attendance_deficit_ledger
   WHERE employee_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
@@ -963,7 +968,7 @@ async function balanceFor(employeeId, nowMs = T.now(), includeToday = true) {
     }
   }
 
-  const dayEquivalent = await (await schedule.resolve(employeeId)).dayEquivalentMinutes;
+  const dayEquivalent = DEFICIT_DAY_MINUTES;
   return {
     balanceMinutes: balance,
     wholeDayEquivalents: Math.floor(balance / dayEquivalent),
@@ -994,7 +999,7 @@ const selectLedgerAsOf = db.prepare(`
 async function balanceAsOf(employeeId, dateKey) {
   const cutoffMs = T.endOfDay(dateKey);
   const row = await selectLedgerAsOf.get(employeeId, cutoffMs);
-  const dayEquivalent = (await schedule.resolve(employeeId, dateKey)).dayEquivalentMinutes;
+  const dayEquivalent = DEFICIT_DAY_MINUTES;
 
   if (!row) {
     return { balanceMinutes: 0, wholeDayEquivalents: 0, carryForwardMinutes: 0, dayEquivalentMinutes: dayEquivalent };
@@ -1552,7 +1557,7 @@ async function calculateWorkingHoursMetrics(employeeId, dateKey = T.dateKey(), e
 module.exports = {
   deriveDay, recomputeDay, present,
   startBreak, endBreak, closeStaleBreaks, clockOut, selfClockOutRefusal, resumeDay, buildDayView,
-  balanceFor, balanceAsOf, postDeficit, adjustBalance, countLateOccurrences,
+  balanceFor, balanceAsOf, postDeficit, adjustBalance, countLateOccurrences, DEFICIT_DAY_MINUTES, insertLedger,
   addPeriodAdjustment, listPeriodAdjustments, deletePeriodAdjustment,
   latenessStatus, monitoringPeriod,
   calculateWorkingHoursMetrics,

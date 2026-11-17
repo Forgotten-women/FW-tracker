@@ -348,19 +348,69 @@ router.post('/absences/:id/review',
     }
 
     try {
+      const b = req.body || {};
       const r = await W.reviewAbsence({
         absenceId: req.params.id,
-        status: req.body?.status,
-        deductAnnualLeave: req.body?.deductAnnualLeave ?? null,
-        treatAsUnpaid: req.body?.treatAsUnpaid ?? null,
-        createWarningTrigger: req.body?.createWarningTrigger ?? null,
-        notes: req.body?.notes,
+        status: b.status,
+        deductAnnualLeave: b.deductAnnualLeave ?? null,
+        treatAsUnpaid: b.treatAsUnpaid ?? null,
+        createWarningTrigger: b.createWarningTrigger ?? null,
+        notes: b.notes,
+        // Unauthorised absence review (HR requirements 2026-11-12, section 4)
+        notificationStatus: b.notificationStatus ?? null,
+        emergencyException: b.emergencyException ?? null,
+        treatment: b.treatment ?? null,
+        applyPenalty: b.applyPenalty ?? null,
+        approvedBy: b.approvedBy ?? null,
+        allowOutstanding: Boolean(b.allowOutstanding),
+        leaveTypeId: b.leaveTypeId ?? null,
+        isPaid: b.isPaid ?? null,
         actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
       });
       res.json({
         status: 'SUCCESS', ...r,
-        message: 'Recorded. The chosen consequences are proposals and take effect only once approved.',
+        message: r.message || 'Recorded.',
       });
+    } catch (err) {
+      const status = err.code === 'INSUFFICIENT_BALANCE' || err.code === 'PENALTY_ALREADY_APPLIED' ? 409 : 400;
+      res.status(status).json({ status: 'ERROR', code: err.code || null, message: err.message, details: err.details || null });
+    }
+  });
+
+// POST /api/warnings/absences/:id/review-preview - what confirming would do
+// (annual leave impact, payroll impact, existing penalty on the incident)
+router.post('/absences/:id/review-preview',
+  requireUserOrAdminKey('attendance.write'),
+  async (req, res) => {
+    const record = await db.prepare('SELECT * FROM absence_records WHERE id = ?').get(req.params.id);
+    if (!record) return res.status(404).json({ status: 'ERROR', message: 'No such absence record.' });
+    if (!await rbac.canAccessEmployee(req.auth, record.employee_id)) {
+      return res.status(404).json({ status: 'ERROR', message: 'No such absence record.' });
+    }
+    try {
+      const b = req.body || {};
+      res.json({ status: 'SUCCESS', preview: await W.absenceReviewPreview({
+        absenceId: req.params.id, treatment: b.treatment ?? null, applyPenalty: b.applyPenalty ?? null,
+      }) });
+    } catch (err) {
+      res.status(400).json({ status: 'ERROR', message: err.message });
+    }
+  });
+
+// POST /api/warnings/absences/record - HR records unauthorised absence days
+router.post('/absences/record',
+  requireUserOrAdminKey('attendance.write'),
+  async (req, res) => {
+    const b = req.body || {};
+    if (!b.employeeId || !await rbac.canAccessEmployee(req.auth, b.employeeId)) {
+      return res.status(404).json({ status: 'ERROR', message: 'No such employee.' });
+    }
+    try {
+      const out = await W.recordHrAbsences({
+        employeeId: b.employeeId, startDate: b.startDate, endDate: b.endDate || b.startDate,
+        reason: b.reason || null, actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
+      });
+      res.json({ status: 'SUCCESS', ...out });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
     }

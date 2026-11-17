@@ -253,54 +253,40 @@ const selectEmploymentDates = db.prepare(`
 // ---------------------------------------------------------------------------
 
 const ATTENDANCE_DEFICIT_DAY = 'ATTENDANCE_DEFICIT_DAY';
+const ATTENDANCE_PENALTY_PAY = 'ATTENDANCE_PENALTY_PAY';
 const UNAUTHORISED_ABSENCE_UNPAID = 'UNAUTHORISED_ABSENCE_UNPAID';
 const UNPAID_LEAVE_DEDUCTION = 'UNPAID_LEAVE_DEDUCTION';
 
+/**
+ * Attendance-deficit pay deduction for a window: the unpaid part of every
+ * deficit settlement HR has confirmed on the deficit card and not yet
+ * proposed to a run (HR requirements 2026-11-12, sections 10-11, 36.1).
+ *
+ * Until 2026-11-12 this was derived from the ledger (every 480 accumulated
+ * minutes became an unpaid day automatically). It is no longer automatic:
+ * HR decides, per period, how many deficit days are paid annual leave,
+ * unpaid (whole days plus hours/minutes) or carried forward. One line per
+ * settlement, keyed by source_reference, so re-running proposes nothing twice.
+ * A penalty "option 1" day's pay is a separate line (ATTENDANCE_PENALTY_PAY).
+ */
 const selectExistingDeficitAdjustment = db.prepare(`
   SELECT * FROM payroll_adjustments
   WHERE period_id = ? AND employee_id = ? AND adjustment_type = ?
 `);
 
-const selectClaimedDeficitDays = db.prepare(`
-  SELECT COALESCE(SUM(calculated_days), 0) AS d
-  FROM payroll_adjustments WHERE employee_id = ? AND adjustment_type = ?
-`);
-
-/**
- * How many NEW attendance-deficit whole-days should be deducted, for a given
- * employee, as of a window's end date.
- *
- * If a payroll_adjustments row already exists for this employee+period (any
- * status), its figure is authoritative for preview - never recomputed to a
- * different number for an already-proposed/decided row. Otherwise the delta
- * is the employee's lifetime whole-day count as of windowEnd (via
- * attendance.balanceAsOf, which is bounded so deficit posted AFTER the
- * window cannot leak in) minus however many whole-days have ever been
- * claimed by a payroll_adjustments row for this employee, across any period.
- *
- * periodId is optional: starterCalculation/leaverCalculation call this
- * standalone (not tied to a specific payroll_periods row), in which case the
- * "existing row for this period" short-circuit is skipped and the live delta
- * is always computed.
- */
 async function deficitComponent({ employeeId, periodId = null, windowEnd }) {
-  if (periodId) {
-    const existing = await selectExistingDeficitAdjustment.get(periodId, employeeId, ATTENDANCE_DEFICIT_DAY);
-    if (existing) {
-      return {
-        days: existing.calculated_days,
-        amount: existing.calculated_amount,
-        existingAdjustmentId: existing.id,
-        status: existing.status,
-      };
-    }
-  }
+  const DP = require('./deficitPeriods');
+  const settlements = await DP.unclaimedUnpaidSettlements({ employeeId, throughDate: windowEnd, adjustmentType: ATTENDANCE_DEFICIT_DAY });
+  const days = Math.round(settlements.reduce((s, r) => s + r.dayEquivalents, 0) * 10000) / 10000;
+  let existing = null;
+  if (periodId) existing = await selectExistingDeficitAdjustment.get(periodId, employeeId, ATTENDANCE_DEFICIT_DAY);
+  return { days, amount: null, existingAdjustmentId: existing?.id || null, status: existing?.status || null, settlements };
+}
 
-  const claimed = Number((await selectClaimedDeficitDays.get(employeeId, ATTENDANCE_DEFICIT_DAY)).d) || 0;
-  const asOf = await attendance.balanceAsOf(employeeId, windowEnd);
-  const days = Math.max(0, asOf.wholeDayEquivalents - claimed);
-
-  return { days, amount: null, existingAdjustmentId: null, status: null, lifetimeWholeDays: asOf.wholeDayEquivalents, claimed };
+async function penaltyPayComponent({ employeeId, windowEnd }) {
+  const DP = require('./deficitPeriods');
+  const penalties = await DP.unclaimedPenaltyPay({ employeeId, throughDate: windowEnd, adjustmentType: ATTENDANCE_PENALTY_PAY });
+  return { days: penalties.reduce((s, r) => s + r.payDays, 0), penalties };
 }
 
 const selectUnclaimedAbsences = db.prepare(`
@@ -368,18 +354,23 @@ async function unclaimedUnpaidLeave({ employeeId, throughDate }) {
  */
 async function unpaidDaysSummary({ employeeId, periodId = null, windowEnd, dailyPrecise }) {
   const deficit = await deficitComponent({ employeeId, periodId, windowEnd });
+  const penalty = await penaltyPayComponent({ employeeId, windowEnd });
   const absences = await unclaimedUnpaidAbsences({ employeeId, throughDate: windowEnd });
   const leaveRows = await unclaimedUnpaidLeave({ employeeId, throughDate: windowEnd });
 
   const absenceDays = absences.length;
   const leaveDays = leaveRows.reduce((s, r) => s + (Number(r.total_days) || 0), 0);
-  const totalDays = deficit.days + absenceDays + leaveDays;
+  const totalDays = Math.round((deficit.days + penalty.days + absenceDays + leaveDays) * 10000) / 10000;
 
   return {
     deficitDays: deficit.days,
     deficitAmount: money(dailyPrecise * deficit.days),
     deficitAdjustmentId: deficit.existingAdjustmentId,
     deficitStatus: deficit.status,
+    deficitSettlements: deficit.settlements,
+    penaltyDays: penalty.days,
+    penaltyAmount: money(dailyPrecise * penalty.days),
+    penalties: penalty.penalties,
     absenceDays,
     absenceAmount: money(dailyPrecise * absenceDays),
     absenceRecordIds: absences.map(a => a.id),
@@ -489,8 +480,12 @@ async function leaverCalculation({ employeeId, lastWorkingDate, periodStart = nu
   const balance = await leave.balanceFor(employeeId, lastWorkingDate, { project: true });
   const leaveBlocked = balance.blocked;
 
-  const untakenDays = leaveBlocked ? null : Math.max(0, balance.availableDays);
-  const excessTakenDays = leaveBlocked ? null : Math.max(0, -balance.availableDays);
+  // Section 8: an approved annual leave penalty not yet applied is an
+  // Outstanding Annual Leave Adjustment, taken off the final balance.
+  const outstandingDays = leaveBlocked ? 0 : Math.round((await leave.outstandingDays(employeeId)) * 100) / 100;
+  const accruedBalanceDays = leaveBlocked ? null : Math.round(balance.availableDays * 100) / 100;
+  const untakenDays = leaveBlocked ? null : Math.max(0, Math.round((balance.availableDays - outstandingDays) * 100) / 100);
+  const excessTakenDays = leaveBlocked ? null : Math.max(0, Math.round((outstandingDays - balance.availableDays) * 100) / 100);
 
   // Attendance deficit, as whole-day equivalents - the lifetime informational
   // view, kept for continuity. The unpaidDays figure above is what actually
@@ -526,6 +521,8 @@ async function leaverCalculation({ employeeId, lastWorkingDate, periodStart = nu
           accruedDays: balance.accruedDays,
           takenDays: balance.takenDays,
           bookedDays: balance.bookedDays,
+          accruedBalanceDays,
+          outstandingAdjustmentDays: outstandingDays,
           untakenDays,
           excessTakenDays,
           untakenValue: money(salary.dailyPrecise * (untakenDays || 0)),
@@ -1439,20 +1436,36 @@ async function generatePeriodDeductions({ periodId, actor, employeeIds = null })
       // joined after the period was created; refreshed while undecided).
       await syncProcessingFeeFor(period, e.id, basis);
 
-      // Attendance deficit: one row per employee per period.
+      // Attendance deficit: one row per deficit settlement HR marked (partly) unpaid.
       const deficit = await deficitComponent({ employeeId: e.id, periodId, windowEnd });
-      if (!deficit.existingAdjustmentId && deficit.days > 0) {
+      for (const st of deficit.settlements) {
+        if (st.dayEquivalents <= 0) continue;
+        const parts = [];
+        if (st.unpaidDays) parts.push(`${st.unpaidDays} day(s)`);
+        if (st.unpaidMinutes) parts.push(`${T.formatMinutes(st.unpaidMinutes)}`);
         const adj = await createAdjustment({
           periodId, employeeId: e.id, adjustmentType: ATTENDANCE_DEFICIT_DAY,
-          calculatedDays: deficit.days,
-          calculatedAmount: -money(salary.dailyPrecise * deficit.days),
-          explanation: `Attendance deficit: ${deficit.days} whole day(s) threshold crossed (480+ accumulated `
-                     + `minutes) as of ${windowEnd}. Decision required: deduct from paid leave accrual or unpaid leave.`,
-          sourceReference: null, actor,
-          reviewLevel: 'ATTENTION',
-          reviewReasons: ['Deficit threshold reached: choose paid leave accrual or unpaid leave deduction'],
+          calculatedDays: st.dayEquivalents,
+          calculatedAmount: -money(salary.dailyPrecise * st.dayEquivalents),
+          explanation: `Attendance deficit for ${st.periodKey} settled by HR as unpaid: ${parts.join(' + ')} `
+                     + `(${st.dayEquivalents} day equivalent(s) at 8 hours per day).`,
+          sourceReference: st.id, actor,
         });
         created.push({ employeeId: e.id, adjustmentType: ATTENDANCE_DEFICIT_DAY, ...adj });
+      }
+
+      // Deficit penalty option 1: one day's pay, decided by HR on the deficit card.
+      const penalty = await penaltyPayComponent({ employeeId: e.id, windowEnd });
+      for (const pn of penalty.penalties) {
+        if (pn.payDays <= 0) continue;
+        const adj = await createAdjustment({
+          periodId, employeeId: e.id, adjustmentType: ATTENDANCE_PENALTY_PAY,
+          calculatedDays: pn.payDays,
+          calculatedAmount: -money(salary.dailyPrecise * pn.payDays),
+          explanation: `Attendance deficit penalty for ${pn.periodKey} (option 1): ${pn.payDays} day('s) pay, approved by HR.`,
+          sourceReference: pn.id, actor,
+        });
+        created.push({ employeeId: e.id, adjustmentType: ATTENDANCE_PENALTY_PAY, ...adj });
       }
 
       // Unauthorised absences: one row per unclaimed confirmed+unpaid record.
@@ -1551,9 +1564,10 @@ async function addDecisionToRunInReview({ employeeId, dateKey, actor }) {
 const ROUTINE_REASON = {
   [UNPAID_LEAVE_DEDUCTION]: 'Unpaid leave already approved by a person',
   [UNAUTHORISED_ABSENCE_UNPAID]: 'Absence already confirmed as unpaid by HR',
+  [ATTENDANCE_DEFICIT_DAY]: 'Deficit settled as unpaid by HR on the deficit card',
+  [ATTENDANCE_PENALTY_PAY]: 'Deficit penalty (option 1) approved by HR on the deficit card',
   'PROCESSING_FEE': 'Period processing fee configured for payroll',
 };
-const DEFICIT_REASON = 'Derived from accumulated lateness/early departures';
 
 const MAX_ROUTINE_DAYS = 3;
 const MAX_ROUTINE_SHARE = 0.20;
@@ -1601,9 +1615,6 @@ async function employeeAttentionReasons(period, employeeId, basis, lines) {
 }
 
 function classifyLine(a, employeeReasons) {
-  if (a.adjustment_type === ATTENDANCE_DEFICIT_DAY) {
-    return { level: 'ATTENTION', reasons: [DEFICIT_REASON, ...employeeReasons] };
-  }
   if (ROUTINE_REASON[a.adjustment_type]) {
     return employeeReasons.length
       ? { level: 'ATTENTION', reasons: employeeReasons }
@@ -1916,8 +1927,11 @@ async function preflightChecks(period, run, excluded) {
         employeeId: m.employee.id, periodId: period.id, windowEnd: m.basis.windowEnd, dailyPrecise: m.basis.salary.dailyPrecise,
       });
       const who = { employeeId: m.employee.id, employeeName: m.employee.name };
-      if (u.deficitDays > 0 && !u.deficitAdjustmentId) {
-        fresh.push({ ...who, ref: null, date: m.basis.windowEnd, detail: `${ATTENDANCE_DEFICIT_DAY}: ${u.deficitDays} day(s)` });
+      for (const st of (u.deficitSettlements || [])) {
+        fresh.push({ ...who, ref: st.id, date: m.basis.windowEnd, detail: `${ATTENDANCE_DEFICIT_DAY}: ${st.dayEquivalents} day(s) (${st.periodKey})` });
+      }
+      for (const pn of (u.penalties || [])) {
+        fresh.push({ ...who, ref: pn.id, date: m.basis.windowEnd, detail: `${ATTENDANCE_PENALTY_PAY}: ${pn.payDays} day(s) (${pn.periodKey})` });
       }
       for (const a of u.absenceRecords) fresh.push({ ...who, ref: a.id, date: a.date, detail: UNAUTHORISED_ABSENCE_UNPAID });
       for (const l of u.leaveRequests) {
@@ -2225,6 +2239,7 @@ function payslipHash(r) {
 
 const LINE_LABELS = {
   [ATTENDANCE_DEFICIT_DAY]: 'Attendance deficit',
+  [ATTENDANCE_PENALTY_PAY]: 'Attendance deficit penalty',
   [UNAUTHORISED_ABSENCE_UNPAID]: 'Unpaid absence',
   [UNPAID_LEAVE_DEDUCTION]: 'Unpaid leave',
   'PROCESSING_FEE': 'Processing fee',
@@ -2943,20 +2958,26 @@ async function payrollEstimate(employeeId, nowMs) {
   // Deficit: this period's generated line if there is one, else the live
   // preview. unpaid.deficitDays already prefers an existing line, but counts a
   // rejected one too, which an estimate must not.
-  const deficitRow = existing.find(a => a.adjustment_type === ATTENDANCE_DEFICIT_DAY);
-  const deficitDays = deficitRow
-    ? (deficitRow.status === 'REJECTED' ? 0 : Number(deficitRow.calculated_days) || 0)
-    : unpaid.deficitDays;
+  const deficitRows = rowsOf(ATTENDANCE_DEFICIT_DAY);
+  const deficitDays = Math.round((sum(deficitRows, 'calculated_days') + unpaid.deficitDays) * 10000) / 10000;
   if (deficitDays > 0) {
     deductions.push({
       type: ATTENDANCE_DEFICIT_DAY,
       label: lineLabel(ATTENDANCE_DEFICIT_DAY),
       days: deficitDays,
-      amount: deficitRow && deficitRow.status !== 'REJECTED'
-        ? money(Number(deficitRow.calculated_amount) || 0)
-        : -money(daily * deficitDays),
-      explanation: `${deficitDays} whole day(s) of accumulated lateness/early departures `
-                 + `(every ${asOf.dayEquivalentMinutes} minutes is one unpaid day).`,
+      amount: money(sum(deficitRows, 'calculated_amount') - daily * unpaid.deficitDays),
+      explanation: `${deficitDays} day(s) of attendance deficit HR settled as unpaid (8 hours = 1 day).`,
+    });
+  }
+  const penaltyRows = rowsOf(ATTENDANCE_PENALTY_PAY);
+  const penaltyDays = sum(penaltyRows, 'calculated_days') + (unpaid.penaltyDays || 0);
+  if (penaltyDays > 0) {
+    deductions.push({
+      type: ATTENDANCE_PENALTY_PAY,
+      label: lineLabel(ATTENDANCE_PENALTY_PAY),
+      days: penaltyDays,
+      amount: money(sum(penaltyRows, 'calculated_amount') - daily * (unpaid.penaltyDays || 0)),
+      explanation: `${penaltyDays} day('s) pay: attendance deficit penalty (option 1) approved by HR.`,
     });
   }
 
@@ -3127,5 +3148,5 @@ module.exports = {
   employeePosition,
   payslipIntegrityOk: r => payslipHash(r) === r.content_hash,
   PayrollRunError, FINAL_STATUSES,
-  ATTENDANCE_DEFICIT_DAY, UNAUTHORISED_ABSENCE_UNPAID, UNPAID_LEAVE_DEDUCTION,
+  ATTENDANCE_DEFICIT_DAY, ATTENDANCE_PENALTY_PAY, UNAUTHORISED_ABSENCE_UNPAID, UNPAID_LEAVE_DEDUCTION,
 };

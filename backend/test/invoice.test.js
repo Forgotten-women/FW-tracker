@@ -136,6 +136,14 @@ test.before(async () => {
       (id, employee_id, date_key, entry_type, minutes_delta, balance_after, whole_days_after, carry_forward_after, description, created_at, created_by)
     VALUES (?,?, '2025-03-04', 'HR_ADJUSTMENT', 500, 500, 1, 20, 'Seeded', ?, 'test')
   `).run('def_' + rand(), EMP, at('2025-03-04'));
+  // ...which HR settled as unpaid on the deficit card (HR requirements
+  // 2026-11-12: a deficit day costs pay only once HR decides so).
+  await db.prepare(`
+    INSERT INTO attendance_deficit_settlements
+      (id, employee_id, period_key, al_days, unpaid_days, unpaid_minutes, settled_minutes, snapshot_json,
+       reason, entered_by, approved_by, created_at)
+    VALUES (?, ?, '2025-03', 0, 1, 0, 480, '{}', 'Settled unpaid for the test', 'user:hr', 'HR Manager', ?)
+  `).run('dst_' + rand(), EMP, at('2025-03-04'));
 
   await new Promise(r => { server = app.listen(0, '127.0.0.1', r); });
   base = `http://127.0.0.1:${server.address().port}`;

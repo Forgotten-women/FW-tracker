@@ -15,6 +15,7 @@ import type {
   LeaveTypeItem,
 } from '@/lib/types';
 import { Badge, Button, Empty, Input, Panel } from './primitives';
+import { AbsenceReviewModal, type AbsenceAction } from './AbsenceReviewModal';
 import {
   AlertTriangleIcon,
   CalendarIcon,
@@ -56,7 +57,7 @@ export function LeaveManagementPanel() {
 
   // Filters
   const [historyFilter, setHistoryFilter] = useState<'ALL' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('ALL');
-  const [absenceStatusFilter, setAbsenceStatusFilter] = useState<'ALL' | 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED'>('ALL');
+  const [absenceStatusFilter, setAbsenceStatusFilter] = useState<'ALL' | 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED' | 'RECLASSIFIED'>('ALL');
   const [search, setSearch] = useState('');
   // Set by the Shortfall Warnings card: the pending queue shows only requests beyond the accrued balance.
   const [shortfallOnly, setShortfallOnly] = useState(false);
@@ -71,12 +72,8 @@ export function LeaveManagementPanel() {
 
   // Modals & Action states (Absences / Sickness)
   const [selectedAbsence, setSelectedAbsence] = useState<AbsenceRecord | null>(null);
-  const [absenceAction, setAbsenceAction] = useState<'CONFIRMED' | 'DISMISSED' | 'EXCUSED' | null>(null);
-  const [absenceNotes, setAbsenceNotes] = useState('');
-  const [paidSickness, setPaidSickness] = useState(false);
-  const [deductAnnualLeave, setDeductAnnualLeave] = useState(false);
-  const [treatAsUnpaid, setTreatAsUnpaid] = useState(true);
-  const [createWarningTrigger, setCreateWarningTrigger] = useState(false);
+  const [absenceAction, setAbsenceAction] = useState<AbsenceAction | null>(null);
+  const [absenceDone, setAbsenceDone] = useState<string | null>(null);
 
   // Manual Adjustment Modal
   const [showAdjustModal, setShowAdjustModal] = useState(false);
@@ -91,8 +88,10 @@ export function LeaveManagementPanel() {
   const [recordLeaveTypeId, setRecordLeaveTypeId] = useState('annual');
   const [availableLeaveTypes, setAvailableLeaveTypes] = useState<LeaveTypeItem[]>([
     { id: 'annual', name: 'Paid annual leave (Annual Entitlement)', reducesEntitlement: true, requiresEvidence: false, isPaid: true },
-    { id: 'sick', name: 'Sick leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
-    { id: 'maternity', name: 'Maternity leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
+    { id: 'sick', name: 'Sick leave (paid)', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
+    { id: 'sick_unpaid', name: 'Sick leave (unpaid)', reducesEntitlement: false, requiresEvidence: true, isPaid: false },
+    { id: 'maternity', name: 'Maternity leave (paid)', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
+    { id: 'maternity_unpaid', name: 'Maternity leave (unpaid)', reducesEntitlement: false, requiresEvidence: true, isPaid: false },
     { id: 'paternity', name: 'Paternity leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
     { id: 'parental', name: 'Parental leave', reducesEntitlement: false, requiresEvidence: true, isPaid: true },
     { id: 'compassionate', name: 'Compassionate leave', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
@@ -100,6 +99,7 @@ export function LeaveManagementPanel() {
     { id: 'study', name: 'Study leave', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
     { id: 'toil', name: 'Time off in lieu (TOIL)', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
     { id: 'authorised', name: 'Authorised absence', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
+    { id: 'unauthorised', name: 'Unauthorised absence (HR review required)', reducesEntitlement: false, requiresEvidence: false, isPaid: false },
     { id: 'unpaid', name: 'Unpaid leave', reducesEntitlement: false, requiresEvidence: false, isPaid: false },
     { id: 'wfh', name: 'Work from home', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
     { id: 'other', name: 'Other', reducesEntitlement: false, requiresEvidence: false, isPaid: true },
@@ -409,34 +409,6 @@ export function LeaveManagementPanel() {
       setRecordError(err instanceof Error ? err.message : 'Failed to record leave.');
     } finally {
       setRecordSubmitting(false);
-    }
-  };
-
-  const handleReviewAbsence = async () => {
-    if (!selectedAbsence || !absenceAction) return;
-    if (!absenceNotes.trim()) {
-      alert('A review note explaining the decision is required.');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await api.reviewAbsence(selectedAbsence.id, {
-        status: absenceAction === 'DISMISSED' ? 'DISMISSED' : 'CONFIRMED',
-        deductAnnualLeave: paidSickness ? false : deductAnnualLeave,
-        treatAsUnpaid: paidSickness ? false : treatAsUnpaid,
-        createWarningTrigger: paidSickness ? false : createWarningTrigger,
-        notes: absenceNotes.trim(),
-      });
-      setSelectedAbsence(null);
-      setAbsenceAction(null);
-      setAbsenceNotes('');
-      setPaidSickness(false);
-      await refresh();
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Failed to review absence.');
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -2046,6 +2018,13 @@ export function LeaveManagementPanel() {
       )}
 
       {/* Tab 3: Workforce Balances & Entitlements (Spec 14.1) */}
+      {absenceDone && (
+        <div role="status" className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+          <span>{absenceDone}</span>
+          <button type="button" onClick={() => setAbsenceDone(null)} className="text-emerald-200 hover:underline">Dismiss</button>
+        </div>
+      )}
+
       {activeTab === 'balances' && (
         <div>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -2627,7 +2606,15 @@ export function LeaveManagementPanel() {
                           )}
                         </td>
                         <td className="px-3 py-3 align-middle text-[11px]">
-                          {abs.status === 'CONFIRMED' ? (
+                          {abs.status === 'RECLASSIFIED' ? (
+                            <div className="text-emerald-300">Recorded as leave{abs.emergencyException ? ' (emergency / exceptional circumstances)' : ''}</div>
+                          ) : abs.status === 'CONFIRMED' && abs.treatment ? (
+                            <div className="space-y-0.5">
+                              <div className="text-text font-medium">{abs.treatment === 'UNPAID' ? 'Option 1 — Unpaid day' : 'Option 2 — Paid, 1 AL day covers it'}</div>
+                              <div className={abs.penaltyAlDays ? 'text-amber-400' : 'text-dim'}>• AL penalty: {abs.penaltyAlDays ? `${abs.penaltyAlDays} day` : 'none'}{abs.coverAlDays ? ` · AL cover: ${abs.coverAlDays} day` : ''}</div>
+                              <div className="text-dim">• Notice: {abs.notificationStatus ? abs.notificationStatus.replace('_', ' ').toLowerCase() : '—'} · approved by {abs.approvedBy || '—'}</div>
+                            </div>
+                          ) : abs.status === 'CONFIRMED' ? (
                             <div className="space-y-0.5">
                               <div className={abs.deductAnnualLeave ? 'text-amber-400 font-medium' : 'text-dim'}>
                                 • Deduct Annual Leave: {abs.deductAnnualLeave ? 'YES' : 'NO'}
@@ -2657,6 +2644,8 @@ export function LeaveManagementPanel() {
                               ? 'Pending Review'
                               : abs.status === 'CONFIRMED'
                               ? 'Confirmed'
+                              : abs.status === 'RECLASSIFIED'
+                              ? 'Recorded as leave'
                               : 'Dismissed / Excused'}
                           </Badge>
                         </td>
@@ -2665,24 +2654,20 @@ export function LeaveManagementPanel() {
                             <div className="flex items-center justify-end gap-1.5">
                               <Button
                                 variant="primary"
-                                onClick={() => {
-                                  setSelectedAbsence(abs);
-                                  setAbsenceAction('CONFIRMED');
-                                  setDeductAnnualLeave(false);
-                                  setTreatAsUnpaid(true);
-                                  setCreateWarningTrigger(false);
-                                  setAbsenceNotes('');
-                                }}
+                                onClick={() => { setSelectedAbsence(abs); setAbsenceAction('CONFIRMED'); }}
                                 className="py-1 px-2.5 text-[11px]"
                               >
                                 Review & Decide
                               </Button>
                               <Button
-                                onClick={() => {
-                                  setSelectedAbsence(abs);
-                                  setAbsenceAction('DISMISSED');
-                                  setAbsenceNotes('Excused with management approval.');
-                                }}
+                                onClick={() => { setSelectedAbsence(abs); setAbsenceAction('RECLASSIFIED'); }}
+                                className="py-1 px-2.5 text-[11px]"
+                                title="Emergency / exceptional circumstances: record as the appropriate leave category"
+                              >
+                                Record as leave
+                              </Button>
+                              <Button
+                                onClick={() => { setSelectedAbsence(abs); setAbsenceAction('DISMISSED'); }}
                                 className="py-1 px-2.5 text-[11px] text-muted hover:text-text"
                               >
                                 Dismiss / Excuse
@@ -2702,129 +2687,18 @@ export function LeaveManagementPanel() {
 
       {/* Review Absence Modal */}
       {selectedAbsence && absenceAction && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6">
-          <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-6">
-            <h2 className="text-base font-bold text-text">
-              {absenceAction === 'CONFIRMED'
-                ? `Decide Absence Consequences: ${selectedAbsence.employeeName}`
-                : `Dismiss / Excuse Absence: ${selectedAbsence.employeeName}`}
-            </h2>
-            <p className="mt-1 text-xs text-muted">
-              Date: {selectedAbsence.date} · Type: {selectedAbsence.absenceType}
-            </p>
-
-            {selectedAbsence.reason && (
-              <div className="my-3 rounded-lg bg-raised p-3 text-xs text-text">
-                <div className="font-semibold text-dim mb-0.5">Reported Reason:</div>
-                {selectedAbsence.reason}
-              </div>
-            )}
-
-            {absenceAction === 'CONFIRMED' && (
-              <div className="my-4 space-y-3 rounded-xl border border-line bg-raised/60 p-4 text-xs">
-                <div className="font-semibold text-text text-sm">
-                  Independent Policy Consequences (Spec 10.2):
-                </div>
-
-                <label className="flex items-start gap-3 p-2.5 rounded-lg bg-surface border border-line cursor-pointer hover:border-brand transition">
-                  <input
-                    type="checkbox"
-                    checked={deductAnnualLeave}
-                    onChange={(e) => setDeductAnnualLeave(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-line text-brand focus:ring-brand"
-                  />
-                  <div>
-                    <div className="font-semibold text-text">Deduct from Annual Leave Balance</div>
-                    <div className="text-[11px] text-muted">
-                      Subtract 1 day from accrued annual leave entitlement.
-                    </div>
-                  </div>
-                </label>
-
-                <label className="flex items-start gap-3 p-2.5 rounded-lg bg-surface border border-line cursor-pointer hover:border-brand transition">
-                  <input
-                    type="checkbox"
-                    checked={paidSickness}
-                    onChange={(e) => setPaidSickness(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-line text-brand focus:ring-brand"
-                  />
-                  <div>
-                    <div className="font-semibold text-text">Grant Paid Sick Leave</div>
-                    <div className="text-[11px] text-muted">
-                      Cover as paid statutory sickness absence without wage deduction.
-                    </div>
-                  </div>
-                </label>
-
-                <label className="flex items-start gap-3 p-2.5 rounded-lg bg-surface border border-line cursor-pointer hover:border-brand transition">
-                  <input
-                    type="checkbox"
-                    checked={treatAsUnpaid}
-                    onChange={(e) => setTreatAsUnpaid(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-line text-brand focus:ring-brand"
-                  />
-                  <div>
-                    <div className="font-semibold text-text">Flag for Unpaid Payroll Deduction</div>
-                    <div className="text-[11px] text-muted">
-                      Mark as unpaid absence to be deducted in monthly payroll calculation.
-                    </div>
-                  </div>
-                </label>
-
-                <label className="flex items-start gap-3 p-2.5 rounded-lg bg-surface border border-line cursor-pointer hover:border-brand transition">
-                  <input
-                    type="checkbox"
-                    checked={createWarningTrigger}
-                    onChange={(e) => setCreateWarningTrigger(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-line text-brand focus:ring-brand"
-                  />
-                  <div>
-                    <div className="font-semibold text-text">Generate Disciplinary Trigger</div>
-                    <div className="text-[11px] text-muted">
-                      Forward unexcused absence to Warning Board for formal disciplinary progression.
-                    </div>
-                  </div>
-                </label>
-              </div>
-            )}
-
-            <div className="my-4">
-              <label className="block text-xs font-semibold text-text mb-1">
-                Review Notes (Required)
-              </label>
-              <textarea
-                value={absenceNotes}
-                onChange={(e) => setAbsenceNotes(e.target.value)}
-                placeholder="Explain the HR review rationale..."
-                rows={3}
-                className="w-full rounded-lg border border-line bg-raised p-2.5 text-xs text-text placeholder-dim focus:border-brand focus:outline-none"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                onClick={() => {
-                  setSelectedAbsence(null);
-                  setAbsenceAction(null);
-                  setAbsenceNotes('');
-                }}
-                disabled={submitting}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant={absenceAction === 'DISMISSED' ? 'ghost' : 'primary'}
-                onClick={handleReviewAbsence}
-                disabled={submitting}
-                className={
-                  absenceAction === 'DISMISSED' ? 'bg-brand text-white hover:bg-brand/90' : ''
-                }
-              >
-                {submitting ? 'Submitting…' : 'Submit Decision'}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <AbsenceReviewModal
+          absence={selectedAbsence}
+          action={absenceAction}
+          leaveTypes={availableLeaveTypes}
+          onClose={() => { setSelectedAbsence(null); setAbsenceAction(null); }}
+          onDone={async (message) => {
+            setSelectedAbsence(null);
+            setAbsenceAction(null);
+            setAbsenceDone(message);
+            await refresh();
+          }}
+        />
       )}
 
       {/* Leave Request Review & Decision Modal */}

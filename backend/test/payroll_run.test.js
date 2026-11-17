@@ -213,11 +213,18 @@ test('at the cut-off the run is generated, moved to IN_REVIEW, and every line cl
   await tick('2025-05-02');
   may = await periodStarting('2025-05-01');
 
-  // Routine leave and absence, plus a derived (so ATTENTION) deficit day.
+  // Routine leave and absence, plus a deficit day HR settled as unpaid
+  // (HR requirements 2026-11-12: deficit pay is decided, never derived).
   E.routine = await makeEmployee('emp_routine', '2024-12-02', { salary: 3000 });
   await unpaidLeave(E.routine, '2025-05-12', '2025-05-12', 1);
   await unpaidAbsence(E.routine, '2025-05-13');
   await seedDeficit(E.routine, 500, '2025-05-19');
+  await db.prepare(`
+    INSERT INTO attendance_deficit_settlements
+      (id, employee_id, period_key, al_days, unpaid_days, unpaid_minutes, settled_minutes, snapshot_json,
+       reason, entered_by, approved_by, created_at)
+    VALUES (?, ?, '2025-05', 0, 1, 0, 480, '{}', 'Settled unpaid for the test', 'user:hr', 'HR Manager', ?)
+  `).run('dst_' + rand(), E.routine, at('2025-05-20'));
 
   // A starter: every one of their lines needs attention.
   E.starter = await makeEmployee('emp_starter', '2025-05-14');
@@ -234,8 +241,8 @@ test('at the cut-off the run is generated, moved to IN_REVIEW, and every line cl
   const run = r.generated.find(g => g.periodId === may.id);
   assert.ok(run, 'May was generated');
   assert.equal(run.createdCount, 5);
-  assert.equal(run.routineCount, 2);
-  assert.equal(run.attentionCount, 3);
+  assert.equal(run.routineCount, 3);
+  assert.equal(run.attentionCount, 2);
   assert.equal((await periodStarting('2025-05-01')).status, 'IN_REVIEW');
 
   const byType = async emp => Object.fromEntries((await linesFor(may.id, emp)).map(l => [l.adjustment_type, l]));
@@ -243,9 +250,9 @@ test('at the cut-off the run is generated, moved to IN_REVIEW, and every line cl
   const routine = await byType(E.routine);
   assert.equal(routine[PR.UNPAID_LEAVE_DEDUCTION].review_level, 'ROUTINE');
   assert.equal(routine[PR.UNAUTHORISED_ABSENCE_UNPAID].review_level, 'ROUTINE');
-  assert.equal(routine[PR.ATTENDANCE_DEFICIT_DAY].review_level, 'ATTENTION');
+  assert.equal(routine[PR.ATTENDANCE_DEFICIT_DAY].review_level, 'ROUTINE');
   assert.ok(JSON.parse(routine[PR.ATTENDANCE_DEFICIT_DAY].review_reasons)
-    .includes('Derived from accumulated lateness/early departures'));
+    .includes('Deficit settled as unpaid by HR on the deficit card'));
   assert.equal(routine[PR.ATTENDANCE_DEFICIT_DAY].calculated_amount, -PR.money(daily(3000)));
 
   const starter = await byType(E.starter);
@@ -261,7 +268,7 @@ test('at the cut-off the run is generated, moved to IN_REVIEW, and every line cl
     "SELECT * FROM notifications WHERE category = 'PAYROLL' AND employee_id IS NULL AND title LIKE '%May 2025%'"
   ).all();
   assert.equal(note.length, 1);
-  assert.match(note[0].body, /2 routine, 3 needing a decision/);
+  assert.match(note[0].body, /3 routine, 2 needing a decision/);
   assert.equal(note[0].link, `/payroll?period=${may.id}`);
 });
 
@@ -279,8 +286,8 @@ test('a line entered by hand is always ATTENTION, and the review sheet flags eac
   assert.equal(sheet.period.cutoffDate, '2025-05-25');
   assert.equal(sheet.period.payDate, '2025-05-31');
   assert.equal(sheet.totals.employees, 5);
-  assert.equal(sheet.totals.routineCount, 2);
-  assert.equal(sheet.totals.attentionCount, 4);
+  assert.equal(sheet.totals.routineCount, 3);
+  assert.equal(sheet.totals.attentionCount, 3);
   assert.equal(sheet.totals.pendingCount, 6);
   assert.ok(!sheet.preflight.some(c => c.severity === 'BLOCKING'), 'nothing blocks May');
 
@@ -312,7 +319,7 @@ test('approve-run refuses while an ATTENTION line is undecided, then publishes p
       return true;
     },
   );
-  assert.equal(undecided.length, 4, 'the deficit, the starter, the 4-day leave and the hand-entered bonus');
+  assert.equal(undecided.length, 3, 'the starter, the 4-day leave and the hand-entered bonus (the settled deficit is routine)');
 
   // Refused means nothing changed - not even the routine lines.
   assert.equal((await periodStarting('2025-05-01')).status, 'IN_REVIEW');
@@ -325,7 +332,6 @@ test('approve-run refuses while an ATTENTION line is undecided, then publishes p
   const r = await PR.approveRun({
     periodId: may.id, note: 'May payroll', actor: 'user:hr', nowMs: at('2025-05-28'),
     decisions: [
-      { adjustmentId: find(E.routine, PR.ATTENDANCE_DEFICIT_DAY), decision: 'APPROVED' },
       { adjustmentId: find(E.starter, PR.UNAUTHORISED_ABSENCE_UNPAID), decision: 'REJECTED', notes: 'First week - waived' },
       { adjustmentId: find(E.big, PR.UNPAID_LEAVE_DEDUCTION), decision: 'APPROVED', approvedAmount: -300, notes: 'Reduced by agreement' },
       { adjustmentId: find('emp_cut', 'BONUS'), decision: 'APPROVED' },
@@ -333,7 +339,7 @@ test('approve-run refuses while an ATTENTION line is undecided, then publishes p
   });
   assert.equal(r.periodStatus, 'PUBLISHED');
   assert.equal(r.payslipCount, 5);
-  assert.deepEqual(r.decided, { explicit: 4, routineApproved: 2 });
+  assert.deepEqual(r.decided, { explicit: 3, routineApproved: 3 });
 
   const period = await periodStarting('2025-05-01');
   assert.equal(period.status, 'PUBLISHED');
@@ -346,7 +352,7 @@ test('approve-run refuses while an ATTENTION line is undecided, then publishes p
   const decided = await db.prepare(
     "SELECT note FROM audit_log WHERE action = 'PAYROLL_ADJUSTMENT_DECIDED' AND note LIKE 'Approved as routine%'"
   ).all();
-  assert.equal(decided.length, 2);
+  assert.equal(decided.length, 3);
   assert.match(decided[0].note, /Approved as routine in the payroll run: May payroll/);
   assert.ok(await db.prepare(
     "SELECT 1 FROM audit_log WHERE action = 'PAYROLL_RUN_APPROVED' AND target_id = ?"

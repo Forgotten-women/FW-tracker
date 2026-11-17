@@ -85,7 +85,7 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
   }
 
   // 2. Run all queries in ONE parallel batch
-  const [patterns, empRecords, summaries, attDays, calendarDays, leaveRows, periodAdjs, salaryRows, leaveBalances] = await Promise.all([
+  const [patterns, empRecords, summaries, attDays, calendarDays, leaveRows, periodAdjs, salaryRows, leaveBalances, confirmedAbsences] = await Promise.all([
     db.prepare('SELECT * FROM working_patterns').all(),
     employeeId
       ? db.prepare('SELECT * FROM employment_records WHERE employee_id = ? ORDER BY effective_from DESC, created_at DESC').all(employeeId)
@@ -121,6 +121,10 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     employeeId
       ? db.prepare('SELECT * FROM leave_balances WHERE employee_id = ?').all(employeeId).catch(() => [])
       : db.prepare('SELECT * FROM leave_balances').all().catch(() => []),
+    // HR-confirmed unauthorised absences in the range (treatment decides pay).
+    employeeId
+      ? db.prepare("SELECT employee_id, date_key, treatment FROM absence_records WHERE employee_id = ? AND status = 'CONFIRMED' AND date_key >= ? AND date_key <= ?").all(employeeId, startDate, endDate)
+      : db.prepare("SELECT employee_id, date_key, treatment FROM absence_records WHERE status = 'CONFIRMED' AND date_key >= ? AND date_key <= ?").all(startDate, endDate),
   ]);
 
   // Fast map lookups
@@ -174,6 +178,15 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     }
   }
 
+  const absenceByEmpDate = new Map();
+  for (const ab of confirmedAbsences || []) absenceByEmpDate.set(`${ab.employee_id}_${ab.date_key}`, ab);
+  // Deficit card figures when the export covers exactly one calendar month
+  // from November 2026 (sections 12, 16, 17).
+  const DP = require('./deficitPeriods');
+  const singleMonthKey = startDate.slice(0, 7) === endDate.slice(0, 7)
+    && startDate.endsWith('-01') && endDate === DP.periodBounds(startDate.slice(0, 7)).end
+    ? startDate.slice(0, 7) : null;
+
   const periodAdjByEmp = new Map();
   for (const pa of periodAdjs) {
     const arr = periodAdjByEmp.get(pa.employee_id) || [];
@@ -211,10 +224,14 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     let missingDays = 0;
     let wfhDaysCount = 0;
     let remoteDaysCount = 0;
-    let paidLeaveDaysCount = 0;
+    let paidLeaveDaysCount = 0;        // paid annual leave
     let unpaidLeaveDaysCount = 0;
-    let sickLeaveDaysCount = 0;
+    let sickLeaveDaysCount = 0;        // paid
+    let sickUnpaidLeaveDaysCount = 0;
     let compassionateLeaveDaysCount = 0;
+    let emergencyLeaveDaysCount = 0;
+    let authorisedAbsenceDaysCount = 0;
+    let otherPaidLeaveDaysCount = 0;   // maternity, paternity, parental, study, TOIL, other
     let unauthorisedAbsenceDaysCount = 0;
 
     let totalWorkedMinutes = 0;
@@ -300,30 +317,45 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
           completeWorkingDays++;
           payrollMins = dayEquivalentMinutes;
           workedMins = dayEquivalentMinutes;
-        } else if (lType.includes('SICK')) {
-          dailyStatus = 'Sick Leave';
-          sickLeaveDaysCount++;
-          workStatusLabel = 'Leave';
-          if (leaveForDay.is_paid === 1 || leaveForDay.type_is_paid === 1) {
-            payrollMins = dayEquivalentMinutes;
-          }
-        } else if (lType.includes('UNPAID')) {
-          dailyStatus = 'Unpaid Leave';
-          unpaidLeaveDaysCount++;
-          workStatusLabel = 'Leave';
-        } else if (lType.includes('COMPASSIONATE')) {
-          dailyStatus = 'Compassionate Leave';
-          compassionateLeaveDaysCount++;
-          workStatusLabel = 'Leave';
-          if (leaveForDay.is_paid === 1 || leaveForDay.type_is_paid === 1) {
-            payrollMins = dayEquivalentMinutes;
-          }
         } else {
-          dailyStatus = 'Paid Leave';
-          paidLeaveDaysCount++;
-          payrollMins = dayEquivalentMinutes;
+          // By category and whether the request is paid (its own flag, else
+          // the type's): "Sick leave (unpaid)" is unpaid sick, not sick.
+          const lid = leaveForDay.leave_type_id;
+          const paid = leaveForDay.is_paid === 1 || (leaveForDay.is_paid == null && leaveForDay.type_is_paid === 1);
           workStatusLabel = 'Leave';
+          if (lid === 'sick' || lid === 'sick_unpaid' || lType.includes('SICK')) {
+            if (paid) { dailyStatus = 'Sick Leave (Paid)'; sickLeaveDaysCount++; }
+            else { dailyStatus = 'Sick Leave (Unpaid)'; sickUnpaidLeaveDaysCount++; }
+          } else if (lid === 'unpaid' || (!paid && lid !== 'authorised')) {
+            dailyStatus = 'Unpaid Leave';
+            unpaidLeaveDaysCount++;
+          } else if (lid === 'compassionate') {
+            dailyStatus = 'Compassionate Leave';
+            compassionateLeaveDaysCount++;
+          } else if (lid === 'emergency') {
+            dailyStatus = 'Emergency Leave';
+            emergencyLeaveDaysCount++;
+          } else if (lid === 'authorised') {
+            dailyStatus = 'Authorised Absence';
+            authorisedAbsenceDaysCount++;
+          } else if (lid === 'annual') {
+            dailyStatus = 'Paid Annual Leave';
+            paidLeaveDaysCount++;
+          } else {
+            dailyStatus = `${leaveForDay.type_name || 'Paid Leave'}`;
+            otherPaidLeaveDaysCount++;
+          }
+          if (paid) payrollMins = dayEquivalentMinutes;
         }
+      } else if (absenceByEmpDate.has(`${empId}_${dKey}`)) {
+        // HR-confirmed unauthorised absence: paid only when annual leave covers it.
+        const ab = absenceByEmpDate.get(`${empId}_${dKey}`);
+        expectedWorkingDays++;
+        dailyStatus = 'Unauthorised Absence';
+        workStatusLabel = 'Absent';
+        unauthorisedAbsenceDaysCount++;
+        missingDays++;
+        if (ab.treatment === 'PAID_ANNUAL_LEAVE') payrollMins = dayEquivalentMinutes;
       } else if (isFuture) {
         // Future working day with no approved leave: count as Present (for export only, no real DB write)
         expectedWorkingDays++;
@@ -443,10 +475,20 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
     const dailyWageRate = sal?.daily_rate ? Number(sal.daily_rate) : Math.round(monthlyWage * 12 / 260);
     const currency = sal?.currency || emp.currency || 'PKR';
 
-    // Shortfall deduction: net deficit converted to day fraction
-    const deficitDaysEquivalent = (netShortfallMinutes / (dayEquivalentMinutes || 480));
+    // Deficit card for the month (sections 12 and 17), when the export is one
+    // calendar month from November 2026. Pay is deducted only for what HR
+    // settled as unpaid (plus a penalty option 1 day), never derived.
+    let deficitPeriod = null;
+    if (singleMonthKey) {
+      try { deficitPeriod = await DP.monthlyFigures(empId, singleMonthKey); } catch (_) { deficitPeriod = null; }
+    }
+    const deficitDaysEquivalent = deficitPeriod
+      ? deficitPeriod.payrollDeductionDayEquivalents
+      : (netShortfallMinutes / (dayEquivalentMinutes || 480));
     const attendanceDeduction = Math.round(deficitDaysEquivalent * dailyWageRate);
-    const unpaidLeaveDeduction = Math.round(unpaidLeaveDaysCount * dailyWageRate);
+    const unpaidAbsenceDays = Array.from(absenceByEmpDate.entries())
+      .filter(([k, ab]) => k.startsWith(`${empId}_`) && ab.treatment === 'UNPAID').length;
+    const unpaidLeaveDeduction = Math.round((unpaidLeaveDaysCount + sickUnpaidLeaveDaysCount + unpaidAbsenceDays) * dailyWageRate);
     const finalPayrollAmount = Math.max(0, Math.round(monthlyWage - attendanceDeduction - unpaidLeaveDeduction));
 
     employeeReports.push({
@@ -507,12 +549,33 @@ async function generateReportData({ from, to, employeeId = null, workStatus = nu
         paidLeaveDays: paidLeaveDaysCount,
         unpaidLeaveDays: unpaidLeaveDaysCount,
         sickLeaveDays: sickLeaveDaysCount,
+        sickUnpaidLeaveDays: sickUnpaidLeaveDaysCount,
         compassionateLeaveDays: compassionateLeaveDaysCount,
+        emergencyLeaveDays: emergencyLeaveDaysCount,
+        authorisedAbsenceDays: authorisedAbsenceDaysCount,
+        otherPaidLeaveDays: otherPaidLeaveDaysCount,
         unauthorisedAbsenceDays: unauthorisedAbsenceDaysCount,
         annualLeaveOpening,
         annualLeaveUsed,
         annualLeaveClosing,
       },
+      // Section 17: deficit figures for the month, each kept separate.
+      deficitSummary: deficitPeriod ? {
+        previousDeficit: formatMins(deficitPeriod.previousDeficitMinutes),
+        currentDeficit: (deficitPeriod.currentDeficitMinutes < 0 ? '-' : '') + formatMins(Math.abs(deficitPeriod.currentDeficitMinutes)),
+        totalDeficit: formatMins(deficitPeriod.totalDeficitMinutes),
+        deficitDays: deficitPeriod.deficitDays,
+        remainingDeficit: formatMins(deficitPeriod.remainingDeficitMinutes),
+        carriedForward: formatMins(deficitPeriod.carriedForwardMinutes),
+        annualLeaveCoverDeficitDays: deficitPeriod.annualLeaveCoverDeficitDays,
+        annualLeaveCoverAbsenceDays: deficitPeriod.annualLeaveCoverAbsenceDays,
+        annualLeavePenaltyDays: deficitPeriod.annualLeavePenaltyDays,
+        settledUnpaidDays: deficitPeriod.settledUnpaidDays,
+        settledUnpaidMinutes: deficitPeriod.settledUnpaidMinutes,
+        payrollDeductionDays: deficitPeriod.payrollDeductionDayEquivalents,
+        penalty: deficitPeriod.penalty ? deficitPeriod.penalty.label : 'None',
+        finalNetDeficit: formatMins(deficitPeriod.finalNetDeficitMinutes),
+      } : null,
       payrollSummary: {
         currency,
         monthlyWage,
@@ -564,7 +627,7 @@ async function buildExcelWorkbook(reportData) {
   });
 
   // Title Banner
-  summarySheet.mergeCells('A1:AB1');
+  summarySheet.mergeCells('A1:AO1');
   const titleCell = summarySheet.getCell('A1');
   titleCell.value = 'OFFICE TRACKER — WORKFORCE ATTENDANCE & PAYROLL SUMMARY';
   titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -573,7 +636,7 @@ async function buildExcelWorkbook(reportData) {
   summarySheet.getRow(1).height = 40;
 
   // Metadata Row
-  summarySheet.mergeCells('A2:AB2');
+  summarySheet.mergeCells('A2:AO2');
   const metaCell = summarySheet.getCell('A2');
   metaCell.value = `Payroll & Attendance Period: ${reportData.meta.formattedPeriod}  |  Total Workforce: ${reportData.meta.totalEmployees} Employees  |  Generated: ${reportData.meta.generatedAt}`;
   metaCell.font = { name: 'Calibri', size: 11, italic: true, color: { argb: 'FFFFFFFF' } };
@@ -586,10 +649,13 @@ async function buildExcelWorkbook(reportData) {
   // Summary Table Header
   const summaryHeaders = [
     'Employee ID', 'Employee Name', 'Role', 'Work Status', 'Main Schedule', 'Break Allowance',
-    'Expected Days', 'Complete Days', 'Days Off', 'WFH Days', 'Paid Leave', 'Unpaid Leave',
-    'Sick Leave', 'Compassionate', 'Unauth. Absence', 'Missing Days',
+    'Expected Days', 'Complete Days', 'Days Off', 'WFH Days', 'Paid Annual Leave', 'Unpaid Leave',
+    'Sick (Paid)', 'Sick (Unpaid)', 'Compassionate', 'Emergency', 'Auth. Absence', 'Other Paid Leave', 'Unauth. Absence', 'Missing Days',
     'Total Worked (Reg)', 'Payroll Hours', 'Late Arrival', 'Early Leave', 'Extra Break',
-    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time', 'Monthly Wage', 'Deduction', 'Final Pay',
+    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time',
+    'Prev. Period Deficit', 'Current Period Deficit', 'Total Deficit', 'Deficit Days', 'Remaining Deficit', 'Deficit Carried Fwd',
+    'AL Used (Deficit)', 'AL Used (Unauth. Abs.)', 'AL Penalty', 'Payroll Deduction (days)',
+    'Monthly Wage', 'Deduction', 'Final Pay',
     'Idle (no pay effect)'
   ];
   const moneyCols = new Set(['Monthly Wage', 'Deduction', 'Final Pay'].map(h => summaryHeaders.indexOf(h) + 1));
@@ -629,7 +695,11 @@ async function buildExcelWorkbook(reportData) {
       l.paidLeaveDays,
       l.unpaidLeaveDays,
       l.sickLeaveDays,
+      l.sickUnpaidLeaveDays,
       l.compassionateLeaveDays,
+      l.emergencyLeaveDays,
+      l.authorisedAbsenceDays,
+      l.otherPaidLeaveDays,
       l.unauthorisedAbsenceDays,
       a.missingDays,
       a.totalWorkedFormatted,
@@ -641,6 +711,16 @@ async function buildExcelWorkbook(reportData) {
       a.approvedCreditFormatted,
       a.netShortfallFormatted,
       a.totalExtraFormatted,
+      er.deficitSummary ? er.deficitSummary.previousDeficit : 'n/a',
+      er.deficitSummary ? er.deficitSummary.currentDeficit : 'n/a',
+      er.deficitSummary ? er.deficitSummary.totalDeficit : 'n/a',
+      er.deficitSummary ? er.deficitSummary.deficitDays : 'n/a',
+      er.deficitSummary ? er.deficitSummary.remainingDeficit : 'n/a',
+      er.deficitSummary ? er.deficitSummary.carriedForward : 'n/a',
+      er.deficitSummary ? er.deficitSummary.annualLeaveCoverDeficitDays : 'n/a',
+      er.deficitSummary ? er.deficitSummary.annualLeaveCoverAbsenceDays : 'n/a',
+      er.deficitSummary ? er.deficitSummary.annualLeavePenaltyDays : 'n/a',
+      er.deficitSummary ? er.deficitSummary.payrollDeductionDays : 'n/a',
       p.monthlyWage,
       p.attendanceDeduction + p.unpaidLeaveDeduction,
       p.finalPayrollAmount,
@@ -738,6 +818,13 @@ async function buildExcelWorkbook(reportData) {
       ['Break Allowance', `${e.permittedBreakMinutes} mins`, '', '', 'Gross Shortfall', a.grossShortfallFormatted, '', '', 'Paid Leave Used', `${l.paidLeaveDays} days`],
       ['Overtime Counted', e.overtimeCounted ? 'Enabled' : 'Disabled', '', '', 'Approved Credit (Total)', a.approvedCreditFormatted, '', '', 'Unauthorised Absence', `${l.unauthorisedAbsenceDays} days`],
       ['Payroll Period', reportData.meta.formattedPeriod, '', '', 'Net Shortfall', a.netShortfallFormatted, '', '', 'Extra Time / Overtime', a.totalExtraFormatted],
+      ['Sick (Paid / Unpaid)', `${l.sickLeaveDays} / ${l.sickUnpaidLeaveDays} days`, '', '', 'Compassionate / Emergency', `${l.compassionateLeaveDays} / ${l.emergencyLeaveDays} days`, '', '', 'Authorised Absence', `${l.authorisedAbsenceDays} days`],
+      ...(er.deficitSummary ? [
+        ['Previous Period Deficit', er.deficitSummary.previousDeficit, '', '', 'Current Period Deficit', er.deficitSummary.currentDeficit, '', '', 'Total Deficit', er.deficitSummary.totalDeficit],
+        ['Deficit Days (8h)', er.deficitSummary.deficitDays, '', '', 'Remaining Deficit', er.deficitSummary.remainingDeficit, '', '', 'Deficit Carried Forward', er.deficitSummary.carriedForward],
+        ['AL Used (Deficit)', `${er.deficitSummary.annualLeaveCoverDeficitDays} days`, '', '', 'AL Used (Unauth. Absence)', `${er.deficitSummary.annualLeaveCoverAbsenceDays} days`, '', '', 'AL Penalty', `${er.deficitSummary.annualLeavePenaltyDays} days`],
+        ['Deficit Penalty', er.deficitSummary.penalty, '', '', 'Payroll Deduction (days)', er.deficitSummary.payrollDeductionDays, '', '', 'Final Net Deficit', er.deficitSummary.finalNetDeficit],
+      ] : []),
     ];
 
     infoRows.forEach(r => {
@@ -893,9 +980,12 @@ function buildCsv(reportData) {
   lines.push('OVERALL WORKFORCE SUMMARY');
   lines.push([
     'Employee ID', 'Employee Name', 'Role', 'Work Status', 'Main Schedule', 'Break Allowance',
-    'Expected Days', 'Complete Days', 'Days Off', 'WFH Days', 'Paid Leave', 'Unpaid Leave',
-    'Sick Leave', 'Unauth. Absence', 'Worked Hours', 'Payroll Hours',
-    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time', 'Monthly Wage', 'Final Pay', 'Idle (no pay effect)'
+    'Expected Days', 'Complete Days', 'Days Off', 'WFH Days', 'Paid Annual Leave', 'Unpaid Leave',
+    'Sick (Paid)', 'Sick (Unpaid)', 'Compassionate', 'Emergency', 'Auth. Absence', 'Other Paid Leave', 'Unauth. Absence', 'Worked Hours', 'Payroll Hours',
+    'Gross Shortfall', 'Approved Credit', 'Net Shortfall', 'Extra Time',
+    'Prev. Period Deficit', 'Current Period Deficit', 'Total Deficit', 'Deficit Days', 'Remaining Deficit', 'Deficit Carried Fwd',
+    'AL Used (Deficit)', 'AL Used (Unauth. Abs.)', 'AL Penalty', 'Payroll Deduction (days)',
+    'Monthly Wage', 'Final Pay', 'Idle (no pay effect)'
   ].join(','));
 
   for (const er of reportData.employees) {
@@ -907,8 +997,12 @@ function buildCsv(reportData) {
     lines.push([
       esc(e.employeeNumber), esc(e.name), esc(e.role), esc(e.workStatus), esc(e.scheduleSummary), `${e.permittedBreakMinutes}m`,
       a.expectedWorkingDays, a.completeWorkingDays, a.scheduledDaysOff, a.wfhDays, l.paidLeaveDays, l.unpaidLeaveDays,
-      l.sickLeaveDays, l.unauthorisedAbsenceDays, esc(a.totalWorkedFormatted), esc(a.totalPayrollFormatted),
-      esc(a.grossShortfallFormatted), esc(a.approvedCreditFormatted), esc(a.netShortfallFormatted), esc(a.totalExtraFormatted), p.monthlyWage, p.finalPayrollAmount, esc(a.totalIdleFormatted)
+      l.sickLeaveDays, l.sickUnpaidLeaveDays, l.compassionateLeaveDays, l.emergencyLeaveDays, l.authorisedAbsenceDays, l.otherPaidLeaveDays, l.unauthorisedAbsenceDays, esc(a.totalWorkedFormatted), esc(a.totalPayrollFormatted),
+      esc(a.grossShortfallFormatted), esc(a.approvedCreditFormatted), esc(a.netShortfallFormatted), esc(a.totalExtraFormatted),
+      ...(er.deficitSummary
+        ? [esc(er.deficitSummary.previousDeficit), esc(er.deficitSummary.currentDeficit), esc(er.deficitSummary.totalDeficit), er.deficitSummary.deficitDays, esc(er.deficitSummary.remainingDeficit), esc(er.deficitSummary.carriedForward), er.deficitSummary.annualLeaveCoverDeficitDays, er.deficitSummary.annualLeaveCoverAbsenceDays, er.deficitSummary.annualLeavePenaltyDays, er.deficitSummary.payrollDeductionDays]
+        : ['n/a', 'n/a', 'n/a', 'n/a', 'n/a', 'n/a', 'n/a', 'n/a', 'n/a', 'n/a']),
+      p.monthlyWage, p.finalPayrollAmount, esc(a.totalIdleFormatted)
     ].join(','));
   }
 

@@ -171,9 +171,11 @@ INSERT INTO leave_policies (id, name, annual_entitlement_days, accrual_method, c
 -- leave_types (15 rows)
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('annual', 'Paid annual leave', 1, 1, 1, 0, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('unpaid', 'Unpaid leave', 1, 0, 0, 0, 0, 1) ON CONFLICT DO NOTHING;
-INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('sick', 'Sick leave', 0, 0, 1, 1, 0, 1) ON CONFLICT DO NOTHING;
+INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('sick', 'Sick leave (paid)', 0, 0, 1, 1, 0, 1) ON CONFLICT DO NOTHING;
+INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('sick_unpaid', 'Sick leave (unpaid)', 1, 0, 0, 1, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('compassionate', 'Compassionate leave', 1, 0, 1, 0, 0, 1) ON CONFLICT DO NOTHING;
-INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('maternity', 'Maternity leave', 1, 0, 1, 1, 0, 1) ON CONFLICT DO NOTHING;
+INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('maternity', 'Maternity leave (paid)', 1, 0, 1, 1, 0, 1) ON CONFLICT DO NOTHING;
+INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('maternity_unpaid', 'Maternity leave (unpaid)', 1, 0, 0, 1, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('paternity', 'Paternity leave', 1, 0, 1, 1, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('parental', 'Parental leave', 1, 0, 1, 1, 0, 1) ON CONFLICT DO NOTHING;
 INSERT INTO leave_types (id, name, requires_approval, reduces_entitlement, is_paid, requires_evidence, counts_toward_warnings, active) VALUES ('emergency', 'Emergency leave', 1, 0, 1, 0, 0, 1) ON CONFLICT DO NOTHING;

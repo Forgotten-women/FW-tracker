@@ -339,7 +339,7 @@ export interface AbsenceRecord {
   evidenceDocumentId: string | null;
   documentTitle: string | null;
   detectedAt: string;
-  status: 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED';
+  status: 'PENDING_REVIEW' | 'CONFIRMED' | 'DISMISSED' | 'RECLASSIFIED';
   reviewedBy: string | null;
   reviewedAt: string | null;
   reviewNotes: string | null;
@@ -347,6 +347,155 @@ export interface AbsenceRecord {
   treatAsUnpaid: boolean;
   createWarningTrigger: boolean;
   consequencesAppliedAt: string | null;
+  // Unauthorised absence review (HR requirements 2026-11-12)
+  notificationStatus?: 'NO_NOTICE' | 'SHORT_NOTICE' | 'NORMAL_NOTICE' | null;
+  emergencyException?: boolean | null;
+  treatment?: 'UNPAID' | 'PAID_ANNUAL_LEAVE' | null;
+  incidentId?: string | null;
+  coverAlDays?: number;
+  penaltyAlDays?: number;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  reclassifiedRequestId?: string | null;
+}
+
+export interface AbsenceReviewPreview {
+  absence: { id: string; date: string; employeeId: string; status: string };
+  incident: {
+    id: string;
+    days: number;
+    otherDates: string[];
+    existingPenalty: { penaltyType: string; dateApplied: string | null; approvedBy: string | null; onDate: string } | null;
+  };
+  treatment: 'UNPAID' | 'PAID_ANNUAL_LEAVE' | null;
+  annualLeave: {
+    coverDays: number;
+    penaltyDays: number;
+    totalDays: number;
+    balance: LeaveChargePreview | null;
+  };
+  payroll: { deduction: boolean; days?: number; note?: string };
+}
+
+export interface LeaveChargePreview {
+  blocked?: boolean;
+  requiredDays: number;
+  availableDays: number;
+  deductNowDays: number;
+  outstandingDays: number;
+  balanceAfter: number;
+  sufficient: boolean;
+}
+
+export interface LeaveOutstandingAdjustment {
+  id: string;
+  days: number;
+  appliedDays: number;
+  remainingDays: number;
+  status: 'OPEN' | 'APPLIED' | 'SETTLED_ON_LEAVING' | 'CANCELLED';
+  entryType: 'PENALTY' | 'UA_COVER' | 'DEFICIT_COVER';
+  sourceType: string;
+  sourceId: string | null;
+  reason: string;
+  enteredBy: string;
+  approvedBy: string | null;
+  createdAt: number;
+  settledAt: number | null;
+}
+
+// Deficit card (HR requirements 2026-11-12, sections 9-16)
+export interface DeficitMinutes {
+  minutes: number;
+  days: number;
+  remainingMinutes: number;
+  formatted: string;
+}
+
+export interface DeficitSettlement {
+  id: string;
+  periodKey: string;
+  alDays: number;
+  unpaidDays: number;
+  unpaidMinutes: number;
+  settledMinutes: number;
+  settledFormatted: string;
+  reason: string;
+  enteredBy: string;
+  approvedBy: string;
+  createdAt: number;
+  at: string;
+  outstandingAdjustmentId: string | null;
+}
+
+export interface DeficitPenalty {
+  id: string;
+  periodKey: string;
+  option: 'NONE' | 'OPTION_1' | 'OPTION_2';
+  label: string;
+  alDays: number;
+  payDays: number;
+  reason: string;
+  enteredBy: string;
+  approvedBy: string;
+  createdAt: number;
+  at: string;
+  outstandingAdjustmentId: string | null;
+}
+
+export interface DeficitPeriod {
+  periodKey: string;
+  label: string;
+  start: string;
+  end: string;
+  isCurrent: boolean;
+  previous: DeficitMinutes;
+  newGross: DeficitMinutes;
+  credits: DeficitMinutes;
+  current: DeficitMinutes & { netMinutes: number };
+  total: DeficitMinutes;
+  convertedDays: number;
+  remaining: DeficitMinutes;
+  settled: { minutes: number; formatted: string; alDays: number; unpaidDays: number; unpaidMinutes: number; unpaidFormatted: string };
+  available: DeficitMinutes;
+  carriedForward: DeficitMinutes;
+  settlements: DeficitSettlement[];
+  penalty: DeficitPenalty | null;
+  entries: { id: string; date: string; type: string; minutes: number; description: string | null; at: string; by: string | null }[];
+}
+
+export interface DeficitPeriodView {
+  employeeId: string;
+  dayMinutes: number;
+  baseline: { periodKey: string; openingMinutes: number; openingFormatted: string };
+  period: DeficitPeriod;
+  history: DeficitPeriod[];
+  nextPeriodOpening: DeficitMinutes;
+  penaltyOptions: { option: 'NONE' | 'OPTION_1' | 'OPTION_2'; alDays: number; payDays: number; label: string }[];
+  leaveBalance: { blocked: boolean; availableDays?: number; outstandingAdjustmentDays?: number } & ({ blocked: true } | { blocked: false; availableDays: number; outstandingAdjustmentDays: number }) | null;
+}
+
+export interface DeficitSettlementPreview {
+  period: {
+    periodKey: string; label: string;
+    previous: DeficitMinutes; current: DeficitMinutes & { netMinutes: number }; total: DeficitMinutes;
+    convertedDays: number; remaining: DeficitMinutes;
+    alreadySettled: DeficitPeriod['settled']; available: DeficitMinutes;
+  };
+  settlement: { alDays: number; unpaidDays: number; unpaidMinutes: number; settledMinutes: number; settledFormatted: string; unpaidTotalMinutes: number; unpaidTotalFormatted: string; unpaidDayEquivalents: number };
+  carryForward: DeficitMinutes;
+  annualLeave: LeaveChargePreview | null;
+  payroll: { deduction: boolean; dayEquivalents?: number; note?: string };
+}
+
+export interface DeficitPenaltyPreview {
+  period: { periodKey: string; label: string; total: DeficitMinutes; convertedDays: number; settled: DeficitPeriod['settled'] };
+  option: 'NONE' | 'OPTION_1' | 'OPTION_2';
+  label: string;
+  alDays: number;
+  payDays: number;
+  annualLeave: LeaveChargePreview | null;
+  payroll: { deduction: boolean; days?: number; note?: string };
+  replacesNoPenalty: boolean;
 }
 
 export interface LeaveBalanceDetails {
@@ -384,6 +533,11 @@ export interface LeaveBalanceDetails {
   available: number;
   availableDays?: number;
   isNegative: boolean;
+  // HR charges this holiday year (each apart) and the outstanding adjustment.
+  penaltyDays?: number;
+  uaCoverDays?: number;
+  deficitCoverDays?: number;
+  outstandingAdjustmentDays?: number;
   approvedHourlyDays?: number;
   approvedHourlyMinutes?: number;
   approvedHourlyWholeDaysDeducted?: number;

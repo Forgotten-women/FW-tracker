@@ -478,37 +478,275 @@ async function recordSuspectedAbsence({ employeeId, dateKey, nowMs = T.now() }) 
   return { id, recorded: true };
 }
 
+// ---------------------------------------------------------------------------
+// Unauthorised absence review (HR requirements 2026-11-12, sections 2-7, 18, 36)
+//
+// HR records how much notice was given and whether there were emergency or
+// exceptional circumstances. An emergency is never confirmed as unauthorised:
+// HR reclassifies it as the right leave (emergency, sick, compassionate,
+// authorised absence, other). Otherwise HR picks the treatment:
+//   Option 1 - unpaid:  the day is unpaid (payroll) + 1 annual leave day penalty
+//   Option 2 - paid:    1 annual leave day covers the day + 1 annual leave day penalty
+//                       (2 days in total, never 3; no payroll deduction)
+// Consecutive absence days form one incident and the penalty is charged once
+// per incident, never once per day. Nothing is applied without a reason and
+// an approver, and the balance is checked first (36.3).
+// ---------------------------------------------------------------------------
+
+const NOTIFICATION_STATUSES = ['NO_NOTICE', 'SHORT_NOTICE', 'NORMAL_NOTICE'];
+const TREATMENTS = ['UNPAID', 'PAID_ANNUAL_LEAVE'];
+const RECLASSIFY_TYPES = ['emergency', 'sick', 'sick_unpaid', 'compassionate', 'authorised', 'other', 'annual', 'unpaid', 'maternity', 'maternity_unpaid', 'paternity', 'parental', 'study', 'toil'];
+const INCIDENT_GAP_DAYS = 4; // a weekend between two absence days keeps them one incident
+
+function shiftDate(dateKey, days) {
+  const t = new Date(dateKey + 'T00:00:00Z');
+  t.setUTCDate(t.getUTCDate() + days);
+  return t.toISOString().slice(0, 10);
+}
+
+/** The incident this absence belongs to: an adjacent reviewed day's, or a new one. */
+async function incidentFor(record) {
+  const rows = await db.prepare(`
+    SELECT incident_id, date_key, penalty_ledger_id, penalty_al_days, approved_by, approved_at, reviewed_at, treatment
+    FROM absence_records
+    WHERE employee_id = ? AND id <> ? AND incident_id IS NOT NULL
+      AND date_key >= ? AND date_key <= ?
+    ORDER BY ABS(EXTRACT(EPOCH FROM (date_key::date - ?::date))) ASC
+  `).all(record.employee_id, record.id,
+    shiftDate(record.date_key, -INCIDENT_GAP_DAYS), shiftDate(record.date_key, INCIDENT_GAP_DAYS), record.date_key);
+  if (record.incident_id) {
+    const own = rows.filter(r => r.incident_id === record.incident_id);
+    return { id: record.incident_id, members: own, existingPenalty: own.find(r => r.penalty_ledger_id || Number(r.penalty_al_days) > 0) || null };
+  }
+  if (!rows.length) return { id: 'inc_' + crypto.randomBytes(6).toString('hex'), members: [], existingPenalty: null };
+  const id = rows[0].incident_id;
+  const members = rows.filter(r => r.incident_id === id);
+  return { id, members, existingPenalty: members.find(r => r.penalty_ledger_id || Number(r.penalty_al_days) > 0) || null };
+}
+
+/** What confirming this absence would do, for the Review & Confirm screen. */
+async function absenceReviewPreview({ absenceId, treatment = null, applyPenalty = null }) {
+  const record = await db.prepare('SELECT * FROM absence_records WHERE id = ?').get(absenceId);
+  if (!record) throw new Error('No such absence record.');
+  const incident = await incidentFor(record);
+  const penaltyWanted = applyPenalty === null || applyPenalty === undefined ? !incident.existingPenalty : Boolean(applyPenalty);
+  const coverDays = treatment === 'PAID_ANNUAL_LEAVE' ? 1 : 0;
+  const penaltyDays = penaltyWanted && !incident.existingPenalty ? 1 : 0;
+  const L = require('./leave');
+  const leave = coverDays + penaltyDays > 0 ? await L.chargePreview(record.employee_id, coverDays + penaltyDays, record.date_key) : null;
+  return {
+    absence: { id: record.id, date: record.date_key, employeeId: record.employee_id, status: record.status },
+    incident: {
+      id: incident.id,
+      days: incident.members.length + 1,
+      otherDates: incident.members.map(m => m.date_key).sort(),
+      existingPenalty: incident.existingPenalty ? {
+        penaltyType: '1 annual leave day (unauthorised absence)',
+        dateApplied: incident.existingPenalty.approved_at ? T.displayTime(Number(incident.existingPenalty.approved_at)) : (incident.existingPenalty.reviewed_at ? T.displayTime(Number(incident.existingPenalty.reviewed_at)) : null),
+        approvedBy: incident.existingPenalty.approved_by || null,
+        onDate: incident.existingPenalty.date_key,
+      } : null,
+    },
+    treatment,
+    annualLeave: {
+      coverDays, penaltyDays, totalDays: coverDays + penaltyDays,
+      balance: leave,
+    },
+    payroll: treatment === 'UNPAID'
+      ? { deduction: true, days: 1, note: 'Proposed to the payroll run for this period; HR approves it there.' }
+      : { deduction: false },
+  };
+}
+
 /** A person decides the outcome of a suspected absence. */
 async function reviewAbsence({
   absenceId, status, deductAnnualLeave = null, treatAsUnpaid = null,
   createWarningTrigger = null, notes, actor, nowMs = T.now(),
+  // Unauthorised absence review
+  notificationStatus = null, emergencyException = null, treatment = null, applyPenalty = null,
+  approvedBy = null, allowOutstanding = false, leaveTypeId = null, isPaid = null,
 }) {
-  if (!['CONFIRMED', 'DISMISSED'].includes(status)) {
-    throw new Error('status must be CONFIRMED or DISMISSED.');
+  if (!['CONFIRMED', 'DISMISSED', 'RECLASSIFIED'].includes(status)) {
+    throw new Error('status must be CONFIRMED or DISMISSED (or RECLASSIFIED, to record the day as leave).');
   }
   if (!notes || !String(notes).trim()) throw new Error('A note explaining the decision is required.');
 
   const record = await db.prepare('SELECT * FROM absence_records WHERE id = ?').get(absenceId);
   if (!record) throw new Error('No such absence record.');
+  if (notificationStatus !== null && !NOTIFICATION_STATUSES.includes(notificationStatus)) {
+    throw new Error('Notification status must be No notice, Short notice or Normal notice.');
+  }
+  const emergency = emergencyException === null || emergencyException === undefined ? null : Boolean(emergencyException);
+  const note = String(notes).trim();
 
+  // --- Emergency / exceptional circumstances: the right leave category, no penalty.
+  if (status === 'RECLASSIFIED') {
+    if (!leaveTypeId || !RECLASSIFY_TYPES.includes(leaveTypeId)) {
+      throw new Error('Choose the leave category this absence should be recorded as.');
+    }
+    if (record.status === 'RECLASSIFIED') throw new Error('This absence has already been reclassified.');
+    const L = require('./leave');
+    const created = await L.submitRequest({
+      employeeId: record.employee_id, leaveTypeId, startDate: record.date_key, endDate: record.date_key,
+      reason: `Absence review: ${note}`, source: 'HR_ABSENCE_REVIEW',
+    });
+    await L.decideRequest({
+      requestId: created.id, decision: 'APPROVED', notes: note, actor,
+      overdraftReason: note, isPaid: isPaid === null || isPaid === undefined ? null : Boolean(isPaid), nowMs,
+    });
+    await db.prepare(`
+      UPDATE absence_records
+      SET status = 'RECLASSIFIED', reviewed_by = ?, reviewed_at = ?, review_notes = ?,
+          notification_status = ?, emergency_exception = ?, treatment = NULL,
+          deduct_annual_leave = 0, treat_as_unpaid = 0, create_warning_trigger = 0,
+          approved_by = ?, approved_at = ?, reclassified_request_id = ?
+      WHERE id = ?
+    `).run(actor, nowMs, note, notificationStatus, emergency === null ? 1 : (emergency ? 1 : 0),
+      approvedBy ? String(approvedBy).trim() : null, nowMs, created.id, absenceId);
+    await audit({
+      actor, action: 'ABSENCE_RECLASSIFIED', targetType: 'absence', targetId: absenceId,
+      before: { status: record.status },
+      after: { status: 'RECLASSIFIED', leaveTypeId, leaveRequestId: created.id, notificationStatus, emergencyException: emergency, approvedBy },
+      note,
+    });
+    try { require('./payroll').invalidatePayrollCache(record.employee_id); } catch (_) {}
+    try {
+      await N.notify({
+        employeeId: record.employee_id, category: 'ABSENCE',
+        title: 'Absence recorded as leave',
+        body: `Your absence on ${record.date_key} has been recorded as ${leaveTypeId.replace(/_/g, ' ')} leave by HR.`,
+        severity: 'info', link: '/leave', nowMs,
+      });
+    } catch (_) {}
+    return { status: 'RECLASSIFIED', leaveRequestId: created.id, applied: true, message: 'Recorded as leave. No unauthorised absence penalty applies.' };
+  }
+
+  // --- Unauthorised absence confirmed with a treatment (the review section).
+  if (status === 'CONFIRMED' && treatment !== null) {
+    if (!TREATMENTS.includes(treatment)) throw new Error('Treatment must be Option 1 (unpaid) or Option 2 (paid using accrued annual leave).');
+    if (!notificationStatus) throw new Error('Notification status is required.');
+    if (emergency === null) throw new Error('Say whether there were emergency / exceptional circumstances.');
+    if (emergency) {
+      // 36.9: a genuine emergency is reviewed for the right leave category, not penalised.
+      throw new Error('Emergency / exceptional circumstances: choose the appropriate leave category instead of confirming an unauthorised absence.');
+    }
+    if (!approvedBy || !String(approvedBy).trim()) throw new Error('Approved by is required.');
+    if (record.status === 'CONFIRMED' && record.treatment) throw new Error('This absence has already been confirmed and its treatment applied.');
+    if (record.status === 'RECLASSIFIED') throw new Error('This absence was reclassified as leave.');
+
+    const preview = await absenceReviewPreview({ absenceId, treatment, applyPenalty });
+    const wantPenalty = applyPenalty === null || applyPenalty === undefined ? true : Boolean(applyPenalty);
+    if (wantPenalty && preview.incident.existingPenalty) {
+      const err = new Error('Penalty already applied for this absence incident.');
+      err.code = 'PENALTY_ALREADY_APPLIED';
+      err.details = preview.incident.existingPenalty;
+      throw err;
+    }
+    const L = require('./leave');
+    const need = preview.annualLeave.totalDays;
+    if (need > 0 && preview.annualLeave.balance && !preview.annualLeave.balance.sufficient && !allowOutstanding) {
+      throw new L.InsufficientBalanceError({
+        requiredDays: need, availableDays: preview.annualLeave.balance.availableDays, shortfallDays: preview.annualLeave.balance.outstandingDays,
+      });
+    }
+
+    const approver = String(approvedBy).trim();
+    const out = await tx(async () => {
+      let coverLedgerId = null;
+      let penaltyLedgerId = null;
+      const outstanding = [];
+      if (preview.annualLeave.coverDays > 0) {
+        const c = await L.chargeAnnualLeave({
+          employeeId: record.employee_id, days: preview.annualLeave.coverDays, entryType: 'UA_COVER',
+          reason: `Unauthorised absence ${record.date_key} kept paid: 1 annual leave day used to cover it. ${note}`,
+          actor, approvedBy: approver, onDate: record.date_key, allowOutstanding, sourceType: 'ABSENCE', sourceId: absenceId, nowMs,
+        });
+        coverLedgerId = c.ledgerId || c.outstandingId;
+        if (c.outstandingId) outstanding.push(c.outstandingId);
+      }
+      if (preview.annualLeave.penaltyDays > 0) {
+        const c = await L.chargeAnnualLeave({
+          employeeId: record.employee_id, days: preview.annualLeave.penaltyDays, entryType: 'PENALTY',
+          reason: `Unauthorised absence penalty (incident from ${record.date_key}): 1 annual leave day. ${note}`,
+          actor, approvedBy: approver, onDate: record.date_key, allowOutstanding, sourceType: 'ABSENCE', sourceId: absenceId, nowMs,
+        });
+        penaltyLedgerId = c.ledgerId || c.outstandingId;
+        if (c.outstandingId) outstanding.push(c.outstandingId);
+      }
+      await db.prepare(`
+        UPDATE absence_records
+        SET status = 'CONFIRMED', reviewed_by = ?, reviewed_at = ?, review_notes = ?,
+            notification_status = ?, emergency_exception = 0, treatment = ?, incident_id = ?,
+            cover_al_days = ?, penalty_al_days = ?,
+            deduct_annual_leave = ?, treat_as_unpaid = ?, create_warning_trigger = ?,
+            approved_by = ?, approved_at = ?, cover_ledger_id = ?, penalty_ledger_id = ?
+        WHERE id = ?
+      `).run(actor, nowMs, note, notificationStatus, treatment, preview.incident.id,
+        preview.annualLeave.coverDays, preview.annualLeave.penaltyDays,
+        (preview.annualLeave.coverDays + preview.annualLeave.penaltyDays) > 0 ? 1 : 0,
+        treatment === 'UNPAID' ? 1 : 0,
+        createWarningTrigger === null ? 0 : (createWarningTrigger ? 1 : 0),
+        approver, nowMs, coverLedgerId, penaltyLedgerId, absenceId);
+
+      await audit({
+        actor, action: 'ABSENCE_REVIEWED', targetType: 'absence', targetId: absenceId,
+        before: { status: record.status, treatment: record.treatment || null },
+        after: {
+          status: 'CONFIRMED', notificationStatus, emergencyException: false, treatment, incidentId: preview.incident.id,
+          annualLeave: { coverDays: preview.annualLeave.coverDays, penaltyDays: preview.annualLeave.penaltyDays, totalDays: need },
+          payroll: preview.payroll, approvedBy: approver, outstandingAdjustmentIds: outstanding,
+        },
+        note,
+      });
+      return { coverLedgerId, penaltyLedgerId, outstanding };
+    });
+
+    try { require('./payroll').invalidatePayrollCache(record.employee_id); } catch (_) {}
+    let addedToRun = null;
+    if (treatment === 'UNPAID') {
+      addedToRun = await require('./payroll').addDecisionToRunInReview({ employeeId: record.employee_id, dateKey: record.date_key, actor });
+    }
+    try {
+      await N.notify({
+        employeeId: record.employee_id, category: 'ABSENCE',
+        title: 'Unauthorised absence confirmed',
+        body: treatment === 'UNPAID'
+          ? `Your absence on ${record.date_key} is recorded as unauthorised: the day is unpaid${preview.annualLeave.penaltyDays ? ' and 1 annual leave day is deducted as a penalty' : ''}.`
+          : `Your absence on ${record.date_key} is recorded as unauthorised: 1 annual leave day covers it${preview.annualLeave.penaltyDays ? ' and 1 annual leave day is deducted as a penalty' : ''}.`,
+        severity: 'warning', link: '/leave', nowMs,
+      });
+    } catch (_) {}
+    return {
+      status: 'CONFIRMED', treatment, incidentId: preview.incident.id, applied: true,
+      annualLeave: preview.annualLeave, payroll: preview.payroll, outstandingAdjustmentIds: out.outstanding, addedToRun,
+      message: treatment === 'UNPAID'
+        ? `Confirmed: 1 unpaid day proposed to payroll${preview.annualLeave.penaltyDays ? ', 1 annual leave day penalty applied' : ''}.`
+        : `Confirmed: ${need} annual leave day(s) deducted (${preview.annualLeave.coverDays} to cover the day, ${preview.annualLeave.penaltyDays} penalty). No payroll deduction.`,
+    };
+  }
+
+  // --- Dismissed, or confirmed the older way (no treatment chosen): nothing applied.
   await tx(async () => {
     await db.prepare(`
       UPDATE absence_records
       SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?,
-          deduct_annual_leave = ?, treat_as_unpaid = ?, create_warning_trigger = ?
+          deduct_annual_leave = ?, treat_as_unpaid = ?, create_warning_trigger = ?,
+          notification_status = COALESCE(?, notification_status),
+          emergency_exception = COALESCE(?, emergency_exception)
       WHERE id = ?
-    `).run(status, actor, nowMs, String(notes).trim(),
+    `).run(status, actor, nowMs, note,
            deductAnnualLeave === null ? null : (deductAnnualLeave ? 1 : 0),
            treatAsUnpaid === null ? null : (treatAsUnpaid ? 1 : 0),
            createWarningTrigger === null ? null : (createWarningTrigger ? 1 : 0),
+           notificationStatus, emergency === null ? null : (emergency ? 1 : 0),
            absenceId);
 
     await audit({
       actor, action: 'ABSENCE_REVIEWED',
       targetType: 'absence', targetId: absenceId,
       before: { status: record.status },
-      after: { status, deductAnnualLeave, treatAsUnpaid, createWarningTrigger },
-      note: String(notes).trim(),
+      after: { status, deductAnnualLeave, treatAsUnpaid, createWarningTrigger, notificationStatus, emergencyException: emergency },
+      note,
     });
   });
 
@@ -544,7 +782,42 @@ async function reviewAbsence({
     proposedConsequences: { deductAnnualLeave, treatAsUnpaid, createWarningTrigger },
     applied: false,
     addedToRun,
+    message: 'Recorded. The chosen consequences are proposals and take effect only once approved.',
   };
+}
+
+/**
+ * HR records unauthorised absence days directly (e.g. from "Record leave" with
+ * the Unauthorised absence category): one PENDING_REVIEW record per working
+ * day, for the review above. Days that already have a record are left alone.
+ */
+async function recordHrAbsences({ employeeId, startDate, endDate, reason = null, actor, nowMs = T.now() }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(startDate || ''))) throw new Error('startDate must be YYYY-MM-DD.');
+  const last = /^\d{4}-\d{2}-\d{2}$/.test(String(endDate || '')) ? endDate : startDate;
+  if (last < startDate) throw new Error('End date must not be before the start date.');
+  const ids = [];
+  const skipped = [];
+  let guard = 0;
+  for (let d = startDate; d <= last && guard++ < 62; d = shiftDate(d, 1)) {
+    const sched = await schedule.resolve(employeeId, d);
+    if (!sched.isWorkingDay) { skipped.push({ date: d, reason: sched.nonWorkingReason || 'rest day' }); continue; }
+    const existing = await db.prepare('SELECT id, status FROM absence_records WHERE employee_id = ? AND date_key = ?').get(employeeId, d);
+    if (existing) { skipped.push({ date: d, reason: `already recorded (${existing.status})`, id: existing.id }); continue; }
+    const id = 'abs_' + crypto.randomBytes(8).toString('hex');
+    await db.prepare(`
+      INSERT INTO absence_records (id, employee_id, date_key, absence_type, reason, detected_at, status)
+      VALUES (?, ?, ?, 'UNAUTHORISED', ?, ?, 'PENDING_REVIEW')
+    `).run(id, employeeId, d, reason, nowMs);
+    ids.push(id);
+  }
+  if (ids.length) {
+    await audit({
+      actor, action: 'ABSENCE_RECORDED_BY_HR', targetType: 'employee', targetId: employeeId,
+      after: { dates: ids.length, from: startDate, to: last, reason },
+      note: 'Awaiting HR review: notice given, emergency / exceptional circumstances, treatment.',
+    });
+  }
+  return { ids, skipped };
 }
 
 /**
@@ -747,6 +1020,16 @@ async function listAbsences({ status = 'ALL', from = null, to = null, employeeId
     treatAsUnpaid: r.treat_as_unpaid === 1,
     createWarningTrigger: r.create_warning_trigger === 1,
     consequencesAppliedAt: r.consequences_applied_at ? T.displayTime(r.consequences_applied_at) : null,
+    // Unauthorised absence review (2026-11-12)
+    notificationStatus: r.notification_status || null,
+    emergencyException: r.emergency_exception === null || r.emergency_exception === undefined ? null : Number(r.emergency_exception) === 1,
+    treatment: r.treatment || null,
+    incidentId: r.incident_id || null,
+    coverAlDays: Number(r.cover_al_days) || 0,
+    penaltyAlDays: Number(r.penalty_al_days) || 0,
+    approvedBy: r.approved_by || null,
+    approvedAt: r.approved_at ? T.displayTime(Number(r.approved_at)) : null,
+    reclassifiedRequestId: r.reclassified_request_id || null,
   }));
 }
 
@@ -848,5 +1131,6 @@ module.exports = {
   reviewTrigger, issueFormalWarning, withdrawWarning, acknowledgeWarning,
   expireWarnings, addMonths,
   recordSuspectedAbsence, reviewAbsence, scanDailyAbsences, selfReportAbsence, listAbsences,
+  absenceReviewPreview, recordHrAbsences,
   notify, levelLabel, employeeWarningView,
 };

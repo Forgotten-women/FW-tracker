@@ -16,7 +16,19 @@ test.before(prepareDatabase);
 const { db } = require('../src/db');
 const PR = require('../src/domain/payroll');
 const A = require('../src/domain/attendance');
+const DP = require('../src/domain/deficitPeriods');
 const T = require('../src/util/time');
+
+// HR requirements 2026-11-12: a deficit day costs pay only once HR settles it
+// as unpaid on the deficit card. Seeds the ledger and settles one whole day.
+async function settleOneDayUnpaid(emp, minutes) {
+  await A.adjustBalance({ employeeId: emp, dateKey: TODAY, minutes, reason: 'Seeded for test', actor: 'test' });
+  const key = TODAY.slice(0, 7) < DP.PERIODS_FROM ? DP.PERIODS_FROM : TODAY.slice(0, 7);
+  return await DP.settle({
+    employeeId: emp, periodKey: key, unpaidDays: 1, reason: 'Settled as unpaid for the test',
+    actor: 'user:hr', approvedBy: 'HR Manager',
+  });
+}
 
 test.after(dropDatabase);
 
@@ -73,19 +85,19 @@ test('a full-period employee with nothing to deduct is paid the whole monthly sa
 });
 
 // ---------------------------------------------------------------------------
-// Attendance deficit: 480+ accumulated minutes = one whole day off
+// Attendance deficit: a whole day HR settled as unpaid is one day off
 // ---------------------------------------------------------------------------
 
-test('a 500-minute deficit deducts exactly one whole day from a full period', async () => {
+test('a deficit day HR settled as unpaid deducts exactly one whole day from a full period', async () => {
   const emp = await makeEmployee('emp_deficit_pay', '2020-01-01');
   await PR.setSalary({ employeeId: emp, amount: 2000, effectiveFrom: '2020-01-01', reason: 'Start', actor: 'user:hr' });
-  await A.adjustBalance({ employeeId: emp, dateKey: TODAY, minutes: 500, reason: 'Seeded for test', actor: 'test' });
+  await settleOneDayUnpaid(emp, 500);
 
   const period = await PR.createPeriod({ name: 'Deficit period', ...nextMonth(), actor: 'user:hr' });
   const before = await PR.preparePeriod(period.id);
   const rowBefore = before.employees.find(e => e.employeeId === emp);
 
-  assert.equal(rowBefore.unpaidDays.deficitDays, 1, '500 min crosses one 480-minute threshold');
+  assert.equal(rowBefore.unpaidDays.deficitDays, 1, 'one settled unpaid day (8 h)');
   assert.equal(rowBefore.unpaidDays.totalDays, 1);
   assert.equal(rowBefore.calculatedPeriodGross, PR.money(2000 - 2000 * 12 / 52 / 5), 'preview only, nothing proposed yet');
   assert.equal(rowBefore.netPayable.amount, 2000, 'net stays the full salary until an adjustment is approved');
@@ -130,7 +142,7 @@ test('a 500-minute deficit deducts exactly one whole day from a full period', as
 test('a rejected deficit deduction is terminal -- it does not resurface next period', async () => {
   const emp = await makeEmployee('emp_deficit_reject', '2020-01-01');
   await PR.setSalary({ employeeId: emp, amount: 1500, effectiveFrom: '2020-01-01', reason: 'Start', actor: 'user:hr' });
-  await A.adjustBalance({ employeeId: emp, dateKey: TODAY, minutes: 480, reason: 'Seeded for test', actor: 'test' });
+  await settleOneDayUnpaid(emp, 480);
 
   const p1 = await PR.createPeriod({ name: 'Reject period 1', ...nextMonth(), actor: 'user:hr' });
   await PR.generatePeriodDeductions({ periodId: p1.id, actor: 'user:hr' });
@@ -138,7 +150,7 @@ test('a rejected deficit deduction is terminal -- it does not resurface next per
   const adj = await db.prepare(
     "SELECT * FROM payroll_adjustments WHERE period_id = ? AND employee_id = ? AND adjustment_type = ?"
   ).get(p1.id, emp, PR.ATTENDANCE_DEFICIT_DAY);
-  assert.ok(adj, 'a deduction was proposed for the 480-minute crossing');
+  assert.ok(adj, 'a deduction was proposed for the settled unpaid day');
 
   await PR.decideAdjustment({
     adjustmentId: adj.id, decision: 'REJECTED', notes: 'Waived as a goodwill gesture', actor: 'user:hr',

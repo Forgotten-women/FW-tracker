@@ -1689,3 +1689,69 @@ ALTER TABLE attendance_daily_summary ADD COLUMN IF NOT EXISTS idle_minutes INTEG
 
 -- 037: period adjustment kind: EXTRA_TIME (offsets deficit, rest is extra time) or DEFICIT_FIX (cancels deficit only).
 ALTER TABLE attendance_period_adjustments ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'EXTRA_TIME';
+
+-- 040: unauthorised absence review, deficit settlement and penalties, outstanding annual leave adjustments.
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS notification_status TEXT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS emergency_exception BIGINT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS treatment TEXT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS incident_id TEXT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS cover_al_days DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS penalty_al_days DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS approved_by TEXT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS approved_at BIGINT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS cover_ledger_id TEXT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS penalty_ledger_id TEXT;
+ALTER TABLE absence_records ADD COLUMN IF NOT EXISTS reclassified_request_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_absence_incident ON absence_records(incident_id);
+
+CREATE TABLE IF NOT EXISTS attendance_deficit_settlements (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  period_key TEXT NOT NULL,
+  al_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+  unpaid_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+  unpaid_minutes BIGINT NOT NULL DEFAULT 0,
+  settled_minutes BIGINT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  entered_by TEXT NOT NULL,
+  approved_by TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  ledger_entry_id TEXT,
+  leave_ledger_id TEXT,
+  outstanding_adjustment_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_deficit_settlements_emp ON attendance_deficit_settlements(employee_id, period_key);
+
+CREATE TABLE IF NOT EXISTS attendance_deficit_penalties (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  period_key TEXT NOT NULL,
+  penalty_option TEXT NOT NULL,
+  al_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+  pay_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL,
+  entered_by TEXT NOT NULL,
+  approved_by TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  leave_ledger_id TEXT,
+  outstanding_adjustment_id TEXT,
+  UNIQUE (employee_id, period_key)
+);
+
+CREATE TABLE IF NOT EXISTS leave_outstanding_adjustments (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  days DOUBLE PRECISION NOT NULL,
+  applied_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  ledger_entry_type TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  source_id TEXT,
+  reason TEXT NOT NULL,
+  entered_by TEXT NOT NULL,
+  approved_by TEXT,
+  created_at BIGINT NOT NULL,
+  settled_at BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_leave_outstanding_emp ON leave_outstanding_adjustments(employee_id, status);

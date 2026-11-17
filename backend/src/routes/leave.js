@@ -45,6 +45,11 @@ function presentBalance(b) {
     nextRenewalDate: b.nextRenewalDate || b.yearEnd,
     nextAccrualDate: b.nextAccrualDate,
     officialJoiningDate: b.officialJoiningDate || b.startDate,
+    // HR charges this holiday year, each apart, and what the balance could not cover yet.
+    penaltyDays: roundDays(b.penaltyDays || 0),
+    uaCoverDays: roundDays(b.uaCoverDays || 0),
+    deficitCoverDays: roundDays(b.deficitCoverDays || 0),
+    outstandingAdjustmentDays: roundDays(b.outstandingAdjustmentDays || 0),
 
     // 8-Metric Leave Report Breakdown (spec & policy):
     // 1. Current year's/cycle's annual leave entitlement
@@ -593,6 +598,26 @@ router.post('/employee/:employeeId/request',
         reason = `${reason} (Hourly: ${startTime} - ${endTime}, ${minutes}m)`.trim();
       }
 
+      // "Unauthorised absence" is not booked as leave: it opens an absence
+      // record per working day for the HR review (notice given, emergency,
+      // treatment, penalty) - HR requirements 2026-11-12, sections 2-6.
+      if (b.leaveTypeId === 'unauthorised') {
+        const W = require('../domain/warnings');
+        const out = await W.recordHrAbsences({
+          employeeId: req.params.employeeId, startDate: b.startDate, endDate: b.endDate || b.startDate,
+          reason, actor,
+        });
+        return res.json({
+          status: 'SUCCESS',
+          recordedAsAbsence: true,
+          absenceIds: out.ids,
+          skippedDates: out.skipped,
+          message: out.ids.length
+            ? `${out.ids.length} day(s) recorded as unauthorised absence, awaiting HR review (notice, emergency, treatment).`
+            : 'No working days to record: every day in the range is a rest day or already has an absence record.',
+        });
+      }
+
       const created = await L.submitRequest({
         employeeId: req.params.employeeId,
         leaveTypeId: b.leaveTypeId,
@@ -668,24 +693,27 @@ router.post('/employee/:employeeId/adjust',
     }
   });
 
-// POST /api/leave/employee/:employeeId/resolve-deficit - Resolves accumulated unapproved deficit days
-// Option 1 ('ANNUAL_LEAVE'): Deducts 2 annual leaves for every 1 day deficit.
-// Option 2 ('PAYROLL_DEDUCTION'): Deducts 1 day of salary pay on payroll.
-router.post('/employee/:employeeId/resolve-deficit',
-  requireUserOrAdminKey('leave.write'), requireEmployeeAccess(),
+// POST /api/leave/employee/:employeeId/resolve-deficit was the old banner
+// (2 annual leave days per deficit day, no duplicate check). Deficit
+// settlement and penalties now live on the deficit card:
+// /api/attendance/employee/:id/deficit-period/... (2026-11-12).
+router.post('/employee/:employeeId/resolve-deficit', requireUserOrAdminKey('leave.write'), (req, res) => {
+  res.status(410).json({
+    status: 'ERROR',
+    message: 'Deficit penalties are decided on the Deficit card (settlement and penalty are separate, confirmed decisions).',
+  });
+});
+
+// GET /api/leave/employee/:employeeId/outstanding-adjustments
+router.get('/employee/:employeeId/outstanding-adjustments',
+  requireUserOrAdminKey('leave.read'), requireEmployeeAccess(),
   async (req, res) => {
     try {
-      const actor = req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`;
-      const out = await L.resolveDeficitPenalty({
-        employeeId: req.params.employeeId,
-        wholeDays: req.body?.wholeDays || 1,
-        resolutionType: req.body?.resolutionType,
-        actor,
-        reason: req.body?.reason || '',
-        periodId: req.body?.periodId || null,
+      res.json({
+        status: 'SUCCESS',
+        adjustments: await L.listOutstandingAdjustments(req.params.employeeId),
+        outstandingDays: await L.outstandingDays(req.params.employeeId),
       });
-      const balance = await L.balanceFor(req.params.employeeId);
-      res.json({ status: 'SUCCESS', ...out, balance: presentBalance(balance) });
     } catch (err) {
       res.status(400).json({ status: 'ERROR', message: err.message });
     }

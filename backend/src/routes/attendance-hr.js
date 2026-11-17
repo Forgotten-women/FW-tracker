@@ -751,6 +751,77 @@ router.post('/employee/:employeeId/adjust',
     }
   });
 
+// ---------------------------------------------------------------------------
+// Deficit card: monthly settlement and the separate penalty
+// (HR requirements 2026-11-12, sections 9-16)
+// ---------------------------------------------------------------------------
+
+const DP = require('../domain/deficitPeriods');
+
+function deficitError(res, err) {
+  const status = err.code === 'INSUFFICIENT_BALANCE' || err.code === 'PENALTY_ALREADY_APPLIED' || err.code === 'EXCEEDS_AVAILABLE' ? 409 : 400;
+  res.status(status).json({ status: 'ERROR', code: err.code || null, message: err.message, details: err.details || null });
+}
+
+// GET /api/attendance/employee/:employeeId/deficit-period?period=YYYY-MM
+router.get('/employee/:employeeId/deficit-period',
+  requireUser, requirePermission('attendance.read'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      res.json({ status: 'SUCCESS', ...(await DP.periodView(req.params.employeeId, req.query.period || null)) });
+    } catch (err) { deficitError(res, err); }
+  });
+
+// POST .../deficit-period/settle/preview and .../deficit-period/settle
+router.post('/employee/:employeeId/deficit-period/settle/preview',
+  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const b = req.body || {};
+      res.json({ status: 'SUCCESS', preview: await DP.settlementPreview({
+        employeeId: req.params.employeeId, periodKey: b.period, alDays: b.alDays, unpaidDays: b.unpaidDays, unpaidMinutes: b.unpaidMinutes,
+      }) });
+    } catch (err) { deficitError(res, err); }
+  });
+
+router.post('/employee/:employeeId/deficit-period/settle',
+  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const b = req.body || {};
+      const out = await DP.settle({
+        employeeId: req.params.employeeId, periodKey: b.period,
+        alDays: b.alDays, unpaidDays: b.unpaidDays, unpaidMinutes: b.unpaidMinutes,
+        reason: b.reason, approvedBy: b.approvedBy, allowOutstanding: Boolean(b.allowOutstanding),
+        actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
+      });
+      res.json({ status: 'SUCCESS', message: 'Deficit settlement recorded.', ...out });
+    } catch (err) { deficitError(res, err); }
+  });
+
+router.post('/employee/:employeeId/deficit-period/penalty/preview',
+  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const b = req.body || {};
+      res.json({ status: 'SUCCESS', preview: await DP.penaltyPreview({ employeeId: req.params.employeeId, periodKey: b.period, option: b.option }) });
+    } catch (err) { deficitError(res, err); }
+  });
+
+router.post('/employee/:employeeId/deficit-period/penalty',
+  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  async (req, res) => {
+    try {
+      const b = req.body || {};
+      const out = await DP.applyPenalty({
+        employeeId: req.params.employeeId, periodKey: b.period, option: b.option,
+        reason: b.reason, approvedBy: b.approvedBy, allowOutstanding: Boolean(b.allowOutstanding),
+        actor: req.auth.kind === 'admin' ? 'admin' : `user:${req.auth.id}`,
+      });
+      res.json({ status: 'SUCCESS', message: 'Penalty decision recorded.', ...out });
+    } catch (err) { deficitError(res, err); }
+  });
+
 // GET /api/attendance/employee/:employeeId/ledger
 router.get('/employee/:employeeId/ledger',
   requireUser, requirePermission('attendance.read'), requireEmployeeAccess(),
