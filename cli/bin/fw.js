@@ -378,6 +378,17 @@ function cmdConnect(target) {
 
     getWebSocket((ws) => {
       let shellStarted = false;
+      const isMac = info && info.platform === 'macos';
+      let promptTimer = null;
+
+      function showPromptIfMac() {
+        if (!isMac) return;
+        clearTimeout(promptTimer);
+        promptTimer = setTimeout(() => {
+          process.stdout.write('\x1b[36mzsh (' + (info.employeeNumber || target) + ') % \x1b[0m');
+        }, 120);
+      }
+
       const handshakeTimeout = setTimeout(() => {
         if (!shellStarted) {
           cleanup();
@@ -390,12 +401,18 @@ function cmdConnect(target) {
 
       ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_start' }));
 
-      // Prompt kickstart
+      // Prompt kickstart: Windows PowerShell needs \r\n, macOS zsh needs local prompt display
       setTimeout(() => {
         if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: "\r\n" }));
+          shellStarted = true;
+          clearTimeout(handshakeTimeout);
+          if (!isMac) {
+            ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: "\r\n" }));
+          } else {
+            showPromptIfMac();
+          }
         }
-      }, 400);
+      }, 300);
 
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(true);
@@ -403,7 +420,34 @@ function cmdConnect(target) {
       process.stdin.resume();
 
       process.stdin.on('data', (chunk) => {
-        ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: chunk.toString() }));
+        let str = chunk.toString();
+
+        if (isMac) {
+          // macOS raw mode bridge
+          if (str === '\r' || str === '\r\n') {
+            process.stdout.write('\r\n');
+            ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: '\n' }));
+            showPromptIfMac();
+            return;
+          }
+          if (str === '\u0003') { // Ctrl+C
+            cleanup();
+            console.log('\n\x1b[33mSession terminated.\x1b[0m');
+            ws.close();
+            process.exit(0);
+          }
+          if (str === '\u0008' || str === '\x7f') { // Backspace
+            process.stdout.write('\b \b');
+            ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: '\x7f' }));
+            return;
+          }
+          // Echo typed character locally for macOS non-PTY zsh
+          process.stdout.write(str);
+          ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: str }));
+        } else {
+          // Windows target: forward keystrokes directly to PowerShell
+          ws.send(JSON.stringify({ action: 'forward', target: devId, type: 'shell_input', data: str }));
+        }
       });
 
       ws.on('message', (raw) => {
@@ -412,6 +456,7 @@ function cmdConnect(target) {
           shellStarted = true;
           clearTimeout(handshakeTimeout);
           process.stdout.write(msg.data);
+          showPromptIfMac();
         } else if (msg.type === 'shell_closed') {
           cleanup();
           console.log(`\n\x1b[33mRemote shell closed (exit code ${msg.code}).\x1b[0m`);
