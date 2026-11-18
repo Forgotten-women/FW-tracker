@@ -59,10 +59,10 @@ export function ReviewConfirm({
         </div>
       ))}
 
-      <dl className="divide-y divide-line rounded-xl border border-line bg-raised/50 text-xs">
+      <dl className="divide-y divide-line rounded-xl border border-line-strong bg-raised text-xs">
         {rows.map((r) => (
-          <div key={r.label} className="flex items-start justify-between gap-4 px-3 py-2">
-            <dt className="text-dim shrink-0">{r.label}</dt>
+          <div key={r.label} className="flex items-start justify-between gap-4 px-3.5 py-2">
+            <dt className="text-text-secondary shrink-0">{r.label}</dt>
             <dd className={`text-right font-medium ${toneClass(r.tone)}`}>{r.value}</dd>
           </div>
         ))}
@@ -74,9 +74,9 @@ export function ReviewConfirm({
         <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</div>
       )}
 
-      <div className="flex justify-end gap-2 pt-1 border-t border-line">
+      <div className="flex justify-end gap-2 pt-2 border-t border-line">
         <Button onClick={onBack} disabled={busy}>Back</Button>
-        <Button variant="primary" onClick={onConfirm} disabled={busy || disabled}>
+        <Button variant="success" onClick={onConfirm} disabled={busy || disabled}>
           {busy ? 'Applying…' : confirmLabel}
         </Button>
       </div>

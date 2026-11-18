@@ -79,8 +79,8 @@ export function DeficitTile({ employeeId, month, onOpen }: { employeeId: string;
 
 function Row({ label, value, tone = '' }: { label: string; value: string | number; tone?: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
-      <span className="text-dim">{label}</span>
+    <div className="flex items-center justify-between gap-3 px-3.5 py-2 text-xs">
+      <span className="text-text-secondary">{label}</span>
       <span className={`font-mono font-semibold ${tone || 'text-text'}`}>{value}</span>
     </div>
   );
@@ -192,14 +192,14 @@ export function DeficitCardModal({
   };
 
   const periodSummary = (x: DeficitPeriod) => (
-    <div className="rounded-xl border border-line bg-raised/50 divide-y divide-line">
+    <div className="rounded-xl border border-line-strong bg-raised divide-y divide-line">
       <Row label="Previous period deficit (carried forward)" value={fmt(x.previous.minutes)} />
       <Row label={`New deficit this period${x.credits.minutes > 0 ? ` (${fmt(x.newGross.minutes)} − ${fmt(x.credits.minutes)} HR credit)` : ''}`} value={x.current.formatted} />
       <Row label="Total deficit" value={fmt(x.total.minutes)} tone={x.total.minutes > 0 ? 'text-rose-300' : 'text-text'} />
-      <Row label="Completed 8-hour deficit days" value={`${x.convertedDays} day${x.convertedDays === 1 ? '' : 's'}`} tone="text-rose-300" />
+      <Row label="Completed 8-hour deficit days" value={`${x.convertedDays} day${x.convertedDays === 1 ? '' : 's'}`} tone={x.convertedDays > 0 ? 'text-rose-300' : 'text-text'} />
       <Row label="Remaining hours/minutes" value={fmt(x.remaining.minutes)} />
       <Row label="Settled this period" value={x.settled.minutes > 0 ? `${fmt(x.settled.minutes)} (AL ${x.settled.alDays}d · unpaid ${x.settled.unpaidDays}d${x.settled.unpaidMinutes ? ` + ${fmt(x.settled.unpaidMinutes)}` : ''})` : 'Nothing yet'} />
-      <Row label="Carried forward to next period" value={`${x.carriedForward.days} day${x.carriedForward.days === 1 ? '' : 's'} + ${fmt(x.carriedForward.remainingMinutes)} (${fmt(x.carriedForward.minutes)})`} tone="text-amber-300" />
+      <Row label="Carried forward to next period" value={`${x.carriedForward.days} day${x.carriedForward.days === 1 ? '' : 's'} + ${fmt(x.carriedForward.remainingMinutes)} (${fmt(x.carriedForward.minutes)})`} tone={x.carriedForward.minutes > 0 ? 'text-amber-300' : 'text-text'} />
       <Row label="Penalty" value={x.penalty ? `${x.penalty.label} · ${x.penalty.approvedBy} · ${x.penalty.at}` : 'No decision recorded'} tone={x.penalty && x.penalty.option !== 'NONE' ? 'text-rose-300' : ''} />
     </div>
   );
@@ -240,16 +240,31 @@ export function DeficitCardModal({
   ) : null;
 
   const num = (v: string, max = 99) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
+  const fieldClass = 'mt-1 w-full rounded-lg border border-line-strong bg-sheet px-3 py-2 text-text placeholder:text-muted focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25';
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [busy, onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-md overflow-y-auto">
-      <div className="relative w-full max-w-2xl rounded-3xl border border-white/10 bg-surface p-6 shadow-2xl my-auto max-h-[92vh] overflow-y-auto space-y-4 text-text">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Deficit card · ${employeeName}`}
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+    >
+      <div className="glass-panel-elevated relative w-full max-w-2xl rounded-3xl p-6 my-auto max-h-[92vh] overflow-y-auto space-y-4 text-text">
         <div className="flex items-start justify-between gap-3 pb-3 border-b border-line">
           <div>
-            <h2 className="text-base font-bold flex items-center gap-2"><ClockIcon className="h-5 w-5 text-rose-400" /> Deficit card · {employeeName}</h2>
+            <h2 className="text-base font-bold text-text flex items-center gap-2"><ClockIcon className="h-5 w-5 text-rose-400" /> Deficit card · {employeeName}</h2>
             <p className="text-xs text-muted mt-0.5">{p ? p.label : month} · 8 hours = 1 deficit day · settlement and penalty are separate HR decisions</p>
           </div>
-          <button type="button" onClick={onClose} className="p-2 rounded-xl text-muted hover:text-text hover:bg-raised" aria-label="Close"><XIcon className="h-5 w-5" /></button>
+          <button type="button" onClick={onClose} className="p-2 rounded-xl text-muted hover:text-text hover:bg-raised transition" aria-label="Close"><XIcon className="h-5 w-5" /></button>
         </div>
 
         {loadError && <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">{loadError}</div>}
@@ -259,24 +274,24 @@ export function DeficitCardModal({
           <>
             {periodSummary(p)}
             {view?.leaveBalance && !view.leaveBalance.blocked && (
-              <div className="text-[11px] text-muted">
+              <div className="text-xs text-text-secondary">
                 Annual leave available: <strong className="text-text">{view.leaveBalance.availableDays} day(s)</strong>
                 {view.leaveBalance.outstandingAdjustmentDays > 0 && <> · outstanding adjustment: <strong className="text-rose-300">{view.leaveBalance.outstandingAdjustmentDays} day(s)</strong></>}
               </div>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button variant="primary" disabled={p.available.minutes <= 0} onClick={() => { reset(); setDone(null); setMode('SETTLE'); }}>Settle deficit…</Button>
+              <Button variant="success" disabled={p.available.minutes <= 0} onClick={() => { reset(); setDone(null); setMode('SETTLE'); }}>Settle deficit…</Button>
               <Button variant="danger" onClick={() => { reset(); setDone(null); setOption(p.penalty?.option ?? 'NONE'); setMode('PENALTY'); }}>Penalty decision…</Button>
             </div>
 
             {p.settlements.length > 0 && (
               <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-dim mb-1">Settlements this period</div>
-                <div className="divide-y divide-line rounded-xl border border-line text-xs">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted mb-1">Settlements this period</div>
+                <div className="divide-y divide-line rounded-xl border border-line-strong bg-raised text-xs">
                   {p.settlements.map((s) => (
                     <div key={s.id} className="px-3 py-2">
-                      <div className="flex justify-between gap-3"><span className="font-semibold">{s.settledFormatted}</span><span className="text-dim">{s.at}</span></div>
-                      <div className="text-muted">AL {s.alDays}d · unpaid {s.unpaidDays}d{s.unpaidMinutes ? ` + ${fmt(s.unpaidMinutes)}` : ''} · {s.reason} · approved by {s.approvedBy}{s.outstandingAdjustmentId ? ' · shortfall held as outstanding adjustment' : ''}</div>
+                      <div className="flex justify-between gap-3"><span className="font-semibold text-text">{s.settledFormatted}</span><span className="text-muted">{s.at}</span></div>
+                      <div className="text-text-secondary">AL {s.alDays}d · unpaid {s.unpaidDays}d{s.unpaidMinutes ? ` + ${fmt(s.unpaidMinutes)}` : ''} · {s.reason} · approved by {s.approvedBy}{s.outstandingAdjustmentId ? ' · shortfall held as outstanding adjustment' : ''}</div>
                     </div>
                   ))}
                 </div>
@@ -285,12 +300,12 @@ export function DeficitCardModal({
 
             {view && view.history.length > 0 && (
               <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-dim mb-1 flex items-center gap-1"><HistoryIcon className="h-3.5 w-3.5" /> Previous periods</div>
-                <div className="divide-y divide-line rounded-xl border border-line text-xs">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted mb-1 flex items-center gap-1"><HistoryIcon className="h-3.5 w-3.5" /> Previous periods</div>
+                <div className="divide-y divide-line rounded-xl border border-line-strong bg-raised text-xs">
                   {view.history.map((h) => (
                     <div key={h.periodKey} className="px-3 py-2 flex flex-wrap justify-between gap-x-4 gap-y-0.5">
-                      <span className="font-semibold">{h.label}</span>
-                      <span className="text-muted">prev {fmt(h.previous.minutes)} + new {h.current.formatted} = {fmt(h.total.minutes)} · settled {fmt(h.settled.minutes)} · carried {fmt(h.carriedForward.minutes)}{h.penalty ? ` · penalty: ${h.penalty.label}` : ''}</span>
+                      <span className="font-semibold text-text">{h.label}</span>
+                      <span className="text-text-secondary">prev {fmt(h.previous.minutes)} + new {h.current.formatted} = {fmt(h.total.minutes)} · settled {fmt(h.settled.minutes)} · carried {fmt(h.carriedForward.minutes)}{h.penalty ? ` · penalty: ${h.penalty.label}` : ''}</span>
                     </div>
                   ))}
                 </div>
@@ -298,12 +313,12 @@ export function DeficitCardModal({
             )}
             {p.entries.length > 0 && (
               <details className="text-xs">
-                <summary className="cursor-pointer text-dim">Ledger entries this period ({p.entries.length})</summary>
-                <div className="mt-1 divide-y divide-line rounded-xl border border-line">
+                <summary className="cursor-pointer font-medium text-text-secondary hover:text-text transition">Ledger entries this period ({p.entries.length})</summary>
+                <div className="mt-1.5 divide-y divide-line rounded-xl border border-line-strong bg-raised">
                   {p.entries.map((e) => (
                     <div key={e.id} className="px-3 py-1.5 flex justify-between gap-3">
-                      <span className="text-muted">{e.date} · {e.description}</span>
-                      <span className={`font-mono ${e.minutes > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{e.minutes > 0 ? '+' : '−'}{fmt(Math.abs(e.minutes))}</span>
+                      <span className="text-text-secondary">{e.date} · {e.description}</span>
+                      <span className={`font-mono font-semibold ${e.minutes > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{e.minutes > 0 ? '+' : '−'}{fmt(Math.abs(e.minutes))}</span>
                     </div>
                   ))}
                 </div>
@@ -314,32 +329,32 @@ export function DeficitCardModal({
 
         {p && mode === 'SETTLE' && (
           <div className="space-y-3 text-xs">
-            <div className="rounded-xl border border-line bg-raised/50 p-3">
-              Open this period: <strong>{p.available.days} completed day(s) + {fmt(p.available.remainingMinutes)}</strong> ({fmt(p.available.minutes)}). Choose how many days are covered by paid annual leave or treated as unpaid; everything else carries forward automatically.
+            <div className="rounded-xl border border-line-strong bg-raised p-3 text-text-secondary">
+              Open this period: <strong className="text-text">{p.available.days} completed day(s) + {fmt(p.available.remainingMinutes)}</strong> ({fmt(p.available.minutes)}). Choose how many days are covered by paid annual leave or treated as unpaid; everything else carries forward automatically.
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <label className="block"><span className="text-[11px] font-semibold text-dim">Paid annual leave (days)</span>
-                <input type="number" min={0} max={p.available.days} value={alDays} onChange={(e) => setAlDays(num(e.target.value, p.available.days))} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2 font-mono" /></label>
-              <label className="block"><span className="text-[11px] font-semibold text-dim">Unpaid (days)</span>
-                <input type="number" min={0} max={p.available.days} value={unpaidDays} onChange={(e) => setUnpaidDays(num(e.target.value, p.available.days))} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2 font-mono" /></label>
-              <label className="block"><span className="text-[11px] font-semibold text-dim">Unpaid hours (of the remainder)</span>
-                <input type="number" min={0} max={7} value={unpaidHours} onChange={(e) => setUnpaidHours(num(e.target.value, 7))} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2 font-mono" /></label>
-              <label className="block"><span className="text-[11px] font-semibold text-dim">Unpaid minutes</span>
-                <input type="number" min={0} max={59} value={unpaidMins} onChange={(e) => setUnpaidMins(num(e.target.value, 59))} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2 font-mono" /></label>
+              <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Paid annual leave (days)</span>
+                <input type="number" min={0} max={p.available.days} value={alDays} onChange={(e) => setAlDays(num(e.target.value, p.available.days))} className={`${fieldClass} font-mono`} /></label>
+              <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Unpaid (days)</span>
+                <input type="number" min={0} max={p.available.days} value={unpaidDays} onChange={(e) => setUnpaidDays(num(e.target.value, p.available.days))} className={`${fieldClass} font-mono`} /></label>
+              <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Unpaid hours (of the remainder)</span>
+                <input type="number" min={0} max={7} value={unpaidHours} onChange={(e) => setUnpaidHours(num(e.target.value, 7))} className={`${fieldClass} font-mono`} /></label>
+              <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Unpaid minutes</span>
+                <input type="number" min={0} max={59} value={unpaidMins} onChange={(e) => setUnpaidMins(num(e.target.value, 59))} className={`${fieldClass} font-mono`} /></label>
             </div>
-            <div className="rounded-xl border border-line bg-raised/50 divide-y divide-line">
+            <div className="rounded-xl border border-line-strong bg-raised divide-y divide-line">
               <Row label="Settled" value={fmt(settledMinutes)} />
               <Row label="Carried forward (calculated)" value={`${Math.floor(carryAfter / 480)} day(s) + ${fmt(carryAfter % 480)} (${fmt(carryAfter)})`} tone="text-amber-300" />
             </div>
-            {settledMinutes > p.available.minutes && <div className="text-rose-300">Settlement exceeds available deficit. Please review.</div>}
-            <label className="block"><span className="text-[11px] font-semibold text-dim">Reason (required)</span>
-              <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2" placeholder="e.g. Agreed with the employee and their manager on 12 Nov." /></label>
-            <label className="block"><span className="text-[11px] font-semibold text-dim">Approved by (required)</span>
-              <input type="text" value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2" placeholder="Name of the HR / management approver" /></label>
+            {settledMinutes > p.available.minutes && <div className="text-rose-300 font-medium">Settlement exceeds available deficit. Please review.</div>}
+            <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Reason (required)</span>
+              <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className={fieldClass} placeholder="e.g. Agreed with the employee and their manager on 12 Nov." /></label>
+            <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Approved by (required)</span>
+              <input type="text" value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} className={fieldClass} placeholder="Name of the HR / management approver" /></label>
             {error && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">{error}</div>}
-            <div className="flex justify-end gap-2 pt-1 border-t border-line">
+            <div className="flex justify-end gap-2 pt-2 border-t border-line">
               <Button onClick={() => { setMode('VIEW'); setError(null); }} disabled={busy}>Cancel</Button>
-              <Button variant="primary" onClick={previewSettlement} disabled={busy || settledMinutes <= 0 || settledMinutes > p.available.minutes}>{busy ? 'Checking…' : 'Review…'}</Button>
+              <Button variant="success" onClick={previewSettlement} disabled={busy || settledMinutes <= 0 || settledMinutes > p.available.minutes}>{busy ? 'Checking…' : 'Review…'}</Button>
             </div>
           </div>
         )}
@@ -365,7 +380,7 @@ export function DeficitCardModal({
 
         {p && mode === 'PENALTY' && (
           <div className="space-y-3 text-xs">
-            <div className="rounded-xl border border-line bg-raised/50 p-3">
+            <div className="rounded-xl border border-line-strong bg-raised p-3 text-text-secondary">
               The penalty is a separate decision from settling the deficit, and it is fixed: it does not grow with the number of deficit days ({p.convertedDays} day{p.convertedDays === 1 ? '' : 's'} this period). One penalty per period.
             </div>
             {p.penalty && p.penalty.option !== 'NONE' && (
@@ -375,28 +390,28 @@ export function DeficitCardModal({
             )}
             <div className="space-y-2">
               {(view?.penaltyOptions ?? []).map((o) => (
-                <label key={o.option} className={`flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer ${option === o.option ? 'border-brand bg-brand/10' : 'border-line bg-raised/40'}`}>
+                <label key={o.option} className={`flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition ${option === o.option ? 'border-brand bg-brand/10' : 'border-line-strong bg-raised hover:border-brand/50'}`}>
                   <input type="radio" name="penalty" checked={option === o.option} onChange={() => setOption(o.option)} className="mt-0.5" />
                   <div>
-                    <div className="font-semibold">{o.option === 'NONE' ? 'No penalty' : o.option === 'OPTION_1' ? 'Option 1' : 'Option 2'}</div>
-                    <div className="text-muted">{o.label}</div>
+                    <div className="font-semibold text-text">{o.option === 'NONE' ? 'No penalty' : o.option === 'OPTION_1' ? 'Option 1' : 'Option 2'}</div>
+                    <div className="text-text-secondary">{o.label}</div>
                   </div>
                 </label>
               ))}
             </div>
-            <label className="block"><span className="text-[11px] font-semibold text-dim">Reason (required)</span>
-              <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2" /></label>
-            <label className="block"><span className="text-[11px] font-semibold text-dim">Approved by (required)</span>
-              <input type="text" value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} className="mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2" /></label>
+            <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Reason (required)</span>
+              <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className={fieldClass} /></label>
+            <label className="block"><span className="text-[11px] font-semibold text-text-secondary">Approved by (required)</span>
+              <input type="text" value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} className={fieldClass} /></label>
             {alreadyApplied && (
               <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-200">
                 Penalty already applied · {alreadyApplied.penaltyType} · {alreadyApplied.dateApplied} · approved by {alreadyApplied.approvedBy}
               </div>
             )}
             {error && !alreadyApplied && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">{error}</div>}
-            <div className="flex justify-end gap-2 pt-1 border-t border-line">
+            <div className="flex justify-end gap-2 pt-2 border-t border-line">
               <Button onClick={() => { setMode('VIEW'); setError(null); }} disabled={busy}>Cancel</Button>
-              <Button variant="primary" onClick={previewPenalty} disabled={busy || Boolean(p.penalty && p.penalty.option !== 'NONE')}>{busy ? 'Checking…' : 'Review…'}</Button>
+              <Button variant="success" onClick={previewPenalty} disabled={busy || Boolean(p.penalty && p.penalty.option !== 'NONE')}>{busy ? 'Checking…' : 'Review…'}</Button>
             </div>
           </div>
         )}
@@ -422,7 +437,7 @@ export function DeficitCardModal({
         )}
 
         {!p && !loadError && <div className="text-xs text-muted">Loading…</div>}
-        {p && mode === 'VIEW' && <div className="text-[10px] text-dim"><Badge tone="muted" size="sm">Audit</Badge> Every settlement and penalty is recorded with who entered it, who approved it, the reason and the figures at the time. Earlier figures are never overwritten.</div>}
+        {p && mode === 'VIEW' && <div className="text-[11px] text-muted leading-relaxed"><Badge tone="muted" size="sm">Audit</Badge> Every settlement and penalty is recorded with who entered it, who approved it, the reason and the figures at the time. Earlier figures are never overwritten.</div>}
       </div>
     </div>
   );

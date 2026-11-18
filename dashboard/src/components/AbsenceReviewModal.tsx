@@ -138,12 +138,17 @@ export function AbsenceReviewModal({
     { label: 'Reason', value: notes.trim() },
   ];
 
-  const field = 'mt-1 w-full rounded-lg border border-line bg-raised px-3 py-2 text-xs text-text';
-  const radio = (checked: boolean) => `flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer text-xs ${checked ? 'border-brand bg-brand/10' : 'border-line bg-surface hover:border-brand/50'}`;
+  const field = 'mt-1 w-full rounded-lg border border-line-strong bg-sheet px-3 py-2 text-xs text-text placeholder:text-muted focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25';
+  const radio = (checked: boolean) => `flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer text-xs transition ${checked ? 'border-brand bg-brand/10' : 'border-line-strong bg-raised hover:border-brand/50'}`;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 overflow-y-auto">
-      <div className="w-full max-w-xl rounded-2xl border border-line bg-surface p-6 my-auto max-h-[92vh] overflow-y-auto space-y-4">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+    >
+      <div className="glass-panel-elevated w-full max-w-xl rounded-3xl p-6 my-auto max-h-[92vh] overflow-y-auto space-y-4 text-text">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-text flex items-center gap-2">
@@ -229,7 +234,7 @@ export function AbsenceReviewModal({
             {error && <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300">{error}</div>}
             <div className="flex justify-end gap-2 pt-2 border-t border-line">
               <Button onClick={onClose} disabled={busy}>Cancel</Button>
-              <Button variant="primary" onClick={goReview} disabled={busy}>{busy ? 'Checking…' : 'Review…'}</Button>
+              <Button variant="success" onClick={goReview} disabled={busy}>{busy ? 'Checking…' : 'Review…'}</Button>
             </div>
           </div>
         )}
