@@ -765,7 +765,7 @@ function deficitError(res, err) {
 
 // GET /api/attendance/employee/:employeeId/deficit-period?period=YYYY-MM
 router.get('/employee/:employeeId/deficit-period',
-  requireUser, requirePermission('attendance.read'), requireEmployeeAccess(),
+  requireUserOrAdminKey('attendance.read'), requireEmployeeAccess(),
   async (req, res) => {
     try {
       res.json({ status: 'SUCCESS', ...(await DP.periodView(req.params.employeeId, req.query.period || null)) });
@@ -774,7 +774,7 @@ router.get('/employee/:employeeId/deficit-period',
 
 // POST .../deficit-period/settle/preview and .../deficit-period/settle
 router.post('/employee/:employeeId/deficit-period/settle/preview',
-  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  requireUserOrAdminKey('attendance.write'), requireEmployeeAccess(),
   async (req, res) => {
     try {
       const b = req.body || {};
@@ -785,7 +785,7 @@ router.post('/employee/:employeeId/deficit-period/settle/preview',
   });
 
 router.post('/employee/:employeeId/deficit-period/settle',
-  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  requireUserOrAdminKey('attendance.write'), requireEmployeeAccess(),
   async (req, res) => {
     try {
       const b = req.body || {};
@@ -800,7 +800,7 @@ router.post('/employee/:employeeId/deficit-period/settle',
   });
 
 router.post('/employee/:employeeId/deficit-period/penalty/preview',
-  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  requireUserOrAdminKey('attendance.write'), requireEmployeeAccess(),
   async (req, res) => {
     try {
       const b = req.body || {};
@@ -809,7 +809,7 @@ router.post('/employee/:employeeId/deficit-period/penalty/preview',
   });
 
 router.post('/employee/:employeeId/deficit-period/penalty',
-  requireUser, requirePermission('attendance.write'), requireEmployeeAccess(),
+  requireUserOrAdminKey('attendance.write'), requireEmployeeAccess(),
   async (req, res) => {
     try {
       const b = req.body || {};
