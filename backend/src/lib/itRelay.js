@@ -88,8 +88,24 @@ wss.on('connection', (ws, req, clientInfo) => {
       console.log('[itRelay] IT Admin CLI disconnected.');
     });
 
+    ws.on('error', () => {
+      activeAdmins.delete(ws);
+    });
+
   } else if (clientInfo.role === 'agent') {
     const { deviceId, employeeNumber, employeeName, platform } = clientInfo;
+
+    // Terminate any previous stale connection for this deviceId
+    const prev = activeAgents.get(deviceId);
+    if (prev && prev.ws && prev.ws !== ws) {
+      try { prev.ws.terminate(); } catch (_) {}
+    }
+
+    ws.isAlive = true;
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
+
     activeAgents.set(deviceId, {
       ws,
       meta: {
@@ -103,6 +119,7 @@ wss.on('connection', (ws, req, clientInfo) => {
     console.log(`[itRelay] Agent connected: ${deviceId} (${employeeName} / ${employeeNumber})`);
 
     ws.on('message', (raw) => {
+      ws.isAlive = true;
       // Forward agent responses to all connected admin consoles
       const str = raw.toString();
       for (const adminWs of activeAdmins) {
@@ -113,17 +130,33 @@ wss.on('connection', (ws, req, clientInfo) => {
     });
 
     ws.on('close', () => {
-      activeAgents.delete(deviceId);
+      const current = activeAgents.get(deviceId);
+      if (current && current.ws === ws) {
+        activeAgents.delete(deviceId);
+      }
       console.log(`[itRelay] Agent disconnected: ${deviceId}`);
+    });
+
+    ws.on('error', (err) => {
+      const current = activeAgents.get(deviceId);
+      if (current && current.ws === ws) {
+        activeAgents.delete(deviceId);
+      }
+      console.warn(`[itRelay] Agent socket error (${deviceId}):`, err.message);
     });
   }
 });
 
 function findAgent(target) {
-  if (activeAgents.has(target)) return activeAgents.get(target);
+  const direct = activeAgents.get(target);
+  if (direct && direct.ws.readyState === 1) return direct;
   // Also lookup by employee number (e.g. PK018)
   for (const entry of activeAgents.values()) {
-    if (entry.meta.employeeNumber && entry.meta.employeeNumber.toUpperCase() === String(target).toUpperCase()) {
+    if (
+      entry.ws.readyState === 1 &&
+      entry.meta.employeeNumber &&
+      entry.meta.employeeNumber.toUpperCase() === String(target).toUpperCase()
+    ) {
       return entry;
     }
   }
@@ -228,6 +261,29 @@ function attach(server) {
       socket.destroy();
     }
   });
+
+  // Periodically ping connected agents and evict half-open/sleeping sockets
+  const heartbeatInterval = setInterval(() => {
+    for (const [deviceId, entry] of activeAgents.entries()) {
+      const ws = entry.ws;
+      if (!ws || ws.readyState !== 1 || ws.isAlive === false) {
+        console.log(`[itRelay] Evicting unresponsive/sleeping agent socket: ${deviceId} (${entry.meta.employeeNumber})`);
+        activeAgents.delete(deviceId);
+        try { ws.terminate(); } catch (_) {}
+        continue;
+      }
+      ws.isAlive = false;
+      try {
+        ws.ping();
+      } catch (_) {
+        activeAgents.delete(deviceId);
+        try { ws.terminate(); } catch (__) {}
+      }
+    }
+  }, 30000);
+  if (typeof heartbeatInterval.unref === 'function') {
+    heartbeatInterval.unref();
+  }
 
   console.log('[itRelay] IT Workstation Relay attached to HTTP server.');
 }
