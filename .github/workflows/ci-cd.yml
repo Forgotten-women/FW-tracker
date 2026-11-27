@@ -140,16 +140,18 @@ jobs:
       - name: Deploy ${{ github.sha }}
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
         run: |
-          if [ -z "$DEPLOY_SSH_KEY" ]; then
-            echo "::error::Repository secret DEPLOY_SSH_KEY is not set."; exit 1
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_HOST_KEY" ]; then
+            echo "::error::Repository secrets DEPLOY_SSH_KEY, DEPLOY_HOST, DEPLOY_USER, and DEPLOY_HOST_KEY must all be set."; exit 1
           fi
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
-          # Pinned host key (SHA256:Mn+BlnQ8bR4dFDtm+vR1Djz7bErsEJK0fQfqesCRyYM).
-          echo "72.60.236.105 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMJhEAarIzGhF61usIQ148H2Ww0khhhWnRH7tNbTAgT" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            fwdeploy@72.60.236.105 "deploy ${{ github.sha }}"
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${{ github.sha }}"
 
       - name: Public health check
         run: |

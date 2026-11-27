@@ -20,6 +20,9 @@ set -Eeuo pipefail
 main() {
   local APP=/opt/fwtracker/app
   local COMPOSE="docker compose -f $APP/deploy/docker-compose.yml"
+  if [[ -f /opt/fwtracker/docker-compose.oci.yml ]]; then
+    COMPOSE="$COMPOSE -f /opt/fwtracker/docker-compose.oci.yml"
+  fi
   local REQ="${SSH_ORIGINAL_COMMAND:-${*:-}}"
   cd /opt/fwtracker
 
