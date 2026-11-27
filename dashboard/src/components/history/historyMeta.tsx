@@ -313,7 +313,7 @@ export function deficitLines(d: HistoryDeficit): { text: string; minutes: number
   }
   if (d.unauthorisedMissingMinutes > 0) {
     out.push({
-      text: `${fmtMinutes(d.unauthorisedMissingMinutes)} unaccounted for during working hours.`,
+      text: `${fmtMinutes(d.unauthorisedMissingMinutes)} unaccounted for during working hours (info only, not counted in deficit).`,
       minutes: d.unauthorisedMissingMinutes,
     });
   }

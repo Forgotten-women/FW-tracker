@@ -126,13 +126,12 @@ async function attendanceSummary(employeeId, fromDate, toDate) {
   const scheduled = await payroll().eligibleWorkingDays(employeeId, fromDate, toDate);
   const dayEquivalent = (await schedule.resolve(employeeId, toDate)).dayEquivalentMinutes || 480;
 
-  const [days, leaveRows, unauthorised] = await Promise.all([
+  const [days, leaveRows, unauthorised, deficitSettlementRow] = await Promise.all([
     db.prepare(`
       SELECT
         COUNT(*) FILTER (WHERE is_working_day = 1 AND attendance_status IN ('PRESENT','LATE','RECOVERED')) AS present,
         COALESCE(SUM(worked_minutes), 0) AS worked,
-        0 AS extra, -- Company policy: extra time is not counted or compensated
-        COALESCE(SUM(daily_deficit_minutes), 0) AS shortfall
+        0 AS extra -- Company policy: extra time is not counted or compensated
       FROM attendance_daily_summary
       WHERE employee_id = ? AND date_key >= ? AND date_key <= ?
     `).get(employeeId, fromDate, toDate),
@@ -149,6 +148,11 @@ async function attendanceSummary(employeeId, fromDate, toDate) {
       WHERE employee_id = ? AND status = 'CONFIRMED' AND treat_as_unpaid = 1
         AND date_key >= ? AND date_key <= ?
     `).get(employeeId, fromDate, toDate),
+    db.prepare(`
+      SELECT COALESCE(SUM(unpaid_days * 480 + unpaid_minutes), 0) AS shortfall
+      FROM attendance_deficit_settlements
+      WHERE employee_id = ? AND period_key = ?
+    `).get(employeeId, String(fromDate).slice(0, 7)).catch(() => ({ shortfall: 0 })),
   ]);
 
   // Leave counts working days only, clipped to the window; a half-day
@@ -175,7 +179,7 @@ async function attendanceSummary(employeeId, fromDate, toDate) {
     unauthorisedDays: Number(unauthorised.c) || 0,
     workedMinutes: Number(days.worked) || 0,
     extraMinutes: Number(days.extra) || 0,
-    shortfallMinutes: Number(days.shortfall) || 0,
+    shortfallMinutes: Number(deficitSettlementRow?.shortfall) || 0,
   };
 }
 
@@ -344,7 +348,7 @@ async function draftFigures(period, employeeId, throughDate) {
 
   // What the run would still propose: sources with no adjustment row yet.
   const daily = basis.salary.dailyPrecise;
-  const hasDeficitRow = existing.some(a => a.adjustment_type === 'ATTENDANCE_DEFICIT_DAY');
+  const hasDeficitRow = existing.some(a => a.adjustment_type === 'ATTENDANCE_DEFICIT_DAY' && a.status !== 'REJECTED');
   if (!hasDeficitRow && unpaid.deficitDays > 0) {
     lines.push({ type: 'ATTENDANCE_DEFICIT_DAY', amount: -round2(daily * unpaid.deficitDays), days: unpaid.deficitDays });
   }
@@ -431,6 +435,23 @@ async function buildStatementUncached({ periodId, employeeId, maskBank = false, 
   const bank = emp.bank || {};
   const preparedBy = draft ? settings.prepared_by_default : await preparedByName(publishedBy, settings.prepared_by_default);
 
+  // Shortfall hours only apply if there was an actual shortfall deduction
+  let deductedShortfallMinutes = 0;
+  if (c.shortfall > 0) {
+    const deficitLines = money.lines.filter(l => l.type === 'ATTENDANCE_DEFICIT_DAY');
+    deductedShortfallMinutes = deficitLines.reduce((s, l) => {
+      if (l.days != null && Number(l.days) > 0) return s + Math.round(Number(l.days) * 480);
+      return s;
+    }, 0);
+    if (deductedShortfallMinutes === 0 && money.monthlySalary > 0) {
+      const daily = money.monthlySalary / (a.scheduledDays || 22);
+      deductedShortfallMinutes = Math.round((c.shortfall / daily) * 480);
+    }
+  }
+  const shortfallHours = (c.shortfall > 0 && deductedShortfallMinutes > 0)
+    ? fmtHours(deductedShortfallMinutes)
+    : '-';
+
   const fields = {
     company_name: settings.company_name,
     company_email: settings.company_email,
@@ -459,7 +480,7 @@ async function buildStatementUncached({ periodId, employeeId, maskBank = false, 
     unauthorised_days: fmtDays(a.unauthorisedDays),
     worked_hours: fmtHours(a.workedMinutes),
     extra_hours: '-', // Company policy: extra time is not counted
-    shortfall_hours: fmtHours(a.shortfallMinutes),
+    shortfall_hours: shortfallHours,
     unpaid_leave_deduction: fmtMoney(c.unpaidLeave),
     shortfall_deduction: fmtMoney(c.shortfall),
     adjustment_amount: fmtMoney(c.adjustments),
@@ -971,7 +992,7 @@ async function renderPeriodCombinedExcel({ period, employeeIds, maskBank = false
       ['Additions, Bonus & Allowances', 'Addition', 'Approved HR Additions', t.additions > 0 ? t.additions : null, null, t.additions],
       ['Approved Overtime Pay', 'Addition', 'Approved Extra Hours', t.overtime > 0 ? t.overtime : null, null, t.overtime],
       ['TOTAL GROSS EARNINGS', '', '', t.grossEarnings, null, t.grossEarnings],
-      ['Attendance Shortfall Deduction', 'Deduction', `${f.shortfall_hours} Shortfall`, null, t.shortfall > 0 ? t.shortfall : null, -t.shortfall],
+      ['Attendance Shortfall Deduction', 'Deduction', t.shortfall > 0 ? `${f.shortfall_hours} Shortfall` : '—', null, t.shortfall > 0 ? t.shortfall : null, -t.shortfall],
       ['Unpaid Leave Deduction', 'Deduction', `${f.unpaid_leave_days} Unpaid Days`, null, t.unpaidLeave > 0 ? t.unpaidLeave : null, -t.unpaidLeave],
       ['Other Adjustments & Deductions', 'Deduction', 'Manual & Misc Deductions', null, t.adjustments > 0 ? t.adjustments : null, -t.adjustments],
       ['TOTAL DEDUCTIONS', '', '', null, t.totalDeductions, -t.totalDeductions],

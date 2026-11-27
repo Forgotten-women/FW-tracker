@@ -1428,6 +1428,39 @@ async function generatePeriodDeductions({ periodId, actor, employeeIds = null })
     const created = [];
     const bases = new Map();
 
+    // Clean up any stale/unbacked PROPOSED deficit adjustments (such as legacy
+    // automatic threshold deductions with source_reference IS NULL, or settlements
+    // that no longer have unpaid days) before regenerating deductions.
+    await db.prepare(`
+      DELETE FROM payroll_adjustments
+      WHERE period_id = ?
+        AND adjustment_type = 'ATTENDANCE_DEFICIT_DAY'
+        AND status = 'PROPOSED'
+        AND (
+          source_reference IS NULL
+          OR source_reference NOT IN (SELECT id FROM attendance_deficit_settlements WHERE unpaid_days > 0 OR unpaid_minutes > 0)
+        )
+    `).run(periodId);
+
+    // Clean up any PROPOSED unpaid leave deductions whose underlying leave request
+    // no longer exists, is no longer approved, or has been changed to paid leave.
+    await db.prepare(`
+      DELETE FROM payroll_adjustments pa
+      WHERE pa.period_id = ?
+        AND pa.adjustment_type = 'UNPAID_LEAVE_DEDUCTION'
+        AND pa.status = 'PROPOSED'
+        AND (
+          pa.source_reference IS NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM leave_requests lr
+            JOIN leave_types lt ON lt.id = lr.leave_type_id
+            WHERE lr.id = pa.source_reference
+              AND lr.status = 'APPROVED'
+              AND COALESCE(lr.is_paid, lt.is_paid) = 0
+          )
+        )
+    `).run(periodId);
+
     for (const e of await payrollEmployees(period)) {
       if (only && !only.has(e.id)) continue;
       const basis = await periodBasis(period, e.id);

@@ -1758,10 +1758,10 @@ function PeriodDetailView({
                     const gross = emp.grossBaseline ?? (emp.calculatedPeriodGross ?? (emp.isStarter && emp.starter ? emp.starter.calculatedGross : emp.salary.monthly));
                     const unpaidLeaveDays = emp.unpaidDays?.leaveDays ?? 0;
                     const unpaidLeaveAmount = emp.unpaidDays?.leaveAmount ?? 0;
-                    const deficitDays = (emp.unpaidDays?.deficitDays || emp.attendanceDeficit?.wholeDayEquivalents || 0);
+                    const deficitDays = emp.unpaidDays?.deficitDays || 0;
                     const absenceDays = emp.unpaidDays?.absenceDays || 0;
                     const deficitAbsenceDays = deficitDays + absenceDays;
-                    const deficitAbsenceAmount = (emp.unpaidDays?.deficitAmount || emp.attendanceDeficit?.valueIfDeducted || 0) + (emp.unpaidDays?.absenceAmount || 0);
+                    const deficitAbsenceAmount = (emp.unpaidDays?.deficitAmount || 0) + (emp.unpaidDays?.absenceAmount || 0);
                     const additionsTotal = emp.additions?.total || 0;
                     const net = emp.projectedNetPayable ?? (emp.netPayable?.amount ?? emp.calculatedPeriodGross ?? gross);
 
@@ -1831,7 +1831,21 @@ function PeriodDetailView({
                               )}
                             </div>
                           ) : (
-                            <span className="text-slate-500">—</span>
+                            <div>
+                              <span className="text-slate-500">—</span>
+                              {(emp.attendanceDeficit?.wholeDayEquivalents || 0) > 0 && !isFinal && (
+                                <div className="mt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeficitResolutionEmployee(emp)}
+                                    className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-sans font-semibold text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+                                    title="Open the deficit card: settle completed deficit days (paid annual leave / unpaid / carry forward) and decide the penalty"
+                                  >
+                                    ⚡ Deficit card ({emp.attendanceDeficit.wholeDayEquivalents}d)
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="py-2.5 text-right font-mono">

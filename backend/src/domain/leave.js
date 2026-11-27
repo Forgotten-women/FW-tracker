@@ -1233,6 +1233,9 @@ async function editRequest({ requestId, leaveTypeId, startDate, endDate, dayPort
   try {
     const PR = require('./payroll');
     if (typeof PR.invalidatePayrollCache === 'function') PR.invalidatePayrollCache(req.employee_id);
+    if (effectiveIsPaid || newStatus !== 'APPROVED') {
+      await db.prepare("DELETE FROM payroll_adjustments WHERE source_reference = ? AND adjustment_type = 'UNPAID_LEAVE_DEDUCTION' AND status = 'PROPOSED'").run(requestId);
+    }
   } catch (_) {}
 
   // Old and new dates both: days taken out of the leave and days added to it.
@@ -1277,6 +1280,7 @@ async function deleteRequest({ requestId, actor, reason = null, nowMs = T.now() 
   try {
     const PR = require('./payroll');
     if (typeof PR.invalidatePayrollCache === 'function') PR.invalidatePayrollCache(req.employee_id);
+    await db.prepare("DELETE FROM payroll_adjustments WHERE source_reference = ? AND adjustment_type = 'UNPAID_LEAVE_DEDUCTION' AND status = 'PROPOSED'").run(requestId);
   } catch (_) {}
 
   await recomputeAttendanceFor(req, nowMs);

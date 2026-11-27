@@ -74,7 +74,11 @@ function shiftProgress(sched, workedMinutes, excessBreakMinutes = 0) {
     : (Number(sched && sched.dayEquivalentMinutes) || 450) + (Number(sched && sched.permittedBreakMinutes) || 30);
   const excess = Math.max(0, Math.round(Number(excessBreakMinutes) || 0));
   const credited = Math.max(0, (Number(workedMinutes) || 0) - excess);
-  const remaining = Math.max(0, target - credited);
+  let remaining = Math.max(0, target - credited);
+  if (sched && sched.scheduledEndAt) {
+    const minsUntilCutoff = Math.max(0, Math.ceil((sched.scheduledEndAt - Date.now()) / 60000));
+    remaining = Math.min(remaining, minsUntilCutoff);
+  }
   return {
     targetMinutes: target,
     breakIncludedMinutes: Number(sched && sched.permittedBreakMinutes) || 30,
@@ -93,7 +97,11 @@ function shiftProgress(sched, workedMinutes, excessBreakMinutes = 0) {
  */
 function shiftFromDay(day, sched) {
   if (!day) return shiftProgress(sched, 0);
-  const remaining = day.remainingMinutes;
+  let remaining = day.remainingMinutes;
+  if (day.shiftEndAt && day.asOf) {
+    const minsUntilCutoff = Math.max(0, Math.ceil((day.shiftEndAt - day.asOf) / 60000));
+    remaining = Math.min(remaining, minsUntilCutoff);
+  }
   return {
     targetMinutes: day.targetMinutes,
     breakIncludedMinutes: day.permittedBreakMinutes,

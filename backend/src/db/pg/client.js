@@ -112,8 +112,8 @@ function getPool() {
     // payroll review - run its per-employee reads side by side rather than
     // five at a time.
     max: Number(process.env.PG_POOL_MAX) || 10,
-    idleTimeoutMillis: 10_000,
-    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 30_000,
     // Supabase requires TLS; a local test container does not offer it.
     ssl: local ? false : { rejectUnauthorized: false },
     ...(schema ? { options: `-c search_path=${schema}` } : {}),

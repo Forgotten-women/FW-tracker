@@ -80,7 +80,7 @@ export function DeficitTile({ employeeId, month, onOpen }: { employeeId: string;
 function Row({ label, value, tone = '' }: { label: string; value: string | number; tone?: string }) {
   return (
     <div className="flex items-center justify-between gap-3 px-3.5 py-2 text-xs">
-      <span className="text-text-secondary">{label}</span>
+      <span className="text-text-secondary font-medium">{label}</span>
       <span className={`font-mono font-semibold ${tone || 'text-text'}`}>{value}</span>
     </div>
   );
@@ -195,12 +195,12 @@ export function DeficitCardModal({
     <div className="rounded-xl border border-line-strong bg-raised divide-y divide-line">
       <Row label="Previous period deficit (carried forward)" value={fmt(x.previous.minutes)} />
       <Row label={`New deficit this period${x.credits.minutes > 0 ? ` (${fmt(x.newGross.minutes)} − ${fmt(x.credits.minutes)} HR credit)` : ''}`} value={x.current.formatted} />
-      <Row label="Total deficit" value={fmt(x.total.minutes)} tone={x.total.minutes > 0 ? 'text-rose-300' : 'text-text'} />
-      <Row label="Completed 8-hour deficit days" value={`${x.convertedDays} day${x.convertedDays === 1 ? '' : 's'}`} tone={x.convertedDays > 0 ? 'text-rose-300' : 'text-text'} />
+      <Row label="Total deficit" value={fmt(x.total.minutes)} tone={x.total.minutes > 0 ? 'text-rose-400 font-bold' : ''} />
+      <Row label="Completed 8-hour deficit days" value={`${x.convertedDays} day${x.convertedDays === 1 ? '' : 's'}`} tone={x.convertedDays > 0 ? 'text-rose-400 font-bold' : ''} />
       <Row label="Remaining hours/minutes" value={fmt(x.remaining.minutes)} />
       <Row label="Settled this period" value={x.settled.minutes > 0 ? `${fmt(x.settled.minutes)} (AL ${x.settled.alDays}d · unpaid ${x.settled.unpaidDays}d${x.settled.unpaidMinutes ? ` + ${fmt(x.settled.unpaidMinutes)}` : ''})` : 'Nothing yet'} />
-      <Row label="Carried forward to next period" value={`${x.carriedForward.days} day${x.carriedForward.days === 1 ? '' : 's'} + ${fmt(x.carriedForward.remainingMinutes)} (${fmt(x.carriedForward.minutes)})`} tone={x.carriedForward.minutes > 0 ? 'text-amber-300' : 'text-text'} />
-      <Row label="Penalty" value={x.penalty ? `${x.penalty.label} · ${x.penalty.approvedBy} · ${x.penalty.at}` : 'No decision recorded'} tone={x.penalty && x.penalty.option !== 'NONE' ? 'text-rose-300' : ''} />
+      <Row label="Carried forward to next period" value={`${x.carriedForward.days} day${x.carriedForward.days === 1 ? '' : 's'} + ${fmt(x.carriedForward.remainingMinutes)} (${fmt(x.carriedForward.minutes)})`} tone={x.carriedForward.minutes > 0 ? 'text-amber-400 font-bold' : ''} />
+      <Row label="Penalty" value={x.penalty ? `${x.penalty.label} · ${x.penalty.approvedBy} · ${x.penalty.at}` : 'No decision recorded'} tone={x.penalty && x.penalty.option !== 'NONE' ? 'text-rose-400 font-bold' : ''} />
     </div>
   );
 
@@ -436,8 +436,8 @@ export function DeficitCardModal({
           </ReviewConfirm>
         )}
 
-        {!p && !loadError && <div className="text-xs text-muted">Loading…</div>}
-        {p && mode === 'VIEW' && <div className="text-[11px] text-muted leading-relaxed"><Badge tone="muted" size="sm">Audit</Badge> Every settlement and penalty is recorded with who entered it, who approved it, the reason and the figures at the time. Earlier figures are never overwritten.</div>}
+        {!p && !loadError && <div className="text-xs text-text-secondary">Loading…</div>}
+        {p && mode === 'VIEW' && <div className="text-[11px] text-text-secondary leading-relaxed"><Badge tone="muted" size="sm">Audit</Badge> Every settlement and penalty is recorded with who entered it, who approved it, the reason and the figures at the time. Earlier figures are never overwritten.</div>}
       </div>
     </div>
   );

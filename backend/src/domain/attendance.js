@@ -790,11 +790,13 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   const isLateOccurrence = isLateArrival && netLateMinutes > 0;
 
   // Deficit calculation: what the day shows, after HR's manual time.
+  // Unauthorised missing time (tracking gaps) is recorded and displayed for
+  // HR visibility/review, but does NOT count towards deficit.
+  // Deficit strictly counts: Late Arrival (beyond grace), Excess Break, and Early Departure.
   const dailyDeficitMinutes = Math.max(0,
     netLateMinutes
     + excessBreakMinutes
     + earlyDepartureMinutes
-    + unauthorisedMissingMinutes
     - (hrCredit - hrCoveredLateMinutes)
   );
   // What the ledger posts for the day: the deficit BEFORE HR's manual time.
@@ -802,7 +804,7 @@ async function deriveDay(employeeId, dateKey = T.dateKey(), nowMs = T.now()) {
   // row; posting the net figure as well credited it twice (Kishore's 134 min
   // on 19 Oct took 134 min off his older shortfall too).
   const ledgerDeficitMinutes = Math.max(0,
-    lateAfterOffset + excessBreakMinutes + earlyDepartureMinutes + unauthorisedMissingMinutes);
+    lateAfterOffset + excessBreakMinutes + earlyDepartureMinutes);
 
   let attendanceStatus = 'PRESENT';
   if (isLateOccurrence) {

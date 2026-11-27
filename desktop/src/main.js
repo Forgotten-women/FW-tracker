@@ -373,7 +373,12 @@ function renderDay() {
   const target = dayView.targetMinutes || 0;
   const progressSecs = (dayView.progressMinutes || 0) * 60 + extra;
   const pct = target > 0 ? Math.min(100, Math.round((progressSecs / (target * 60)) * 100)) : 0;
-  const remMins = target > 0 ? Math.max(0, Math.ceil((target * 60 - progressSecs) / 60)) : 0;
+  let remMins = target > 0 ? Math.max(0, Math.ceil((target * 60 - progressSecs) / 60)) : 0;
+  const shiftEndedByTime = Boolean(dayView.shiftEndAt && Date.now() >= dayView.shiftEndAt);
+  if (dayView.shiftEndAt) {
+    const minsUntilCutoff = Math.max(0, Math.ceil((dayView.shiftEndAt - Date.now()) / 60000));
+    remMins = Math.min(remMins, minsUntilCutoff);
+  }
 
   currentActiveSecs = workedSecs;
   if (activeTimer) activeTimer.textContent = formatHMS(workedSecs);
@@ -404,7 +409,7 @@ function renderDay() {
   }
   if (shiftRemText) {
     const after = dayView.overtimeMinutes > 0 ? ` · ${hm(dayView.overtimeMinutes)} after shift` : '';
-    if (dayView.checkedOut) {
+    if (dayView.checkedOut || shiftEndedByTime) {
       shiftRemText.innerHTML = `<span class="rem-emerald">Shift ended${after}</span>`;
     } else if (target > 0 && remMins <= 0) {
       shiftRemText.innerHTML = `<span class="rem-emerald">Target reached${after}</span>`;
