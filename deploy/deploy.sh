@@ -119,3 +119,5 @@ main() {
 
 main "$@" 2>&1 | tee -a /opt/fwtracker/deploy.log
 exit "${PIPESTATUS[0]}"
+
+# ci-cd oci trigger check
